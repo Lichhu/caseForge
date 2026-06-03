@@ -1,0 +1,17 @@
+{
+  "files.exclude": {
+    "**/.DS_Store": true,
+    "**/.pnpm-store": true,
+    "**/.vite": true,
+    "**/.vue-global-types": true,
+    "**/dist": false,
+    "**/node_modules": false,
+    "apps/api/.data": true
+  },
+  "search.exclude": {
+    "**/.pnpm-store": true,
+    "**/dist": true,
+    "**/node_modules": true,
+    "apps/api/.data": true
+  }
+}

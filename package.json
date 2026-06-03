@@ -1,0 +1,21 @@
+{
+  "name": "case-forge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "智能案例生成平台 monorepo",
+  "packageManager": "pnpm@10.33.4",
+  "scripts": {
+    "dev:api": "pnpm --filter @case-forge/shared build && pnpm --filter @case-forge/api dev",
+    "local:api": "pnpm --filter @case-forge/shared build && pnpm --filter @case-forge/api local",
+    "dev:web": "pnpm --filter @case-forge/shared build && pnpm --filter @case-forge/web dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "pnpm": "^10.33.4"
+  }
+}

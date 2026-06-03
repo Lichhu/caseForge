@@ -1,0 +1,35 @@
+{
+  "name": "@case-forge/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:clean": "rm -rf node_modules/.vite && vite",
+    "local": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "lint": "vue-tsc --noEmit",
+    "typecheck": "vue-tsc --noEmit",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@ant-design/icons-vue": "^7.0.1",
+    "@case-forge/shared": "workspace:*",
+    "@vueuse/core": "^10.11.1",
+    "ant-design-vue": "^4.2.3",
+    "axios": "^1.7.3",
+    "dayjs": "^1.11.12",
+    "markdown-it": "^14.1.0",
+    "mind-elixir": "^5.11.0",
+    "pinia": "^2.2.2",
+    "vue": "^3.4.38",
+    "vue-router": "^4.4.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.1.2",
+    "less": "^4.2.0",
+    "typescript": "^5.4.5",
+    "vite": "^5.4.2",
+    "vue-tsc": "^2.0.29"
+  }
+}
