@@ -153,7 +153,7 @@ export class AiWorkflowService {
         skill_input: [skillText],
       });
       const text = this.extractText(rawResponse);
-      this.logger.debug(`AI Workflow 结果：${text}`);
+      this.logger.verbose(`AI Workflow 结果：${JSON.stringify(text)}`);
       return { text, rawResponse };
     } finally {
       await this.stopSession(sessionId);
@@ -215,6 +215,7 @@ export class AiWorkflowService {
 
         const result = await response.json();
         const text = this.extractAiChatContent(result);
+        this.logger.verbose(`AI Chat 结果：${JSON.stringify(text)}`);
         if (!text.trim()) {
           throw new Error("AI Chat 返回内容为空");
         }
