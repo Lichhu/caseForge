@@ -16,6 +16,14 @@
           <template #icon><SaveOutlined /></template>
           保存树
         </a-button>
+        <a-button
+          :disabled="!store.activeRun"
+          :loading="testPlatformSyncing"
+          @click="handleSyncToTestPlatform"
+        >
+          <template #icon><CloudUploadOutlined /></template>
+          同步测管
+        </a-button>
         <a-dropdown :disabled="!store.activeRun">
           <a-button>
             <template #icon><DownloadOutlined /></template>
@@ -122,6 +130,13 @@
         </a-button>
       </div>
     </a-empty>
+
+    <TestPlatformSyncModal
+      v-model:open="testPlatformSyncOpen"
+      :tree="syncModalTree"
+      :confirm-loading="testPlatformSyncing"
+      @confirm="submitSyncToTestPlatform"
+    />
   </section>
 </template>
 
@@ -141,6 +156,7 @@ import { zh_CN } from 'mind-elixir/i18n';
 import 'mind-elixir/style.css';
 import {
   AimOutlined,
+  CloudUploadOutlined,
   DeleteOutlined,
   DownloadOutlined,
   EditOutlined,
@@ -153,7 +169,7 @@ import {
   ZoomInOutlined,
   ZoomOutOutlined,
 } from '@ant-design/icons-vue';
-import { type MenuProps } from 'ant-design-vue';
+import { message, type MenuProps } from 'ant-design-vue';
 import type {
   MindElixirData,
   MindElixirInstance,
@@ -165,14 +181,16 @@ import {
   getCaseDisplayTitle,
   getCaseTitleOnly,
   isPlaceholderCaseTitle,
+  cloneCaseTree,
   normalizeCaseTreeForSkill,
   nextSixLevelChildKind,
   sanitizeCaseTitleText,
   simplifyRequirementTitleForDisplay,
 } from '@case-forge/shared';
-import { exportUrl } from '@/api/client';
+import { exportUrl, syncRunToTestPlatform } from '@/api/client';
 import { useCaseForgeStore } from '@/stores/caseForge';
 import CaseTreeExcel from '@/components/CaseTreeExcel.vue';
+import TestPlatformSyncModal from '@/components/TestPlatformSyncModal.vue';
 import { debounce } from '@/utils/debounce';
 
 interface MindNodeMeta {
@@ -197,6 +215,9 @@ const mindContainer = ref<HTMLDivElement | null>(null);
 const mind = shallowRef<MindElixirInstance | null>(null);
 const selectedMindNode = shallowRef<NodeObj<MindNodeMeta> | null>(null);
 const dirty = ref(false);
+const testPlatformSyncing = ref(false);
+const testPlatformSyncOpen = ref(false);
+const syncModalTree = ref<CaseTreeNode | null>(null);
 const isRefreshing = ref(false);
 const selectedTitle = ref('');
 const selectedKind = ref<CaseNodeKind>('scenario');
@@ -724,6 +745,49 @@ async function handleSaveTree() {
     }
   } catch {
     // 错误提示由 store.saveTree 处理
+  }
+}
+
+function getCurrentEditorTree(): CaseTreeNode | null {
+  if (!store.activeRun) return null;
+  if (viewMode.value === 'xmind') {
+    syncTreeFromMind();
+  }
+  return cloneCaseTree(store.activeRun.tree);
+}
+
+async function handleSyncToTestPlatform() {
+  if (!store.activeProject || !store.activeRun) return;
+  try {
+    const tree = getCurrentEditorTree();
+    if (!tree) return;
+    syncModalTree.value = tree;
+    testPlatformSyncOpen.value = true;
+  } catch (error) {
+    message.error((error as Error)?.message || '无法读取当前案例树');
+  }
+}
+
+async function submitSyncToTestPlatform(caseNodeIds: string[]) {
+  if (!store.activeProject || !store.activeRun) return;
+  const tree = getCurrentEditorTree();
+  if (!tree) return;
+  testPlatformSyncing.value = true;
+  try {
+    const result = await syncRunToTestPlatform(
+      store.activeProject.id,
+      store.activeRun.id,
+      tree,
+      caseNodeIds,
+    );
+    testPlatformSyncOpen.value = false;
+    message.success(
+      `已同步至测管平台（${result.projectCode}）：新增 ${result.inserted}，更新 ${result.updated}，跳过 ${result.skipped}`,
+    );
+  } catch (error) {
+    message.error((error as Error)?.message || '同步测管平台失败');
+  } finally {
+    testPlatformSyncing.value = false;
   }
 }
 

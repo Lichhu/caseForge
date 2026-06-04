@@ -252,6 +252,28 @@ export async function saveRunTree(
   return data;
 }
 
+export interface SyncToTestPlatformResult {
+  projectCode: string;
+  testPlatformProjectId: string;
+  inserted: number;
+  updated: number;
+  skipped: number;
+  total: number;
+}
+
+export async function syncRunToTestPlatform(
+  projectId: string,
+  runId: string,
+  tree: CaseTreeNode,
+  caseNodeIds: string[],
+) {
+  const { data } = await http.post<SyncToTestPlatformResult>(
+    `/case-editor/projects/${projectId}/runs/${runId}/sync-test-platform`,
+    { tree, caseNodeIds },
+  );
+  return data;
+}
+
 export async function listScenarioLibrary() {
   const { data } = await http.get<ScenarioLibraryItem[]>('/scenario/list');
   return data;

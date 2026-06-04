@@ -13,6 +13,14 @@ export interface AppConfig {
     password: string;
     database: string;
   };
+  /** 测管平台 MySQL（jnyh_test 等），用于案例同步 */
+  typeOrmTest: {
+    host: string;
+    port: number;
+    username: string;
+    password: string;
+    database: string;
+  };
   minio: {
     host: string;
     port: number;

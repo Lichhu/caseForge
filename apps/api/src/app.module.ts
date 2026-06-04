@@ -15,6 +15,7 @@ import { MinioStorageModule } from "@minio/index";
 import { ScenarioModule } from "@scenario/index";
 import { AiWorkflowModule } from "./common/ai-workflow";
 import { TypeormModule } from "./common/typeorm";
+import { TestPlatformModule } from "./common/test-platform";
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { TypeormModule } from "./common/typeorm";
       envFilePath: getNestEnvFilePaths(),
     }),
     TypeormModule,
+    TestPlatformModule,
     MinioStorageModule,
     AiWorkflowModule,
     CaseEditorModule,

@@ -19,10 +19,12 @@ import { BuildConstraintsDto } from "../dto/build-constraints.dto";
 import { CancelGenerateDto } from "../dto/cancel-generate.dto";
 import { GenerateCasesDto } from "../dto/generate-cases.dto";
 import { RegenerateNodeDto } from "../dto/regenerate-node.dto";
+import { SyncToTestPlatformDto } from "../dto/sync-to-test-platform.dto";
 import { UpdateRunTreeDto } from "../dto/update-run-tree.dto";
 import { CaseEditorService } from "../service/case-editor.service";
 import { CaseWorkspaceService } from "../service/case-workspace.service";
 import { ExportService } from "../service/export.service";
+import { CaseTestPlatformSyncService } from "../service/case-test-platform-sync.service";
 
 /** 案例编辑器 REST 控制器 */
 @ApiTags("case-editor")
@@ -35,6 +37,8 @@ export class CaseEditorController {
     private readonly workspaceService: CaseWorkspaceService,
     @Inject(ExportService)
     private readonly exporter: ExportService,
+    @Inject(CaseTestPlatformSyncService)
+    private readonly testPlatformSync: CaseTestPlatformSyncService,
   ) {}
 
   /** 获取项目工作区（文档、约束、案例运行） */
@@ -142,6 +146,22 @@ export class CaseEditorController {
       `attachment; filename="${encodeURIComponent(fileBase)}.json"`,
     );
     return response.send(this.exporter.toJson(run.tree, run.mindMapExtras));
+  }
+
+  /** 将案例树同步至测管平台 */
+  @Post("projects/:projectId/runs/:runId/sync-test-platform")
+  @ApiOperation({ summary: "同步案例树至测管平台" })
+  syncRunToTestPlatform(
+    @Param("projectId") projectId: string,
+    @Param("runId") runId: string,
+    @Body() dto: SyncToTestPlatformDto,
+  ) {
+    return this.testPlatformSync.syncRunToTestPlatform(
+      projectId,
+      runId,
+      dto.tree,
+      dto.caseNodeIds,
+    );
   }
 
   /** 保存编辑后的案例树 */

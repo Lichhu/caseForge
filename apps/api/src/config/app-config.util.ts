@@ -13,6 +13,7 @@ export function getAppConfig(configService: ConfigService): AppConfig {
     nodeEnv: configService.get<string>("nodeEnv", "development"),
     port: configService.get<number>("port", 34550),
     typeOrm: configService.get<AppConfig["typeOrm"]>("typeOrm")!,
+    typeOrmTest: configService.get<AppConfig["typeOrmTest"]>("typeOrmTest")!,
     minio: configService.get<AppConfig["minio"]>("minio")!,
     aiWorkflow: configService.get<AppConfig["aiWorkflow"]>("aiWorkflow")!,
   };

@@ -387,8 +387,29 @@ function buildExcelMerges(rows: CaseExcelRow[]): CaseExcelMergeCell[] {
   return merges;
 }
 
+/** 深拷贝案例树（兼容 Vue 响应式对象，避免 structuredClone 失败） */
+export function cloneCaseTree(node: CaseTreeNode): CaseTreeNode {
+  return {
+    id: node.id,
+    title: node.title,
+    kind: node.kind,
+    collapsed: node.collapsed,
+    metadata: node.metadata
+      ? {
+          priority: node.metadata.priority,
+          caseType: node.metadata.caseType,
+          source: node.metadata.source,
+          knowledgeBaseIds: node.metadata.knowledgeBaseIds
+            ? [...node.metadata.knowledgeBaseIds]
+            : undefined,
+        }
+      : undefined,
+    children: (node.children || []).map(cloneCaseTree),
+  };
+}
+
 export function applyExcelRowToTree(tree: CaseTreeNode, row: CaseExcelRow): CaseTreeNode {
-  const clone = structuredClone(tree);
+  const clone = cloneCaseTree(tree);
   const caseNode = findNodeById(clone, row.caseNodeId);
   if (!caseNode) {
     return clone;

@@ -16,6 +16,8 @@ import { CaseEditorService } from "./service/case-editor.service";
 import { CasePipelineService } from "./service/case-pipeline.service";
 import { CaseWorkspaceService } from "./service/case-workspace.service";
 import { ExportService } from "./service/export.service";
+import { CaseTestPlatformSyncService } from "./service/case-test-platform-sync.service";
+import { TestPlatformModule } from "../../common/test-platform";
 import { TestPointInstructEntity } from "@dynamic-instruct/entity/test-point-instruct.entity";
 import { TestPointPromptEntity } from "@dynamic-instruct/entity/test-point-prompt.entity";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
@@ -38,6 +40,7 @@ import { TestPointEntity } from "@struct-doc/entity/test-point.entity";
     ProjectManageModule,
     AiWorkflowModule,
     MinioStorageModule,
+    TestPlatformModule,
   ],
   controllers: [CaseEditorController],
   providers: [
@@ -45,6 +48,7 @@ import { TestPointEntity } from "@struct-doc/entity/test-point.entity";
     CaseWorkspaceService,
     CasePipelineService,
     ExportService,
+    CaseTestPlatformSyncService,
   ],
   exports: [CaseEditorService, CaseWorkspaceService],
 })
