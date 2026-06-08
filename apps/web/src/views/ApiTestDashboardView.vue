@@ -1,0 +1,144 @@
+<template>
+  <main class="app-frame app-frame--nested" :class="{ 'immersive-mode': immersiveMode, 'is-loading': apiStore.loading }">
+    <div class="app-shell">
+      <ProjectSidebar platform="api-test" />
+      <section class="main-workspace">
+        <header v-if="!immersiveMode" class="topbar">
+          <div>
+            <h1>{{ cleanProjectTitle(activeProjectTitle) }}</h1>
+            <p>接口文档结构化、案例生成、环境执行与报表导出</p>
+          </div>
+          <div class="topbar-actions action-toolbar action-toolbar--compact">
+            <a-button :disabled="!apiStore.activeProjectId" @click="enterImmersiveMode">
+              <template #icon><FullscreenOutlined /></template>
+              全屏
+            </a-button>
+          </div>
+        </header>
+
+        <nav v-if="!immersiveMode" class="stage-nav stage-nav--four" aria-label="接口测试工作区">
+          <button
+            v-for="stage in stages"
+            :key="stage.key"
+            type="button"
+            class="stage-item"
+            :class="{ active: apiStore.workspaceStage === stage.key }"
+            :disabled="!canOpenStage(stage.key)"
+            @click.stop.prevent="switchStage(stage.key)"
+          >
+            <span class="stage-index">{{ stage.index }}</span>
+            <span>
+              <strong>{{ stage.title }}</strong>
+              <small>{{ stage.description }}</small>
+            </span>
+          </button>
+        </nav>
+
+        <ImmersiveStageOrb
+          v-if="immersiveMode"
+          :controls="immersiveControls"
+          :stages="stages"
+          :active-stage="apiStore.workspaceStage"
+          :can-open-stage="canOpenStage"
+          @switch-stage="switchStage"
+        />
+
+        <div class="stage-workspace" :class="{ 'immersive-stage': immersiveMode }">
+          <keep-alive>
+            <ApiDocumentEditor v-if="apiStore.workspaceStage === 'api-document'" />
+            <ApiCaseWorkbench v-else-if="apiStore.workspaceStage === 'api-cases'" />
+            <ApiTestRunner v-else-if="apiStore.workspaceStage === 'api-runner'" />
+            <ApiTestReport v-else />
+          </keep-alive>
+        </div>
+      </section>
+    </div>
+  </main>
+</template>
+
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted } from 'vue';
+import { FullscreenOutlined } from '@ant-design/icons-vue';
+import ApiCaseWorkbench from '@/components/api-test/ApiCaseWorkbench.vue';
+import ApiDocumentEditor from '@/components/api-test/ApiDocumentEditor.vue';
+import ApiTestReport from '@/components/api-test/ApiTestReport.vue';
+import ApiTestRunner from '@/components/api-test/ApiTestRunner.vue';
+import ImmersiveStageOrb from '@/components/workspace/ImmersiveStageOrb.vue';
+import ProjectSidebar from '@/components/ProjectSidebar.vue';
+import { useImmersiveWorkspace } from '@/composables/useImmersiveWorkspace';
+import { useApiTestStore, type ApiWorkspaceStage } from '@/stores/apiTest';
+
+const apiStore = useApiTestStore();
+const immersiveControls = useImmersiveWorkspace();
+const {
+  immersiveMode,
+  enterImmersiveMode,
+  exitImmersiveMode,
+  scheduleViewportRefresh,
+  bindImmersiveListeners,
+  unbindImmersiveListeners,
+} = immersiveControls;
+
+const stages = [
+  { key: 'api-document' as const, index: '01', title: '接口文档', shortTitle: '文档', description: 'Excel/Word/Markdown 上传与结构化' },
+  { key: 'api-cases' as const, index: '02', title: '案例生成', shortTitle: '案例', description: 'AI 生成与手工维护' },
+  { key: 'api-runner' as const, index: '03', title: '执行平台', shortTitle: '执行', description: '环境中心、批量执行与比对' },
+  { key: 'api-report' as const, index: '04', title: '结果报表', shortTitle: '报表', description: '统计图表、Excel/PDF 导出' },
+];
+
+const activeProjectTitle = computed(
+  () => apiStore.activeProject?.title || '智能接口测试平台',
+);
+
+function canOpenStage(stage: ApiWorkspaceStage | string) {
+  if (stage === 'api-document') return true;
+  if (stage === 'api-cases') return Boolean(apiStore.canEnterCases);
+  if (stage === 'api-runner') return Boolean(apiStore.canEnterRunner);
+  if (stage === 'api-report') return apiStore.runs.length > 0 || apiStore.cases.length > 0;
+  return false;
+}
+
+function switchStage(stage: string) {
+  if (!canOpenStage(stage)) return;
+  const projectId = apiStore.activeProjectId;
+  if (projectId) apiStore.setWorkspaceStage(projectId, stage as ApiWorkspaceStage);
+  scheduleViewportRefresh();
+}
+
+function handleKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && immersiveMode.value) {
+    exitImmersiveMode();
+  }
+}
+
+function cleanProjectTitle(title: string) {
+  return (
+    title
+      .replace(/^#+\s*/, '')
+      .replace(/^[：:\s·。|]+/, '')
+      .replace(/\s+-\s+测试分析$/, '')
+      .replace(/\.(docx?|md|xlsx?)$/i, '')
+      .trim() || '未命名项目'
+  );
+}
+
+onMounted(async () => {
+  await apiStore.bootstrap();
+  bindImmersiveListeners(handleKeydown);
+});
+
+onBeforeUnmount(() => {
+  unbindImmersiveListeners(handleKeydown);
+});
+</script>
+
+<style scoped>
+.app-frame--nested {
+  flex: 1;
+  min-height: 0;
+}
+.app-frame.is-loading .stage-workspace {
+  opacity: 0.96;
+  pointer-events: none;
+}
+</style>

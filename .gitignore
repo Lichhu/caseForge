@@ -1,0 +1,11 @@
+node_modules
+dist
+**/dist
+.turbo
+.DS_Store
+# *.env
+*.local
+coverage
+apps/api/.data
+apps/web/.vite
+.pnpm-store
