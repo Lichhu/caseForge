@@ -12,12 +12,16 @@ import {
 
 @Entity("api_endpoint")
 @Index("idx_api_endpoint_doc", ["apiDocId"])
+@Index("idx_api_endpoint_transaction", ["transactionId"])
 export class ApiEndpointEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 
   @Column()
   projectId: string;
+
+  @Column({ nullable: true, length: 36 })
+  transactionId?: string;
 
   @Column()
   apiDocId: string;

@@ -28,7 +28,27 @@ export class SaveApiCaseDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  caseNo?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
   description?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  remark?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  transactionCode?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  owner?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

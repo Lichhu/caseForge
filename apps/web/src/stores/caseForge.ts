@@ -867,7 +867,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
       }
       message.success('测试要点已保存');
     },
-    async saveTree() {
+    async saveTree(options?: { successMessage?: string }) {
       if (!this.activeProject || !this.activeRun) return;
       this.treeSaving = true;
       try {
@@ -881,7 +881,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
         if (index >= 0) {
           this.activeProject.runs[index] = this.activeRun;
         }
-        message.success('案例树已保存');
+        message.success(options?.successMessage ?? '案例树已保存');
         await this.bumpSidebarProjectOrder();
       } catch (error) {
         message.error((error as Error)?.message || '保存案例树失败');

@@ -576,7 +576,7 @@ onBeforeUnmount(() => {
   clearScenarioAutoSaveTimers();
 });
 const activeTestPointId = ref('');
-const generationMode = ref<'append' | 'full'>('append');
+const generationMode = ref<'append' | 'full'>('full');
 
 const definitionDraft = reactive({
   id: '',
@@ -1388,6 +1388,6 @@ function resetDefinitionDraft() {
 function resetInstructionDraft() {
   instructionDraft.promptIds = [];
   instructionDraft.naturalText = '';
-  generationMode.value = 'append';
+  generationMode.value = 'full';
 }
 </script>

@@ -40,27 +40,34 @@ const summary = ref<{
 } | null>(null);
 
 const runOptions = computed(() =>
-  apiStore.runs.map((r) => ({
+  apiStore.transactionRuns.map((r) => ({
     label: `${new Date(r.createdAt).toLocaleString()} — ${r.passedCount}/${r.totalCount}`,
     value: r.id,
   })),
 );
 
 watch(
-  () => apiStore.runs,
+  () => apiStore.transactionRuns,
   (runs) => {
-    if (!selectedRunId.value && runs[0]) selectedRunId.value = runs[0].id;
+    if (!runs.some((run) => run.id === selectedRunId.value)) {
+      selectedRunId.value = runs[0]?.id ?? '';
+    }
   },
   { immediate: true },
 );
 
 watch(selectedRunId, async (runId) => {
   const projectId = apiStore.activeProjectId;
-  if (!projectId || !runId) {
+  const transactionId = apiStore.activeTransactionId;
+  if (!projectId || !transactionId || !runId) {
     summary.value = null;
     return;
   }
-  summary.value = (await apiStore.loadReportSummary(projectId, runId)) as typeof summary.value;
+  summary.value = (await apiStore.loadReportSummary(
+    projectId,
+    transactionId,
+    runId,
+  )) as typeof summary.value;
 });
 
 function percent(value: number, total: number) {
@@ -70,14 +77,16 @@ function percent(value: number, total: number) {
 
 async function exportXlsx() {
   const projectId = apiStore.activeProjectId;
-  if (!projectId || !selectedRunId.value) return;
-  await apiStore.exportReport(projectId, selectedRunId.value, 'xlsx');
+  const transactionId = apiStore.activeTransactionId;
+  if (!projectId || !transactionId || !selectedRunId.value) return;
+  await apiStore.exportReport(projectId, transactionId, selectedRunId.value, 'xlsx');
 }
 
 async function exportPdf() {
   const projectId = apiStore.activeProjectId;
-  if (!projectId || !selectedRunId.value) return;
-  await apiStore.exportReport(projectId, selectedRunId.value, 'pdf');
+  const transactionId = apiStore.activeTransactionId;
+  if (!projectId || !transactionId || !selectedRunId.value) return;
+  await apiStore.exportReport(projectId, transactionId, selectedRunId.value, 'pdf');
 }
 </script>
 

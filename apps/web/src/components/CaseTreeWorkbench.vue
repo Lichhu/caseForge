@@ -14,11 +14,11 @@
           @click="handleSaveTree"
         >
           <template #icon><SaveOutlined /></template>
-          保存树
+          保存
         </a-button>
         <a-button
           :disabled="!store.activeRun"
-          :loading="testPlatformSyncing"
+          :loading="caseSelectConfirmLoading"
           @click="handleSyncToTestPlatform"
         >
           <template #icon><CloudUploadOutlined /></template>
@@ -33,7 +33,6 @@
             <a-menu @click="download">
               <a-menu-item key="xmind">XMind</a-menu-item>
               <a-menu-item key="excel">Excel</a-menu-item>
-              <a-menu-item key="json">JSON</a-menu-item>
             </a-menu>
           </template>
         </a-dropdown>
@@ -85,35 +84,51 @@
       </div>
 
       <aside v-if="viewMode === 'xmind'" class="inspector">
-        <h3>节点属性</h3>
-        <template v-if="selectedNode">
-          <label>标题</label>
-          <a-input v-model:value="selectedTitle" @press-enter="applySelectedTitle" @blur="applySelectedTitle" />
-          <label>类型</label>
-          <a-select v-model:value="selectedKind" :options="kindOptions" @change="applySelectedKind" />
-          <template v-if="selectedChildNodes.length">
-            <label>子节点（{{ selectedChildNodes.length }}）</label>
-            <ul class="inspector-child-list">
-              <li
-                v-for="child in selectedChildNodes"
-                :key="child.id"
-                class="inspector-child-item"
-                @click="focusChildNode(child.id)"
-              >
-                <span class="inspector-child-kind">{{ child.kindLabel }}</span>
-                <span class="inspector-child-title" :title="child.title">{{ child.title }}</span>
-              </li>
-            </ul>
+        <h3 class="inspector-title">节点属性</h3>
+        <div class="inspector-body">
+          <template v-if="selectedNode">
+            <label>标题</label>
+            <a-input v-model:value="selectedTitle" @press-enter="applySelectedTitle" @blur="applySelectedTitle" />
+            <label>类型</label>
+            <a-select v-model:value="selectedKind" :options="kindOptions" @change="applySelectedKind" />
+            <template v-if="isSelectedCaseLike">
+              <label>案例性质</label>
+              <a-select
+                v-model:value="selectedCaseNature"
+                :options="caseNatureOptions"
+                @change="applySelectedCaseMetadata"
+              />
+              <label>优先级</label>
+              <a-select
+                v-model:value="selectedPriority"
+                :options="casePriorityOptions"
+                @change="applySelectedCaseMetadata"
+              />
+            </template>
+            <template v-if="selectedChildNodes.length">
+              <label>子节点（{{ selectedChildNodes.length }}）</label>
+              <ul class="inspector-child-list">
+                <li
+                  v-for="child in selectedChildNodes"
+                  :key="child.id"
+                  class="inspector-child-item"
+                  @click="focusChildNode(child.id)"
+                >
+                  <span class="inspector-child-kind">{{ child.kindLabel }}</span>
+                  <span class="inspector-child-title" :title="child.title">{{ child.title }}</span>
+                </li>
+              </ul>
+            </template>
+            <p v-else class="inspector-child-empty">当前节点暂无子节点</p>
+            <a-alert
+              v-if="dirty"
+              type="info"
+              show-icon
+              message="案例树有本地编辑，保存后导出会使用最新内容。"
+            />
           </template>
-          <p v-else class="inspector-child-empty">当前节点暂无子节点</p>
-          <a-alert
-            v-if="dirty"
-            type="info"
-            show-icon
-            message="案例树有本地编辑，保存树后导出会使用最新内容。"
-          />
-        </template>
-        <a-empty v-else description="在画布中选择一个节点" />
+          <a-empty v-else description="在画布中选择一个节点" />
+        </div>
       </aside>
     </div>
 
@@ -131,11 +146,13 @@
       </div>
     </a-empty>
 
-    <TestPlatformSyncModal
-      v-model:open="testPlatformSyncOpen"
-      :tree="syncModalTree"
-      :confirm-loading="testPlatformSyncing"
-      @confirm="submitSyncToTestPlatform"
+    <CaseSelectionModal
+      v-model:open="caseSelectModalOpen"
+      :mode="caseSelectModalMode"
+      :tree="caseSelectModalTree"
+      :confirm-loading="caseSelectConfirmLoading"
+      @confirm="handleCaseSelectConfirm"
+      @download-template="handleDownloadExcelTemplate"
     />
   </section>
 </template>
@@ -175,11 +192,13 @@ import type {
   MindElixirInstance,
   NodeObj,
 } from 'mind-elixir';
-import type { CaseNodeKind, CaseNodeMetadata, CaseTreeNode, MindMapExtras } from '@case-forge/shared';
+import type { CaseNature, CaseNodeKind, CaseNodeMetadata, CasePriority, CaseTreeNode, MindMapExtras } from '@case-forge/shared';
 import {
   CASE_NODE_KIND_LABELS,
+  DEFAULT_CASE_PRIORITY,
   getCaseDisplayTitle,
   getCaseTitleOnly,
+  isCaseLikeKind,
   isPlaceholderCaseTitle,
   cloneCaseTree,
   normalizeCaseTreeForSkill,
@@ -187,10 +206,10 @@ import {
   sanitizeCaseTitleText,
   simplifyRequirementTitleForDisplay,
 } from '@case-forge/shared';
-import { exportUrl, syncRunToTestPlatform } from '@/api/client';
+import { exportExcelTemplateUrl, exportUrl, syncRunToTestPlatform } from '@/api/client';
 import { useCaseForgeStore } from '@/stores/caseForge';
 import CaseTreeExcel from '@/components/CaseTreeExcel.vue';
-import TestPlatformSyncModal from '@/components/TestPlatformSyncModal.vue';
+import CaseSelectionModal, { type CaseSelectionMode } from '@/components/CaseSelectionModal.vue';
 import { debounce } from '@/utils/debounce';
 
 interface MindNodeMeta {
@@ -215,12 +234,25 @@ const mindContainer = ref<HTMLDivElement | null>(null);
 const mind = shallowRef<MindElixirInstance | null>(null);
 const selectedMindNode = shallowRef<NodeObj<MindNodeMeta> | null>(null);
 const dirty = ref(false);
-const testPlatformSyncing = ref(false);
-const testPlatformSyncOpen = ref(false);
-const syncModalTree = ref<CaseTreeNode | null>(null);
+const caseSelectModalOpen = ref(false);
+const caseSelectModalMode = ref<CaseSelectionMode>('sync');
+const caseSelectModalTree = ref<CaseTreeNode | null>(null);
+const caseSelectConfirmLoading = ref(false);
 const isRefreshing = ref(false);
 const selectedTitle = ref('');
 const selectedKind = ref<CaseNodeKind>('scenario');
+const selectedCaseNature = ref<CaseNature>('正向');
+const selectedPriority = ref<CasePriority>(DEFAULT_CASE_PRIORITY);
+const caseNatureOptions = [
+  { label: '正向', value: '正向' as CaseNature },
+  { label: '反向', value: '反向' as CaseNature },
+];
+const casePriorityOptions = [
+  { label: '高', value: '高' as CasePriority },
+  { label: '中', value: '中' as CasePriority },
+  { label: '低', value: '低' as CasePriority },
+];
+const isSelectedCaseLike = computed(() => isCaseLikeKind(selectedKind.value));
 const compactNodeThreshold = 220;
 
 const selectedChildNodes = computed<InspectorChildSummary[]>(() => {
@@ -302,9 +334,29 @@ onActivated(() => {
 });
 
 onBeforeUnmount(() => {
+  mindResizeObserver?.disconnect();
+  mindResizeObserver = undefined;
   mind.value?.destroy();
   mind.value = null;
 });
+
+let mindResizeObserver: ResizeObserver | undefined;
+
+function bindMindResizeObserver() {
+  mindResizeObserver?.disconnect();
+  const el = mindContainer.value;
+  if (!el) return;
+  mindResizeObserver = new ResizeObserver((entries) => {
+    const rect = entries[0]?.contentRect;
+    if (!rect || rect.width < 8 || rect.height < 8) return;
+    if (!mind.value) {
+      void scheduleMindMapPaint();
+      return;
+    }
+    void repaintMindLinks();
+  });
+  mindResizeObserver.observe(el);
+}
 
 /** 等容器可见并完成布局后再画连线（避免 keep-alive / 后台更新时线条缺失） */
 async function scheduleMindMapPaint() {
@@ -398,6 +450,7 @@ async function mountMindMap() {
     setSelectedMindNode(node || null);
   });
   setSelectedMindNode(mind.value.nodeData as NodeObj<MindNodeMeta>);
+  bindMindResizeObserver();
   await repaintMindLinks();
 }
 
@@ -439,6 +492,8 @@ function setSelectedMindNode(node: NodeObj<MindNodeMeta> | null) {
   syncSelectedNodeToStore(node?.id || '');
   selectedTitle.value = node?.topic || '';
   selectedKind.value = node ? node.metadata?.kind || inferKind(node) : 'scenario';
+  selectedCaseNature.value = node?.metadata?.caseMetadata?.caseNature || '正向';
+  selectedPriority.value = node?.metadata?.caseMetadata?.priority || DEFAULT_CASE_PRIORITY;
 }
 
 function syncSelectedDraftFromCurrentTopic() {
@@ -580,19 +635,27 @@ function summarizeMindChild(node: NodeObj<MindNodeMeta>): InspectorChildSummary 
   const metadata = node.metadata as MindNodeMeta | undefined;
   const kind = metadata?.kind || inferKind(node);
   const rawTitle = node.topic?.trim() || '（无标题）';
-  const title =
-    kind === 'requirement'
+  const preserveFullText =
+    kind === 'case_condition'
+    || kind === 'case_step'
+    || kind === 'case_expected'
+    || kind === 'condition'
+    || kind === 'step'
+    || kind === 'expectation';
+  const title = preserveFullText
+    ? rawTitle
+    : kind === 'requirement'
       ? simplifyRequirementTitleForDisplay(rawTitle)
       : kind === 'case_title'
         ? isPlaceholderCaseTitle(rawTitle)
           ? '详情'
           : sanitizeCaseTitleText(rawTitle)
-        : sanitizeCaseTitleText(rawTitle);
+        : clipInspectorText(sanitizeCaseTitleText(rawTitle), 120);
   return {
     id: node.id,
     kind,
     kindLabel: kindLabel(kind),
-    title: clipInspectorText(title, 120),
+    title,
   };
 }
 
@@ -687,13 +750,16 @@ function topicKind(topic: { nodeObj: NodeObj }) {
 }
 
 function newMindNode(topic: string, kind: CaseNodeKind): NodeObj<MindNodeMeta> {
+  const caseMetadata: CaseNodeMetadata | undefined = isCaseLikeKind(kind)
+    ? { caseNature: '正向', priority: DEFAULT_CASE_PRIORITY }
+    : undefined;
   return {
     id: crypto.randomUUID(),
     topic,
     expanded: true,
     tags: [kindLabel(kind)],
     style: nodeStyle(kind),
-    metadata: { kind },
+    metadata: { kind, caseMetadata },
     children: [],
   };
 }
@@ -706,7 +772,18 @@ function handleExcelTreeChange(tree: CaseTreeNode) {
   if (!store.activeRun) return;
   store.activeRun.tree = normalizeCaseTreeForSkill(tree);
   dirty.value = true;
+  scheduleExcelAutoSave();
 }
+
+const scheduleExcelAutoSave = debounce(async () => {
+  if (!store.activeRun || viewMode.value !== 'excel') return;
+  try {
+    await store.saveTree({ successMessage: '已自动保存' });
+    dirty.value = false;
+  } catch {
+    dirty.value = true;
+  }
+}, 500);
 
 async function applySelectedTitle() {
   const topic = selectedTopic();
@@ -720,12 +797,39 @@ async function applySelectedKind() {
   const topic = selectedTopic();
   if (!mind.value || !topic) return;
   const metadata = topic.nodeObj.metadata as MindNodeMeta | undefined;
+  const nextCaseMetadata = isCaseLikeKind(selectedKind.value)
+    ? {
+        caseNature: selectedCaseNature.value,
+        priority: selectedPriority.value,
+        ...metadata?.caseMetadata,
+      }
+    : metadata?.caseMetadata;
   await mind.value.reshapeNode(topic, {
     tags: [kindLabel(selectedKind.value)],
     style: nodeStyle(selectedKind.value),
     metadata: {
       ...metadata,
       kind: selectedKind.value,
+      caseMetadata: nextCaseMetadata,
+    },
+  });
+  setSelectedMindNode(topic.nodeObj as NodeObj<MindNodeMeta>);
+  markTreeDirty();
+}
+
+async function applySelectedCaseMetadata() {
+  const topic = selectedTopic();
+  if (!mind.value || !topic || !isCaseLikeKind(selectedKind.value)) return;
+  const metadata = topic.nodeObj.metadata as MindNodeMeta | undefined;
+  await mind.value.reshapeNode(topic, {
+    metadata: {
+      ...metadata,
+      kind: selectedKind.value,
+      caseMetadata: {
+        ...metadata?.caseMetadata,
+        caseNature: selectedCaseNature.value,
+        priority: selectedPriority.value,
+      },
     },
   });
   setSelectedMindNode(topic.nodeObj as NodeObj<MindNodeMeta>);
@@ -756,23 +860,62 @@ function getCurrentEditorTree(): CaseTreeNode | null {
   return cloneCaseTree(store.activeRun.tree);
 }
 
-async function handleSyncToTestPlatform() {
-  if (!store.activeProject || !store.activeRun) return;
+async function prepareTreeForAction() {
+  if (!store.activeProject || !store.activeRun) return null;
+  if (viewMode.value === 'xmind') {
+    syncTreeFromMind();
+  }
+  if (dirty.value) {
+    try {
+      await store.saveTree();
+      dirty.value = false;
+    } catch {
+      return null;
+    }
+  }
+  return getCurrentEditorTree();
+}
+
+async function openCaseSelectModal(mode: CaseSelectionMode) {
   try {
-    const tree = getCurrentEditorTree();
+    const tree = await prepareTreeForAction();
     if (!tree) return;
-    syncModalTree.value = tree;
-    testPlatformSyncOpen.value = true;
+    caseSelectModalMode.value = mode;
+    caseSelectModalTree.value = tree;
+    caseSelectModalOpen.value = true;
   } catch (error) {
     message.error((error as Error)?.message || '无法读取当前案例树');
   }
+}
+
+async function handleSyncToTestPlatform() {
+  await openCaseSelectModal('sync');
+}
+
+function handleDownloadExcelTemplate() {
+  if (!store.activeProject || !store.activeRun) return;
+  window.open(
+    exportExcelTemplateUrl(store.activeProject.id, store.activeRun.id),
+  );
+}
+
+async function handleCaseSelectConfirm(caseNodeIds: string[]) {
+  if (caseSelectModalMode.value === 'excel') {
+    if (!store.activeProject || !store.activeRun) return;
+    window.open(
+      exportUrl(store.activeProject.id, store.activeRun.id, 'excel', caseNodeIds),
+    );
+    caseSelectModalOpen.value = false;
+    return;
+  }
+  await submitSyncToTestPlatform(caseNodeIds);
 }
 
 async function submitSyncToTestPlatform(caseNodeIds: string[]) {
   if (!store.activeProject || !store.activeRun) return;
   const tree = getCurrentEditorTree();
   if (!tree) return;
-  testPlatformSyncing.value = true;
+  caseSelectConfirmLoading.value = true;
   try {
     const result = await syncRunToTestPlatform(
       store.activeProject.id,
@@ -780,19 +923,23 @@ async function submitSyncToTestPlatform(caseNodeIds: string[]) {
       tree,
       caseNodeIds,
     );
-    testPlatformSyncOpen.value = false;
+    caseSelectModalOpen.value = false;
     message.success(
       `已同步至测管平台（${result.projectCode}）：新增 ${result.inserted}，更新 ${result.updated}，跳过 ${result.skipped}`,
     );
   } catch (error) {
     message.error((error as Error)?.message || '同步测管平台失败');
   } finally {
-    testPlatformSyncing.value = false;
+    caseSelectConfirmLoading.value = false;
   }
 }
 
 const download: MenuProps['onClick'] = async ({ key }) => {
   if (!store.activeProject || !store.activeRun) return;
+  if (key === 'excel') {
+    await openCaseSelectModal('excel');
+    return;
+  }
   if (viewMode.value === 'xmind') {
     syncTreeFromMind();
   }
@@ -804,7 +951,7 @@ const download: MenuProps['onClick'] = async ({ key }) => {
       return;
     }
   }
-  window.open(exportUrl(store.activeProject.id, store.activeRun.id, key as 'json' | 'excel' | 'xmind'));
+  window.open(exportUrl(store.activeProject.id, store.activeRun.id, 'xmind'));
 };
 </script>
 
@@ -837,10 +984,8 @@ const download: MenuProps['onClick'] = async ({ key }) => {
 .inspector-child-list {
   display: grid;
   gap: 8px;
-  max-height: min(420px, 42vh);
   margin: 0;
   padding: 0;
-  overflow: auto;
   list-style: none;
 }
 
@@ -872,6 +1017,7 @@ const download: MenuProps['onClick'] = async ({ key }) => {
   color: #101828;
   font-size: 13px;
   line-height: 1.45;
+  white-space: pre-wrap;
   word-break: break-word;
 }
 

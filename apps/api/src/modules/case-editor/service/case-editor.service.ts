@@ -5,6 +5,7 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 import type { CaseTreeNode, GenerationRun, MindMapExtras } from "@case-forge/shared";
+import { ensureCaseMetadata, isCaseLikeKind } from "@case-forge/shared";
 import { randomUUID } from "node:crypto";
 import { CaseEditorEntity } from "@case-editor/entity/case-editor.entity";
 import { CaseNodeMetadataEntity } from "@case-editor/entity/case-node-metadata.entity";
@@ -158,15 +159,19 @@ export class CaseEditorService {
       }),
     );
 
-    if (node.metadata) {
+    if (isCaseLikeKind(node.kind) || node.metadata) {
+      const metadata = isCaseLikeKind(node.kind)
+        ? ensureCaseMetadata(node)
+        : node.metadata!;
       await manager.save(
         CaseNodeMetadataEntity,
         manager.create(CaseNodeMetadataEntity, {
           caseTreeId: node.id,
-          priority: node.metadata.priority,
-          caseType: node.metadata.caseType,
-          source: node.metadata.source,
-          knowledgeBaseIds: node.metadata.knowledgeBaseIds,
+          caseNature: metadata.caseNature,
+          priority: metadata.priority,
+          caseType: metadata.caseType,
+          source: metadata.source,
+          knowledgeBaseIds: metadata.knowledgeBaseIds,
         }),
       );
     }
@@ -198,6 +203,7 @@ export class CaseEditorService {
         collapsed: entity.collapsed,
         metadata: entity.metadata
           ? {
+              caseNature: entity.metadata.caseNature as any,
               priority: entity.metadata.priority as any,
               caseType: entity.metadata.caseType,
               source: entity.metadata.source,
@@ -221,7 +227,21 @@ export class CaseEditorService {
     if (!root) {
       throw new NotFoundException(`Root tree ${rootId} not found`);
     }
-    return root;
+    return this.normalizeLoadedTree(root);
+  }
+
+  private normalizeLoadedTree(node: CaseTreeNode): CaseTreeNode {
+    const children = (node.children || []).map((child) =>
+      this.normalizeLoadedTree(child),
+    );
+    if (isCaseLikeKind(node.kind)) {
+      return {
+        ...node,
+        metadata: ensureCaseMetadata(node),
+        children,
+      };
+    }
+    return { ...node, children };
   }
 
   /** 按运行 ID 一次加载整棵案例树（替代逐层 BFS，减少 round-trip） */

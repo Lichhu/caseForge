@@ -57,10 +57,10 @@ export class TestPointInstructEntity {
   @Column({ type: "text", nullable: true })
   naturalText?: string;
 
-  @Column({ default: false })
+  @Column({ default: true })
   isFull: boolean;
 
-  @Column({ default: true })
+  @Column({ default: false })
   isAppend: boolean;
 
   @Column({ nullable: true, default: "system" })

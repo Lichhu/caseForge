@@ -52,6 +52,7 @@ export class ProjectManageController {
       id: row.id,
       title: row.title,
       description: row.description,
+      requirementNo: row.requirementNo,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       constraints: [],

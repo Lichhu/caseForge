@@ -10,13 +10,27 @@ import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { CaseEditorEntity } from "@case-editor/entity/case-editor.entity";
 import { StructDocEntity } from "@struct-doc/entity/struct-doc.entity";
 import { DataSource, EntityManager, Repository } from "typeorm";
+import {
+  extractProjectCodeFromText,
+  isValidProjectRequirementCode,
+} from "@case-editor/util/requirement-code.util";
 import { auditFieldsForCreate } from "../../../common/audit/request-context";
 import {
   applyUserScope,
-  assertOwned,
   findOwnedProject,
   scopedWhere,
 } from "../../../common/audit/user-scope";
+
+function normalizeRequirementNo(raw: string): string {
+  const trimmed = raw.trim();
+  const code = extractProjectCodeFromText(trimmed) ?? trimmed;
+  if (!isValidProjectRequirementCode(code)) {
+    throw new BadRequestException(
+      "需求编号格式必须为 XQxxxx-xxxx-xx，例如 XQ2026-0818-01",
+    );
+  }
+  return code.toUpperCase();
+}
 
 /** 项目列表项：实体字段 + 案例生成次数 */
 export type ProjectListItem = CaseProjectEntity & {
@@ -43,15 +57,32 @@ export class ProjectManageService {
    */
   async createProject(dto: CreateProjectDto): Promise<CaseProjectEntity> {
     const platform: ProjectPlatform = dto.platform ?? "case-forge";
+    if (platform === "api-test") {
+      const title = dto.title?.trim();
+      const requirementNo = dto.requirementNo?.trim();
+      if (!title) {
+        throw new BadRequestException("请输入需求名称");
+      }
+      if (!requirementNo) {
+        throw new BadRequestException("请输入需求编号（XQxxxx-xxxx-xx）");
+      }
+      const normalizedRequirementNo = normalizeRequirementNo(requirementNo);
+      await this.assertApiTestRequirementAvailable(normalizedRequirementNo);
+      const project = this.projectRepo.create({
+        title,
+        description: dto.description?.trim() || "",
+        requirementNo: normalizedRequirementNo,
+        platform,
+        ...auditFieldsForCreate(),
+      });
+      return await this.projectRepo.save(project);
+    }
+
     const total = await this.projectRepo.count({
       where: scopedWhere({ platform }),
     });
-    const defaultTitle =
-      platform === "api-test"
-        ? `接口测试项目 ${total + 1}`
-        : `案例生成项目 ${total + 1}`;
     const project = this.projectRepo.create({
-      title: dto.title?.trim() || defaultTitle,
+      title: dto.title?.trim() || `案例生成项目 ${total + 1}`,
       description: dto.description?.trim() || "",
       requirementNo: dto.requirementNo?.trim() || undefined,
       platform,
@@ -144,17 +175,59 @@ export class ProjectManageService {
   ): Promise<CaseProjectEntity> {
     const project = await findOwnedProject(this.projectRepo, projectId);
 
-    if (dto.title !== undefined) {
-      project.title = dto.title.trim();
+    if (project.platform === "api-test") {
+      if (dto.title !== undefined) {
+        const title = dto.title.trim();
+        if (!title) {
+          throw new BadRequestException("请输入需求名称");
+        }
+        project.title = title;
+      }
+      if (dto.requirementNo !== undefined) {
+        const requirementNo = dto.requirementNo.trim();
+        if (!requirementNo) {
+          throw new BadRequestException("请输入需求编号（XQxxxx-xxxx-xx）");
+        }
+        const normalizedRequirementNo = normalizeRequirementNo(requirementNo);
+        await this.assertApiTestRequirementAvailable(
+          normalizedRequirementNo,
+          projectId,
+        );
+        project.requirementNo = normalizedRequirementNo;
+      }
+    } else {
+      if (dto.title !== undefined) {
+        project.title = dto.title.trim();
+      }
+      if (dto.requirementNo !== undefined) {
+        project.requirementNo = dto.requirementNo.trim() || undefined;
+      }
     }
     if (dto.description !== undefined) {
       project.description = dto.description.trim();
     }
-    if (dto.requirementNo !== undefined) {
-      project.requirementNo = dto.requirementNo.trim() || undefined;
-    }
 
     return await this.projectRepo.save(project);
+  }
+
+  private async assertApiTestRequirementAvailable(
+    requirementNo: string,
+    excludeProjectId?: string,
+  ) {
+    const query = applyUserScope(
+      this.projectRepo
+        .createQueryBuilder("project")
+        .where("project.platform = :platform", { platform: "api-test" })
+        .andWhere("project.requirementNo = :requirementNo", { requirementNo }),
+      "project",
+    );
+    if (excludeProjectId) {
+      query.andWhere("project.id != :excludeProjectId", { excludeProjectId });
+    }
+    const existing = await query.getOne();
+    if (existing) {
+      throw new BadRequestException(`需求编号 ${requirementNo} 已存在，请勿重复创建`);
+    }
   }
 
   /**

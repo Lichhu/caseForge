@@ -457,7 +457,7 @@ export class CaseWorkspaceService implements OnModuleInit {
           const instruct = instructs.find(
             (item) => item.testPointId === testPointId,
           );
-          const mode: CaseTreeMergeMode = instruct?.isFull ? "full" : "append";
+          const mode: CaseTreeMergeMode = instruct?.isAppend ? "append" : "full";
           return [testPointId, mode];
         }),
       );

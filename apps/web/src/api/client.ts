@@ -23,6 +23,7 @@ http.interceptors.request.use((config) => {
 
 export interface ProjectListItem extends Omit<CaseForgeProject, 'runs'> {
   runCount: number;
+  requirementNo?: string;
 }
 
 export interface PromptLibraryItem {
@@ -121,6 +122,7 @@ export async function listProjects(platform: ProjectPlatform = 'case-forge') {
 export async function createProject(payload: {
   title?: string;
   description?: string;
+  requirementNo?: string;
   platform?: ProjectPlatform;
 }) {
   const { data: created } = await http.post<{ id: string }>('/project-manage/project', payload);
@@ -129,11 +131,12 @@ export async function createProject(payload: {
       id: created.id,
       title: payload.title ?? '',
       description: payload.description ?? '',
+      requirementNo: payload.requirementNo,
       constraints: [],
       runs: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-    } as CaseForgeProject;
+    } as CaseForgeProject & { requirementNo?: string };
   }
   return getProject(created.id);
 }
@@ -345,6 +348,23 @@ export async function batchSaveDynamicTestPointInstruction(
   return data;
 }
 
-export function exportUrl(projectId: string, runId: string, format: 'json' | 'excel' | 'xmind') {
-  return `${getUserApiBaseUrl()}/case-editor/projects/${projectId}/runs/${runId}/export?format=${format}`;
+export function exportUrl(
+  projectId: string,
+  runId: string,
+  format: 'excel' | 'xmind',
+  caseNodeIds?: string[],
+) {
+  const params = new URLSearchParams({ format });
+  if (caseNodeIds?.length) {
+    params.set('caseNodeIds', caseNodeIds.join(','));
+  }
+  return `${getUserApiBaseUrl()}/case-editor/projects/${projectId}/runs/${runId}/export?${params.toString()}`;
+}
+
+export function exportExcelTemplateUrl(projectId: string, runId: string) {
+  const params = new URLSearchParams({
+    format: 'excel',
+    template: '1',
+  });
+  return `${getUserApiBaseUrl()}/case-editor/projects/${projectId}/runs/${runId}/export?${params.toString()}`;
 }

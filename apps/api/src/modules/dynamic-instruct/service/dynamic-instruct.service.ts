@@ -17,6 +17,7 @@ import {
   assertOwned,
   findOwnedProject,
   scopedWhere,
+  scopedWhereWithSystem,
 } from "../../../common/audit/user-scope";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { compareTestPointsByStatus } from "@dynamic-instruct/util/test-point-status-sort.util";
@@ -101,7 +102,7 @@ export class DynamicInstructService {
     const promptIds = [...new Set(dto.promptIds ?? [])];
     const prompts = promptIds.length
       ? await this.promptRepo.find({
-          where: scopedWhere({ id: In(promptIds) }),
+          where: scopedWhereWithSystem({ id: In(promptIds) }),
         })
       : [];
     const promptMap = new Map(prompts.map((prompt) => [prompt.id, prompt]));
@@ -126,8 +127,8 @@ export class DynamicInstructService {
         testPoint,
         status,
         naturalText: dto.naturalText ?? "",
-        isFull: dto.isFull ?? false,
-        isAppend: dto.isAppend ?? true,
+        isFull: dto.isFull ?? true,
+        isAppend: dto.isAppend ?? false,
       }),
     );
 
@@ -193,8 +194,8 @@ export class DynamicInstructService {
       ...testPoint,
       status: instruct?.status ?? ("待编辑" as TestPointInstructStatus),
       naturalText: instruct?.naturalText ?? "",
-      isFull: instruct?.isFull ?? false,
-      isAppend: instruct?.isAppend ?? true,
+      isFull: instruct?.isFull ?? true,
+      isAppend: instruct?.isAppend ?? false,
       promptIds: selections.map((item) => item.prompt?.id).filter(Boolean),
       prompts: selections.map((item) => item.prompt).filter(Boolean),
     };

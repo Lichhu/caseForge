@@ -30,7 +30,11 @@ export interface ApiCaseExpected {
 
 export interface ApiTestCasePayload {
   title: string;
+  caseNo?: string;
   description: string;
+  remark?: string;
+  transactionCode?: string;
+  owner?: string;
   priority: ApiCasePriority;
   polarity: ApiCasePolarity;
   enabled: boolean;

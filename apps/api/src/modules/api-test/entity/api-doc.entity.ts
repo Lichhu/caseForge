@@ -22,13 +22,17 @@ export const API_STRUCTURING_STATUS = [
 export type ApiStructuringStatus = (typeof API_STRUCTURING_STATUS)[number];
 
 @Entity("api_doc")
-@Index("uk_api_doc_project", ["projectId"], { unique: true })
+@Index("uk_api_doc_transaction", ["transactionId"], { unique: true })
+@Index("idx_api_doc_project", ["projectId"])
 export class ApiDocEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 
   @Column()
   projectId: string;
+
+  @Column({ nullable: true, length: 36 })
+  transactionId?: string;
 
   @ManyToOne(() => CaseProjectEntity, { onDelete: "CASCADE", onUpdate: "CASCADE" })
   @JoinColumn({ name: "projectId" })

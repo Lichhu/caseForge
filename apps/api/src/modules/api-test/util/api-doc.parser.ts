@@ -1,5 +1,9 @@
 import type { ApiEndpointPayload } from "@case-forge/shared";
 import { randomUUID } from "node:crypto";
+import {
+  API_DOC_SECTION_SEPARATOR,
+  API_DOC_SHEET_NAMES,
+} from "./api-doc-format.const";
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
@@ -13,8 +17,90 @@ function normalizePath(path: string) {
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 
+export function isApiDocSectionFormat(text: string) {
+  return API_DOC_SHEET_NAMES.some(
+    (section) =>
+      text.includes(`${section}\n${API_DOC_SECTION_SEPARATOR}`) ||
+      text.includes(`${section}\r\n${API_DOC_SECTION_SEPARATOR}`),
+  );
+}
+
+export function extractApiDocSection(text: string, sectionName: string) {
+  const sectionPattern = API_DOC_SHEET_NAMES.map((name) =>
+    name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+  ).join("|");
+  const pattern = new RegExp(
+    `${sectionName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\r?\\n${API_DOC_SECTION_SEPARATOR}\\r?\\n([\\s\\S]*?)(?=\\r?\\n(?:${sectionPattern})\\r?\\n${API_DOC_SECTION_SEPARATOR}|$)`,
+  );
+  return pattern.exec(text)?.[1]?.trim() ?? "";
+}
+
+export function getApiDocFieldValue(sectionText: string, fieldName: string) {
+  for (const line of sectionText.split("\n")) {
+    const cells = line.split("|").map((cell) => cell.trim());
+    if (cells[0] === fieldName) {
+      return cells[1] ?? "";
+    }
+  }
+  return "";
+}
+
+/** 从标准接口文档 Excel 结构化文本抽取端点 */
+export function parseEndpointsFromApiDocSections(
+  text: string,
+): ApiEndpointPayload[] {
+  const basic = extractApiDocSection(text, "基础信息");
+  const service = extractApiDocSection(text, "服务信息");
+  const request = extractApiDocSection(text, "请求报文");
+  const response = extractApiDocSection(text, "响应报文");
+
+  const code = getApiDocFieldValue(basic, "原服务交易码");
+  const name =
+    getApiDocFieldValue(basic, "服务名称(中)") ||
+    getApiDocFieldValue(basic, "服务名称") ||
+    code;
+  const serviceUrl = getApiDocFieldValue(basic, "服务URL").trim();
+
+  let path = code ? `/${code}` : "/";
+  if (serviceUrl) {
+    try {
+      const url = /^https?:\/\//i.test(serviceUrl)
+        ? serviceUrl
+        : `http://${serviceUrl}`;
+      path = new URL(url).pathname || path;
+    } catch {
+      path = normalizePath(serviceUrl);
+    }
+  }
+
+  if (!code && !serviceUrl) {
+    return [];
+  }
+
+  const method = "POST";
+
+  return [
+    {
+      name: name || code,
+      method,
+      path: normalizePath(path),
+      summary: getApiDocFieldValue(service, "功能描述"),
+      requestNotes: request,
+      responseNotes: response,
+      tags: code ? [code] : undefined,
+    },
+  ];
+}
+
 /** 从 Markdown 表格或行内文本抽取接口端点 */
 export function parseEndpointsFromText(text: string): ApiEndpointPayload[] {
+  if (isApiDocSectionFormat(text)) {
+    const endpoints = parseEndpointsFromApiDocSections(text);
+    if (endpoints.length) {
+      return endpoints;
+    }
+  }
+
   const endpoints: ApiEndpointPayload[] = [];
   const seen = new Set<string>();
 

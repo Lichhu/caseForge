@@ -3,8 +3,7 @@
  */
 import {
   flattenCaseTreeToExcel,
-  extractCasePolarity,
-  type CasePriority,
+  normalizeCasePriority,
   type CaseTreeNode,
 } from "@case-forge/shared";
 import {
@@ -183,8 +182,7 @@ export class CaseTestPlatformSyncService {
     testProjectId: string;
     operator: string;
   }): Partial<TestPlatformCaseEntity> {
-    const polarity = extractCasePolarity(input.row.caseName) || "正向";
-    const caseNature = /反|负/.test(polarity) ? 2 : 1;
+    const caseNature = /反|负/.test(input.row.caseNature) ? 2 : 1;
     const caseSerial = `CF-${input.projectCode}-`;
 
     return {
@@ -201,7 +199,7 @@ export class CaseTestPlatformSyncService {
       caseExecuteType: 1,
       testPurpose: truncate(input.row.requirement, 2000),
       detailedDescription: truncate(input.row.caseStep, 2000),
-      priority: mapPriority(input.row.caseName),
+      priority: mapPriority(input.row.priority),
       caseStatus: 1,
       expectedResult: truncate(input.row.caseExpected, 2000),
       precondition: truncate(input.row.caseCondition, 200),
@@ -258,12 +256,8 @@ function truncate(value: string, max: number) {
   return text.length > max ? text.slice(0, max) : text;
 }
 
-function mapPriority(caseName: string): number {
-  const match = caseName.match(/\bP([0-3])\b/i);
-  if (!match) {
-    return 2;
-  }
-  const map: Record<CasePriority, number> = { P0: 1, P1: 2, P2: 3, P3: 3 };
-  const key = `P${match[1]}` as CasePriority;
-  return map[key] ?? 2;
+function mapPriority(priority?: string): number {
+  const normalized = normalizeCasePriority(priority);
+  const levelMap = { 高: 1, 中: 2, 低: 3 } as const;
+  return levelMap[normalized];
 }

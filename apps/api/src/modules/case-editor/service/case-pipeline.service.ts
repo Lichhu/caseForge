@@ -26,6 +26,7 @@ import {
   buildFallbackCaseTitle,
   extractCasePolarity,
   isPlaceholderCaseTitle,
+  normalizeCasePriority,
   normalizeCaseTreeForSkill,
   sanitizeCaseTitleText,
   simplifyRequirementTitleForDisplay,
@@ -245,7 +246,7 @@ export class CasePipelineService {
       this.sixLevelCaseNode(
         "案例详情 [正向]",
         `[补充] ${normalized}`,
-        "P1",
+        "高",
         "补充测试",
         [
           `已选中目标节点，依据指令“${normalized}”进行局部扩展`,
@@ -502,7 +503,7 @@ export class CasePipelineService {
     return this.sixLevelCaseNode(
       `案例详情 [${polarity}]`,
       caseTitle,
-      positive ? "P1" : "P0",
+      positive ? "高" : "高",
       positive ? "功能测试" : "功能测试",
       conditions,
       steps,
@@ -537,7 +538,7 @@ export class CasePipelineService {
     return this.sixLevelCaseNode(
       caseNodeTitle,
       caseTitle,
-      scenario.metadata?.priority || "P1",
+      normalizeCasePriority(scenario.metadata?.priority),
       scenario.metadata?.caseType || "功能测试",
       conditions.length ? conditions : ["测试数据和环境已准备"],
       steps.length ? steps : ["执行目标业务操作"],
@@ -700,7 +701,8 @@ export class CasePipelineService {
       ),
     ];
     return this.node(caseNodeTitle, "case", children, {
-      priority,
+      caseNature: extractCasePolarity(caseNodeTitle) || "正向",
+      priority: normalizeCasePriority(priority),
       caseType,
       knowledgeBaseIds,
       source: featureInstruction
@@ -814,7 +816,7 @@ export class CasePipelineService {
       return [
         this.scenarioNode(
           "[反向] 未满足业务规则时系统拦截",
-          "P0",
+          "高",
           "功能测试",
           [
             `构造不满足「${module.rules[0] || "业务规则"}」的数据`,
@@ -835,7 +837,7 @@ export class CasePipelineService {
       return [
         this.scenarioNode(
           "[正向] 满足准入条件时流程正常通过",
-          "P1",
+          "中",
           "功能测试",
           [`${module.system} 可正常访问`, "客户或业务数据不命中拦截规则"],
           [
@@ -853,7 +855,7 @@ export class CasePipelineService {
       return [
         this.scenarioNode(
           "[异常] 命中业务规则时拦截",
-          "P0",
+          "高",
           "异常测试",
           [
             `构造命中“${module.rules[0] || "业务拦截"}”的数据`,
@@ -866,7 +868,7 @@ export class CasePipelineService {
         ),
         this.scenarioNode(
           "[异常] 依赖系统超时或无响应",
-          "P0",
+          "高",
           "接口测试",
           ["已模拟下游系统超时或无响应", "请求参数满足基本校验"],
           ["发起业务请求", "等待接口超时", "查看页面提示和服务端日志"],
@@ -884,7 +886,7 @@ export class CasePipelineService {
       return [
         this.scenarioNode(
           "[边界] 状态枚举边界识别",
-          "P0",
+          "高",
           "数据测试",
           ["准备正常、冻结、解约、待生效、空状态等枚举数据"],
           ["分别使用不同状态数据提交请求", "记录每次处理结果"],
@@ -898,7 +900,7 @@ export class CasePipelineService {
       return [
         this.scenarioNode(
           "[权限] 无权限用户访问功能",
-          "P1",
+          "中",
           "权限测试",
           ["准备无权限账号或过期会话", `目标功能为“${module.name}”`],
           ["使用无权限账号进入功能入口", "尝试提交业务请求"],
@@ -912,7 +914,7 @@ export class CasePipelineService {
       return [
         this.scenarioNode(
           "[端到端] 跨系统主链路一致性",
-          "P1",
+          "中",
           "端到端测试",
           ["上下游系统测试环境可用", "准备完整业务链路数据"],
           ["从渠道入口发起请求", "跟踪下游接口与数据同步", "核对最终业务状态"],
@@ -926,7 +928,7 @@ export class CasePipelineService {
       return [
         this.scenarioNode(
           "[接口] 返回字段和错误码校验",
-          "P1",
+          "中",
           "接口测试",
           ["已关联接口定义或准备接口契约", "请求参数覆盖必填与可选字段"],
           ["调用接口", "校验响应字段、错误码和错误信息", "检查服务端日志"],
@@ -940,7 +942,7 @@ export class CasePipelineService {
       return [
         this.scenarioNode(
           "[UI] 提示文案和弹窗控制",
-          "P2",
+          "低",
           "UI 测试",
           ["已进入目标页面", "准备触发提示或弹窗的数据"],
           ["执行页面操作", "观察提示文案、弹窗和按钮状态"],
@@ -953,7 +955,7 @@ export class CasePipelineService {
     return [
       this.scenarioNode(
         "[并发] 快速重复提交",
-        "P1",
+        "高",
         "并发测试",
         ["准备同一用户同一业务数据", "客户端或接口工具支持并发请求"],
         ["连续快速点击提交或并发调用接口", "观察所有请求处理结果"],
@@ -1015,7 +1017,8 @@ export class CasePipelineService {
       ]),
     );
     return this.node(title, "scenario", [...children], {
-      priority,
+      caseNature: extractCasePolarity(title) || "正向",
+      priority: normalizeCasePriority(priority),
       caseType,
       knowledgeBaseIds,
       source: featureInstruction
@@ -1691,16 +1694,9 @@ export class CasePipelineService {
     return (allx || "").trim() === "反" ? "反向" : "正向";
   }
 
-  /** promote-skill 中 yxj：高/中/低 → P0/P1/P2 */
+  /** promote-skill 中 yxj：高/中/低，默认高 */
   private mapJsonPriority(yxj?: string): CasePriority {
-    const value = (yxj || "").trim();
-    if (value === "高") {
-      return "P0";
-    }
-    if (value === "低") {
-      return "P2";
-    }
-    return "P1";
+    return normalizeCasePriority(yxj);
   }
 
   /**

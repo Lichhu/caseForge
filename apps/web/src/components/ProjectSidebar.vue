@@ -2,7 +2,7 @@
   <aside class="project-sidebar">
     <div class="project-section-title">
       <strong>项目管理</strong>
-      <span>{{ isApiPlatform ? '接口测试项目' : '按需求编号或名称检索' }}</span>
+      <span>{{ isApiPlatform ? '以需求为维度，手动新建项目' : '按需求编号或名称检索' }}</span>
     </div>
 
     <div class="project-action-row action-toolbar action-toolbar--block">
@@ -19,7 +19,7 @@
       v-model:value="keyword"
       class="project-search"
       allow-clear
-      :placeholder="isApiPlatform ? '搜索接口测试项目' : '输入需求编号/项目名称'"
+      :placeholder="isApiPlatform ? '输入需求编号或需求名称' : '输入需求编号/项目名称'"
     >
       <template #prefix><SearchOutlined /></template>
     </a-input>
@@ -70,6 +70,9 @@
             :ellipsis="{ tooltip: cleanProjectTitle(project.title) }"
             :content="cleanProjectTitle(project.title)"
           />
+          <span v-if="isApiPlatform && project.requirementNo" class="project-requirement">
+            {{ project.requirementNo }}
+          </span>
         </div>
         <button
           v-if="!deleteMode"
@@ -94,16 +97,58 @@
     </div>
 
     <a-modal
+      v-if="isApiPlatform"
+      v-model:open="createModalOpen"
+      title="新建项目"
+      ok-text="创建"
+      cancel-text="取消"
+      :confirm-loading="creating"
+      @ok="submitCreateProject"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="需求编号" required>
+          <a-input
+            v-model:value="createForm.requirementNo"
+            maxlength="64"
+            placeholder="XQ2026-0818-01"
+          />
+        </a-form-item>
+        <a-form-item label="需求名称" required>
+          <a-input v-model:value="createForm.title" maxlength="120" placeholder="请输入需求名称" />
+        </a-form-item>
+        <a-form-item label="项目描述">
+          <a-textarea
+            v-model:value="createForm.description"
+            maxlength="800"
+            :rows="3"
+            placeholder="可选，补充需求说明"
+          />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
+    <a-modal
       v-model:open="editModalOpen"
-      title="编辑项目"
+      :title="isApiPlatform ? '编辑需求项目' : '编辑项目'"
       ok-text="保存"
       cancel-text="取消"
       :confirm-loading="saving"
       @ok="submitEditProject"
     >
       <a-form layout="vertical">
-        <a-form-item label="项目名称" required>
-          <a-input v-model:value="editForm.title" maxlength="120" placeholder="请输入项目名称" />
+        <a-form-item v-if="isApiPlatform" label="需求编号" required>
+          <a-input
+            v-model:value="editForm.requirementNo"
+            maxlength="64"
+            placeholder="XQ2026-0818-01"
+          />
+        </a-form-item>
+        <a-form-item :label="isApiPlatform ? '需求名称' : '项目名称'" required>
+          <a-input
+            v-model:value="editForm.title"
+            maxlength="120"
+            :placeholder="isApiPlatform ? '请输入需求名称' : '请输入项目名称'"
+          />
         </a-form-item>
         <a-form-item label="项目描述">
           <a-textarea v-model:value="editForm.description" maxlength="800" :rows="4" placeholder="请输入项目描述" />
@@ -138,13 +183,23 @@ const keyword = ref('');
 const deleteMode = ref(false);
 const deleting = ref(false);
 const saving = ref(false);
+const creating = ref(false);
 const selectedProjectIds = ref<string[]>([]);
+const createModalOpen = ref(false);
 const editModalOpen = ref(false);
 const editingProjectId = ref('');
-const editForm = ref({
+const createForm = ref({
+  requirementNo: '',
   title: '',
   description: '',
 });
+const editForm = ref({
+  requirementNo: '',
+  title: '',
+  description: '',
+});
+
+const REQUIREMENT_NO_PATTERN = /^XQ\d{4}-\d{4}-\d{2}$/i;
 
 const selectedProjectIdSet = computed(() => new Set(selectedProjectIds.value));
 
@@ -157,7 +212,11 @@ const filteredProjects = computed(() => {
   if (!value) return projectList.value;
   const normalizedKeyword = normalizeSearchText(value);
   return projectList.value.filter((project) => {
-    const haystack = [cleanProjectTitle(project.title), project.description]
+    const haystack = [
+      cleanProjectTitle(project.title),
+      project.description,
+      project.requirementNo,
+    ]
       .filter(Boolean)
       .join(' ');
     return normalizeSearchText(haystack).includes(normalizedKeyword);
@@ -185,10 +244,52 @@ watch(
 
 function onNewProject() {
   if (isApiPlatform.value) {
-    void apiStore.newProject();
+    createForm.value = {
+      requirementNo: '',
+      title: '',
+      description: '',
+    };
+    createModalOpen.value = true;
     return;
   }
   void caseStore.newProject();
+}
+
+function isValidRequirementNo(value: string) {
+  return REQUIREMENT_NO_PATTERN.test(value.trim());
+}
+
+async function submitCreateProject() {
+  const requirementNo = createForm.value.requirementNo.trim();
+  const title = createForm.value.title.trim();
+  if (!requirementNo) {
+    message.warning('请输入需求编号');
+    return Promise.reject();
+  }
+  if (!isValidRequirementNo(requirementNo)) {
+    message.warning('需求编号格式须为 XQxxxx-xxxx-xx');
+    return Promise.reject();
+  }
+  if (!title) {
+    message.warning('请输入需求名称');
+    return Promise.reject();
+  }
+  if (creating.value) {
+    return Promise.reject();
+  }
+  creating.value = true;
+  try {
+    await apiStore.newProject({
+      requirementNo,
+      title,
+      description: createForm.value.description.trim(),
+    });
+    createModalOpen.value = false;
+  } catch {
+    return Promise.reject();
+  } finally {
+    creating.value = false;
+  }
 }
 
 function toggleDeleteMode() {
@@ -202,7 +303,7 @@ function handleProjectClick(projectId: string) {
     return;
   }
   if (isApiPlatform.value) {
-    void apiStore.selectProject(projectId);
+    void apiStore.selectProject(projectId, false);
     return;
   }
   void caseStore.selectProject(projectId);
@@ -286,6 +387,7 @@ function confirmDeleteProject(content: string, onOk: () => Promise<void>) {
 function openEditProject(project: ProjectListItem) {
   editingProjectId.value = project.id;
   editForm.value = {
+    requirementNo: project.requirementNo || '',
     title: cleanProjectTitle(project.title),
     description: project.description || '',
   };
@@ -295,8 +397,19 @@ function openEditProject(project: ProjectListItem) {
 async function submitEditProject() {
   const title = editForm.value.title.trim();
   if (!title) {
-    message.warning('请输入项目名称');
+    message.warning(isApiPlatform.value ? '请输入需求名称' : '请输入项目名称');
     return Promise.reject();
+  }
+  if (isApiPlatform.value) {
+    const requirementNo = editForm.value.requirementNo.trim();
+    if (!requirementNo) {
+      message.warning('请输入需求编号');
+      return Promise.reject();
+    }
+    if (!isValidRequirementNo(requirementNo)) {
+      message.warning('需求编号格式须为 XQxxxx-xxxx-xx');
+      return Promise.reject();
+    }
   }
   if (saving.value || !editingProjectId.value) {
     return Promise.reject();
@@ -306,6 +419,7 @@ async function submitEditProject() {
     if (isApiPlatform.value) {
       await apiStore.updateProjectInfo(editingProjectId.value, {
         title,
+        requirementNo: editForm.value.requirementNo.trim(),
         description: editForm.value.description.trim(),
       });
     } else {

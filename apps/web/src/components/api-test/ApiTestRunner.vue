@@ -13,7 +13,7 @@
     <a-row :gutter="16">
       <a-col :span="8">
         <h3>执行批次</h3>
-        <a-list size="small" :data-source="apiStore.runs" bordered>
+        <a-list size="small" :data-source="apiStore.transactionRuns" bordered>
           <template #renderItem="{ item }">
             <a-list-item class="run-item" :class="{ active: item.id === activeRunId }" @click="selectRun(item.id)">
               <div>
@@ -125,8 +125,9 @@ function onExpand(expanded: boolean, record: { id: string }) {
 
 async function runOne(caseId: string) {
   const projectId = apiStore.activeProjectId;
-  if (!projectId) return;
-  await apiStore.executeCases(projectId, [caseId]);
+  const transactionId = apiStore.activeTransactionId;
+  if (!projectId || !transactionId) return;
+  await apiStore.executeCases(projectId, transactionId, [caseId]);
 }
 </script>
 

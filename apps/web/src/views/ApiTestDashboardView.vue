@@ -5,18 +5,31 @@
       <section class="main-workspace">
         <header v-if="!immersiveMode" class="topbar">
           <div>
-            <h1>{{ cleanProjectTitle(activeProjectTitle) }}</h1>
-            <p>接口文档结构化、案例生成、环境执行与报表导出</p>
+            <h1>{{ headerTitle }}</h1>
+            <p>{{ headerSubtitle }}</p>
           </div>
           <div class="topbar-actions action-toolbar action-toolbar--compact">
-            <a-button :disabled="!apiStore.activeProjectId" @click="enterImmersiveMode">
+            <a-button
+              v-if="apiStore.inTransactionWorkspace"
+              @click="apiStore.exitTransactionWorkspace()"
+            >
+              返回
+            </a-button>
+            <a-button
+              v-if="apiStore.inTransactionWorkspace"
+              @click="enterImmersiveMode"
+            >
               <template #icon><FullscreenOutlined /></template>
               全屏
             </a-button>
           </div>
         </header>
 
-        <nav v-if="!immersiveMode" class="stage-nav stage-nav--four" aria-label="接口测试工作区">
+        <nav
+          v-if="apiStore.inTransactionWorkspace && !immersiveMode"
+          class="stage-nav stage-nav--four"
+          aria-label="接口测试工作区"
+        >
           <button
             v-for="stage in stages"
             :key="stage.key"
@@ -35,7 +48,7 @@
         </nav>
 
         <ImmersiveStageOrb
-          v-if="immersiveMode"
+          v-if="immersiveMode && apiStore.inTransactionWorkspace"
           :controls="immersiveControls"
           :stages="stages"
           :active-stage="apiStore.workspaceStage"
@@ -44,7 +57,13 @@
         />
 
         <div class="stage-workspace" :class="{ 'immersive-stage': immersiveMode }">
-          <keep-alive>
+          <a-empty
+            v-if="!apiStore.activeProjectId"
+            class="empty-state workbench-empty"
+            description="请先在左侧新建项目（需填写需求编号 XQxxxx-xxxx-xx）"
+          />
+          <ApiTransactionList v-else-if="!apiStore.inTransactionWorkspace" />
+          <keep-alive v-else>
             <ApiDocumentEditor v-if="apiStore.workspaceStage === 'api-document'" />
             <ApiCaseWorkbench v-else-if="apiStore.workspaceStage === 'api-cases'" />
             <ApiTestRunner v-else-if="apiStore.workspaceStage === 'api-runner'" />
@@ -63,6 +82,7 @@ import ApiCaseWorkbench from '@/components/api-test/ApiCaseWorkbench.vue';
 import ApiDocumentEditor from '@/components/api-test/ApiDocumentEditor.vue';
 import ApiTestReport from '@/components/api-test/ApiTestReport.vue';
 import ApiTestRunner from '@/components/api-test/ApiTestRunner.vue';
+import ApiTransactionList from '@/components/api-test/ApiTransactionList.vue';
 import ImmersiveStageOrb from '@/components/workspace/ImmersiveStageOrb.vue';
 import ProjectSidebar from '@/components/ProjectSidebar.vue';
 import { useImmersiveWorkspace } from '@/composables/useImmersiveWorkspace';
@@ -80,28 +100,50 @@ const {
 } = immersiveControls;
 
 const stages = [
-  { key: 'api-document' as const, index: '01', title: '接口文档', shortTitle: '文档', description: 'Excel/Word/Markdown 上传与结构化' },
+  { key: 'api-document' as const, index: '01', title: '接口文档', shortTitle: '文档', description: 'Excel 上传与结构化' },
   { key: 'api-cases' as const, index: '02', title: '案例生成', shortTitle: '案例', description: 'AI 生成与手工维护' },
   { key: 'api-runner' as const, index: '03', title: '执行平台', shortTitle: '执行', description: '环境中心、批量执行与比对' },
   { key: 'api-report' as const, index: '04', title: '结果报表', shortTitle: '报表', description: '统计图表、Excel/PDF 导出' },
 ];
 
-const activeProjectTitle = computed(
-  () => apiStore.activeProject?.title || '智能接口测试平台',
-);
+const headerTitle = computed(() => {
+  if (apiStore.activeTransaction) {
+    return `${apiStore.activeTransaction.code} · ${apiStore.activeTransaction.name}`;
+  }
+  if (apiStore.activeProject) {
+    return cleanProjectTitle(apiStore.activeProject.title);
+  }
+  return '智能接口测试平台';
+});
+
+const headerSubtitle = computed(() => {
+  if (apiStore.inTransactionWorkspace) {
+    return '接口文档 → 案例生成 → 执行平台 → 结果报表';
+  }
+  if (apiStore.activeProject) {
+    const no = apiStore.activeProject.requirementNo;
+    return no ? `${no} · 选择交易码进入测试流程` : '选择交易码进入测试流程';
+  }
+  return '以需求为维度管理接口测试';
+});
 
 function canOpenStage(stage: ApiWorkspaceStage | string) {
   if (stage === 'api-document') return true;
   if (stage === 'api-cases') return Boolean(apiStore.canEnterCases);
   if (stage === 'api-runner') return Boolean(apiStore.canEnterRunner);
-  if (stage === 'api-report') return apiStore.runs.length > 0 || apiStore.cases.length > 0;
+  if (stage === 'api-report') {
+    return apiStore.transactionRuns.length > 0 || apiStore.cases.length > 0;
+  }
   return false;
 }
 
 function switchStage(stage: string) {
   if (!canOpenStage(stage)) return;
   const projectId = apiStore.activeProjectId;
-  if (projectId) apiStore.setWorkspaceStage(projectId, stage as ApiWorkspaceStage);
+  const transactionId = apiStore.activeTransactionId;
+  if (projectId && transactionId) {
+    apiStore.setWorkspaceStage(projectId, transactionId, stage as ApiWorkspaceStage);
+  }
   scheduleViewportRefresh();
 }
 

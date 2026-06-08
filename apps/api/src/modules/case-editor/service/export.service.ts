@@ -8,26 +8,17 @@ import {
 } from "@case-forge/shared";
 import type { CaseTreeNode, MindMapExtras, MindMapSummary } from "@case-forge/shared";
 import { randomUUID } from "node:crypto";
-import ExcelJS from "exceljs";
 import JSZip from "jszip";
+import {
+  buildTestPlatformCaseExcel,
+  readTestPlatformCaseExcelTemplate,
+} from "../util/test-platform-case-excel.util";
 
 /** XMind 打开所需的 1x1 占位缩略图 */
 const XMIND_THUMBNAIL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAD0lEQVQ42mNkYPP9HwAFfwJ/ARkJQQAAAABJRU5ErkJggg==",
   "base64",
 );
-
-const EXCEL_HEADERS = [
-  "根",
-  "系统",
-  "功能模块",
-  "测试要点",
-  "案例",
-  "案例标题",
-  "前置条件",
-  "测试步骤",
-  "预期结果",
-] as const;
 
 /** 案例树多格式导出服务 */
 @Injectable()
@@ -37,46 +28,19 @@ export class ExportService {
     return `${JSON.stringify({ tree, mindMapExtras }, null, 2)}\n`;
   }
 
-  /** 导出为 Excel 工作簿（xlsx） */
-  async toExcel(tree: CaseTreeNode): Promise<Buffer> {
-    const { rows } = flattenCaseTreeToExcel(tree);
-    const workbook = new ExcelJS.Workbook();
-    workbook.creator = "CaseForge";
-    const sheet = workbook.addWorksheet("测试案例");
-    sheet.columns = EXCEL_HEADERS.map((header, index) => ({
-      header,
-      key: [
-        "root",
-        "system",
-        "module",
-        "requirement",
-        "caseName",
-        "caseTitle",
-        "caseCondition",
-        "caseStep",
-        "caseExpected",
-      ][index],
-      width: index < 4 ? 18 : 24,
-    }));
-    const headerRow = sheet.getRow(1);
-    headerRow.font = { bold: true };
-    headerRow.alignment = { vertical: "middle", horizontal: "center" };
-    for (const row of rows) {
-      sheet.addRow({
-        root: row.root,
-        system: row.system,
-        module: row.module,
-        requirement: row.requirement,
-        caseName: row.caseName,
-        caseTitle: row.caseTitle,
-        caseCondition: row.caseCondition,
-        caseStep: row.caseStep,
-        caseExpected: row.caseExpected,
-      });
+  /** 下载空白测管平台测试案例 Excel 模板 */
+  toExcelTemplate(): Buffer {
+    return readTestPlatformCaseExcelTemplate();
+  }
+
+  /** 导出为测管平台测试案例 Excel（xlsx） */
+  async toExcel(tree: CaseTreeNode, caseNodeIds?: string[]): Promise<Buffer> {
+    let { rows } = flattenCaseTreeToExcel(tree);
+    if (caseNodeIds?.length) {
+      const selected = new Set(caseNodeIds);
+      rows = rows.filter((row) => selected.has(row.caseNodeId));
     }
-    sheet.views = [{ state: "frozen", ySplit: 1 }];
-    const buffer = await workbook.xlsx.writeBuffer();
-    return Buffer.from(buffer);
+    return buildTestPlatformCaseExcel(rows);
   }
 
   /** 导出为 XMind 工作簿（XMind 2020+ 兼容结构，含摘要） */
@@ -248,6 +212,7 @@ export class ExportService {
 
   private buildTopicNotes(node: CaseTreeNode) {
     const metaLines = [
+      node.metadata?.caseNature ? `案例性质：${node.metadata.caseNature}` : "",
       node.metadata?.priority ? `优先级：${node.metadata.priority}` : "",
       node.metadata?.caseType ? `类型：${node.metadata.caseType}` : "",
       node.metadata?.source ? `来源：${node.metadata.source}` : "",

@@ -14,7 +14,12 @@ import {
 import { PromptEntity } from "@scenario/entity/prompt.entity";
 import { ScenarioEntity } from "@scenario/entity/scenario.entity";
 import { In, Repository } from "typeorm";
-import { assertOwned, scopedWhere } from "../../../common/audit/user-scope";
+import {
+  assertAccessible,
+  assertOwned,
+  scopedWhere,
+  scopedWhereWithSystem,
+} from "../../../common/audit/user-scope";
 
 /**
  * 场景服务：场景的增删改查及下属提示词的同步保存
@@ -28,10 +33,10 @@ export class ScenarioService {
     private readonly promptRepo: Repository<PromptEntity>,
   ) {}
 
-  /** 列出全部场景及其提示词 */
+  /** 列出系统预置与当前用户维护的场景及其提示词 */
   async listScenarios() {
     return this.scenarioRepo.find({
-      where: scopedWhere(),
+      where: scopedWhereWithSystem(),
       relations: ["prompts"],
       order: {
         updatedAt: "DESC",
@@ -49,7 +54,7 @@ export class ScenarioService {
    */
   async getScenario(id: string) {
     const scenario = await this.scenarioRepo.findOne({
-      where: scopedWhere({ id }),
+      where: { id },
       relations: ["prompts"],
       order: {
         prompts: {
@@ -58,6 +63,12 @@ export class ScenarioService {
         },
       },
     });
+    assertAccessible(scenario, "场景");
+    return scenario;
+  }
+
+  private async getOwnedScenario(id: string) {
+    const scenario = await this.getScenario(id);
     assertOwned(scenario, "场景");
     return scenario;
   }
@@ -89,7 +100,7 @@ export class ScenarioService {
    * @param dto - 保存载荷
    */
   async updateScenario(id: string, dto: SaveScenarioDto) {
-    const scenario = await this.getScenario(id);
+    const scenario = await this.getOwnedScenario(id);
     await this.ensureScenarioNameUnique(dto.name.trim(), id);
     await this.scenarioRepo.save(
       this.scenarioRepo.create({
@@ -112,13 +123,13 @@ export class ScenarioService {
    * @param id - 场景 ID
    */
   async deleteScenario(id: string) {
-    const scenario = await this.getScenario(id);
+    const scenario = await this.getOwnedScenario(id);
     await this.scenarioRepo.remove(scenario);
     return { id, deleted: true };
   }
 
   private async replacePrompts(scenarioId: string, prompts: SavePromptDto[]) {
-    await this.getScenario(scenarioId);
+    await this.getOwnedScenario(scenarioId);
     const existing = await this.promptRepo.find({
       where: scopedWhere({ scenarioId }),
       select: ["id"],

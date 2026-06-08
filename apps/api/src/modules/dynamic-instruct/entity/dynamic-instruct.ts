@@ -22,11 +22,11 @@ export class DynamicInstructEntity {
     status: string;
 
     // 是否全量覆盖
-    @Column({ default: false })
+    @Column({ default: true })
     isFull: boolean;
 
     // 是否追加案例
-    @Column({ default: true })
+    @Column({ default: false })
     isAppend: boolean;
 
     // 关联测试要点

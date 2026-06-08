@@ -32,6 +32,9 @@ export class CaseNodeMetadataEntity {
   caseTree: CaseTreeEntity;
 
   @Column({ nullable: true })
+  caseNature?: string;
+
+  @Column({ nullable: true, default: "高" })
   priority?: string;
 
   @Column({ nullable: true })

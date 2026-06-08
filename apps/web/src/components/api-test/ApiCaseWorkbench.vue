@@ -67,6 +67,7 @@ const modalOpen = ref(false);
 const editingId = ref('');
 const selectedIds = computed(() => apiStore.selectedCaseIds);
 const projectId = computed(() => apiStore.activeProjectId ?? '');
+const transactionId = computed(() => apiStore.activeTransactionId ?? '');
 
 const form = reactive({
   endpointId: '',
@@ -150,7 +151,7 @@ function openEdit(row: ApiTestCaseRow) {
 }
 
 async function onSave() {
-  if (!projectId.value) return;
+  if (!projectId.value || !transactionId.value) return;
   const payload = {
     endpointId: form.endpointId,
     title: form.title,
@@ -162,29 +163,38 @@ async function onSave() {
     request: JSON.parse(form.requestJson),
     expected: JSON.parse(form.expectedJson),
   };
-  await apiStore.saveCase(projectId.value, payload, editingId.value || undefined);
+  await apiStore.saveCase(
+    projectId.value,
+    transactionId.value,
+    payload,
+    editingId.value || undefined,
+  );
   modalOpen.value = false;
 }
 
 async function onGenerate() {
-  if (!projectId.value) return;
-  await apiStore.generateCases(projectId.value);
+  if (!projectId.value || !transactionId.value) return;
+  await apiStore.generateCases(projectId.value, transactionId.value);
 }
 
 async function onDelete(caseId: string) {
-  if (!projectId.value) return;
-  await apiStore.removeCase(projectId.value, caseId);
+  if (!projectId.value || !transactionId.value) return;
+  await apiStore.removeCase(projectId.value, transactionId.value, caseId);
 }
 
 async function onRunOne(caseId: string) {
-  if (!projectId.value) return;
-  const run = await apiStore.executeCases(projectId.value, [caseId]);
-  if (run) apiStore.setWorkspaceStage(projectId.value, 'api-runner');
+  if (!projectId.value || !transactionId.value) return;
+  const run = await apiStore.executeCases(projectId.value, transactionId.value, [caseId]);
+  if (run) apiStore.setWorkspaceStage(projectId.value, transactionId.value, 'api-runner');
 }
 
 async function onRunSelected() {
-  if (!projectId.value || !selectedIds.value.length) return;
-  const run = await apiStore.executeCases(projectId.value, [...selectedIds.value]);
-  if (run) apiStore.setWorkspaceStage(projectId.value, 'api-runner');
+  if (!projectId.value || !transactionId.value || !selectedIds.value.length) return;
+  const run = await apiStore.executeCases(
+    projectId.value,
+    transactionId.value,
+    [...selectedIds.value],
+  );
+  if (run) apiStore.setWorkspaceStage(projectId.value, transactionId.value, 'api-runner');
 }
 </script>

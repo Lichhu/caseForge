@@ -40,8 +40,20 @@ export class ApiTestCaseEntity {
   @Column()
   title: string;
 
+  @Column({ length: 64, nullable: true })
+  caseNo?: string;
+
   @Column({ type: "text", nullable: true })
   description?: string;
+
+  @Column({ type: "text", nullable: true })
+  remark?: string;
+
+  @Column({ length: 128, nullable: true })
+  transactionCode?: string;
+
+  @Column({ length: 255, nullable: true })
+  owner?: string;
 
   @Column({ length: 8, default: "P1" })
   priority: ApiCasePriority;

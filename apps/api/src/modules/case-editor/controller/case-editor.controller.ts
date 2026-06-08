@@ -12,6 +12,7 @@ import {
   Post,
   Query,
   Res,
+  BadRequestException,
 } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
@@ -108,17 +109,24 @@ export class CaseEditorController {
     return this.caseEditorService.getRun(projectId, runId);
   }
 
-  /** 导出案例树（支持 json、excel、xmind） */
+  /** 导出案例树（支持 excel、xmind；excel 可按 caseNodeIds 筛选） */
   @Get("projects/:projectId/runs/:runId/export")
   @ApiOperation({ summary: "导出案例树" })
   async exportRun(
     @Param("projectId") projectId: string,
     @Param("runId") runId: string,
-    @Query("format") format: "json" | "excel" | "xmind" = "json",
+    @Query("format") format: "excel" | "xmind",
+    @Query("template") template: string | undefined,
+    @Query("caseNodeIds") caseNodeIdsRaw: string | undefined,
     @Res() response: Response,
   ) {
     const run = await this.caseEditorService.getRun(projectId, runId);
     const fileBase = `${run.tree.title.replace(/[\\/:*?"<>|]/g, "_")}`;
+    const caseNodeIds = (caseNodeIdsRaw || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const downloadTemplate = template === "1" || template === "true";
     if (format === "xmind") {
       const buffer = await this.exporter.toXmind(run.tree, run.mindMapExtras);
       response.setHeader("Content-Type", "application/vnd.xmind.workbook");
@@ -129,23 +137,25 @@ export class CaseEditorController {
       return response.send(buffer);
     }
     if (format === "excel") {
-      const buffer = await this.exporter.toExcel(run.tree);
+      const buffer = downloadTemplate
+        ? this.exporter.toExcelTemplate()
+        : await this.exporter.toExcel(
+            run.tree,
+            caseNodeIds.length ? caseNodeIds : undefined,
+          );
       response.setHeader(
         "Content-Type",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       );
       response.setHeader(
         "Content-Disposition",
-        `attachment; filename="${encodeURIComponent(fileBase)}.xlsx"`,
+        `attachment; filename="${encodeURIComponent(
+          downloadTemplate ? "测试案例模板" : fileBase,
+        )}.xlsx"`,
       );
       return response.send(buffer);
     }
-    response.setHeader("Content-Type", "application/json; charset=utf-8");
-    response.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${encodeURIComponent(fileBase)}.json"`,
-    );
-    return response.send(this.exporter.toJson(run.tree, run.mindMapExtras));
+    throw new BadRequestException("format 仅支持 excel 或 xmind");
   }
 
   /** 将案例树同步至测管平台 */

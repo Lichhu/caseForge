@@ -13,12 +13,12 @@ import { assertApiTestProject } from "../util/assert-api-project.util";
 import { touchProjectUpdatedAt } from "../../../common/project/touch-project.util";
 import { ApiDocEntity } from "../entity/api-doc.entity";
 import { ApiEndpointEntity } from "../entity/api-endpoint.entity";
+import { ApiTransactionEntity } from "../entity/api-transaction.entity";
 import {
   extractDocumentText,
   structureEndpointsFromRawText,
 } from "../util/api-doc-extract.util";
 import {
-  buildStructuredMarkdownFromEndpoints,
   ensureEndpointIds,
   parseEndpointsFromText,
 } from "../util/api-doc.parser";
@@ -32,15 +32,17 @@ export class ApiDocService {
     private readonly apiDocRepo: Repository<ApiDocEntity>,
     @InjectRepository(ApiEndpointEntity)
     private readonly endpointRepo: Repository<ApiEndpointEntity>,
+    @InjectRepository(ApiTransactionEntity)
+    private readonly transactionRepo: Repository<ApiTransactionEntity>,
     @InjectRepository(CaseProjectEntity)
     private readonly projectRepo: Repository<CaseProjectEntity>,
     private readonly minio: MinioStorageService,
   ) {}
 
-  async getUploadStatus(projectId: string) {
-    await assertApiTestProject(this.projectRepo, projectId);
+  async getUploadStatus(projectId: string, transactionId: string) {
+    await this.assertTransaction(projectId, transactionId);
     const doc = await this.apiDocRepo.findOne({
-      where: scopedWhere({ projectId }),
+      where: scopedWhere({ projectId, transactionId }),
     });
     return {
       hasExisting: Boolean(doc?.sourceDocPath),
@@ -50,26 +52,30 @@ export class ApiDocService {
 
   async saveUploadedDocument(
     projectId: string,
+    transactionId: string,
     input: { fileName: string; objectPath: string; force?: boolean },
   ) {
-    await assertApiTestProject(this.projectRepo, projectId);
-    let doc = await this.apiDocRepo.findOne({ where: scopedWhere({ projectId }) });
+    await this.assertTransaction(projectId, transactionId);
+    let doc = await this.apiDocRepo.findOne({
+      where: scopedWhere({ projectId, transactionId }),
+    });
     if (doc?.sourceDocPath && !input.force) {
       throw new BadRequestException("已存在接口文档，请传 force=true 覆盖上传");
     }
     if (!doc) {
-      doc = this.apiDocRepo.create({ projectId });
+      doc = this.apiDocRepo.create({ projectId, transactionId });
     }
     doc.sourceDocName = input.fileName;
     doc.sourceDocPath = input.objectPath;
     doc.structuringStatus = "idle";
     doc.structuringError = undefined;
     await this.apiDocRepo.save({ ...doc, ...auditFieldsForUpdate() });
-    return this.getByProjectId(projectId);
+    return this.getByTransactionId(projectId, transactionId);
   }
 
-  async extractAndStructureFromUpload(projectId: string) {
-    const doc = await this.ensureDoc(projectId);
+  async extractAndStructureFromUpload(projectId: string, transactionId: string) {
+    const transaction = await this.assertTransaction(projectId, transactionId);
+    const doc = await this.ensureDoc(projectId, transactionId);
     if (!doc.sourceDocPath) {
       throw new BadRequestException("请先上传接口文档");
     }
@@ -89,18 +95,24 @@ export class ApiDocService {
           "未能从文档中识别接口，请检查是否包含 METHOD + 路径 或标准表格",
         );
       }
-      const markdown = buildStructuredMarkdownFromEndpoints(
-        endpoints,
-        doc.sourceDocName ?? "接口文档",
+      const normalized = endpoints.map((endpoint, index) =>
+        index === 0
+          ? { ...endpoint, name: endpoint.name || transaction.name }
+          : endpoint,
       );
-      await this.replaceEndpoints(projectId, doc.id, endpoints);
+      await this.replaceEndpoints(
+        projectId,
+        transactionId,
+        doc.id,
+        normalized,
+      );
       doc.extractedRawText = rawText;
-      doc.structuredMarkdown = markdown;
-      doc.tempStructuredMarkdown = markdown;
+      doc.structuredMarkdown = rawText;
+      doc.tempStructuredMarkdown = rawText;
       doc.structuringStatus = "completed";
       await this.apiDocRepo.save({ ...doc, ...auditFieldsForUpdate() });
       await touchProjectUpdatedAt(this.projectRepo, projectId);
-      return this.getByProjectId(projectId);
+      return this.getByTransactionId(projectId, transactionId);
     } catch (error) {
       doc.structuringStatus = "failed";
       doc.structuringError =
@@ -110,15 +122,23 @@ export class ApiDocService {
     }
   }
 
-  async autoSave(projectId: string, tempStructuredMarkdown?: string) {
-    const doc = await this.ensureDoc(projectId);
+  async autoSave(
+    projectId: string,
+    transactionId: string,
+    tempStructuredMarkdown?: string,
+  ) {
+    const doc = await this.ensureDoc(projectId, transactionId);
     doc.tempStructuredMarkdown = tempStructuredMarkdown;
     await this.apiDocRepo.save({ ...doc, ...auditFieldsForUpdate() });
-    return this.getByProjectId(projectId);
+    return this.getByTransactionId(projectId, transactionId);
   }
 
-  async saveDocument(projectId: string, payload: SaveApiDocDto) {
-    const doc = await this.ensureDoc(projectId);
+  async saveDocument(
+    projectId: string,
+    transactionId: string,
+    payload: SaveApiDocDto,
+  ) {
+    const doc = await this.ensureDoc(projectId, transactionId);
     const markdown =
       payload.structuredMarkdown ??
       doc.tempStructuredMarkdown ??
@@ -133,29 +153,34 @@ export class ApiDocService {
     if (!endpoints.length) {
       throw new BadRequestException("至少保留一个接口端点");
     }
-    await this.replaceEndpoints(projectId, doc.id, endpoints);
+    await this.replaceEndpoints(
+      projectId,
+      transactionId,
+      doc.id,
+      endpoints,
+    );
     doc.structuredMarkdown = markdown;
     doc.tempStructuredMarkdown = markdown;
     doc.structuringStatus = "completed";
     await this.apiDocRepo.save({ ...doc, ...auditFieldsForUpdate() });
     await touchProjectUpdatedAt(this.projectRepo, projectId);
-    return this.getByProjectId(projectId);
+    return this.getByTransactionId(projectId, transactionId);
   }
 
-  async getByProjectId(projectId: string) {
-    await assertApiTestProject(this.projectRepo, projectId);
+  async getByTransactionId(projectId: string, transactionId: string) {
+    await this.assertTransaction(projectId, transactionId);
     const doc = await this.apiDocRepo.findOne({
-      where: scopedWhere({ projectId }),
+      where: scopedWhere({ projectId, transactionId }),
     });
     if (!doc) return null;
-    // 端点表无 createdBy，项目归属已在 assertApiTestProject 中校验
     const endpoints = await this.endpointRepo.find({
-      where: { projectId, apiDocId: doc.id },
+      where: { projectId, transactionId, apiDocId: doc.id },
       order: { sortOrder: "ASC", createdAt: "ASC" },
     });
     const endpointCount = endpoints.length;
     return {
       ...doc,
+      transactionId,
       sourceDocUrl: await this.minio.getAccessUrl(doc.sourceDocPath),
       endpoints,
       canEnterCases: endpointCount > 0,
@@ -164,27 +189,46 @@ export class ApiDocService {
     };
   }
 
-  private async ensureDoc(projectId: string) {
-    await assertApiTestProject(this.projectRepo, projectId);
-    let doc = await this.apiDocRepo.findOne({ where: scopedWhere({ projectId }) });
+  private async ensureDoc(projectId: string, transactionId: string) {
+    await this.assertTransaction(projectId, transactionId);
+    let doc = await this.apiDocRepo.findOne({
+      where: scopedWhere({ projectId, transactionId }),
+    });
     if (!doc) {
       doc = await this.apiDocRepo.save(
-        this.apiDocRepo.create({ projectId, structuringStatus: "idle" }),
+        this.apiDocRepo.create({
+          projectId,
+          transactionId,
+          structuringStatus: "idle",
+        }),
       );
     }
     return doc;
   }
 
+  private async assertTransaction(projectId: string, transactionId: string) {
+    await assertApiTestProject(this.projectRepo, projectId);
+    const transaction = await this.transactionRepo.findOne({
+      where: scopedWhere({ projectId, id: transactionId }),
+    });
+    if (!transaction) {
+      throw new NotFoundException("交易码不存在");
+    }
+    return transaction;
+  }
+
   private async replaceEndpoints(
     projectId: string,
+    transactionId: string,
     apiDocId: string,
     endpoints: ApiEndpointPayload[],
   ) {
-    await this.endpointRepo.delete({ projectId, apiDocId });
+    await this.endpointRepo.delete({ projectId, transactionId, apiDocId });
     const normalized = ensureEndpointIds(endpoints);
     const rows = normalized.map((endpoint, index) =>
       this.endpointRepo.create({
         projectId,
+        transactionId,
         apiDocId,
         name: endpoint.name,
         method: endpoint.method,

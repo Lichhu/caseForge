@@ -1,15 +1,28 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
+import { In, Repository } from "typeorm";
+import { ApiTestCaseEntity } from "../entity/api-test-case.entity";
+import { ApiEndpointEntity } from "../entity/api-endpoint.entity";
 import { ApiExecutionService } from "./api-execution.service";
 
 @Injectable()
 export class ApiReportService {
-  constructor(private readonly executionService: ApiExecutionService) {}
+  constructor(
+    private readonly executionService: ApiExecutionService,
+    @InjectRepository(ApiTestCaseEntity)
+    private readonly caseRepo: Repository<ApiTestCaseEntity>,
+    @InjectRepository(ApiEndpointEntity)
+    private readonly endpointRepo: Repository<ApiEndpointEntity>,
+  ) {}
 
-  async summary(projectId: string, runId?: string) {
+  async summary(projectId: string, runId?: string, transactionId?: string) {
     if (runId) {
-      const run = await this.executionService.getRunDetail(projectId, runId);
+      let run = await this.executionService.getRunDetail(projectId, runId);
+      if (transactionId) {
+        run = await this.filterRunByTransaction(projectId, transactionId, run);
+      }
       return {
         runId: run.id,
         total: run.totalCount,
@@ -51,8 +64,12 @@ export class ApiReportService {
     projectId: string,
     runId: string,
     format: "xlsx" | "pdf",
+    transactionId?: string,
   ): Promise<{ buffer: Buffer; fileName: string; contentType: string }> {
-    const run = await this.executionService.getRunDetail(projectId, runId);
+    let run = await this.executionService.getRunDetail(projectId, runId);
+    if (transactionId) {
+      run = await this.filterRunByTransaction(projectId, transactionId, run);
+    }
     if (!run.items?.length) {
       throw new NotFoundException("执行记录无明细，无法导出");
     }
@@ -68,6 +85,38 @@ export class ApiReportService {
       buffer: await this.toPdf(run),
       fileName: `api-test-run-${runId}.pdf`,
       contentType: "application/pdf",
+    };
+  }
+
+  private async filterRunByTransaction(
+    projectId: string,
+    transactionId: string,
+    run: Awaited<ReturnType<ApiExecutionService["getRunDetail"]>>,
+  ) {
+    const endpoints = await this.endpointRepo.find({
+      where: { projectId, transactionId },
+      select: ["id"],
+    });
+    const endpointIds = endpoints.map((item) => item.id);
+    if (!endpointIds.length) {
+      return { ...run, items: [], totalCount: 0, passedCount: 0, failedCount: 0, errorCount: 0 };
+    }
+    const cases = await this.caseRepo.find({
+      where: { projectId, endpointId: In(endpointIds) },
+      select: ["id"],
+    });
+    const caseIds = new Set(cases.map((item) => item.id));
+    const items = (run.items ?? []).filter((item) => caseIds.has(item.caseId));
+    const passedCount = items.filter((item) => item.status === "passed").length;
+    const failedCount = items.filter((item) => item.status === "failed").length;
+    const errorCount = items.filter((item) => item.status === "error").length;
+    return {
+      ...run,
+      items,
+      totalCount: items.length,
+      passedCount,
+      failedCount,
+      errorCount,
     };
   }
 

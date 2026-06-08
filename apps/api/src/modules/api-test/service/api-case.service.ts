@@ -22,9 +22,24 @@ export class ApiCaseService {
     private readonly endpointRepo: Repository<ApiEndpointEntity>,
   ) {}
 
-  listCases(projectId: string) {
+  async listCases(projectId: string, transactionId?: string) {
+    if (!transactionId) {
+      return this.caseRepo.find({
+        where: scopedWhere({ projectId }),
+        relations: ["endpoint"],
+        order: { updatedAt: "DESC" },
+      });
+    }
+    const endpoints = await this.endpointRepo.find({
+      where: { projectId, transactionId },
+      select: ["id"],
+    });
+    const endpointIds = endpoints.map((item) => item.id);
+    if (!endpointIds.length) {
+      return [];
+    }
     return this.caseRepo.find({
-      where: scopedWhere({ projectId }),
+      where: { projectId, endpointId: In(endpointIds) },
       relations: ["endpoint"],
       order: { updatedAt: "DESC" },
     });
@@ -84,11 +99,18 @@ export class ApiCaseService {
     return { ok: true };
   }
 
-  async generateCases(projectId: string, endpointIds?: string[]) {
+  async generateCases(
+    projectId: string,
+    transactionId?: string,
+    endpointIds?: string[],
+  ) {
+    const baseWhere = transactionId
+      ? { projectId, transactionId }
+      : { projectId };
     const endpoints = await this.endpointRepo.find({
       where: endpointIds?.length
         ? { projectId, id: In(endpointIds) }
-        : { projectId },
+        : baseWhere,
       order: { sortOrder: "ASC" },
     });
     if (!endpoints.length) {

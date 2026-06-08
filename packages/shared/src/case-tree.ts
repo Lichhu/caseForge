@@ -1,4 +1,5 @@
-import type { CaseNodeKind, CaseTreeNode } from './index';
+import type { CaseNature, CaseNodeKind, CasePriority, CaseTreeNode } from './index';
+import { DEFAULT_CASE_PRIORITY } from './index';
 
 export const CASE_ELEMENT_KINDS = [
   'case_title',
@@ -69,6 +70,59 @@ export function extractCasePolarity(caseNodeTitle: string): '正向' | '反向' 
   return legacy[1] === '正向' ? '正向' : '反向';
 }
 
+/** 将历史 P0/P1/P2 或空值规范为 高/中/低 */
+export function normalizeCasePriority(value?: string | null): CasePriority {
+  const text = (value ?? '').trim();
+  if (text === '高' || text === '中' || text === '低') {
+    return text;
+  }
+  if (text === 'P0') {
+    return '高';
+  }
+  if (text === 'P1') {
+    return '中';
+  }
+  if (text === 'P2' || text === 'P3') {
+    return '低';
+  }
+  return DEFAULT_CASE_PRIORITY;
+}
+
+/** 解析案例性质：优先 metadata，其次标题中的 [正向]/[反向] */
+export function resolveCaseNature(
+  caseNode: CaseTreeNode,
+  caseNameFallback?: string,
+): CaseNature {
+  const fromMeta = caseNode.metadata?.caseNature;
+  if (fromMeta === '正向' || fromMeta === '反向') {
+    return fromMeta;
+  }
+  return (
+    extractCasePolarity(caseNode.title)
+    ?? extractCasePolarity(caseNameFallback ?? '')
+    ?? '正向'
+  );
+}
+
+/** 补齐案例节点 metadata 默认值（性质、优先级） */
+export function ensureCaseMetadata(
+  caseNode: CaseTreeNode,
+  caseNameFallback?: string,
+): NonNullable<CaseTreeNode['metadata']> {
+  return {
+    ...caseNode.metadata,
+    caseNature: resolveCaseNature(caseNode, caseNameFallback),
+    priority: normalizeCasePriority(caseNode.metadata?.priority),
+    caseType: caseNode.metadata?.caseType,
+    source: caseNode.metadata?.source,
+    knowledgeBaseIds: caseNode.metadata?.knowledgeBaseIds,
+  };
+}
+
+export function isCaseLikeKind(kind: CaseNodeKind) {
+  return kind === 'case' || kind === 'scenario';
+}
+
 /** 去掉 [异常]/[边界]/[接口]/[正向]/[反向] 等标签，只保留业务文案 */
 export function sanitizeCaseTitleText(title: string) {
   let text = (title ?? '').trim();
@@ -121,7 +175,8 @@ export function getCaseTitleOnly(
   if (childTitle && !isPlaceholderCaseTitle(childTitle)) {
     return childTitle;
   }
-  const polarity = extractCasePolarity(caseNode.title);
+  const polarity =
+    caseNode.metadata?.caseNature ?? extractCasePolarity(caseNode.title);
   if (requirementTitle && polarity) {
     return buildFallbackCaseTitle(requirementTitle, polarity);
   }
@@ -133,7 +188,8 @@ export function getCaseDisplayTitle(
   caseNode: CaseTreeNode,
   requirementTitle?: string,
 ) {
-  const polarity = extractCasePolarity(caseNode.title);
+  const polarity =
+    caseNode.metadata?.caseNature ?? extractCasePolarity(caseNode.title);
   const childTitle = sanitizeCaseTitleText(
     getCaseElementContent(caseNode, 'case_title'),
   );
@@ -245,6 +301,8 @@ export interface CaseExcelRow {
   module: string;
   requirement: string;
   caseName: string;
+  caseNature: CaseNature;
+  priority: CasePriority;
   caseTitle: string;
   caseCondition: string;
   caseStep: string;
@@ -289,25 +347,22 @@ export function flattenCaseTreeToExcel(tree: CaseTreeNode): CaseExcelViewModel {
     if (node.kind === 'requirement') nextAncestors.requirement = node;
 
     if (node.kind === 'case' || node.kind === 'scenario') {
+      const requirementTitle = (nextAncestors.requirement?.title || '').trim();
+      const requirementSummary = simplifyRequirementTitleForDisplay(requirementTitle);
+      const caseTitle = getCaseTitleOnly(node, requirementSummary);
+      const metadata = ensureCaseMetadata(node, caseTitle);
+      const caseName = isPlaceholderCaseTitle(node.title)
+        ? caseTitle
+        : sanitizeCaseTitleText(node.title) || caseTitle;
       rows.push({
         root: nextAncestors.root?.title || '',
         system: nextAncestors.system?.title || '',
         module: nextAncestors.module?.title || '',
-        requirement: simplifyRequirementTitleForDisplay(
-          nextAncestors.requirement?.title || '',
-        ),
-        caseName: getCaseTitleOnly(
-          node,
-          simplifyRequirementTitleForDisplay(
-            nextAncestors.requirement?.title || '',
-          ),
-        ),
-        caseTitle: getCaseTitleOnly(
-          node,
-          simplifyRequirementTitleForDisplay(
-            nextAncestors.requirement?.title || '',
-          ),
-        ),
+        requirement: requirementTitle,
+        caseName,
+        caseNature: metadata.caseNature!,
+        priority: metadata.priority!,
+        caseTitle,
         caseCondition: getLegacyOrElementContent(node, 'case_condition', 'condition'),
         caseStep: getLegacyOrElementContent(node, 'case_step', 'step'),
         caseExpected: getLegacyOrElementContent(node, 'case_expected', 'expectation'),
@@ -396,6 +451,7 @@ export function cloneCaseTree(node: CaseTreeNode): CaseTreeNode {
     collapsed: node.collapsed,
     metadata: node.metadata
       ? {
+          caseNature: node.metadata.caseNature,
           priority: node.metadata.priority,
           caseType: node.metadata.caseType,
           source: node.metadata.source,
@@ -415,6 +471,11 @@ export function applyExcelRowToTree(tree: CaseTreeNode, row: CaseExcelRow): Case
     return clone;
   }
   caseNode.title = row.caseName;
+  caseNode.metadata = {
+    ...ensureCaseMetadata(caseNode, row.caseName),
+    caseNature: row.caseNature,
+    priority: normalizeCasePriority(row.priority),
+  };
   upsertCaseElement(caseNode, 'case_title', row.caseTitle || row.caseName);
   upsertCaseElement(caseNode, 'case_condition', row.caseCondition);
   upsertCaseElement(caseNode, 'case_step', row.caseStep);

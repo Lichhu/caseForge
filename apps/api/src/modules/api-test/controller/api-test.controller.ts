@@ -26,6 +26,7 @@ import { ApiCaseService } from "../service/api-case.service";
 import { ApiEnvironmentService } from "../service/api-environment.service";
 import { ApiExecutionService } from "../service/api-execution.service";
 import { ApiReportService } from "../service/api-report.service";
+import { ApiTransactionService } from "../service/api-transaction.service";
 import {
   AutoSaveApiDocDto,
   SaveApiDocDto,
@@ -37,8 +38,10 @@ import {
   SaveApiCaseDto,
 } from "../dto/save-api-case.dto";
 import { SaveApiEnvironmentDto } from "../dto/save-environment.dto";
+import { SaveApiTransactionDto } from "../dto/save-transaction.dto";
+import { BatchDeleteTransactionsDto } from "../dto/batch-delete-transactions.dto";
 
-const UPLOAD_EXTENSIONS = ["xls", "xlsx", "doc", "docx", "md", "markdown", "txt"];
+const UPLOAD_EXTENSIONS = ["xls", "xlsx"];
 
 @ApiTags("api-test")
 @Controller("api-test")
@@ -49,118 +52,218 @@ export class ApiTestController {
     private readonly apiEnvironmentService: ApiEnvironmentService,
     private readonly apiExecutionService: ApiExecutionService,
     private readonly apiReportService: ApiReportService,
+    private readonly apiTransactionService: ApiTransactionService,
     private readonly minio: MinioStorageService,
     @InjectRepository(CaseProjectEntity)
     private readonly projectRepo: Repository<CaseProjectEntity>,
   ) {}
 
-  @Get(":projectId/upload-status")
-  getUploadStatus(@Param("projectId") projectId: string) {
-    return this.apiDocService.getUploadStatus(projectId);
+  @Get(":projectId/transactions")
+  @ApiOperation({ summary: "列出需求下的交易码" })
+  listTransactions(@Param("projectId") projectId: string) {
+    return this.apiTransactionService.listTransactions(projectId);
   }
 
-  @ApiOperation({ summary: "上传接口测试文档（Excel/Word/Markdown）" })
+  @Post(":projectId/transactions")
+  @ApiOperation({ summary: "新建交易码" })
+  createTransaction(
+    @Param("projectId") projectId: string,
+    @Body() body: SaveApiTransactionDto,
+  ) {
+    return this.apiTransactionService.createTransaction(projectId, body);
+  }
+
+  @Patch(":projectId/transactions/:transactionId")
+  @ApiOperation({ summary: "更新交易码" })
+  updateTransaction(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+    @Body() body: SaveApiTransactionDto,
+  ) {
+    return this.apiTransactionService.updateTransaction(
+      projectId,
+      transactionId,
+      body,
+    );
+  }
+
+  @Delete(":projectId/transactions/:transactionId")
+  @ApiOperation({ summary: "删除交易码" })
+  deleteTransaction(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+  ) {
+    return this.apiTransactionService.deleteTransaction(
+      projectId,
+      transactionId,
+    );
+  }
+
+  @Post(":projectId/transactions/batch-delete")
+  @ApiOperation({ summary: "批量删除交易码" })
+  batchDeleteTransactions(
+    @Param("projectId") projectId: string,
+    @Body() body: BatchDeleteTransactionsDto,
+  ) {
+    return this.apiTransactionService.batchDeleteTransactions(
+      projectId,
+      body.ids,
+    );
+  }
+
+  @Get(":projectId/transactions/:transactionId/upload-status")
+  getUploadStatus(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+  ) {
+    return this.apiDocService.getUploadStatus(projectId, transactionId);
+  }
+
+  @ApiOperation({ summary: "上传接口测试文档（Excel）" })
   @ApiConsumes("multipart/form-data")
   @ApiQuery({ name: "force", required: false })
   @UseInterceptors(FileInterceptor("file"))
-  @Post(":projectId/document/upload")
+  @Post(":projectId/transactions/:transactionId/document/upload")
   async uploadDocument(
     @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
     @UploadedFile() file: Express.Multer.File,
     @Query("force") force?: string,
   ) {
     if (!file) {
       throw new BadRequestException("请选择接口文档文件");
     }
-    const extension = file.originalname.split(".").pop()?.toLowerCase();
+    const fileName = this.normalizeUploadFileName(file.originalname);
+    const extension = fileName.split(".").pop()?.toLowerCase();
     if (!extension || !UPLOAD_EXTENSIONS.includes(extension)) {
-      throw new BadRequestException(
-        "仅支持 xls、xlsx、doc、docx、md、markdown、txt",
-      );
+      throw new BadRequestException("仅支持 xls、xlsx");
     }
     await findOwnedProject(this.projectRepo, projectId);
     const objectPath = this.minio.buildProjectObjectPath(
       projectId,
-      file.originalname,
+      `${transactionId}/${fileName}`,
     );
     await this.minio.uploadFile(objectPath, file.buffer);
     await touchProjectUpdatedAt(this.projectRepo, projectId);
-    return this.apiDocService.saveUploadedDocument(projectId, {
-      fileName: file.originalname,
+    return this.apiDocService.saveUploadedDocument(projectId, transactionId, {
+      fileName,
       objectPath,
       force: force === "true",
     });
   }
 
-  @Post(":projectId/document/structure")
+  /**
+   * 修正 multipart 上传文件名可能出现的 Latin1 乱码。
+   */
+  private normalizeUploadFileName(fileName: string) {
+    const decoded = Buffer.from(fileName, "latin1").toString("utf8");
+    const looksMojibake = /[ÃÂâåæçèéäöü]/.test(fileName);
+    const decodedLooksReadable =
+      !decoded.includes("�") && /[\u4e00-\u9fff]/.test(decoded);
+    return looksMojibake && decodedLooksReadable ? decoded : fileName;
+  }
+
+  @Post(":projectId/transactions/:transactionId/document/structure")
   @ApiOperation({ summary: "解析并结构化接口文档" })
-  structureDocument(@Param("projectId") projectId: string) {
-    return this.apiDocService.extractAndStructureFromUpload(projectId);
+  structureDocument(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+  ) {
+    return this.apiDocService.extractAndStructureFromUpload(
+      projectId,
+      transactionId,
+    );
   }
 
-  @Get(":projectId/document")
-  getDocument(@Param("projectId") projectId: string) {
-    return this.apiDocService.getByProjectId(projectId);
+  @Get(":projectId/transactions/:transactionId/document")
+  getDocument(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+  ) {
+    return this.apiDocService.getByTransactionId(projectId, transactionId);
   }
 
-  @Patch(":projectId/document/auto-save")
+  @Patch(":projectId/transactions/:transactionId/document/auto-save")
   autoSaveDocument(
     @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
     @Body() body: AutoSaveApiDocDto,
   ) {
-    return this.apiDocService.autoSave(projectId, body.tempStructuredMarkdown);
+    return this.apiDocService.autoSave(
+      projectId,
+      transactionId,
+      body.tempStructuredMarkdown,
+    );
   }
 
-  @Patch(":projectId/document")
+  @Patch(":projectId/transactions/:transactionId/document")
   saveDocument(
     @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
     @Body() body: SaveApiDocDto,
   ) {
-    return this.apiDocService.saveDocument(projectId, body);
+    return this.apiDocService.saveDocument(projectId, transactionId, body);
   }
 
-  @Get(":projectId/endpoints")
-  async listEndpoints(@Param("projectId") projectId: string) {
-    const doc = await this.apiDocService.getByProjectId(projectId);
+  @Get(":projectId/transactions/:transactionId/endpoints")
+  async listEndpoints(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+  ) {
+    const doc = await this.apiDocService.getByTransactionId(
+      projectId,
+      transactionId,
+    );
     return doc?.endpoints ?? [];
   }
 
-  @Get(":projectId/cases")
-  listCases(@Param("projectId") projectId: string) {
-    return this.apiCaseService.listCases(projectId);
+  @Get(":projectId/transactions/:transactionId/cases")
+  listCases(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+  ) {
+    return this.apiCaseService.listCases(projectId, transactionId);
   }
 
-  @Post(":projectId/cases")
+  @Post(":projectId/transactions/:transactionId/cases")
   createCase(
     @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
     @Body() body: SaveApiCaseDto,
   ) {
     return this.apiCaseService.createCase(projectId, body);
   }
 
-  @Patch(":projectId/cases/:caseId")
+  @Patch(":projectId/transactions/:transactionId/cases/:caseId")
   updateCase(
     @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
     @Param("caseId") caseId: string,
     @Body() body: SaveApiCaseDto,
   ) {
     return this.apiCaseService.updateCase(projectId, caseId, body);
   }
 
-  @Delete(":projectId/cases/:caseId")
+  @Delete(":projectId/transactions/:transactionId/cases/:caseId")
   deleteCase(
     @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
     @Param("caseId") caseId: string,
   ) {
     return this.apiCaseService.deleteCase(projectId, caseId);
   }
 
-  @Post(":projectId/cases/generate")
+  @Post(":projectId/transactions/:transactionId/cases/generate")
   generateCases(
     @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
     @Body() body: GenerateApiCasesDto,
   ) {
-    return this.apiCaseService.generateCases(projectId, body.endpointIds);
+    return this.apiCaseService.generateCases(
+      projectId,
+      transactionId,
+      body.endpointIds,
+    );
   }
 
   @Get(":projectId/environments")
@@ -200,9 +303,10 @@ export class ApiTestController {
     );
   }
 
-  @Post(":projectId/runs")
+  @Post(":projectId/transactions/:transactionId/runs")
   runCases(
     @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
     @Body() body: RunApiCasesDto,
   ) {
     return this.apiExecutionService.runCases({
@@ -226,17 +330,19 @@ export class ApiTestController {
     return this.apiExecutionService.getRunDetail(projectId, runId);
   }
 
-  @Get(":projectId/reports/summary")
+  @Get(":projectId/transactions/:transactionId/reports/summary")
   reportSummary(
     @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
     @Query("runId") runId?: string,
   ) {
-    return this.apiReportService.summary(projectId, runId);
+    return this.apiReportService.summary(projectId, runId, transactionId);
   }
 
-  @Post(":projectId/reports/export")
+  @Post(":projectId/transactions/:transactionId/reports/export")
   async exportReport(
     @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
     @Body() body: ExportApiReportDto,
     @Res() res: Response,
   ) {
@@ -244,6 +350,7 @@ export class ApiTestController {
       projectId,
       body.runId,
       body.format,
+      transactionId,
     );
     res.setHeader("Content-Type", result.contentType);
     res.setHeader(
