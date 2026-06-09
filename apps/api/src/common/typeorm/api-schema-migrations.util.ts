@@ -63,6 +63,7 @@ export async function applyApiTestSchemaMigrations(runner: Queryable) {
   await ensureApiEndpointTransactionColumn(runner);
   await ensureApiTransactionTable(runner);
   await ensureApiTestCaseColumns(runner);
+  await ensureExecutionPlatformTables(runner);
 }
 
 async function ensureApiTransactionTable(runner: Queryable) {
@@ -176,5 +177,88 @@ async function ensureApiTestCaseColumns(runner: Queryable) {
         ADD COLUMN transactionCode VARCHAR(128) NULL AFTER remark,
         ADD COLUMN owner VARCHAR(255) NULL AFTER transactionCode
     `);
+  }
+}
+
+async function ensureExecutionPlatformTables(runner: Queryable) {
+  if (!(await tableExists(runner, "api_test_environment_service"))) {
+    await runner.query(`
+      CREATE TABLE api_test_environment_service (
+        id VARCHAR(36) CHARACTER SET utf8 NOT NULL PRIMARY KEY,
+        projectId VARCHAR(36) CHARACTER SET utf8 NOT NULL,
+        environmentId VARCHAR(36) CHARACTER SET utf8 NOT NULL,
+        name VARCHAR(128) NOT NULL,
+        baseUrl VARCHAR(512) NULL,
+        pathPrefix VARCHAR(256) NULL,
+        headers JSON NULL,
+        variables JSON NULL,
+        sortOrder INT NOT NULL DEFAULT 0,
+        enabled TINYINT(1) NOT NULL DEFAULT 1,
+        createdBy VARCHAR(255) NULL DEFAULT 'system',
+        modifiedBy VARCHAR(255) NULL DEFAULT 'system',
+        createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+        updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+        KEY idx_api_test_env_service_env (environmentId)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+  }
+
+  if (!(await tableExists(runner, "api_test_execution_set"))) {
+    await runner.query(`
+      CREATE TABLE api_test_execution_set (
+        id VARCHAR(36) CHARACTER SET utf8 NOT NULL PRIMARY KEY,
+        projectId VARCHAR(36) CHARACTER SET utf8 NOT NULL,
+        transactionId VARCHAR(36) CHARACTER SET utf8 NOT NULL,
+        name VARCHAR(256) NOT NULL,
+        description TEXT NULL,
+        enabled TINYINT(1) NOT NULL DEFAULT 1,
+        lastRunId VARCHAR(36) NULL,
+        lastRunStatus VARCHAR(32) NULL,
+        lastRunAt DATETIME NULL,
+        lastPassedCount INT NOT NULL DEFAULT 0,
+        lastTotalCount INT NOT NULL DEFAULT 0,
+        createdBy VARCHAR(255) NULL DEFAULT 'system',
+        modifiedBy VARCHAR(255) NULL DEFAULT 'system',
+        createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+        updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+        KEY idx_api_test_exec_set_project (projectId),
+        KEY idx_api_test_exec_set_transaction (transactionId)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+  }
+
+  for (const table of ["api_test_environment_service", "api_test_execution_set"]) {
+    if (!(await tableExists(runner, table))) continue;
+    if (!(await columnExists(runner, table, "createdBy"))) {
+      await runner.query(`
+        ALTER TABLE ${table}
+          ADD COLUMN createdBy VARCHAR(255) NULL DEFAULT 'system',
+          ADD COLUMN modifiedBy VARCHAR(255) NULL DEFAULT 'system'
+      `);
+    }
+  }
+
+  if (!(await tableExists(runner, "api_test_execution_set_case"))) {
+    await runner.query(`
+      CREATE TABLE api_test_execution_set_case (
+        id VARCHAR(36) CHARACTER SET utf8 NOT NULL PRIMARY KEY,
+        executionSetId VARCHAR(36) CHARACTER SET utf8 NOT NULL,
+        caseId VARCHAR(36) CHARACTER SET utf8 NOT NULL,
+        sortOrder INT NOT NULL DEFAULT 0,
+        createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+        UNIQUE KEY uk_api_test_exec_set_case (executionSetId, caseId)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+  }
+
+  if (await tableExists(runner, "api_test_run")) {
+    if (!(await columnExists(runner, "api_test_run", "executionSetId"))) {
+      await runner.query(`
+        ALTER TABLE api_test_run
+          ADD COLUMN environmentServiceId VARCHAR(36) NULL AFTER environmentId,
+          ADD COLUMN executionSetId VARCHAR(36) NULL AFTER environmentServiceId,
+          ADD COLUMN transactionId VARCHAR(36) NULL AFTER executionSetId
+      `);
+    }
   }
 }

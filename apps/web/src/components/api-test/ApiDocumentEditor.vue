@@ -50,50 +50,110 @@
       class="document-panel-alert"
     />
 
-    <a-tabs v-model:active-key="activeTab" size="small" class="document-panel-tabs">
-      <a-tab-pane key="edit" tab="编辑">
-        <a-textarea
-          v-model:value="editorText"
-          class="markdown-editor"
-          :auto-size="false"
-          placeholder="上传 Excel（xls/xlsx）后点击结构化，或在此编辑结构化 Markdown"
-        />
-      </a-tab-pane>
-      <a-tab-pane key="preview" tab="预览">
-        <div v-if="activeTab === 'preview'" class="document-preview-scroll">
-          <article class="markdown-preview" v-html="previewHtml" />
+    <div class="document-table-scroll">
+      <a-empty
+        v-if="!sections.length"
+        description="上传 Excel 后点击结构化，将在此以表格展示并可编辑"
+      />
+      <div v-for="(section, sectionIndex) in sections" :key="section.title" class="doc-section-block">
+        <h3 class="doc-section-title">{{ section.title }}</h3>
+        <div class="api-doc-table-wrap">
+          <table class="api-doc-table">
+            <thead>
+              <tr>
+                <th
+                  v-for="(label, colIndex) in sectionTableHeaders(section)"
+                  :key="`${section.title}-head-${colIndex}`"
+                >
+                  {{ label }}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="record in sectionData[sectionIndex]"
+                :key="record.key"
+              >
+                <td
+                  v-for="colKey in sectionTableColumnKeys(section)"
+                  :key="`${record.key}-${colKey}`"
+                >
+                  <textarea
+                    v-model="record[colKey]"
+                    class="doc-cell-input"
+                    rows="2"
+                    @input="onTableChange(sectionIndex)"
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-      </a-tab-pane>
-    </a-tabs>
+      </div>
+    </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
-import MarkdownIt from 'markdown-it';
+import { computed, onActivated, onDeactivated, ref, watch } from 'vue';
 import { BranchesOutlined, SaveOutlined, UploadOutlined } from '@ant-design/icons-vue';
 import { Modal, message } from 'ant-design-vue';
 import type { UploadProps } from 'ant-design-vue';
 import { useApiTestStore } from '@/stores/apiTest';
+import {
+  parseApiDocTableText,
+  sectionTableColumnKeys,
+  sectionTableData,
+  sectionTableHeaders,
+  serializeApiDocTableText,
+  tableDataToRows,
+  type ApiDocTableSection,
+} from '@/utils/api-doc-table.util';
 
 const apiStore = useApiTestStore();
-const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
-const activeTab = ref('edit');
+const sections = ref<ApiDocTableSection[]>([]);
+const sectionData = ref<Record<string, string>[]>([]);
 const editorText = ref('');
 const autoSaveTimer = ref<number | null>(null);
+const syncingFromStore = ref(false);
+const panelActive = ref(true);
+
+onActivated(() => {
+  panelActive.value = true;
+});
+
+onDeactivated(() => {
+  panelActive.value = false;
+});
+
+function loadFromText(text: string) {
+  syncingFromStore.value = true;
+  sections.value = parseApiDocTableText(text);
+  sectionData.value = sections.value.map((section) => sectionTableData(section));
+  editorText.value = text;
+  syncingFromStore.value = false;
+}
+
+function syncTextFromTables() {
+  const nextSections = sections.value.map((section, index) => ({
+    ...section,
+    rows: tableDataToRows(section, sectionData.value[index] ?? []),
+  }));
+  sections.value = nextSections;
+  editorText.value = serializeApiDocTableText(nextSections);
+}
 
 watch(
   () => apiStore.apiDoc?.tempStructuredMarkdown ?? apiStore.apiDoc?.structuredMarkdown,
   (value) => {
+    if (!panelActive.value) return;
     const next = value || '';
-    if (next === editorText.value) {
-      return;
-    }
+    if (next === editorText.value) return;
     if (autoSaveTimer.value) {
       window.clearTimeout(autoSaveTimer.value);
       autoSaveTimer.value = null;
     }
-    editorText.value = next;
+    loadFromText(next);
   },
   { immediate: true },
 );
@@ -108,17 +168,15 @@ watch(
   },
 );
 
-watch(editorText, (value) => {
+function scheduleAutoSave() {
+  if (syncingFromStore.value) return;
   const projectId = apiStore.activeProjectId;
   const transactionId = apiStore.activeTransactionId;
   const saved =
     apiStore.apiDoc?.tempStructuredMarkdown ?? apiStore.apiDoc?.structuredMarkdown ?? '';
-  if (!projectId || !transactionId || value === saved) {
-    return;
-  }
-  if (autoSaveTimer.value) {
-    window.clearTimeout(autoSaveTimer.value);
-  }
+  if (!projectId || !transactionId || editorText.value === saved) return;
+
+  if (autoSaveTimer.value) window.clearTimeout(autoSaveTimer.value);
   autoSaveTimer.value = window.setTimeout(() => {
     if (
       apiStore.activeProjectId !== projectId ||
@@ -126,35 +184,18 @@ watch(editorText, (value) => {
     ) {
       return;
     }
-    void apiStore.autoSave(projectId, transactionId, value);
+    void apiStore.autoSave(projectId, transactionId, editorText.value);
   }, 1200);
-});
-
-const previewHtml = ref('');
-let previewRenderTimer: ReturnType<typeof setTimeout> | undefined;
-
-function renderPreviewNow() {
-  previewHtml.value = md.render(editorText.value || '');
 }
 
-watch(activeTab, (tab) => {
-  if (tab === 'preview') {
-    renderPreviewNow();
-  }
-});
-
-watch(editorText, () => {
-  if (activeTab.value !== 'preview') {
-    return;
-  }
-  if (previewRenderTimer !== undefined) {
-    clearTimeout(previewRenderTimer);
-  }
-  previewRenderTimer = setTimeout(() => {
-    previewRenderTimer = undefined;
-    renderPreviewNow();
-  }, 280);
-});
+function onTableChange(sectionIndex: number) {
+  if (syncingFromStore.value) return;
+  const section = sections.value[sectionIndex];
+  if (!section) return;
+  section.rows = tableDataToRows(section, sectionData.value[sectionIndex] ?? []);
+  editorText.value = serializeApiDocTableText(sections.value);
+  scheduleAutoSave();
+}
 
 const canSave = computed(() => Boolean(editorText.value.trim()));
 
@@ -215,6 +256,7 @@ function onStructure() {
 }
 
 async function onSave() {
+  syncTextFromTables();
   const projectId = apiStore.activeProjectId;
   const transactionId = apiStore.activeTransactionId;
   if (!projectId || !transactionId) return;
@@ -229,5 +271,70 @@ async function onSave() {
   gap: 4px;
   margin-top: 8px;
   font-size: 12px;
+}
+
+.doc-section-block {
+  margin-bottom: 24px;
+}
+
+.doc-section-title {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.api-doc-table-wrap {
+  overflow-x: auto;
+}
+
+.api-doc-table {
+  width: 100%;
+  min-width: max-content;
+  border-collapse: collapse;
+  table-layout: auto;
+  background: #fff;
+}
+
+.api-doc-table th,
+.api-doc-table td {
+  border: 1px solid #f0f0f0;
+  vertical-align: top;
+}
+
+.api-doc-table th {
+  padding: 8px 12px;
+  background: #f9fafb;
+  color: #667085;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.api-doc-table td {
+  padding: 4px;
+  background: #fff;
+}
+
+.doc-cell-input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 120px;
+  min-height: 52px;
+  max-height: 120px;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: #344054;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  overflow-y: auto;
+}
+
+.doc-cell-input:focus {
+  outline: none;
+  background: #fffbeb;
 }
 </style>

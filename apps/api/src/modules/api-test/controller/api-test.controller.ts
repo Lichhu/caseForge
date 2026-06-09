@@ -5,6 +5,7 @@ import {
   Delete,
   Get,
   Param,
+  Put,
   Patch,
   Post,
   Query,
@@ -37,6 +38,13 @@ import {
   RunApiCasesDto,
   SaveApiCaseDto,
 } from "../dto/save-api-case.dto";
+import { ApiExecutionSetService } from "../service/api-execution-set.service";
+import {
+  ReplaceExecutionSetCasesDto,
+  RunExecutionSetDto,
+  SaveApiEnvironmentServiceDto,
+  SaveApiExecutionSetDto,
+} from "../dto/execution-platform.dto";
 import { SaveApiEnvironmentDto } from "../dto/save-environment.dto";
 import { SaveApiTransactionDto } from "../dto/save-transaction.dto";
 import { BatchDeleteTransactionsDto } from "../dto/batch-delete-transactions.dto";
@@ -51,6 +59,7 @@ export class ApiTestController {
     private readonly apiCaseService: ApiCaseService,
     private readonly apiEnvironmentService: ApiEnvironmentService,
     private readonly apiExecutionService: ApiExecutionService,
+    private readonly apiExecutionSetService: ApiExecutionSetService,
     private readonly apiReportService: ApiReportService,
     private readonly apiTransactionService: ApiTransactionService,
     private readonly minio: MinioStorageService,
@@ -231,7 +240,7 @@ export class ApiTestController {
     @Param("transactionId") transactionId: string,
     @Body() body: SaveApiCaseDto,
   ) {
-    return this.apiCaseService.createCase(projectId, body);
+    return this.apiCaseService.createCase(projectId, transactionId, body);
   }
 
   @Patch(":projectId/transactions/:transactionId/cases/:caseId")
@@ -303,6 +312,139 @@ export class ApiTestController {
     );
   }
 
+  @Get(":projectId/environments/:environmentId/services")
+  listEnvironmentServices(
+    @Param("projectId") projectId: string,
+    @Param("environmentId") environmentId: string,
+  ) {
+    return this.apiEnvironmentService.listEnvironmentServices(
+      projectId,
+      environmentId,
+    );
+  }
+
+  @Post(":projectId/environments/:environmentId/services")
+  createEnvironmentService(
+    @Param("projectId") projectId: string,
+    @Param("environmentId") environmentId: string,
+    @Body() body: SaveApiEnvironmentServiceDto,
+  ) {
+    return this.apiEnvironmentService.createEnvironmentService(
+      projectId,
+      environmentId,
+      body,
+    );
+  }
+
+  @Patch(":projectId/environments/:environmentId/services/:serviceId")
+  updateEnvironmentService(
+    @Param("projectId") projectId: string,
+    @Param("environmentId") environmentId: string,
+    @Param("serviceId") serviceId: string,
+    @Body() body: SaveApiEnvironmentServiceDto,
+  ) {
+    return this.apiEnvironmentService.updateEnvironmentService(
+      projectId,
+      environmentId,
+      serviceId,
+      body,
+    );
+  }
+
+  @Delete(":projectId/environments/:environmentId/services/:serviceId")
+  deleteEnvironmentService(
+    @Param("projectId") projectId: string,
+    @Param("environmentId") environmentId: string,
+    @Param("serviceId") serviceId: string,
+  ) {
+    return this.apiEnvironmentService.deleteEnvironmentService(
+      projectId,
+      environmentId,
+      serviceId,
+    );
+  }
+
+  @Get(":projectId/transactions/:transactionId/execution-sets")
+  listExecutionSets(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+  ) {
+    return this.apiExecutionSetService.listSets(projectId, transactionId);
+  }
+
+  @Post(":projectId/transactions/:transactionId/execution-sets")
+  createExecutionSet(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+    @Body() body: SaveApiExecutionSetDto,
+  ) {
+    return this.apiExecutionSetService.createSet(
+      projectId,
+      transactionId,
+      body,
+    );
+  }
+
+  @Patch(":projectId/transactions/:transactionId/execution-sets/:setId")
+  updateExecutionSet(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+    @Param("setId") setId: string,
+    @Body() body: SaveApiExecutionSetDto,
+  ) {
+    return this.apiExecutionSetService.updateSet(
+      projectId,
+      transactionId,
+      setId,
+      body,
+    );
+  }
+
+  @Delete(":projectId/transactions/:transactionId/execution-sets/:setId")
+  deleteExecutionSet(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+    @Param("setId") setId: string,
+  ) {
+    return this.apiExecutionSetService.deleteSet(
+      projectId,
+      transactionId,
+      setId,
+    );
+  }
+
+  @Put(":projectId/transactions/:transactionId/execution-sets/:setId/cases")
+  replaceExecutionSetCases(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+    @Param("setId") setId: string,
+    @Body() body: ReplaceExecutionSetCasesDto,
+  ) {
+    return this.apiExecutionSetService.replaceCases(
+      projectId,
+      transactionId,
+      setId,
+      body,
+    );
+  }
+
+  @Post(":projectId/transactions/:transactionId/execution-sets/:setId/runs")
+  runExecutionSet(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+    @Param("setId") setId: string,
+    @Body() body: RunExecutionSetDto,
+  ) {
+    return this.apiExecutionService.runExecutionSet({
+      projectId,
+      transactionId,
+      executionSetId: setId,
+      environmentId: body.environmentId,
+      environmentServiceId: body.environmentServiceId,
+      concurrency: body.concurrency,
+    });
+  }
+
   @Post(":projectId/transactions/:transactionId/runs")
   runCases(
     @Param("projectId") projectId: string,
@@ -313,6 +455,8 @@ export class ApiTestController {
       projectId,
       caseIds: body.caseIds,
       environmentId: body.environmentId,
+      environmentServiceId: body.environmentServiceId,
+      transactionId,
       concurrency: body.concurrency,
     });
   }

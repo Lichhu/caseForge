@@ -904,14 +904,16 @@ textarea {
 }
 
 .immersive-stage .markdown-editor,
-.immersive-stage .document-preview-scroll {
+.immersive-stage .document-preview-scroll,
+.immersive-stage .document-table-scroll {
   flex: 1 1 auto;
   width: 100%;
   min-height: 0 !important;
   height: 100% !important;
 }
 
-.immersive-stage .document-preview-scroll {
+.immersive-stage .document-preview-scroll,
+.immersive-stage .document-table-scroll {
   height: 0 !important;
   overflow-y: auto;
 }
@@ -1139,6 +1141,17 @@ textarea {
   height: 0;
   overflow-x: hidden;
   overflow-y: auto;
+}
+
+.document-table-scroll {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  height: 0;
+  overflow-x: auto;
+  overflow-y: auto;
+  padding: 0 20px 20px;
+  -webkit-overflow-scrolling: touch;
 }
 
 .document-preview-scroll .markdown-preview {

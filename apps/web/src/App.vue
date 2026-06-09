@@ -1,5 +1,5 @@
 <template>
-  <a-config-provider :theme="caseForgeTheme">
+  <a-config-provider :theme="caseForgeTheme" :locale="zhCN">
     <a-app>
       <router-view />
     </a-app>
@@ -7,5 +7,6 @@
 </template>
 
 <script setup lang="ts">
+import zhCN from 'ant-design-vue/locale/zh_CN';
 import { caseForgeTheme } from '@/theme/caseForgeTheme';
 </script>

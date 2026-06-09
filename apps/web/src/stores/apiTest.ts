@@ -12,9 +12,13 @@ import {
   autoSaveApiDocument,
   createApiCase,
   createApiEnvironment,
+  createApiEnvironmentService,
+  createApiExecutionSet,
   createApiTransaction,
   deleteApiCase,
   deleteApiEnvironment,
+  deleteApiEnvironmentService,
+  deleteApiExecutionSet,
   batchDeleteApiTransactions,
   exportApiReport,
   generateApiCases,
@@ -23,18 +27,25 @@ import {
   getApiRun,
   listApiCases,
   listApiEnvironments,
+  listApiEnvironmentServices,
+  listApiExecutionSets,
   listApiRuns,
   listApiTransactions,
+  replaceApiExecutionSetCases,
   runApiCases,
+  runApiExecutionSet,
   saveApiDocument,
   structureApiDocument,
   updateApiCase,
   updateApiEnvironment,
+  updateApiEnvironmentService,
   updateApiTransaction,
   uploadApiDocument,
   downloadBlob,
   type ApiDocDetail,
   type ApiEnvironmentRow,
+  type ApiEnvironmentServiceRow,
+  type ApiExecutionSetRow,
   type ApiRunDetail,
   type ApiTestCaseRow,
   type ApiTransactionRow,
@@ -56,12 +67,18 @@ interface State {
   apiDoc: ApiDocDetail | null;
   cases: ApiTestCaseRow[];
   environments: ApiEnvironmentRow[];
+  environmentServices: Record<string, ApiEnvironmentServiceRow[]>;
+  executionSets: ApiExecutionSetRow[];
+  activeExecutionSetId: string;
   runs: ApiRunDetail[];
   activeRun: ApiRunDetail | null;
   selectedCaseIds: string[];
+  activeCaseId: string;
   selectedEnvironmentId: string;
+  selectedEnvironmentServiceId: string;
   workspaceStage: ApiWorkspaceStage;
   loading: boolean;
+  generatingCases: boolean;
   running: boolean;
 }
 
@@ -74,12 +91,18 @@ export const useApiTestStore = defineStore('apiTest', {
     apiDoc: null,
     cases: [],
     environments: [],
+    environmentServices: {},
+    executionSets: [],
+    activeExecutionSetId: '',
     runs: [],
     activeRun: null,
     selectedCaseIds: [],
+    activeCaseId: '',
     selectedEnvironmentId: '',
+    selectedEnvironmentServiceId: '',
     workspaceStage: 'api-document',
     loading: false,
+    generatingCases: false,
     running: false,
   }),
   getters: {
@@ -96,10 +119,15 @@ export const useApiTestStore = defineStore('apiTest', {
       (Boolean(state.apiDoc?.canEnterRunner) || state.cases.some((item) => item.enabled)) &&
       state.cases.some((item) => item.enabled),
     transactionRuns(state): ApiRunDetail[] {
-      const caseIds = new Set(state.cases.map((item) => item.id));
-      return state.runs.filter((run) =>
-        (run.items ?? []).some((item) => caseIds.has(item.caseId)),
-      );
+      return state.runs.filter((run) => {
+        if (state.activeExecutionSetId) {
+          return run.executionSetId === state.activeExecutionSetId;
+        }
+        if (run.transactionId) {
+          return run.transactionId === state.activeTransactionId;
+        }
+        return true;
+      });
     },
   },
   actions: {
@@ -143,9 +171,12 @@ export const useApiTestStore = defineStore('apiTest', {
       this.activeTransactionId = '';
       this.apiDoc = null;
       this.cases = [];
+      this.executionSets = [];
+      this.activeExecutionSetId = '';
       this.runs = [];
       this.activeRun = null;
       this.selectedCaseIds = [];
+      this.activeCaseId = '';
       this.workspaceStage = 'api-document';
     },
     async removeProject(projectId: string) {
@@ -254,14 +285,17 @@ export const useApiTestStore = defineStore('apiTest', {
       this.loading = true;
       try {
         this.restoreStage(projectId, transactionId);
-        const [cases, envs, runs] = await Promise.all([
+        const [cases, envs, runs, sets] = await Promise.all([
           listApiCases(projectId, transactionId),
           listApiEnvironments(projectId),
           listApiRuns(projectId),
+          listApiExecutionSets(projectId, transactionId),
         ]);
         this.cases = cases;
         this.environments = envs;
         this.runs = runs;
+        this.executionSets = sets;
+        this.activeExecutionSetId = sets[0]?.id ?? '';
         this.selectedCaseIds = [];
         try {
           this.apiDoc = await getApiDocument(projectId, transactionId);
@@ -271,6 +305,7 @@ export const useApiTestStore = defineStore('apiTest', {
         }
         const defaultEnv = envs.find((item) => item.isDefault) ?? envs[0];
         if (defaultEnv) this.selectedEnvironmentId = defaultEnv.id;
+        this.selectedEnvironmentServiceId = '';
       } finally {
         this.loading = false;
       }
@@ -306,11 +341,22 @@ export const useApiTestStore = defineStore('apiTest', {
     },
     async refreshCases(projectId: string, transactionId: string) {
       this.cases = await listApiCases(projectId, transactionId);
+      if (this.activeCaseId && !this.cases.some((item) => item.id === this.activeCaseId)) {
+        this.activeCaseId = this.cases[0]?.id ?? '';
+      }
     },
     async generateCases(projectId: string, transactionId: string, endpointIds?: string[]) {
-      const result = await generateApiCases(projectId, transactionId, endpointIds);
-      await this.refreshCases(projectId, transactionId);
-      message.success(`已生成 ${result.count} 条案例`);
+      this.generatingCases = true;
+      try {
+        const result = await generateApiCases(projectId, transactionId, endpointIds);
+        await this.refreshCases(projectId, transactionId);
+        if (result.cases?.[0]?.id) {
+          this.activeCaseId = result.cases[0].id;
+        }
+        message.success(`已生成 ${result.count} 条案例`);
+      } finally {
+        this.generatingCases = false;
+      }
     },
     async saveCase(
       projectId: string,
@@ -329,6 +375,9 @@ export const useApiTestStore = defineStore('apiTest', {
     async removeCase(projectId: string, transactionId: string, caseId: string) {
       await deleteApiCase(projectId, transactionId, caseId);
       this.selectedCaseIds = this.selectedCaseIds.filter((id) => id !== caseId);
+      if (this.activeCaseId === caseId) {
+        this.activeCaseId = '';
+      }
       await this.refreshCases(projectId, transactionId);
     },
     toggleCaseSelection(caseId: string, checked: boolean) {
@@ -354,7 +403,93 @@ export const useApiTestStore = defineStore('apiTest', {
     },
     async removeEnvironment(projectId: string, id: string) {
       await deleteApiEnvironment(projectId, id);
+      delete this.environmentServices[id];
       await this.refreshEnvironments(projectId);
+    },
+    async refreshEnvironmentServices(projectId: string, environmentId: string) {
+      this.environmentServices[environmentId] = await listApiEnvironmentServices(
+        projectId,
+        environmentId,
+      );
+    },
+    async saveEnvironmentService(
+      projectId: string,
+      environmentId: string,
+      payload: Record<string, unknown>,
+      serviceId?: string,
+    ) {
+      if (serviceId) {
+        await updateApiEnvironmentService(projectId, environmentId, serviceId, payload);
+      } else {
+        await createApiEnvironmentService(projectId, environmentId, payload);
+      }
+      await this.refreshEnvironmentServices(projectId, environmentId);
+      message.success('环境服务已保存');
+    },
+    async removeEnvironmentService(
+      projectId: string,
+      environmentId: string,
+      serviceId: string,
+    ) {
+      await deleteApiEnvironmentService(projectId, environmentId, serviceId);
+      await this.refreshEnvironmentServices(projectId, environmentId);
+    },
+    async refreshExecutionSets(projectId: string, transactionId: string) {
+      this.executionSets = await listApiExecutionSets(projectId, transactionId);
+      if (
+        this.activeExecutionSetId &&
+        !this.executionSets.some((item) => item.id === this.activeExecutionSetId)
+      ) {
+        this.activeExecutionSetId = this.executionSets[0]?.id ?? '';
+      }
+    },
+    async createExecutionSet(
+      projectId: string,
+      transactionId: string,
+      payload: { name: string; description?: string },
+    ) {
+      const set = await createApiExecutionSet(projectId, transactionId, payload);
+      await this.refreshExecutionSets(projectId, transactionId);
+      this.activeExecutionSetId = set.id;
+      message.success('执行集已创建');
+    },
+    async removeExecutionSet(projectId: string, transactionId: string, setId: string) {
+      await deleteApiExecutionSet(projectId, transactionId, setId);
+      if (this.activeExecutionSetId === setId) {
+        this.activeExecutionSetId = '';
+      }
+      await this.refreshExecutionSets(projectId, transactionId);
+    },
+    async replaceExecutionSetCases(
+      projectId: string,
+      transactionId: string,
+      setId: string,
+      caseIds: string[],
+    ) {
+      await replaceApiExecutionSetCases(projectId, transactionId, setId, caseIds);
+      await this.refreshExecutionSets(projectId, transactionId);
+      message.success('执行集案例已更新');
+    },
+    async runExecutionSet(projectId: string, transactionId: string, setId: string) {
+      if (!this.selectedEnvironmentId) {
+        message.warning('请先选择执行环境');
+        return;
+      }
+      this.running = true;
+      try {
+        const run = await runApiExecutionSet(projectId, transactionId, setId, {
+          environmentId: this.selectedEnvironmentId,
+          environmentServiceId: this.selectedEnvironmentServiceId || undefined,
+          concurrency: 5,
+        });
+        this.activeRun = run;
+        this.runs = await listApiRuns(projectId);
+        await this.refreshExecutionSets(projectId, transactionId);
+        message.success(`执行完成：通过 ${run.passedCount} / ${run.totalCount}`);
+        return run;
+      } finally {
+        this.running = false;
+      }
     },
     async executeCases(projectId: string, transactionId: string, caseIds: string[]) {
       if (!this.selectedEnvironmentId) {
@@ -366,6 +501,7 @@ export const useApiTestStore = defineStore('apiTest', {
         const run = await runApiCases(projectId, transactionId, {
           caseIds,
           environmentId: this.selectedEnvironmentId,
+          environmentServiceId: this.selectedEnvironmentServiceId || undefined,
           concurrency: 5,
         });
         this.activeRun = run;

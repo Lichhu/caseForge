@@ -3,10 +3,16 @@ import type { ApiEndpointEntity } from "../entity/api-endpoint.entity";
 
 export function buildFallbackCasesForEndpoint(
   endpoint: ApiEndpointEntity,
+  transactionCode?: string,
 ): ApiTestCasePayload[] {
+  const code = transactionCode || endpoint.name;
   const positive: ApiTestCasePayload = {
     title: `${endpoint.name} - 正向`,
+    caseNo: `${code}-001`,
     description: `验证 ${endpoint.method} ${endpoint.path} 正常返回`,
+    remark: "",
+    transactionCode: code,
+    owner: "",
     priority: "P0",
     polarity: "positive",
     enabled: true,
@@ -27,7 +33,11 @@ export function buildFallbackCasesForEndpoint(
 
   const negative: ApiTestCasePayload = {
     title: `${endpoint.name} - 反向缺参`,
+    caseNo: `${code}-002`,
     description: `验证 ${endpoint.method} ${endpoint.path} 参数缺失时的错误响应`,
+    remark: "",
+    transactionCode: code,
+    owner: "",
     priority: "P1",
     polarity: "negative",
     enabled: true,

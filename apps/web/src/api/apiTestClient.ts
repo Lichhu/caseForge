@@ -53,7 +53,11 @@ export interface ApiTestCaseRow {
   projectId: string;
   endpointId: string;
   title: string;
+  caseNo?: string;
   description: string;
+  remark?: string;
+  transactionCode?: string;
+  owner?: string;
   priority: ApiCasePriority;
   polarity: ApiCasePolarity;
   status: ApiCaseStatus;
@@ -62,6 +66,7 @@ export interface ApiTestCaseRow {
   request: ApiCaseRequest;
   expected: ApiCaseExpected;
   endpoint?: ApiEndpointRow;
+  createdBy?: string;
   metadata?: { source?: string };
 }
 
@@ -94,10 +99,42 @@ export interface ApiRunItemRow {
   assertions: AssertionResult[];
 }
 
+export interface ApiEnvironmentServiceRow {
+  id: string;
+  projectId: string;
+  environmentId: string;
+  name: string;
+  baseUrl?: string;
+  pathPrefix?: string;
+  headers?: Record<string, string>;
+  variables?: Record<string, string>;
+  sortOrder: number;
+  enabled: boolean;
+}
+
+export interface ApiExecutionSetRow {
+  id: string;
+  projectId: string;
+  transactionId: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  caseCount?: number;
+  caseIds?: string[];
+  lastRunId?: string;
+  lastRunStatus?: 'running' | 'completed' | 'failed';
+  lastRunAt?: string;
+  lastPassedCount?: number;
+  lastTotalCount?: number;
+}
+
 export interface ApiRunDetail {
   id: string;
   projectId: string;
   environmentId: string;
+  environmentServiceId?: string;
+  executionSetId?: string;
+  transactionId?: string;
   status: string;
   totalCount: number;
   passedCount: number;
@@ -255,7 +292,7 @@ export async function generateApiCases(
   transactionId: string,
   endpointIds?: string[],
 ) {
-  const { data } = await http.post<{ count: number }>(
+  const { data } = await http.post<{ count: number; cases?: ApiTestCaseRow[] }>(
     `${transactionBase(projectId, transactionId)}/cases/generate`,
     { endpointIds },
   );
@@ -288,10 +325,123 @@ export async function deleteApiEnvironment(projectId: string, environmentId: str
   await http.delete(`/api-test/${projectId}/environments/${environmentId}`);
 }
 
+export async function listApiEnvironmentServices(projectId: string, environmentId: string) {
+  const { data } = await http.get<ApiEnvironmentServiceRow[]>(
+    `/api-test/${projectId}/environments/${environmentId}/services`,
+  );
+  return data;
+}
+
+export async function createApiEnvironmentService(
+  projectId: string,
+  environmentId: string,
+  payload: Record<string, unknown>,
+) {
+  const { data } = await http.post<ApiEnvironmentServiceRow>(
+    `/api-test/${projectId}/environments/${environmentId}/services`,
+    payload,
+  );
+  return data;
+}
+
+export async function updateApiEnvironmentService(
+  projectId: string,
+  environmentId: string,
+  serviceId: string,
+  payload: Record<string, unknown>,
+) {
+  const { data } = await http.patch<ApiEnvironmentServiceRow>(
+    `/api-test/${projectId}/environments/${environmentId}/services/${serviceId}`,
+    payload,
+  );
+  return data;
+}
+
+export async function deleteApiEnvironmentService(
+  projectId: string,
+  environmentId: string,
+  serviceId: string,
+) {
+  await http.delete(
+    `/api-test/${projectId}/environments/${environmentId}/services/${serviceId}`,
+  );
+}
+
+export async function listApiExecutionSets(projectId: string, transactionId: string) {
+  const { data } = await http.get<ApiExecutionSetRow[]>(
+    `${transactionBase(projectId, transactionId)}/execution-sets`,
+  );
+  return data;
+}
+
+export async function createApiExecutionSet(
+  projectId: string,
+  transactionId: string,
+  payload: { name: string; description?: string },
+) {
+  const { data } = await http.post<ApiExecutionSetRow>(
+    `${transactionBase(projectId, transactionId)}/execution-sets`,
+    payload,
+  );
+  return data;
+}
+
+export async function updateApiExecutionSet(
+  projectId: string,
+  transactionId: string,
+  setId: string,
+  payload: { name: string; description?: string },
+) {
+  const { data } = await http.patch<ApiExecutionSetRow>(
+    `${transactionBase(projectId, transactionId)}/execution-sets/${setId}`,
+    payload,
+  );
+  return data;
+}
+
+export async function deleteApiExecutionSet(
+  projectId: string,
+  transactionId: string,
+  setId: string,
+) {
+  await http.delete(`${transactionBase(projectId, transactionId)}/execution-sets/${setId}`);
+}
+
+export async function replaceApiExecutionSetCases(
+  projectId: string,
+  transactionId: string,
+  setId: string,
+  caseIds: string[],
+) {
+  const { data } = await http.put<{ caseIds: string[] }>(
+    `${transactionBase(projectId, transactionId)}/execution-sets/${setId}/cases`,
+    { caseIds },
+  );
+  return data;
+}
+
+export async function runApiExecutionSet(
+  projectId: string,
+  transactionId: string,
+  setId: string,
+  payload: { environmentId: string; environmentServiceId?: string; concurrency?: number },
+) {
+  const { data } = await http.post<ApiRunDetail>(
+    `${transactionBase(projectId, transactionId)}/execution-sets/${setId}/runs`,
+    payload,
+  );
+  return data;
+}
+
 export async function runApiCases(
   projectId: string,
   transactionId: string,
-  payload: { caseIds: string[]; environmentId: string; concurrency?: number },
+  payload: {
+    caseIds: string[];
+    environmentId: string;
+    environmentServiceId?: string;
+    concurrency?: number;
+  },
 ) {
   const { data } = await http.post<ApiRunDetail>(
     `${transactionBase(projectId, transactionId)}/runs`,

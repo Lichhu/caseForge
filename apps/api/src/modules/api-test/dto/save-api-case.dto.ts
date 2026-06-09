@@ -100,6 +100,11 @@ export class RunApiCasesDto {
   @IsUUID()
   environmentId!: string;
 
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  environmentServiceId?: string;
+
   @ApiPropertyOptional({ default: 5 })
   @IsOptional()
   concurrency?: number;

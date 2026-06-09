@@ -1,25 +1,43 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, In } from "typeorm";
-import type { ApiTestCasePayload } from "@case-forge/shared";
-import { auditFieldsForUpdate } from "../../../common/audit/request-context";
+import { AiWorkflowService } from "../../../common/ai-workflow/service/ai-workflow.service";
+import {
+  auditFieldsForCreate,
+  auditFieldsForUpdate,
+  RequestContext,
+} from "../../../common/audit/request-context";
 import { scopedWhere } from "../../../common/audit/user-scope";
+import { ApiDocEntity } from "../entity/api-doc.entity";
 import { ApiEndpointEntity } from "../entity/api-endpoint.entity";
 import { ApiTestCaseEntity } from "../entity/api-test-case.entity";
+import { ApiTransactionEntity } from "../entity/api-transaction.entity";
 import { SaveApiCaseDto } from "../dto/save-api-case.dto";
+import {
+  generateCasesWithAi,
+  nextCaseNo,
+} from "../util/api-case-ai.util";
 import { buildFallbackCasesForEndpoint } from "../util/case-fallback.generator";
 
 @Injectable()
 export class ApiCaseService {
+  private readonly logger = new Logger(ApiCaseService.name);
+
   constructor(
     @InjectRepository(ApiTestCaseEntity)
     private readonly caseRepo: Repository<ApiTestCaseEntity>,
     @InjectRepository(ApiEndpointEntity)
     private readonly endpointRepo: Repository<ApiEndpointEntity>,
+    @InjectRepository(ApiDocEntity)
+    private readonly apiDocRepo: Repository<ApiDocEntity>,
+    @InjectRepository(ApiTransactionEntity)
+    private readonly transactionRepo: Repository<ApiTransactionEntity>,
+    private readonly aiWorkflow: AiWorkflowService,
   ) {}
 
   async listCases(projectId: string, transactionId?: string) {
@@ -45,14 +63,32 @@ export class ApiCaseService {
     });
   }
 
-  async createCase(projectId: string, payload: SaveApiCaseDto) {
+  async createCase(
+    projectId: string,
+    transactionId: string,
+    payload: SaveApiCaseDto,
+  ) {
     this.validateCasePayload(payload);
     const endpoint = await this.requireEndpoint(projectId, payload.endpointId);
+    const transaction = await this.requireTransaction(projectId, transactionId);
+    const userName = RequestContext.getUserName();
+    const caseNo =
+      payload.caseNo?.trim() ||
+      (await nextCaseNo(
+        this.caseRepo,
+        projectId,
+        endpoint.id,
+        transaction.code,
+      ));
     const entity = this.caseRepo.create({
       projectId,
       endpointId: endpoint.id,
       title: payload.title,
+      caseNo,
       description: payload.description ?? "",
+      remark: payload.remark ?? "",
+      transactionCode: payload.transactionCode ?? transaction.code,
+      owner: payload.owner?.trim() || userName,
       priority: payload.priority ?? "P1",
       polarity: payload.polarity ?? "positive",
       status: payload.status ?? "ready",
@@ -61,7 +97,7 @@ export class ApiCaseService {
       request: payload.request,
       expected: payload.expected,
       metadata: { source: "manual" },
-      ...auditFieldsForUpdate(),
+      ...auditFieldsForCreate(),
     });
     return this.caseRepo.save(entity);
   }
@@ -79,7 +115,13 @@ export class ApiCaseService {
       existing.endpointId = payload.endpointId;
     }
     existing.title = payload.title;
+    if (payload.caseNo !== undefined) existing.caseNo = payload.caseNo;
     existing.description = payload.description ?? "";
+    existing.remark = payload.remark ?? "";
+    if (payload.transactionCode !== undefined) {
+      existing.transactionCode = payload.transactionCode;
+    }
+    if (payload.owner !== undefined) existing.owner = payload.owner;
     existing.priority = payload.priority ?? existing.priority;
     existing.polarity = payload.polarity ?? existing.polarity;
     existing.status = payload.status ?? existing.status;
@@ -104,12 +146,14 @@ export class ApiCaseService {
     transactionId?: string,
     endpointIds?: string[],
   ) {
-    const baseWhere = transactionId
-      ? { projectId, transactionId }
-      : { projectId };
+    if (!transactionId) {
+      throw new BadRequestException("请指定交易码后再生成案例");
+    }
+    const transaction = await this.requireTransaction(projectId, transactionId);
+    const baseWhere = { projectId, transactionId };
     const endpoints = await this.endpointRepo.find({
       where: endpointIds?.length
-        ? { projectId, id: In(endpointIds) }
+        ? { projectId, id: In(endpointIds), transactionId }
         : baseWhere,
       order: { sortOrder: "ASC" },
     });
@@ -117,15 +161,43 @@ export class ApiCaseService {
       throw new BadRequestException("没有可生成案例的接口端点");
     }
 
+    const doc = await this.apiDocRepo.findOne({
+      where: scopedWhere({ projectId, transactionId }),
+    });
+    const structuredDoc =
+      doc?.tempStructuredMarkdown?.trim() ||
+      doc?.structuredMarkdown?.trim() ||
+      doc?.extractedRawText?.trim() ||
+      "";
+
     const created: ApiTestCaseEntity[] = [];
     for (const endpoint of endpoints) {
-      const payloads = buildFallbackCasesForEndpoint(endpoint);
+      let payloads;
+      try {
+        if (structuredDoc && this.aiWorkflow.canGenerateJsonCases()) {
+          payloads = await generateCasesWithAi(this.aiWorkflow, {
+            transactionCode: transaction.code,
+            structuredDoc,
+            endpoint,
+          });
+        } else {
+          throw new Error("fallback");
+        }
+      } catch (error) {
+        this.logger.warn(
+          `AI 案例生成失败，使用模板兜底（${endpoint.name}）：${error instanceof Error ? error.message : error}`,
+        );
+        payloads = buildFallbackCasesForEndpoint(endpoint, transaction.code);
+      }
+
       for (const payload of payloads) {
         const entity = this.caseRepo.create({
           projectId,
           endpointId: endpoint.id,
           ...payload,
-          ...auditFieldsForUpdate(),
+          transactionCode: payload.transactionCode ?? transaction.code,
+          owner: payload.owner?.trim() || RequestContext.getUserName(),
+          ...auditFieldsForCreate(),
         });
         created.push(await this.caseRepo.save(entity));
       }
@@ -157,4 +229,15 @@ export class ApiCaseService {
     }
     return endpoint;
   }
+
+  private async requireTransaction(projectId: string, transactionId: string) {
+    const transaction = await this.transactionRepo.findOne({
+      where: scopedWhere({ projectId, id: transactionId }),
+    });
+    if (!transaction) {
+      throw new NotFoundException("交易码不存在");
+    }
+    return transaction;
+  }
 }
+

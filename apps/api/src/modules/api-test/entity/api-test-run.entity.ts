@@ -20,6 +20,15 @@ export class ApiTestRunEntity {
   @Column()
   environmentId: string;
 
+  @Column({ nullable: true })
+  environmentServiceId?: string;
+
+  @Column({ nullable: true })
+  executionSetId?: string;
+
+  @Column({ nullable: true })
+  transactionId?: string;
+
   @Column({ type: "varchar", length: 32, default: "completed" })
   status: "running" | "completed" | "failed";
 

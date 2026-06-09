@@ -7,6 +7,7 @@ import { ApiTestCaseEntity } from "../entity/api-test-case.entity";
 import { ApiTestRunEntity } from "../entity/api-test-run.entity";
 import { ApiTestRunItemEntity } from "../entity/api-test-run-item.entity";
 import { ApiEnvironmentService } from "./api-environment.service";
+import { ApiExecutionSetService } from "./api-execution-set.service";
 import {
   buildRuntimeVariables,
   substituteDeep,
@@ -30,12 +31,16 @@ export class ApiExecutionService {
     @InjectRepository(ApiTestRunItemEntity)
     private readonly runItemRepo: Repository<ApiTestRunItemEntity>,
     private readonly environmentService: ApiEnvironmentService,
+    private readonly executionSetService: ApiExecutionSetService,
   ) {}
 
   async runCases(input: {
     projectId: string;
     caseIds: string[];
     environmentId: string;
+    environmentServiceId?: string;
+    executionSetId?: string;
+    transactionId?: string;
     concurrency?: number;
   }) {
     if (!input.caseIds.length) {
@@ -48,6 +53,7 @@ export class ApiExecutionService {
     const env = await this.environmentService.getRuntimeEnvironment(
       input.projectId,
       input.environmentId,
+      input.environmentServiceId,
     );
     const cases = await this.caseRepo.find({
       where: {
@@ -65,6 +71,9 @@ export class ApiExecutionService {
       this.runRepo.create({
         projectId: input.projectId,
         environmentId: env.id,
+        environmentServiceId: input.environmentServiceId,
+        executionSetId: input.executionSetId,
+        transactionId: input.transactionId,
         status: "running",
         totalCount: cases.length,
         concurrency,
@@ -103,9 +112,49 @@ export class ApiExecutionService {
     return this.getRunDetail(input.projectId, run.id);
   }
 
-  async listRuns(projectId: string) {
+  async runExecutionSet(input: {
+    projectId: string;
+    transactionId: string;
+    executionSetId: string;
+    environmentId: string;
+    environmentServiceId?: string;
+    concurrency?: number;
+  }) {
+    await this.executionSetService.requireSet(
+      input.projectId,
+      input.transactionId,
+      input.executionSetId,
+    );
+    const caseIds = await this.executionSetService.getCaseIds(
+      input.executionSetId,
+    );
+    if (!caseIds.length) {
+      throw new BadRequestException("执行集内暂无案例");
+    }
+    const detail = await this.runCases({
+      projectId: input.projectId,
+      caseIds,
+      environmentId: input.environmentId,
+      environmentServiceId: input.environmentServiceId,
+      executionSetId: input.executionSetId,
+      transactionId: input.transactionId,
+      concurrency: input.concurrency,
+    });
+    await this.executionSetService.updateLastRun(input.executionSetId, {
+      runId: detail.id,
+      status: detail.status,
+      passedCount: detail.passedCount,
+      totalCount: detail.totalCount,
+    });
+    return detail;
+  }
+
+  async listRuns(projectId: string, executionSetId?: string) {
     return this.runRepo.find({
-      where: scopedWhere({ projectId }),
+      where: scopedWhere({
+        projectId,
+        ...(executionSetId ? { executionSetId } : {}),
+      }),
       order: { createdAt: "DESC" },
       take: 50,
     });
