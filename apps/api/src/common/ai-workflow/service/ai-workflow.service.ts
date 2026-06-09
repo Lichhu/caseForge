@@ -53,17 +53,8 @@ export class AiWorkflowService {
     return this.isConfigured() && Boolean(this.config.reqDocSkillUrl);
   }
 
-  /** 是否可用于案例生成类任务（需案例技能文件 URL） */
-  canGenerateCases() {
-    return this.isConfigured() && Boolean(this.config.caseDocSkillUrl);
-  }
-
   getReqDocSkillUrl() {
     return this.config.reqDocSkillUrl;
-  }
-
-  getCaseDocSkillUrl() {
-    return this.config.caseDocSkillUrl;
   }
 
   getPromoteUrl() {

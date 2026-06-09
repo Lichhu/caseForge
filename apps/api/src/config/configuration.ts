@@ -38,7 +38,6 @@ export default (): AppConfig => ({
     stopUrl: process.env.AI_WORKFLOW_STOP_URL ?? "",
     workflowId: process.env.AI_WORKFLOW_ID ?? "",
     reqDocSkillUrl: process.env.REQ_DOC_SKILL_URL ?? "",
-    caseDocSkillUrl: process.env.CASE_DOC_SKILL_URL ?? "",
     caseDocPromoteUrl: process.env.CASE_DOC_PROMOTE_URL ?? "",
     dify: {
       workflowUrl: process.env.DIFY_WORKFLOW_URL ?? "",

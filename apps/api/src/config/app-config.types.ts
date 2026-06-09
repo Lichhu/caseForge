@@ -36,7 +36,6 @@ export interface AppConfig {
     stopUrl: string;
     workflowId: string;
     reqDocSkillUrl: string;
-    caseDocSkillUrl: string;
     caseDocPromoteUrl: string;
     dify: {
       workflowUrl: string;

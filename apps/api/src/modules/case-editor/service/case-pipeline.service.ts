@@ -73,7 +73,6 @@ export interface GenerateCaseTreeParams {
   /** 用户点「停止」时返回 true，中断后续 testPoint 的 AI 调用 */
   shouldAbort?: () => boolean;
 }
-import { parseCaseSkillMarkdown } from "../util/case-markdown-tree.util";
 
 const sceneLabel: Record<SceneTag, string> = {
   positive: "正向案例",
@@ -93,8 +92,7 @@ export class CasePipelineService {
   private readonly logger = new Logger(CasePipelineService.name);
 
   constructor(
-    private readonly aiWorkflow: AiWorkflowService,
-    private readonly minio: MinioStorageService,
+    private readonly aiWorkflow: AiWorkflowService
   ) {}
 
   /** 将原始需求文本格式化为结构化 Markdown 与分析结果 */
@@ -136,54 +134,6 @@ export class CasePipelineService {
   /** 从结构化 Markdown 重建需求分析对象 */
   rebuildAnalysisFromMarkdown(markdown: string): RequirementAnalysis {
     return this.analyzeRequirement(markdown);
-  }
-
-  /** 生成案例树：已配置 AI Workflow 时仅走工作流，失败则抛错；未配置时用本地规则 */
-  async generateCaseTree(params: GenerateCaseTreeParams) {
-    const { document, requirementContext, testPoints } = params;
-    const workflowInput = buildCaseWorkflowInput({
-      requirementContext,
-      testPoints,
-    });
-    const rootTitle =
-      `${document.analysis.requirementId} ${document.analysis.requirementName}`.trim() ||
-      "测试案例";
-    const prompt = workflowInput;
-    const localConstraint = this.defaultLocalConstraint();
-
-    let tree: CaseTreeNode;
-    if (this.shouldUseWorkflowForCaseGeneration()) {
-      const llmTree = await this.generateCaseTreeByWorkflow(
-        workflowInput,
-        rootTitle,
-      );
-      const normalizedLlmTree = this.normalizeToSixLevelTree(
-        this.ensureNodeIds(llmTree, "root"),
-        document.analysis,
-      );
-      if (this.isLowQualityAiTree(normalizedLlmTree)) {
-        throw new BadRequestException(
-          "AI Workflow 返回的案例树缺少有效业务内容，生成失败",
-        );
-      }
-      tree = normalizedLlmTree;
-    } else {
-      this.logger.warn("AI Workflow 未配置，使用本地规则生成案例树");
-      tree = this.generateSixLevelLocalTree(
-        document.analysis,
-        localConstraint,
-        testPoints,
-      );
-    }
-    if (testPoints.length) {
-      tree = this.alignTreeToTestPointHierarchy(tree, testPoints);
-      tree = this.normalizeRequirementTitles(tree, testPoints);
-    }
-    tree = this.normalizeCaseNodesToSkillFormat(tree);
-    tree = this.ensureCaseTitles(tree);
-    tree = normalizeCaseTreeForSkill(tree);
-    tree = this.ensureNodeIds(tree, "root");
-    return { prompt, tree };
   }
 
   /**
@@ -1487,7 +1437,7 @@ export class CasePipelineService {
 
   private async generateMarkdownByWorkflow(
     prompt: string,
-    skill: "req" | "case",
+    skill: "req",
   ): Promise<string | null> {
     const skillUrl = this.resolveSkillUrl(skill);
     if (!skillUrl || !this.aiWorkflow.isConfigured()) {
@@ -1507,82 +1457,6 @@ export class CasePipelineService {
         `AI Workflow Markdown 生成失败，回退本地逻辑: ${(error as Error).message}`,
       );
       return null;
-    }
-  }
-
-  /** 已配置工作流时必须走 AI；未配置完整案例技能 URL 时也视为应走工作流并失败 */
-  private defaultLocalConstraint(): ConstraintInput {
-    return {
-      scenarioTags: ["positive", "negative"],
-      testDimensions: ["functional", "interface"],
-      grouping: "bySystem",
-      knowledgeBaseIds: [],
-      naturalLanguage: "",
-      featureInstructions: [],
-    };
-  }
-
-  private shouldUseWorkflowForCaseGeneration() {
-    if (this.aiWorkflow.canGenerateCases()) {
-      return true;
-    }
-    if (
-      this.aiWorkflow.isConfigured() &&
-      this.aiWorkflow.getCaseDocSkillUrl()
-    ) {
-      throw new BadRequestException(
-        "AI Workflow 案例生成配置不完整，请检查 DIFY_WORKFLOW_URL、DIFY_WORKFLOW_ID 与 CASE_DOC_SKILL_URL",
-      );
-    }
-    return false;
-  }
-
-  private async generateCaseTreeByWorkflow(
-    input: string,
-    rootTitle: string,
-  ): Promise<CaseTreeNode> {
-    if (!input?.trim()) {
-      throw new BadRequestException("案例生成输入为空，生成失败");
-    }
-
-    const markdown = await this.runCaseWorkflowMarkdown(input);
-    const tree = parseCaseSkillMarkdown(markdown, rootTitle);
-    if (!tree) {
-      throw new BadRequestException(
-        "AI Workflow 返回内容无法解析为案例树，请检查输出是否符合 case-skill 格式",
-      );
-    }
-    return tree;
-  }
-
-  private async runCaseWorkflowMarkdown(prompt: string): Promise<string> {
-    const skillUrl = this.resolveSkillUrl("case");
-    if (!skillUrl) {
-      throw new BadRequestException("CASE_DOC_SKILL_URL 未配置，无法生成案例");
-    }
-
-    try {
-      const skillText = await this.loadSkillText("case");
-      if (!skillText) {
-        throw new BadRequestException(
-          "读取案例技能文档失败，请检查 MinIO 上的 case-skill 文件",
-        );
-      }
-
-      const { text } = await this.aiWorkflow.runWithContent(prompt, skillText);
-      const markdown = text ? this.stripMarkdownFence(text) : "";
-      if (!markdown.trim()) {
-        throw new BadRequestException("AI Workflow 未返回有效 Markdown");
-      }
-      return markdown;
-    } catch (error) {
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      this.logger.warn(`AI Workflow 案例生成失败: ${(error as Error).message}`);
-      throw new BadRequestException(
-        `AI Workflow 案例生成失败：${(error as Error).message}`,
-      );
     }
   }
 
@@ -1752,15 +1626,13 @@ export class CasePipelineService {
     }
   }
 
-  private resolveSkillUrl(skill: "req" | "case" | "promote") {
+  private resolveSkillUrl(skill: "req" | "promote") {
     return skill === "req"
       ? this.aiWorkflow.getReqDocSkillUrl()
-      : skill === "case"
-        ? this.aiWorkflow.getCaseDocSkillUrl()
-        : this.aiWorkflow.getPromoteUrl();
+      : this.aiWorkflow.getPromoteUrl();
   }
 
-  private async loadSkillText(skill: "req" | "case" | "promote") {
+  private async loadSkillText(skill: "req" | "promote") {
     const skillUrl = this.resolveSkillUrl(skill);
     if (!skillUrl) {
       return null;
