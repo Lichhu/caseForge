@@ -109,7 +109,7 @@ function node(
 
 function sixLevelCase(
   title: string,
-  caseNature: "正向" | "反向",
+  caseNature: "正" | "反",
   priority: "高" | "中" | "低",
   conditions: string[],
   steps: string[],
@@ -133,7 +133,7 @@ function buildDemoCaseTree(): CaseTreeNode {
           node("线程异常捕获与恢复验证", "requirement", [
             sixLevelCase(
               "[正向] 模拟入库异常后线程继续运行",
-              "正向",
+              "正",
               "高",
               ["测试库可模拟连接中断", "采集进程已启动"],
               ["注入入库异常", "观察进程与线程状态", "检查错误日志"],
@@ -141,7 +141,7 @@ function buildDemoCaseTree(): CaseTreeNode {
             ),
             sixLevelCase(
               "[异常] 连续异常时资源占用稳定",
-              "反向",
+              "反",
               "中",
               ["可连续触发 5 次入库异常"],
               ["循环触发异常", "监控 CPU/内存 10 分钟"],
@@ -153,7 +153,7 @@ function buildDemoCaseTree(): CaseTreeNode {
           node("批量提交参数配置验证", "requirement", [
             sixLevelCase(
               "[正向] 累计 30 条日志触发提交",
-              "正向",
+              "正",
               "高",
               ["批量阈值配置为 30"],
               ["写入 30 条日志", "检查入库批次记录"],

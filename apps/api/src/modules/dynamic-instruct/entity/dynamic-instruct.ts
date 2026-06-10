@@ -3,7 +3,7 @@
  */
 import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, OneToOne, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
 import { PromptEntity } from "@scenario/entity/prompt.entity";
-import { TestPointEntity } from "@struct-doc/entity/test-point.entity";
+import type { TestPointEntity } from "@struct-doc/entity/test-point.entity";
 
 /**
  * 动态指令实体：记录测试要点上的编辑状态、自然语言约束及关联提示词
@@ -30,10 +30,14 @@ export class DynamicInstructEntity {
     isAppend: boolean;
 
     // 关联测试要点
-    @OneToOne(() => TestPointEntity, (tp) => tp.selections, {
+    @OneToOne(
+      () => require("@struct-doc/entity/test-point.entity").TestPointEntity,
+      (tp: TestPointEntity) => tp.selections,
+      {
         onDelete: 'CASCADE',
         onUpdate: 'CASCADE'
-    })
+      }
+    )
     @JoinColumn({ name: 'testPointId' })
     testPoint: TestPointEntity;
 

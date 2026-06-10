@@ -13,6 +13,7 @@ import { AiWorkflowService } from "../../../common/ai-workflow/service/ai-workfl
 import { fetchTextFromUrl } from "../../../common/ai-workflow/util/workflow-input.util";
 import { MinioStorageService } from "../../../common/minio/service/minio.service";
 import type {
+  CaseNature,
   CaseNodeKind,
   CasePriority,
   CaseTreeNode,
@@ -26,6 +27,7 @@ import {
   buildFallbackCaseTitle,
   extractCasePolarity,
   isPlaceholderCaseTitle,
+  normalizeCaseNature,
   normalizeCasePriority,
   normalizeCaseTreeForSkill,
   sanitizeCaseTitleText,
@@ -194,7 +196,7 @@ export class CasePipelineService {
     const normalized = instruction.trim() || "补充测试场景";
     return [
       this.sixLevelCaseNode(
-        "案例详情 [正向]",
+        "案例详情 [正]",
         `[补充] ${normalized}`,
         "高",
         "补充测试",
@@ -402,14 +404,14 @@ export class CasePipelineService {
     const knowledgeBaseIds = constraint.knowledgeBaseIds;
     return [
       this.buildSkillPolarityCase(
-        "正向",
+        "正",
         module,
         constraint,
         featureInstruction,
         knowledgeBaseIds,
       ),
       this.buildSkillPolarityCase(
-        "反向",
+        "反",
         module,
         constraint,
         featureInstruction,
@@ -418,15 +420,15 @@ export class CasePipelineService {
     ];
   }
 
-  /** 按 case-skill：每个测试要点一条正向、一条反向 */
+  /** 按 case-skill：每个测试要点一条正、一条反 */
   private buildSkillPolarityCase(
-    polarity: "正向" | "反向",
+    polarity: CaseNature,
     module: RequirementModule,
     constraint: ConstraintInput,
     featureInstruction: string,
     knowledgeBaseIds: string[],
   ) {
-    const positive = polarity === "正向";
+    const positive = polarity === "正";
     const caseTitle = positive
       ? `${module.name}在满足准入条件时正常完成`
       : `未满足「${module.rules[0] || "业务规则"}」时系统拦截并提示`;
@@ -513,7 +515,7 @@ export class CasePipelineService {
   private resolveSkillCaseTitles(rawTitle: string) {
     const title = rawTitle.trim();
     const legacy = title.match(
-      /^\[(正向|反向|异常|边界|接口|权限|端到端|UI|并发)\]\s*(.*)$/u,
+      /^\[(正|反|正向|反向|异常|边界|接口|权限|端到端|UI|并发)\]\s*(.*)$/u,
     );
     if (!legacy) {
       if (title.startsWith("案例详情 [")) {
@@ -532,7 +534,8 @@ export class CasePipelineService {
         caseTitle: isPlaceholderCaseTitle(title) ? "" : title,
       };
     }
-    const polarity = legacy[1] === "正向" ? "正向" : ("反向" as const);
+    const polarity: CaseNature =
+      legacy[1] === "正向" || legacy[1] === "正" ? "正" : "反";
     const caseTitle = sanitizeCaseTitleText(legacy[2] || "");
     return {
       caseNodeTitle: `案例详情 [${polarity}]`,
@@ -598,7 +601,7 @@ export class CasePipelineService {
         };
       }
 
-      const polarity = extractCasePolarity(node.title) || "正向";
+      const polarity = extractCasePolarity(node.title) || "正";
       const titleChild = node.children?.find(
         (item) => item.kind === "case_title",
       );
@@ -622,7 +625,7 @@ export class CasePipelineService {
 
   private buildDefaultCaseTitle(
     requirementTitle: string | undefined,
-    polarity: "正向" | "反向",
+    polarity: CaseNature,
   ) {
     return buildFallbackCaseTitle(requirementTitle, polarity);
   }
@@ -651,7 +654,7 @@ export class CasePipelineService {
       ),
     ];
     return this.node(caseNodeTitle, "case", children, {
-      caseNature: extractCasePolarity(caseNodeTitle) || "正向",
+      caseNature: extractCasePolarity(caseNodeTitle) || "正",
       priority: normalizeCasePriority(priority),
       caseType,
       knowledgeBaseIds,
@@ -967,7 +970,7 @@ export class CasePipelineService {
       ]),
     );
     return this.node(title, "scenario", [...children], {
-      caseNature: extractCasePolarity(title) || "正向",
+      caseNature: extractCasePolarity(title) || "正",
       priority: normalizeCasePriority(priority),
       caseType,
       knowledgeBaseIds,
@@ -1563,9 +1566,9 @@ export class CasePipelineService {
       .map((item) => item.replace(/^\d+[、.]?\s*/, ""));
   }
 
-  /** promote-skill 中 allx：「正」→ 正向，「反」→ 反向 */
-  private mapJsonPolarity(allx?: string): "正向" | "反向" {
-    return (allx || "").trim() === "反" ? "反向" : "正向";
+  /** promote-skill 中 allx：「正」/「反」 */
+  private mapJsonPolarity(allx?: string): CaseNature {
+    return normalizeCaseNature(allx);
   }
 
   /** promote-skill 中 yxj：高/中/低，默认高 */

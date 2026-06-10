@@ -30,14 +30,16 @@ export type CaseNodeKind =
   | 'expectation'
   | 'metadata';
 
-export type CaseNature = '正向' | '反向';
+export type CaseNature = '正' | '反';
+
+export const DEFAULT_CASE_NATURE: CaseNature = '正';
 
 export type CasePriority = '高' | '中' | '低';
 
 export const DEFAULT_CASE_PRIORITY: CasePriority = '高';
 
 export interface CaseNodeMetadata {
-  /** 案例性质：正向 / 反向 */
+  /** 案例性质：正 / 反 */
   caseNature?: CaseNature;
   /** 优先级：高 / 中 / 低，默认高 */
   priority?: CasePriority;

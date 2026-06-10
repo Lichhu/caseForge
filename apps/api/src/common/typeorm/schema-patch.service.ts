@@ -67,7 +67,7 @@ export class SchemaPatchService implements OnModuleInit {
     );
     await this.dataSource.query(`
       ALTER TABLE case_node_metadata
-        ADD COLUMN caseNature VARCHAR(16) NULL COMMENT '案例性质：正向/反向'
+        ADD COLUMN caseNature VARCHAR(16) NULL COMMENT '案例性质：正/反'
         AFTER caseTreeId
     `);
     await this.dataSource.query(`

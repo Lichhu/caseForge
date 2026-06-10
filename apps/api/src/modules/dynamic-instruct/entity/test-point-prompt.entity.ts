@@ -2,7 +2,7 @@
  * @file 测试要点与场景提示词多对多关联实体
  */
 import { PromptEntity } from "@scenario/entity/prompt.entity";
-import { TestPointEntity } from "@struct-doc/entity/test-point.entity";
+import type { TestPointEntity } from "@struct-doc/entity/test-point.entity";
 import {
   Column,
   CreateDateColumn,
@@ -31,10 +31,14 @@ export class TestPointPromptEntity {
   @Column()
   promptId: string;
 
-  @ManyToOne(() => TestPointEntity, (testPoint) => testPoint.promptSelections, {
-    onDelete: "CASCADE",
-    onUpdate: "CASCADE",
-  })
+  @ManyToOne(
+    () => require("@struct-doc/entity/test-point.entity").TestPointEntity,
+    (testPoint: TestPointEntity) => testPoint.promptSelections,
+    {
+      onDelete: "CASCADE",
+      onUpdate: "CASCADE",
+    },
+  )
   @JoinColumn({ name: "testPointId" })
   testPoint: TestPointEntity;
 

@@ -20,9 +20,9 @@ function resolveTemplatePath() {
     join(__dirname, "../assets", TEMPLATE_FILE),
     join(apiRoot, "src/modules/case-editor/assets", TEMPLATE_FILE),
     join(apiRoot, "dist/modules/case-editor/assets", TEMPLATE_FILE),
-    join(apiRoot, "../../doc/example.xlsx"),
-    join(process.cwd(), "doc/example.xlsx"),
-    join(process.cwd(), "../doc/example.xlsx"),
+    join(apiRoot, "../../doc/case-example.xlsx"),
+    join(process.cwd(), "doc/case-example.xlsx"),
+    join(process.cwd(), "../doc/case-example.xlsx"),
   ];
   const matched = candidates.find((path) => existsSync(path));
   if (!matched) {
@@ -41,9 +41,11 @@ function mapRowToTemplateValues(row: CaseExcelRow, serial: number) {
   return [
     serial,
     row.requirement,
+    row.system,
     row.caseName,
     mapCaseNatureName(row.caseNature),
     "SIT",
+    "",
     row.priority,
     "",
     "",

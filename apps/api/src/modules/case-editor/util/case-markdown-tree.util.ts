@@ -52,7 +52,7 @@ function parseMarkdownList(markdown: string): ListNode[] {
 }
 
 function isCaseDetailTitle(title: string) {
-  return /案例详情\s*\[(正向|反向)/.test(title);
+  return /案例详情\s*\[(正|反|正向|反向)/.test(title);
 }
 
 function isLabelTitle(title: string) {
@@ -157,7 +157,7 @@ function normalizeCaseChildNode(child: ListNode): CaseTreeNode {
 }
 
 function normalizeCaseDetailNode(caseNode: CaseTreeNode): CaseTreeNode {
-  const polarity = extractCasePolarity(caseNode.title) || "正向";
+  const polarity = extractCasePolarity(caseNode.title) || "正";
   const caseNodeTitle = `案例详情 [${polarity}]`;
   const byKind = new Map<CaseNodeKind, CaseTreeNode>();
   const orderedKinds: CaseNodeKind[] = [

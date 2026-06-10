@@ -24,7 +24,7 @@ export function createTypeOrmConfig(
     database: appConfig.typeOrm.database,
     synchronize:
       appConfig.nodeEnv === "development" || appConfig.nodeEnv === "local",
-    entities: [join(__dirname, "../../**/entity/*{.ts,.js}")],
+    entities: [join(__dirname, "../../**/entity/*.js")],
     subscribers: [AuditSubscriber],
     logging: false, //appConfig.nodeEnv === "development" || appConfig.nodeEnv === "local",
   };

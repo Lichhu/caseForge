@@ -266,10 +266,13 @@ export async function saveRunTree(
   tree: CaseTreeNode,
   mindMapExtras?: MindMapExtras,
 ) {
-  const { data } = await http.patch<GenerationRun>(`/case-editor/projects/${projectId}/runs/${runId}/tree`, {
-    tree,
-    mindMapExtras,
-  });
+  const { data } = await http.patch<Omit<GenerationRun, 'tree'> & { tree?: CaseTreeNode }>(
+    `/case-editor/projects/${projectId}/runs/${runId}/tree`,
+    {
+      tree,
+      mindMapExtras,
+    },
+  );
   return data;
 }
 

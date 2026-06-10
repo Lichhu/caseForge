@@ -2,8 +2,14 @@
   <div class="excel-wrap">
     <div v-if="draftRows.length" class="excel-toolbar">
       <div class="excel-toolbar-row">
-        <div class="excel-toolbar-left">
-          <span class="excel-stat">{{ rowCountLabel }}</span>
+        <div class="excel-toolbar-main">
+          <span class="excel-stat-pill">{{ rowCountLabel }}</span>
+          <span
+            v-if="showRowSelection && selectedCount"
+            class="excel-stat-pill excel-stat-pill--selected"
+          >
+            已选 {{ selectedCount }}
+          </span>
           <span v-if="store.treeSaving" class="excel-save-status is-saving">保存中…</span>
           <a-button size="small" type="default" @click="toggleHierarchyCollapse">
             <template #icon>
@@ -44,7 +50,21 @@
             :placeholder="searchPlaceholder"
           />
         </div>
-        <span class="excel-hint">{{ toolbarHint }}</span>
+        <div class="excel-toolbar-actions">
+          <a-button size="small" type="primary" @click="openAddModal">
+            <template #icon><PlusOutlined /></template>
+            添加案例
+          </a-button>
+          <a-button
+            size="small"
+            danger
+            :disabled="!canDeleteSelected"
+            @click="deleteSelectedRows"
+          >
+            <template #icon><DeleteOutlined /></template>
+            删除
+          </a-button>
+        </div>
       </div>
       <div v-if="selectedRequirementPreview" class="excel-requirement-preview">
         <span class="excel-requirement-preview-label">当前测试要点</span>
@@ -54,6 +74,7 @@
     <div ref="scrollEl" class="excel-scroll">
       <table v-if="filteredIndices.length" class="excel-table">
         <colgroup>
+          <col v-if="showRowSelection" class="excel-select-col" />
           <col
             v-for="column in visibleColumns"
             :key="column.key"
@@ -62,6 +83,13 @@
         </colgroup>
         <thead>
           <tr>
+            <th v-if="showRowSelection" class="th-select sticky-col">
+              <a-checkbox
+                :checked="allFilteredSelected"
+                :indeterminate="someFilteredSelected && !allFilteredSelected"
+                @change="toggleSelectAllFiltered"
+              />
+            </th>
             <th
               v-for="column in visibleColumns"
               :key="column.key"
@@ -78,6 +106,17 @@
             :key="draftRows[originalIndex].caseNodeId"
             :class="{ 'row-alt': displayIndex % 2 === 1 }"
           >
+            <td
+              v-if="showRowSelection"
+              class="td-select sticky-col"
+              @click.stop
+            >
+              <a-checkbox
+                :checked="isRowSelected(originalIndex)"
+                @click.stop
+                @change="(event) => toggleRowSelect(originalIndex, !!event.target?.checked)"
+              />
+            </td>
             <template
               v-for="column in visibleColumns"
               :key="`${draftRows[originalIndex].caseNodeId}-${column.key}`"
@@ -139,15 +178,39 @@
       />
     </div>
     <a-empty v-if="!draftRows.length" class="excel-empty" description="暂无案例数据，请先生成案例树" />
+
+    <CaseAddModal
+      v-model:open="addModalOpen"
+      :rows="draftRows"
+      :initial-path="addModalInitialPath"
+      @submit="handleAddCaseSubmit"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
-import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons-vue';
-import type { CaseExcelMergeCell, CaseExcelRow, CaseNature, CasePriority, CaseTreeNode } from '@case-forge/shared';
-import { applyExcelRowToTree, flattenCaseTreeToExcel, simplifyRequirementTitleForDisplay } from '@case-forge/shared';
+import { DeleteOutlined, MenuFoldOutlined, MenuUnfoldOutlined, PlusOutlined } from '@ant-design/icons-vue';
+import { Modal, message } from 'ant-design-vue';
+import type {
+  CaseExcelMergeCell,
+  CaseExcelRow,
+  CaseExcelRowPath,
+  CaseNature,
+  CasePriority,
+  CaseTreeNode,
+  NewCaseRowInput,
+} from '@case-forge/shared';
+import {
+  addCaseRowToTree,
+  applyExcelRowToTree,
+  flattenCaseTreeToExcel,
+  pickCaseExcelRowPath,
+  removeCaseFromTree,
+  simplifyRequirementTitleForDisplay,
+} from '@case-forge/shared';
 import { useCaseForgeStore } from '@/stores/caseForge';
+import CaseAddModal from '@/components/CaseAddModal.vue';
 
 const COLLAPSIBLE_HIERARCHY_KEYS = [
   'root',
@@ -156,6 +219,8 @@ const COLLAPSIBLE_HIERARCHY_KEYS = [
   'requirement',
   'caseName',
 ] as const;
+
+const SELECT_COL_WIDTH = 28;
 
 type ExcelColumnKey =
   | 'root'
@@ -219,6 +284,12 @@ const hierarchyCollapsed = ref(true);
 const requirementFilter = ref<string | undefined>(undefined);
 const caseKeyword = ref('');
 const scrollEl = ref<HTMLElement | null>(null);
+const selectedCaseNodeIds = ref<Set<string>>(new Set());
+const pendingSelectCaseId = ref<string | null>(null);
+const addModalOpen = ref(false);
+const addModalInitialPath = ref<CaseExcelRowPath | null>(null);
+
+const showRowSelection = computed(() => hierarchyCollapsed.value);
 
 const visibleColumns = computed(() => {
   const base = hierarchyCollapsed.value
@@ -244,10 +315,11 @@ const lastVisibleStickyCol = computed(
   () => visibleColumns.value.filter((column) => column.sticky).at(-1)?.col,
 );
 
-const tableMinWidthPx = computed(
-  () =>
-    `${visibleColumns.value.reduce((sum, item) => sum + item.width, 0)}px`,
-);
+const tableMinWidthPx = computed(() => {
+  const selectWidth = showRowSelection.value ? SELECT_COL_WIDTH : 0;
+  const columnsWidth = visibleColumns.value.reduce((sum, item) => sum + item.width, 0);
+  return `${selectWidth + columnsWidth}px`;
+});
 
 const draftRows = ref<CaseExcelRow[]>([]);
 const savedRowFingerprints = ref<Map<string, string>>(new Map());
@@ -333,16 +405,6 @@ const rowCountLabel = computed(() => {
   return `共 ${visible} / ${total} 条案例`;
 });
 
-const toolbarHint = computed(() => {
-  if (store.treeSaving) {
-    return '正在保存编辑内容…';
-  }
-  if (isFiltering.value) {
-    return '搜索案例标题/步骤/预期等；编辑后失焦自动保存';
-  }
-  return '收起时隐藏根/系统/模块/测试要点/案例列；编辑后失焦自动保存';
-});
-
 const searchPlaceholder = computed(() =>
   requirementFilter.value
     ? '搜索当前要点下的案例'
@@ -380,6 +442,26 @@ const filteredIndices = computed(() =>
   }, []),
 );
 
+const filteredCaseNodeIds = computed(() =>
+  filteredIndices.value.map((index) => draftRows.value[index].caseNodeId),
+);
+
+const allFilteredSelected = computed(
+  () =>
+    filteredCaseNodeIds.value.length > 0
+    && filteredCaseNodeIds.value.every((id) => selectedCaseNodeIds.value.has(id)),
+);
+
+const someFilteredSelected = computed(() =>
+  filteredCaseNodeIds.value.some((id) => selectedCaseNodeIds.value.has(id)),
+);
+
+const canDeleteSelected = computed(
+  () => showRowSelection.value && selectedCaseNodeIds.value.size > 0,
+);
+
+const selectedCount = computed(() => selectedCaseNodeIds.value.size);
+
 const displayMerges = computed(() =>
   buildDisplayMerges(filteredIndices.value.map((index) => draftRows.value[index])),
 );
@@ -388,13 +470,44 @@ watch(
   () => props.tree,
   async () => {
     syncDraftFromTree();
-    requirementFilter.value = undefined;
-    caseKeyword.value = '';
+    pruneRowSelection();
+    if (pendingSelectCaseId.value) {
+      const caseNodeId = pendingSelectCaseId.value;
+      pendingSelectCaseId.value = null;
+      if (hierarchyCollapsed.value) {
+        selectedCaseNodeIds.value = new Set([caseNodeId]);
+      }
+      await nextTick();
+      scrollToCaseNodeId(caseNodeId);
+    }
     await nextTick();
     resizeAllTextareas();
   },
   { immediate: true },
 );
+
+watch(
+  () => store.activeRun?.id,
+  () => {
+    requirementFilter.value = undefined;
+    caseKeyword.value = '';
+    selectedCaseNodeIds.value = new Set();
+  },
+);
+
+watch(requirementFilter, () => {
+  selectedCaseNodeIds.value = new Set();
+});
+
+watch(caseKeyword, () => {
+  selectedCaseNodeIds.value = new Set();
+});
+
+watch(hierarchyCollapsed, (collapsed) => {
+  if (!collapsed) {
+    selectedCaseNodeIds.value = new Set();
+  }
+});
 
 watch([filteredIndices, hierarchyCollapsed], async () => {
   await nextTick();
@@ -412,7 +525,8 @@ function stickyStyle(column: ExcelColumn) {
   if (column.stickyLeft === undefined) {
     return undefined;
   }
-  return { left: `${column.stickyLeft}px` };
+  const offset = showRowSelection.value ? SELECT_COL_WIDTH : 0;
+  return { left: `${column.stickyLeft + offset}px` };
 }
 
 function thClass(column: ExcelColumn) {
@@ -523,8 +637,8 @@ function isEnumColumn(key: ExcelColumnKey) {
 function enumOptions(key: ExcelColumnKey): Array<{ label: string; value: CaseNature | CasePriority }> {
   if (key === 'caseNature') {
     return [
-      { label: '正向', value: '正向' },
-      { label: '反向', value: '反向' },
+      { label: '正', value: '正' },
+      { label: '反', value: '反' },
     ];
   }
   return [
@@ -561,6 +675,140 @@ function emitRowChange(rowIndex: number) {
   }
   emit('change', applyExcelRowToTree(props.tree, row));
 }
+
+function resolveAddContext(): CaseExcelRowPath | null {
+  if (selectedCaseNodeIds.value.size) {
+    const firstId = [...selectedCaseNodeIds.value][0];
+    const selected = draftRows.value.find((row) => row.caseNodeId === firstId);
+    if (selected?.requirement.trim()) {
+      return pickCaseExcelRowPath(selected);
+    }
+  }
+  if (requirementFilter.value) {
+    const matched = draftRows.value.find((row) => row.requirement === requirementFilter.value);
+    if (matched) {
+      return pickCaseExcelRowPath(matched);
+    }
+  }
+  const last = draftRows.value[draftRows.value.length - 1];
+  if (last?.requirement.trim()) {
+    return pickCaseExcelRowPath(last);
+  }
+  return null;
+}
+
+function isRowSelected(originalIndex: number) {
+  const caseNodeId = draftRows.value[originalIndex]?.caseNodeId;
+  return Boolean(caseNodeId && selectedCaseNodeIds.value.has(caseNodeId));
+}
+
+function toggleRowSelect(originalIndex: number, checked: boolean) {
+  const caseNodeId = draftRows.value[originalIndex]?.caseNodeId;
+  if (!caseNodeId) {
+    return;
+  }
+  const next = new Set(selectedCaseNodeIds.value);
+  if (checked) {
+    next.add(caseNodeId);
+  } else {
+    next.delete(caseNodeId);
+  }
+  selectedCaseNodeIds.value = next;
+}
+
+function toggleSelectAllFiltered(event: { target: { checked: boolean } }) {
+  const checked = event.target.checked;
+  const next = new Set(selectedCaseNodeIds.value);
+  for (const caseNodeId of filteredCaseNodeIds.value) {
+    if (checked) {
+      next.add(caseNodeId);
+    } else {
+      next.delete(caseNodeId);
+    }
+  }
+  selectedCaseNodeIds.value = next;
+}
+
+function pruneRowSelection() {
+  const validIds = new Set(draftRows.value.map((row) => row.caseNodeId));
+  selectedCaseNodeIds.value = new Set(
+    [...selectedCaseNodeIds.value].filter((id) => validIds.has(id)),
+  );
+}
+
+function scrollToCaseNodeId(caseNodeId: string) {
+  const originalIndex = draftRows.value.findIndex((row) => row.caseNodeId === caseNodeId);
+  if (originalIndex < 0) {
+    return;
+  }
+  const root = scrollEl.value;
+  if (!root) {
+    return;
+  }
+  const displayIndex = filteredIndices.value.indexOf(originalIndex);
+  if (displayIndex < 0) {
+    return;
+  }
+  const rowEl = root.querySelectorAll<HTMLTableRowElement>('tbody tr')[displayIndex];
+  rowEl?.scrollIntoView({ block: 'nearest' });
+}
+
+function openAddModal() {
+  if (!props.tree) {
+    return;
+  }
+  addModalInitialPath.value = resolveAddContext();
+  addModalOpen.value = true;
+}
+
+function handleAddCaseSubmit(path: CaseExcelRowPath, input: NewCaseRowInput) {
+  if (!props.tree) {
+    return;
+  }
+  const result = addCaseRowToTree(props.tree, path, input);
+  if (!result) {
+    message.error('无法添加案例，请检查归属层级是否完整');
+    return;
+  }
+  pendingSelectCaseId.value = result.caseNodeId;
+  emit('change', result.tree);
+  addModalOpen.value = false;
+}
+
+function deleteSelectedRows() {
+  if (!props.tree || !canDeleteSelected.value) {
+    message.warning('请先勾选要删除的案例');
+    return;
+  }
+  const ids = [...selectedCaseNodeIds.value];
+  const labels = ids.map((id) => {
+    const row = draftRows.value.find((item) => item.caseNodeId === id);
+    return row?.caseName || row?.caseTitle || '未命名案例';
+  });
+  const content =
+    ids.length === 1
+      ? `确定删除「${labels[0]}」吗？此操作不可撤销。`
+      : `确定删除已选 ${ids.length} 条案例吗？此操作不可撤销。`;
+  Modal.confirm({
+    title: '删除案例？',
+    content,
+    okText: '删除',
+    cancelText: '取消',
+    okType: 'danger',
+    centered: true,
+    onOk: () => {
+      let nextTree = props.tree!;
+      for (const caseNodeId of ids) {
+        const next = removeCaseFromTree(nextTree, caseNodeId);
+        if (next) {
+          nextTree = next;
+        }
+      }
+      selectedCaseNodeIds.value = new Set();
+      emit('change', nextTree);
+    },
+  });
+}
 </script>
 
 <style scoped>
@@ -580,39 +828,62 @@ function emitRowChange(rowIndex: number) {
   flex-shrink: 0;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 8px 12px;
   border-bottom: 1px solid #eaecf0;
   background: #f9fafb;
 }
 
 .excel-toolbar-row {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 8px 16px;
+  gap: 12px;
   width: 100%;
 }
 
-.excel-toolbar-left {
+.excel-toolbar-main {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 10px;
-  flex: 1 1 320px;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
+  overflow: hidden;
 }
 
-.excel-stat {
+.excel-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.excel-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #e4e7ec;
   color: var(--cf-text, #1d2939);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
+  line-height: 1;
   white-space: nowrap;
+}
+
+.excel-stat-pill--selected {
+  border-color: rgb(182 15 45 / 22%);
+  background: #fff4f6;
+  color: #b60f2d;
 }
 
 .excel-save-status {
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 24px;
   white-space: nowrap;
 }
 
@@ -621,9 +892,10 @@ function emitRowChange(rowIndex: number) {
 }
 
 .excel-filter-select {
-  min-width: 220px;
-  max-width: min(360px, 36vw);
-  flex: 1 1 220px;
+  width: 200px;
+  min-width: 140px;
+  flex: 1 1 160px;
+  max-width: 240px;
 }
 
 .excel-filter-select :deep(.ant-select-selection-item) {
@@ -635,6 +907,13 @@ function emitRowChange(rowIndex: number) {
 
 .excel-filter-select :deep(.ant-select-selector) {
   align-items: center;
+}
+
+.excel-search-input {
+  width: 168px;
+  min-width: 120px;
+  flex: 0 0 168px;
+  max-width: 200px;
 }
 
 .excel-requirement-preview {
@@ -666,19 +945,20 @@ function emitRowChange(rowIndex: number) {
   word-break: break-word;
 }
 
-.excel-search-input {
-  width: 220px;
-  flex: 1 1 180px;
-  max-width: 320px;
-}
-
 .excel-filter-empty {
   margin: 48px auto;
 }
 
-.excel-hint {
-  color: var(--cf-text-secondary, #667085);
-  font-size: 12px;
+@media (max-width: 960px) {
+  .excel-toolbar-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .excel-toolbar-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 
 .excel-scroll {
@@ -770,6 +1050,51 @@ function emitRowChange(rowIndex: number) {
 
 .excel-table tbody tr.row-alt td.td-case {
   background: #fcfcfd;
+}
+
+.excel-select-col {
+  width: 28px;
+  min-width: 28px;
+}
+
+.excel-table .th-select,
+.excel-table .td-select {
+  width: 28px;
+  min-width: 28px;
+  max-width: 28px;
+  left: 0;
+  padding: 0;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.excel-table .th-select :deep(.ant-checkbox-wrapper),
+.excel-table .td-select :deep(.ant-checkbox-wrapper) {
+  margin: 0;
+  padding: 0;
+  line-height: 1;
+}
+
+.excel-table .th-select :deep(.ant-checkbox),
+.excel-table .td-select :deep(.ant-checkbox) {
+  top: 0;
+  margin: 0;
+}
+
+.excel-table thead th.th-select {
+  background: #eef2f6;
+}
+
+.excel-table tbody td.td-select {
+  background: #fff;
+}
+
+.excel-table tbody tr.row-alt td.td-select {
+  background: #fcfcfd;
+}
+
+.excel-table tbody tr:hover td.td-select {
+  background: #fff9fa;
 }
 
 .excel-table tbody tr:hover td {

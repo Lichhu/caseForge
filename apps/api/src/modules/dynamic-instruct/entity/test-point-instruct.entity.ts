@@ -1,7 +1,7 @@
 /**
  * @file 测试要点动态指令主表实体（状态、自然语言、全量/追加标志）
  */
-import { TestPointEntity } from "@struct-doc/entity/test-point.entity";
+import type { TestPointEntity } from "@struct-doc/entity/test-point.entity";
 import {
   Column,
   CreateDateColumn,
@@ -40,10 +40,14 @@ export class TestPointInstructEntity {
   @Column()
   testPointId: string;
 
-  @OneToOne(() => TestPointEntity, (testPoint) => testPoint.instruct, {
-    onDelete: "CASCADE",
-    onUpdate: "CASCADE",
-  })
+  @OneToOne(
+    () => require("@struct-doc/entity/test-point.entity").TestPointEntity,
+    (testPoint: TestPointEntity) => testPoint.instruct,
+    {
+      onDelete: "CASCADE",
+      onUpdate: "CASCADE",
+    },
+  )
   @JoinColumn({ name: "testPointId" })
   testPoint: TestPointEntity;
 

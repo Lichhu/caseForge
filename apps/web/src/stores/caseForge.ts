@@ -871,12 +871,18 @@ export const useCaseForgeStore = defineStore('caseForge', {
       if (!this.activeProject || !this.activeRun) return;
       this.treeSaving = true;
       try {
-        this.activeRun = await saveRunTree(
+        const localTree = this.activeRun.tree;
+        const saved = await saveRunTree(
           this.activeProject.id,
           this.activeRun.id,
-          this.activeRun.tree,
+          localTree,
           this.activeRun.mindMapExtras,
         );
+        this.activeRun = {
+          ...this.activeRun,
+          ...saved,
+          tree: localTree,
+        };
         const index = this.activeProject.runs.findIndex((run) => run.id === this.activeRun?.id);
         if (index >= 0) {
           this.activeProject.runs[index] = this.activeRun;
