@@ -340,6 +340,10 @@ async function main() {
           testPointId: saved.id,
           status: item.status,
           naturalText: "演示约束：覆盖正常、异常与边界，断言数据一致性。",
+          generateError:
+            item.status === "生成失败"
+              ? "AI 未返回可解析的案例 JSON（演示数据）"
+              : null,
           isFull: true,
           isAppend: false,
         }),

@@ -1967,6 +1967,52 @@ textarea {
   pointer-events: none;
 }
 
+.test-point-card.generating.batch-card .ant-checkbox-wrapper,
+.test-point-card.generating.batch-card .generate-status-pill {
+  pointer-events: auto;
+}
+
+.test-point-card.generating .test-point-card-head {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  gap: 8px;
+}
+
+.test-point-card.generating.batch-card .test-point-card-head {
+  grid-template-columns: 20px minmax(0, 1fr);
+}
+
+.test-point-card.generating.batch-card .ant-checkbox-wrapper {
+  grid-row: 1;
+  grid-column: 1;
+}
+
+.test-point-card.generating.batch-card .test-point-card-title {
+  grid-row: 1;
+  grid-column: 2;
+}
+
+.test-point-card.generating.browse-card .test-point-card-title {
+  grid-row: 1;
+  grid-column: 1;
+}
+
+.test-point-card.generating .test-point-card-status {
+  grid-column: 1 / -1;
+  justify-content: flex-start;
+}
+
+.test-point-card.generating.batch-card .test-point-card-status {
+  padding-left: 32px;
+}
+
+.test-point-card.generating .generate-status-pill {
+  width: fit-content;
+  max-width: 100%;
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
 .scenario-prompt-table .ant-table-cell {
   vertical-align: top;
 }
@@ -2145,16 +2191,70 @@ textarea {
   color: #1849a9 !important;
 }
 
+.test-point-card-error {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #fecdca;
+  background: #fef3f2;
+  color: #b42318;
+  font-size: 12px;
+  line-height: 1.5;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  word-break: break-word;
+}
+
+.test-point-card-generate-eta {
+  margin: 8px 0 0;
+  padding: 0 2px;
+  color: #175cd3;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.editor-failure-banner {
+  margin-bottom: 4px;
+  padding: 12px 14px;
+  border: 1px solid #fecdca;
+  border-radius: var(--cf-radius);
+  background: linear-gradient(90deg, #fef3f2 0%, #fff8f7 100%);
+}
+
+.editor-failure-banner__content strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #b42318;
+  font-size: 13px;
+}
+
+.editor-failure-banner__content p {
+  margin: 0;
+  color: #912018;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.editor-hero + .editor-failure-banner {
+  margin-top: -8px;
+}
+
 .test-point-card-title {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
 .test-point-card-title strong {
   color: #1d2939;
   font-size: 14px;
   line-height: 1.4;
+  word-break: break-word;
 }
 
 .test-point-card-title small,
@@ -2334,6 +2434,39 @@ textarea {
 .scenario-maintain-modal .ant-modal-body {
   max-height: calc(100vh - 160px);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.scenario-maintain-modal .scenario-manager {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.scenario-save-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-right: auto;
+  color: #667085;
+  font-size: 13px;
+  line-height: 32px;
+}
+
+.scenario-save-status.is-dirty {
+  color: #b54708;
+}
+
+.scenario-save-status.is-saving {
+  color: #b60f2d;
+}
+
+.scenario-save-status.is-saved {
+  color: #027a48;
+}
+
+.scenario-save-status.is-error {
+  color: #b42318;
 }
 
 .scenario-manager {

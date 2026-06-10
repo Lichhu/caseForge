@@ -79,6 +79,7 @@ export interface TestPointInstructionItem {
   testPointDesc: string;
   status: '待编辑' | '已编辑' | '再编辑' | '生成中' | '生成失败' | '生成完成';
   naturalText: string;
+  generateError?: string;
   isFull: boolean;
   isAppend: boolean;
   promptIds: string[];
@@ -235,11 +236,51 @@ export async function generateCases(
   projectId: string,
   payload: { testPointIds?: string[]; model?: string },
 ) {
-  const isBatch = (payload.testPointIds?.length ?? 0) > 1;
   const { data } = await http.post<CaseForgeProject>(
     `/case-editor/projects/${projectId}/generate`,
     payload,
-    { timeout: isBatch ? 30_000 : GENERATE_CASES_TIMEOUT_MS },
+    { timeout: 30_000 },
+  );
+  return data;
+}
+
+export interface CaseGenerateQueueItemStatus {
+  testPointId: string;
+  jobId: string;
+  phase: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'none';
+  queuePosition: number;
+  queuedAhead: number;
+  runningAhead: number;
+  estimatedWaitSeconds: number;
+  estimatedRemainingSeconds: number;
+  elapsedSeconds: number;
+  averageRunSeconds: number;
+  concurrency: number;
+  globalQueuedCount: number;
+  globalRunningCount: number;
+  perUserMaxRunning?: number;
+  userQueuedAhead?: number;
+  errorMessage?: string;
+}
+
+export interface CaseGenerateQueueStatusResponse {
+  averageRunSeconds: number;
+  concurrency: number;
+  globalQueuedCount: number;
+  globalRunningCount: number;
+  slotWaitingCount: number;
+  items: CaseGenerateQueueItemStatus[];
+}
+
+export async function getGenerateQueueStatus(
+  projectId: string,
+  testPointIds?: string[],
+) {
+  const { data } = await http.get<CaseGenerateQueueStatusResponse>(
+    `/case-editor/projects/${projectId}/generate/queue`,
+    {
+      params: testPointIds?.length ? { testPointIds: testPointIds.join(',') } : undefined,
+    },
   );
   return data;
 }

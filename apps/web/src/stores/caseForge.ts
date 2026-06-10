@@ -19,6 +19,7 @@ import {
   deleteProject,
   deleteScenarioLibraryItem,
   generateCases,
+  getGenerateQueueStatus,
   getProject,
   getProjectStructDoc,
   getStructDocUploadStatus,
@@ -35,10 +36,12 @@ import {
   updateScenarioLibraryItem,
   uploadStructDocRequirement,
   type ProjectListItem,
+  type PromptLibraryItem,
   type ScenarioLibraryPayload,
   type ScenarioLibraryItem,
   type StructDocDetail,
   type TestPointInstructionItem,
+  type CaseGenerateQueueItemStatus,
 } from '@/api/client';
 import { sortTestPointsByStatus } from '@/utils/testPointStatusSort';
 import { isTestPointDefinitionComplete, testPointDefinitionLabel } from '@/utils/testPointDefinition';
@@ -51,6 +54,7 @@ const GENERATE_POLL_DELAYS_MS = [2000, 3000, 5000, 8000, 10000, 15000, 20000, 30
 const GENERATE_POLL_EXTENDED_DELAYS_MS = [
   30000, 30000, 45000, 60000, 60000, 90000, 90000, 120000,
 ];
+const GENERATE_QUEUE_POLL_INTERVAL_MS = 3000;
 
 type DynamicWorkspaceLoadOptions = {
   /** 默认 true；仅刷新测试要点列表时可设为 false */
@@ -61,6 +65,7 @@ type DynamicWorkspaceLoadOptions = {
 
 let inFlightDynamicWorkspaceLoad: Promise<void> | null = null;
 let inFlightTestPointsRefresh: Promise<void> | null = null;
+let generateQueuePollTimer: ReturnType<typeof setInterval> | null = null;
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => {
@@ -90,6 +95,8 @@ interface State {
   treeSaving: boolean;
   /** 已为该测试要点启动的结果轮询（防止 load 时重复开多条 poll） */
   pollingGenerateTestPointIds: string[];
+  /** 案例生成队列 ETA（按测试要点 ID 索引） */
+  generateQueueByTestPointId: Record<string, CaseGenerateQueueItemStatus>;
 }
 
 const stageStoragePrefix = 'case-forge:workspace-stage:';
@@ -112,6 +119,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
     batchGenerateProgress: null,
     treeSaving: false,
     pollingGenerateTestPointIds: [],
+    generateQueueByTestPointId: {},
     constraintDraft: {
       scenarioTags: ['positive', 'negative'],
       testDimensions: ['functional', 'interface', 'data'],
@@ -271,7 +279,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
       });
       return inFlightDynamicWorkspaceLoad;
     },
-    setWorkspaceStage(stage: WorkspaceStage) {
+    async setWorkspaceStage(stage: WorkspaceStage, options?: { refresh?: boolean }) {
       if (stage === 'constraints' && !this.structDoc?.canEnterDynamicInstruct) {
         message.warning('请先保存结构化需求文档后再进入动态指令');
         stage = 'document';
@@ -279,6 +287,60 @@ export const useCaseForgeStore = defineStore('caseForge', {
       this.workspaceStage = stage;
       if (this.activeProject) {
         localStorage.setItem(`${stageStoragePrefix}${this.activeProject.id}`, stage);
+      }
+      if (options?.refresh) {
+        await this.refreshWorkspaceStageData(stage);
+      }
+    },
+    /** 切换工作区阶段时，从服务端刷新当前页所需数据 */
+    async refreshWorkspaceStageData(stage: WorkspaceStage) {
+      if (!this.activeProject) {
+        return;
+      }
+      const projectId = this.activeProject.id;
+      try {
+        switch (stage) {
+          case 'document': {
+            const [project, structDoc] = await Promise.all([
+              getProject(projectId),
+              getProjectStructDoc(projectId),
+            ]);
+            this.activeProject = project;
+            this.structDoc = structDoc;
+            if (structDoc?.structuringStatus === 'processing') {
+              this.startStructuringPoll(projectId);
+            } else if (this.structuringPollProjectId === projectId) {
+              this.stopStructuringPoll();
+            }
+            break;
+          }
+          case 'constraints': {
+            this.structDoc = await getProjectStructDoc(projectId);
+            await this.loadDynamicWorkspace({ recoverOrphans: false });
+            this.syncGenerateQueuePolling();
+            break;
+          }
+          case 'workbench': {
+            const prevRunId = this.activeRun?.id;
+            const prevSelectedNodeId = this.selectedNodeId;
+            this.activeProject = await getProject(projectId);
+            const nextRun = this.activeProject.runs[0] || null;
+            this.activeRun = nextRun;
+            if (
+              nextRun &&
+              prevRunId === nextRun.id &&
+              prevSelectedNodeId &&
+              findNode(nextRun.tree, prevSelectedNodeId)
+            ) {
+              this.selectedNodeId = prevSelectedNodeId;
+            } else {
+              this.selectedNodeId = nextRun?.tree.id || '';
+            }
+            break;
+          }
+        }
+      } catch (error) {
+        message.warning((error as Error)?.message || '刷新页面数据失败，请稍后重试');
       }
     },
     async removeProject(projectId: string) {
@@ -584,18 +646,69 @@ export const useCaseForgeStore = defineStore('caseForge', {
       if (this.pollingGenerateTestPointIds.includes(testPointId)) {
         return;
       }
-      if (this.generatingTestPointIds.includes(testPointId)) {
-        return;
-      }
       this.pollingGenerateTestPointIds = [
         ...this.pollingGenerateTestPointIds,
         testPointId,
       ];
+      this.startGenerateQueuePolling([testPointId]);
       void this.pollGenerateOutcome(testPointId, testPointLabel, projectId).finally(() => {
         this.pollingGenerateTestPointIds = this.pollingGenerateTestPointIds.filter(
           (id) => id !== testPointId,
         );
+        this.syncGenerateQueuePolling();
       });
+    },
+    startGenerateQueuePolling(testPointIds?: string[]) {
+      const ids =
+        testPointIds?.length
+          ? [...new Set(testPointIds)]
+          : this.testPoints.filter((item) => item.status === '生成中').map((item) => item.id);
+      if (!ids.length) {
+        this.stopGenerateQueuePolling();
+        return;
+      }
+      void this.refreshGenerateQueueStatus(ids);
+      if (generateQueuePollTimer) {
+        return;
+      }
+      generateQueuePollTimer = window.setInterval(() => {
+        void this.syncGenerateQueuePolling();
+      }, GENERATE_QUEUE_POLL_INTERVAL_MS);
+    },
+    syncGenerateQueuePolling() {
+      const ids = this.testPoints.filter((item) => item.status === '生成中').map((item) => item.id);
+      if (!ids.length) {
+        this.stopGenerateQueuePolling();
+        return;
+      }
+      void this.refreshGenerateQueueStatus(ids);
+    },
+    stopGenerateQueuePolling() {
+      if (generateQueuePollTimer) {
+        window.clearInterval(generateQueuePollTimer);
+        generateQueuePollTimer = null;
+      }
+      this.generateQueueByTestPointId = {};
+    },
+    async refreshGenerateQueueStatus(testPointIds: string[]) {
+      if (!this.activeProject || !testPointIds.length) {
+        return;
+      }
+      try {
+        const status = await getGenerateQueueStatus(this.activeProject.id, testPointIds);
+        const next: Record<string, CaseGenerateQueueItemStatus> = {
+          ...this.generateQueueByTestPointId,
+        };
+        for (const id of testPointIds) {
+          delete next[id];
+        }
+        for (const item of status.items) {
+          next[item.testPointId] = item;
+        }
+        this.generateQueueByTestPointId = next;
+      } catch {
+        // 队列状态查询失败时不打断生成流程
+      }
     },
     async markGenerateFailed(testPointId: string) {
       await this.saveTestPointInstruction(testPointId, { status: '生成失败' }, { silent: true });
@@ -618,6 +731,14 @@ export const useCaseForgeStore = defineStore('caseForge', {
         const outcome = await this.fetchGenerateOutcome(testPointId);
         if (outcome === 'completed') {
           this.unmarkGeneratingTestPoints([testPointId]);
+          await this.refreshTestPoints({ force: true });
+          try {
+            this.activeProject = await getProject(projectId);
+            this.activeRun = this.activeProject.runs[0] || null;
+            this.selectedNodeId = this.activeRun?.tree.id || '';
+          } catch {
+            // 刷新项目失败时仍以列表状态为准
+          }
           message.success(`「${testPointLabel}」案例已生成`);
           if (this.activeProject?.runs.length) {
             this.setWorkspaceStage('workbench');
@@ -626,6 +747,11 @@ export const useCaseForgeStore = defineStore('caseForge', {
         }
         if (outcome === 'failed') {
           this.unmarkGeneratingTestPoints([testPointId]);
+          await this.refreshTestPoints({ force: true });
+          const failed = this.testPoints.find((item) => item.id === testPointId);
+          if (failed) {
+            message.error(`「${testPointLabel}」生成失败：${failed.generateError?.trim() || '请稍后重试'}`);
+          }
           return;
         }
         if (outcome === 'unknown') {
@@ -642,13 +768,30 @@ export const useCaseForgeStore = defineStore('caseForge', {
       const outcome = await this.fetchGenerateOutcome(testPointId);
       if (outcome === 'completed') {
         this.unmarkGeneratingTestPoints([testPointId]);
+        await this.refreshTestPoints({ force: true });
+        try {
+          this.activeProject = await getProject(projectId);
+          this.activeRun = this.activeProject.runs[0] || null;
+          this.selectedNodeId = this.activeRun?.tree.id || '';
+        } catch {
+          // 刷新项目失败时仍以列表状态为准
+        }
         message.success(`「${testPointLabel}」案例已生成`);
         if (this.activeProject?.runs.length) {
           this.setWorkspaceStage('workbench');
         }
         return;
       }
-      if (outcome === 'failed' || outcome === 'unknown') {
+      if (outcome === 'failed') {
+        this.unmarkGeneratingTestPoints([testPointId]);
+        await this.refreshTestPoints({ force: true });
+        const failed = this.testPoints.find((item) => item.id === testPointId);
+        if (failed) {
+          message.error(`「${testPointLabel}」生成失败：${failed.generateError?.trim() || '请稍后重试'}`);
+        }
+        return;
+      }
+      if (outcome === 'unknown') {
         this.unmarkGeneratingTestPoints([testPointId]);
         return;
       }
@@ -665,6 +808,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
         return;
       }
       const projectId = this.activeProject.id;
+      this.startGenerateQueuePolling(orphans.map((item) => item.id));
       for (const item of orphans) {
         this.scheduleGeneratePoll(item.id, item.testPoint, projectId);
       }
@@ -731,9 +875,10 @@ export const useCaseForgeStore = defineStore('caseForge', {
       try {
         await generateCases(projectId, { testPointIds: selectedIds });
         await this.refreshTestPoints({ force: true });
+        this.startGenerateQueuePolling(selectedIds);
         this.schedulePollForGenerating(selectedIds);
         message.info(
-          `已为 ${selectedIds.length} 条测试要点标记「生成中」，后台依次生成，可随时刷新查看进度`,
+          `已为 ${selectedIds.length} 条测试要点提交生成任务，可在列表中查看排队与预计耗时`,
         );
       } catch (error) {
         message.error((error as Error)?.message || '批量生成提交失败');
@@ -757,44 +902,18 @@ export const useCaseForgeStore = defineStore('caseForge', {
       this.markGeneratingTestPoints([testPointId]);
       const projectId = this.activeProject.id;
       try {
-        this.activeProject = await generateCases(projectId, {
+        await generateCases(projectId, {
           testPointIds: [testPointId],
         });
-        this.activeRun = this.activeProject.runs[0] || null;
-        this.selectedNodeId = this.activeRun?.tree.id || '';
-        if (!options?.deferSidebarRefresh) {
-          await this.refreshProjects();
-          await this.loadDynamicWorkspace();
-        }
+        await this.refreshTestPoints({ force: true });
+        this.scheduleGeneratePoll(testPointId, current.testPoint, projectId);
         if (!options?.quiet) {
-          message.success(`「${current.testPoint}」案例已生成`);
-          if (this.activeProject?.runs.length) {
-            this.setWorkspaceStage('workbench');
-          }
+          message.info(`「${current.testPoint}」已提交生成，可在列表中查看排队与预计耗时`);
         }
       } catch (error) {
-        const outcome = await this.fetchGenerateOutcome(testPointId);
-        if (outcome === 'completed') {
-          if (!options?.quiet) {
-            message.success(`「${current.testPoint}」案例已生成`);
-            if (this.activeProject.runs.length) {
-              this.setWorkspaceStage('workbench');
-            }
-          }
-          return;
-        }
-        if (outcome === 'pending') {
-          this.scheduleGeneratePoll(testPointId, current.testPoint, projectId);
-          return;
-        }
-        if (!options?.quiet) {
-          const reason = (error as Error)?.message || '生成失败';
-          const hint = reason.includes('timeout') || reason.includes('超时') ? '（请求超时）' : '';
-          message.error(`「${current.testPoint}」生成失败${hint}：${reason}`);
-        }
+        message.error((error as Error)?.message || '提交生成失败');
       } finally {
         this.unmarkGeneratingTestPoints([testPointId]);
-        await this.refreshTestPoints({ force: true });
       }
     },
     async saveTestPointBundle(
@@ -984,7 +1103,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
         await this.refreshTestPoints({ force: true });
       } else {
         this.applyLocalTestPointDefinitions(testPoints);
-        void this.refreshTestPoints({ force: true });
+        await this.refreshTestPoints({ force: true });
       }
       message.success(options?.successMessage ?? '测试要点已保存');
       await this.bumpSidebarProjectOrder();
@@ -1017,7 +1136,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
       const normalized = normalizeScenarioLibraryItem(saved);
       const index = this.scenarios.findIndex((scenario) => scenario.id === normalized.id);
       if (index >= 0) {
-        this.scenarios.splice(index, 1, normalized);
+        applyScenarioLibraryItemInPlace(this.scenarios[index], normalized);
       } else {
         this.scenarios.unshift(normalized);
       }
@@ -1079,6 +1198,32 @@ function isEnabledFlag(value: unknown) {
     return normalized === '1' || normalized === 'true';
   }
   return Boolean(value);
+}
+
+function applyPromptListInPlace(local: PromptLibraryItem[], saved: PromptLibraryItem[]) {
+  saved.forEach((savedPrompt, index) => {
+    if (local[index]) {
+      Object.assign(local[index], savedPrompt);
+      return;
+    }
+    local.push({ ...savedPrompt });
+  });
+  if (local.length > saved.length) {
+    local.splice(saved.length);
+  }
+}
+
+function applyScenarioLibraryItemInPlace(
+  target: ScenarioLibraryItem,
+  saved: ScenarioLibraryItem,
+) {
+  target.name = saved.name;
+  target.description = saved.description;
+  target.category = saved.category;
+  target.isActive = saved.isActive;
+  if (saved.prompts !== undefined) {
+    applyPromptListInPlace(target.prompts, saved.prompts);
+  }
 }
 
 function normalizeScenarioLibraryItem(scenario: ScenarioLibraryItem): ScenarioLibraryItem {

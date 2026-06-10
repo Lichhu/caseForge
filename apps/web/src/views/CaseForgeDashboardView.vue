@@ -92,9 +92,9 @@ function canOpenStage(stage: WorkspaceStage) {
   return Boolean(store.structDoc?.canEnterDynamicInstruct);
 }
 
-function switchStage(stage: WorkspaceStage) {
+async function switchStage(stage: WorkspaceStage) {
   if (!canOpenStage(stage)) return;
-  store.setWorkspaceStage(stage);
+  await store.setWorkspaceStage(stage, { refresh: true });
   scheduleViewportRefresh();
 }
 

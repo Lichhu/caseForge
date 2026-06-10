@@ -149,7 +149,7 @@
         </p>
       </template>
       <div v-if="store.structDoc?.canEnterDynamicInstruct" class="action-toolbar">
-        <a-button type="primary" @click="store.setWorkspaceStage('constraints')">
+        <a-button type="primary" @click="goToConstraints">
           去动态指令
         </a-button>
       </div>
@@ -239,10 +239,15 @@ interface InspectorChildSummary {
 }
 
 const store = useCaseForgeStore();
-const viewMode = ref<'xmind' | 'excel'>('xmind');
+
+async function goToConstraints() {
+  await store.setWorkspaceStage('constraints', { refresh: true });
+}
+
+const viewMode = ref<'xmind' | 'excel'>('excel');
 const viewModeOptions = [
-  { label: 'XMind', value: 'xmind' },
   { label: 'Excel', value: 'excel' },
+  { label: 'XMind', value: 'xmind' },
 ];
 const mindContainer = ref<HTMLDivElement | null>(null);
 const mind = shallowRef<MindElixirInstance | null>(null);
@@ -634,6 +639,10 @@ watch(viewMode, async (mode) => {
   if (mode === 'xmind') {
     needsMindRemount.value = true;
     await scheduleMindMapPaint();
+    await nextTick();
+    requestAnimationFrame(() => {
+      fitMap();
+    });
   } else {
     syncTreeFromMind();
   }
@@ -829,13 +838,8 @@ function shouldCompactTree(tree: CaseTreeNode) {
   return countCaseNodes(tree) > compactNodeThreshold;
 }
 
-function resetInitialViewport(compact: boolean) {
+function resetInitialViewport(_compact?: boolean) {
   if (!mind.value) return;
-  if (compact) {
-    mind.value.scale(0.85);
-    mind.value.toCenter();
-    return;
-  }
   mind.value.scaleFit();
 }
 

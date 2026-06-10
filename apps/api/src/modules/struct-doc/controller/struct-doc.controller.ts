@@ -92,10 +92,10 @@ export class StructDocController {
     });
   }
 
-  /** 异步触发 AI Workflow 结构化需求文档。 */
+  /** 异步触发 AI Chat 结构化需求文档。 */
   @Post(":projectId/document/structure")
   @HttpCode(202)
-  @ApiOperation({ summary: "异步调用 AI Workflow 结构化需求文档" })
+  @ApiOperation({ summary: "异步调用 AI Chat 结构化需求文档" })
   startStructRequirement(@Param("projectId") projectId: string) {
     return this.structDocService.startStructRequirement(projectId);
   }

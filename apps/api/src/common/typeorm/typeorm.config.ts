@@ -22,6 +22,7 @@ export function createTypeOrmConfig(
     username: appConfig.typeOrm.username,
     password: appConfig.typeOrm.password,
     database: appConfig.typeOrm.database,
+    charset: "utf8mb4",
     synchronize:
       appConfig.nodeEnv === "development" || appConfig.nodeEnv === "local",
     entities: [join(__dirname, "../../**/entity/*.js")],

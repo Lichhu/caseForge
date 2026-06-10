@@ -85,6 +85,23 @@ export class CaseEditorController {
     return this.workspaceService.cancelGenerateCases(projectId, dto);
   }
 
+  /** 查询案例生成队列进度与 ETA */
+  @Get("projects/:projectId/generate/queue")
+  @ApiOperation({ summary: "查询案例生成队列进度" })
+  getGenerateQueueStatus(
+    @Param("projectId") projectId: string,
+    @Query("testPointIds") testPointIdsRaw?: string,
+  ) {
+    const testPointIds = (testPointIdsRaw || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    return this.workspaceService.getGenerateQueueStatus(
+      projectId,
+      testPointIds.length ? testPointIds : undefined,
+    );
+  }
+
   /** 局部重生成案例节点 */
   @Post("projects/:projectId/regenerate-node")
   @ApiOperation({ summary: "局部重生成案例节点" })

@@ -54,9 +54,116 @@ export function parseStructuredDoc(markdown: string): ParsedTestPoint[] {
   return [];
 }
 
+/** 清洗 AI 结构化 Markdown：去 thinking 标签、统一测试要点条目格式 */
+export function sanitizeStructuredMarkdown(markdown: string): string {
+  const normalized = normalizeStructuredMarkdown(markdown);
+  return normalizeStructuredTestPointLines(normalized).trim();
+}
+
 function normalizeStructuredMarkdown(markdown: string) {
   const fenced = markdown.match(/^```(?:markdown|md)?\s*([\s\S]*?)\s*```$/i);
-  return (fenced ? fenced[1] : markdown).replace(/\r\n/g, "\n").trim();
+  const unfenced = (fenced ? fenced[1] : markdown).replace(/\r\n/g, "\n").trim();
+  return stripAiThinkingTags(unfenced);
+}
+
+function stripAiThinkingTags(text: string) {
+  return text
+    .replace(
+      /<redacted[_-]?thinking\b[^>]*>[\s\S]*?<\/redacted[_-]?thinking>/gi,
+      "",
+    )
+    .replace(/<thinking\b[^>]*>[\s\S]*?<\/thinking>/gi, "")
+    .replace(/<thought\b[^>]*>[\s\S]*?<\/thought>/gi, "")
+    .replace(/<redacted[_-]?thinking\b[^>]*>[^\n]*/gi, "")
+    .replace(/<\/redacted[_-]?thinking>/gi, "")
+    .replace(/<thinking\b[^>]*>[^\n]*/gi, "")
+    .replace(/<\/thinking>/gi, "")
+    .replace(/<thought\b[^>]*>[^\n]*/gi, "")
+    .replace(/<\/thought>/gi, "")
+    .trim();
+}
+
+const TEST_POINT_SECTION_HEADER =
+  /^(?:#{1,5}\s*)?(?:\*\*)?测试要点(?:\*\*)?[：:]?\s*$/;
+const TEST_POINT_SECTION_BOUNDARY =
+  /^(?:#{1,5}\s*)?(?:\*\*)?(?:功能模块|系统|涉及终端|业务规则|系统交互)(?:\*\*)?[：:]?/;
+
+function normalizeStructuredTestPointLines(markdown: string) {
+  const lines = markdown.split("\n");
+  const output: string[] = [];
+  let inTestPointSection = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (TEST_POINT_SECTION_HEADER.test(trimmed)) {
+      inTestPointSection = true;
+      output.push(line);
+      continue;
+    }
+
+    if (inTestPointSection && isTestPointSectionBoundary(trimmed)) {
+      inTestPointSection = false;
+    }
+
+    output.push(
+      inTestPointSection ? normalizeTestPointListLine(line) : line,
+    );
+  }
+
+  return output.join("\n");
+}
+
+function isTestPointSectionBoundary(line: string) {
+  if (!line) {
+    return false;
+  }
+  if (/^---+\s*$/.test(line)) {
+    return true;
+  }
+  if (/^#{1,2}\s+/.test(line)) {
+    return true;
+  }
+  return TEST_POINT_SECTION_BOUNDARY.test(line);
+}
+
+function normalizeTestPointListLine(line: string) {
+  const labeledInline = line.match(
+    /^(\s*\d+[.、．)]\s*)\*\*测试要点描述\*\*[：:]\s*(.+)$/,
+  );
+  if (labeledInline) {
+    const title = cleanText(labeledInline[2]);
+    if (!title) {
+      return line;
+    }
+    return `${labeledInline[1]}**测试要点描述**：${title}`;
+  }
+
+  if (/^\s*\d+[.、．)]\s*\*\*测试要点描述\*\*\s*$/.test(line)) {
+    return line;
+  }
+
+  const boldTitle = line.match(/^(\s*\d+[.、．)]\s*)\*\*([^*]+)\*\*\s*$/);
+  if (boldTitle) {
+    const label = cleanText(boldTitle[2]);
+    if (
+      label &&
+      label !== TEST_POINT_DESC_LABEL &&
+      label !== "验证点" &&
+      label !== "测试方法"
+    ) {
+      return `${boldTitle[1]}**测试要点描述**：${label}`;
+    }
+  }
+
+  const plainNumbered = line.match(/^(\s*\d+[.、．)]\s*)(.+)$/);
+  if (plainNumbered && !plainNumbered[2].includes("**")) {
+    const title = cleanText(plainNumbered[2]);
+    if (title && !/^测试要点描述[：:]/i.test(title)) {
+      return `${plainNumbered[1]}**测试要点描述**：${title}`;
+    }
+  }
+
+  return line;
 }
 
 /** 纯文本 / Markdown 标签行，如「#### 功能模块：」「**测试要点描述**：」 */
@@ -73,7 +180,7 @@ const PLAIN_FEATURE_MODULE_PATTERN = plainLabelPattern("功能模块");
 const PLAIN_SYSTEM_PATTERN = plainLabelPattern("系统", "m");
 
 /**
- * 解析 Dify 等返回的纯文本结构（无 # 标题，测试要点为「测试要点描述 / 验证点 / 测试方法」）
+ * 解析旧版纯文本结构（无 # 标题，测试要点为「测试要点描述 / 验证点 / 测试方法」）
  */
 function parsePlainTextStructuredDoc(text: string) {
   const moduleMatches = [...text.matchAll(PLAIN_FEATURE_MODULE_PATTERN)];

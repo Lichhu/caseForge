@@ -31,17 +31,8 @@ export interface AppConfig {
     publicBaseUrl: string;
   };
   aiWorkflow: {
-    isExternalNetwork: boolean;
-    invokeUrl: string;
-    stopUrl: string;
-    workflowId: string;
     reqDocSkillUrl: string;
     caseDocPromoteUrl: string;
-    dify: {
-      workflowUrl: string;
-      apiKey: string;
-      user: string;
-    };
     aiChat: {
       url: string;
       model: string;

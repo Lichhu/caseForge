@@ -73,7 +73,7 @@
                 @click.stop
               >
                 <LoadingOutlined spin class="generate-status-pill__icon" />
-                <span class="generate-status-pill__label">生成中</span>
+                <span class="generate-status-pill__label">{{ generateProgressTitle(item.id) }}</span>
                 <span class="generate-status-pill__sep" aria-hidden="true" />
                 <button
                   type="button"
@@ -87,6 +87,12 @@
               <a-tag v-else :color="statusColor(item.status)">{{ item.status }}</a-tag>
             </div>
           </div>
+          <p
+            v-if="isTestPointLocked(item) && generateProgressSubtitle(item.id)"
+            class="test-point-card-generate-eta"
+          >
+            {{ generateProgressSubtitle(item.id) }}
+          </p>
         </article>
         </div>
       </div>
@@ -193,12 +199,27 @@
             </a-tag>
           </div>
 
+          <div
+            v-if="activeRow.status === '生成失败'"
+            class="editor-failure-banner"
+          >
+            <div class="editor-failure-banner__content">
+              <strong>案例生成失败</strong>
+              <p>{{ testPointFailureReason(activeRow) }}</p>
+            </div>
+          </div>
+
           <div v-if="editingDisabled" class="editor-generating-banner">
             <div class="editor-generating-banner__content">
               <LoadingOutlined spin class="editor-generating-banner__icon" />
               <div>
-                <strong>正在生成测试案例</strong>
-                <p>可切换其他要点或维护场景；不需要时可停止生成。</p>
+                <strong>{{ generateProgressTitle(activeRow.id) }}</strong>
+                <p>
+                  {{
+                    generateProgressSubtitle(activeRow.id) ||
+                    '可切换其他要点或维护场景；不需要时可停止生成。'
+                  }}
+                </p>
               </div>
             </div>
             <a-button
@@ -410,7 +431,7 @@
             :scroll="{ y: promptTableScrollY }"
             :data-source="activeScenarioPrompts"
             :columns="promptColumns"
-            row-key="id"
+            :row-key="(record: ScenarioLibraryItem['prompts'][number]) => getPromptRowKey(record.id)"
           >
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'content'">
@@ -422,7 +443,7 @@
                   placeholder="请输入提示词内容"
                   @update:value="(value: string) => handlePromptContentInput(record.id, value)"
                   @focus="promptEditScenarioId = editingScenarioId"
-                  @blur="flushPromptSave(record, promptEditScenarioId)"
+                  @blur="flushPromptSave(record, promptEditScenarioId, { notify: false })"
                 />
               </template>
               <template v-else-if="column.key === 'isActive'">
@@ -444,12 +465,27 @@
           <a-empty v-else class="scenario-prompt-empty" description="请先在左侧新增或选择场景" />
         </section>
       </div>
+      <div class="scenario-manager-footer">
+        <span class="scenario-save-status" :class="scenarioSaveStatusClass">
+          {{ scenarioSaveStatusText }}
+        </span>
+        <a-button @click="closeScenarioModal">关闭</a-button>
+        <a-button
+          type="primary"
+          :loading="scenarioSaveUi === 'saving'"
+          :disabled="!activeScenario || (!activeScenarioDirty && scenarioSaveUi !== 'error')"
+          @click="saveActiveScenarioManual"
+        >
+          <template #icon><SaveOutlined /></template>
+          保存
+        </a-button>
+      </div>
     </a-modal>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { message, Modal } from 'ant-design-vue';
 import type { TableColumnsType } from 'ant-design-vue';
 import {
@@ -467,6 +503,7 @@ import {
   isTestPointDefinitionComplete,
   testPointDefinitionLabel,
 } from '@/utils/testPointDefinition';
+import { formatDurationSeconds } from '@/utils/formatDuration';
 
 const IMMERSIVE_OVERLAY_Z_INDEX = 2600;
 const SCENARIO_AUTO_SAVE_DELAY_MS = 600;
@@ -535,6 +572,10 @@ const scenarioNameSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const promptSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const scenarioNameLastSaved = new Map<string, string>();
 const promptContentLastSaved = new Map<string, string>();
+const promptStableKeys = new Map<string, string>();
+type ScenarioSaveUiState = 'idle' | 'saving' | 'saved' | 'error';
+const scenarioSaveUi = ref<ScenarioSaveUiState>('idle');
+let scenarioSavedFadeTimer: ReturnType<typeof setTimeout> | undefined;
 
 function syncPromptTableScrollY() {
   const el = promptTableWrapRef.value;
@@ -555,11 +596,17 @@ watch(scenarioModalOpen, async (open) => {
     promptTableResizeObserver?.disconnect();
     promptTableResizeObserver = undefined;
     await flushPendingScenarioSaves();
-    await store.loadScenarioLibrary();
+    scenarioSaveUi.value = 'idle';
+    if (scenarioSavedFadeTimer) {
+      clearTimeout(scenarioSavedFadeTimer);
+      scenarioSavedFadeTimer = undefined;
+    }
     configureAppMessage();
     return;
   }
   configureScenarioModalMessage();
+  store.scenarios.forEach((scenario) => syncScenarioSaveSnapshots(scenario.id));
+  scenarioSaveUi.value = 'idle';
   await nextTick();
   syncPromptTableScrollY();
   bindPromptTableResizeObserver();
@@ -569,6 +616,12 @@ watch(editingScenarioId, async () => {
   if (!scenarioModalOpen.value) return;
   await nextTick();
   syncPromptTableScrollY();
+});
+
+onActivated(() => {
+  void nextTick(() => {
+    window.dispatchEvent(new Event('resize'));
+  });
 });
 
 onBeforeUnmount(() => {
@@ -608,6 +661,26 @@ const activeScenario = computed(() =>
 );
 
 const activeScenarioPrompts = computed(() => activeScenario.value?.prompts ?? []);
+
+const activeScenarioDirty = computed(() => {
+  const scenario = activeScenario.value;
+  return scenario ? isScenarioDirty(scenario) : false;
+});
+
+const scenarioSaveStatusText = computed(() => {
+  if (scenarioSaveUi.value === 'saving') return '保存中…';
+  if (scenarioSaveUi.value === 'error') return '保存失败，请重试';
+  if (scenarioSaveUi.value === 'saved') return '已保存';
+  if (activeScenarioDirty.value) return '有未保存的修改';
+  return '已全部保存';
+});
+
+const scenarioSaveStatusClass = computed(() => ({
+  'is-saving': scenarioSaveUi.value === 'saving',
+  'is-saved': scenarioSaveUi.value === 'saved',
+  'is-dirty': activeScenarioDirty.value && scenarioSaveUi.value === 'idle',
+  'is-error': scenarioSaveUi.value === 'error',
+}));
 
 const enabledScenarios = computed(() =>
   store.scenarios
@@ -862,6 +935,52 @@ function statusColor(status: TestPointInstructionItem['status']) {
   return colors[status];
 }
 
+function testPointFailureReason(item: TestPointInstructionItem) {
+  return item.generateError?.trim() || '案例生成失败，请稍后重试';
+}
+
+function generateQueueItem(testPointId: string) {
+  return store.generateQueueByTestPointId[testPointId];
+}
+
+function generateProgressTitle(testPointId: string) {
+  const queue = generateQueueItem(testPointId);
+  if (queue?.phase === 'queued') {
+    return queue.queuePosition > 1 ? `排队中 · 第 ${queue.queuePosition} 位` : '排队中';
+  }
+  if (queue?.phase === 'running') {
+    return '生成中';
+  }
+  return '生成中';
+}
+
+function generateProgressSubtitle(testPointId: string) {
+  const queue = generateQueueItem(testPointId);
+  if (!queue) {
+    return '';
+  }
+  if (queue.phase === 'queued') {
+    if (queue.estimatedWaitSeconds > 0) {
+      const userHint =
+        queue.userQueuedAhead && queue.userQueuedAhead > 0
+          ? `（您前面还有 ${queue.userQueuedAhead} 条）`
+          : '';
+      return `预计 ${formatDurationSeconds(queue.estimatedWaitSeconds)} 后开始${userHint}`;
+    }
+    if (queue.globalRunningCount >= queue.concurrency) {
+      return `全站 ${queue.globalRunningCount} 路生成中，公平排队`;
+    }
+    return '即将开始生成';
+  }
+  if (queue.phase === 'running') {
+    if (queue.estimatedRemainingSeconds > 0) {
+      return `预计还需 ${formatDurationSeconds(queue.estimatedRemainingSeconds)}`;
+    }
+    return `已进行 ${formatDurationSeconds(queue.elapsedSeconds)}`;
+  }
+  return '';
+}
+
 function buildInstructionPayload(generateNow: boolean) {
   const statusSource = batchMode.value
     ? selectedRows.value[0]?.status
@@ -953,6 +1072,11 @@ async function saveSelection(generateNow: boolean) {
     if (generateNow) {
       store.markGeneratingTestPoints(targetIds);
       void store.generate(targetIds);
+      if (batchMode.value) {
+        batchMode.value = false;
+        activeTestPointId.value = targetIds[0];
+        store.setSelectedTestPointIds([targetIds[0]]);
+      }
     }
   } catch (error) {
     message.error((error as Error)?.message || '保存或生成失败');
@@ -1050,13 +1174,14 @@ async function addTestPoint() {
 }
 
 function selectScenario(scenarioId: string) {
-  if (!scenarioId) {
+  if (!scenarioId || editingScenarioId.value === scenarioId) {
     return;
   }
-  if (editingScenarioId.value !== scenarioId) {
+  void (async () => {
+    await flushActiveScenarioPendingSaves();
     editingScenarioId.value = scenarioId;
     promptEditScenarioId.value = scenarioId;
-  }
+  })();
 }
 
 function openScenarioModal() {
@@ -1064,6 +1189,10 @@ function openScenarioModal() {
   const firstId = store.scenarios[0]?.id || '';
   editingScenarioId.value = firstId;
   promptEditScenarioId.value = firstId;
+}
+
+async function closeScenarioModal() {
+  scenarioModalOpen.value = false;
 }
 
 defineExpose({
@@ -1091,11 +1220,74 @@ function promptSaveKey(scenarioId: string, promptId: string) {
   return `${scenarioId}:${promptId}`;
 }
 
+function ensurePromptStableKey(promptId: string) {
+  if (!promptStableKeys.has(promptId)) {
+    promptStableKeys.set(promptId, promptId);
+  }
+}
+
+function getPromptRowKey(promptId: string) {
+  return promptStableKeys.get(promptId) ?? promptId;
+}
+
+function linkPromptStableKey(fromId: string, toId: string) {
+  if (fromId === toId) {
+    return;
+  }
+  const stable = promptStableKeys.get(fromId) ?? fromId;
+  promptStableKeys.set(toId, stable);
+}
+
+function isScenarioDirty(scenario: ScenarioLibraryItem) {
+  const name = scenario.name.trim();
+  if (scenarioNameLastSaved.get(scenario.id) !== name) {
+    return true;
+  }
+  return scenario.prompts.some((prompt) => {
+    const key = promptSaveKey(scenario.id, prompt.id);
+    return promptContentLastSaved.get(key) !== prompt.content.trim();
+  });
+}
+
+function markScenarioAutoSaved() {
+  scenarioSaveUi.value = 'saved';
+  if (scenarioSavedFadeTimer) {
+    clearTimeout(scenarioSavedFadeTimer);
+  }
+  scenarioSavedFadeTimer = setTimeout(() => {
+    if (scenarioSaveUi.value === 'saved') {
+      scenarioSaveUi.value = 'idle';
+    }
+  }, 2500);
+}
+
+function migratePromptKeysAfterSave(
+  scenarioId: string,
+  prevPromptIds: string[],
+  savedPrompts: ScenarioLibraryItem['prompts'],
+) {
+  savedPrompts.forEach((savedPrompt, index) => {
+    const prevId = prevPromptIds[index];
+    if (!prevId || prevId === savedPrompt.id) {
+      ensurePromptStableKey(savedPrompt.id);
+      return;
+    }
+    linkPromptStableKey(prevId, savedPrompt.id);
+    const oldKey = promptSaveKey(scenarioId, prevId);
+    const content = promptContentLastSaved.get(oldKey);
+    if (content !== undefined) {
+      promptContentLastSaved.delete(oldKey);
+      promptContentLastSaved.set(promptSaveKey(scenarioId, savedPrompt.id), content);
+    }
+  });
+}
+
 function syncScenarioSaveSnapshots(scenarioId: string) {
   const scenario = store.scenarios.find((item) => item.id === scenarioId);
   if (!scenario) return;
   scenarioNameLastSaved.set(scenarioId, scenario.name.trim());
   scenario.prompts.forEach((prompt) => {
+    ensurePromptStableKey(prompt.id);
     promptContentLastSaved.set(promptSaveKey(scenarioId, prompt.id), prompt.content.trim());
   });
 }
@@ -1109,6 +1301,9 @@ function clearScenarioAutoSaveTimers() {
 
 function handleScenarioNameInput(item: ScenarioLibraryItem, value: string) {
   item.name = clipText(value, FIELD_LIMITS.scenarioName);
+  if (scenarioSaveUi.value === 'saved') {
+    scenarioSaveUi.value = 'idle';
+  }
   if (scenarioNameSaveTimers.has(item.id)) {
     clearTimeout(scenarioNameSaveTimers.get(item.id)!);
   }
@@ -1136,26 +1331,34 @@ async function flushScenarioNameSave(item: ScenarioLibraryItem) {
   const duplicated = store.scenarios.some((scenario) => scenario.id !== item.id && scenario.name === name);
   if (duplicated) {
     message.warning('场景名称不能重复');
+    scenarioSaveUi.value = 'error';
     return;
   }
-  const saved = await store.saveScenario(
-    {
-      id: item.id,
-      name,
-      description: item.description,
-      category: item.category,
-      isActive: item.isActive,
-      prompts: item.prompts,
-    },
-    { successMessage: '场景名称已保存' },
-  );
-  scenarioNameLastSaved.set(item.id, name);
-  editingScenarioId.value = saved.id;
-  promptEditScenarioId.value = saved.id;
+  scenarioSaveUi.value = 'saving';
+  try {
+    await store.saveScenario(
+      {
+        id: item.id,
+        name,
+        description: item.description,
+        category: item.category,
+        isActive: item.isActive,
+      },
+      { silent: true },
+    );
+    scenarioNameLastSaved.set(item.id, name);
+    markScenarioAutoSaved();
+  } catch (error) {
+    scenarioSaveUi.value = 'error';
+    message.error((error as Error)?.message || '场景名称保存失败');
+  }
 }
 
 function handlePromptContentInput(promptId: string, value: string) {
   updatePromptContent(promptId, value);
+  if (scenarioSaveUi.value === 'saved') {
+    scenarioSaveUi.value = 'idle';
+  }
   const scenarioId = editingScenarioId.value;
   if (!scenarioId) return;
   const timerKey = promptSaveKey(scenarioId, promptId);
@@ -1169,7 +1372,7 @@ function handlePromptContentInput(promptId: string, value: string) {
       const scenario = store.scenarios.find((item) => item.id === scenarioId);
       const prompt = scenario?.prompts.find((item) => item.id === promptId);
       if (prompt) {
-        void flushPromptSave(prompt, scenarioId);
+        void flushPromptSave(prompt, scenarioId, { notify: false });
       }
     }, SCENARIO_AUTO_SAVE_DELAY_MS),
   );
@@ -1177,14 +1380,45 @@ function handlePromptContentInput(promptId: string, value: string) {
 
 async function flushPendingScenarioSaves() {
   clearScenarioAutoSaveTimers();
-  const tasks: Promise<void>[] = [];
-  store.scenarios.forEach((scenario) => {
-    tasks.push(flushScenarioNameSave(scenario));
-    scenario.prompts.forEach((prompt) => {
-      tasks.push(flushPromptSave(prompt, scenario.id, { notify: false }));
-    });
-  });
-  await Promise.all(tasks);
+  for (const scenario of store.scenarios) {
+    await flushScenarioNameSave(scenario);
+    for (const prompt of scenario.prompts) {
+      await flushPromptSave(prompt, scenario.id, { notify: false });
+    }
+  }
+}
+
+async function flushActiveScenarioPendingSaves() {
+  const scenario = activeScenario.value;
+  if (!scenario) {
+    return;
+  }
+  clearScenarioAutoSaveTimers();
+  await flushScenarioNameSave(scenario);
+  for (const prompt of scenario.prompts) {
+    await flushPromptSave(prompt, scenario.id, { notify: false });
+  }
+}
+
+async function saveActiveScenarioManual() {
+  const scenario = activeScenario.value;
+  if (!scenario) {
+    return;
+  }
+  scenarioSaveUi.value = 'saving';
+  try {
+    await flushActiveScenarioPendingSaves();
+    if (isScenarioDirty(scenario)) {
+      scenarioSaveUi.value = 'error';
+      message.warning('部分内容未能保存，请检查是否为空或重复');
+      return;
+    }
+    message.success('场景已保存');
+    markScenarioAutoSaved();
+  } catch (error) {
+    scenarioSaveUi.value = 'error';
+    message.error((error as Error)?.message || '保存失败');
+  }
 }
 
 function buildScenarioPromptPayload(scenario: ScenarioLibraryItem) {
@@ -1206,21 +1440,36 @@ async function persistScenarioPrompts(
   scenario: ScenarioLibraryItem,
   options?: { successMessage?: string; silent?: boolean },
 ) {
-  const saved = await store.saveScenario(
-    {
-      id: scenario.id,
-      name: scenario.name,
-      description: scenario.description,
-      category: scenario.category,
-      isActive: scenario.isActive,
-      prompts: buildScenarioPromptPayload(scenario),
-    },
-    options,
-  );
-  syncScenarioSaveSnapshots(saved.id);
-  editingScenarioId.value = saved.id;
-  promptEditScenarioId.value = saved.id;
-  return saved;
+  const prevPromptIds = scenario.prompts.map((item) => item.id);
+  scenarioSaveUi.value = 'saving';
+  try {
+    const saved = await store.saveScenario(
+      {
+        id: scenario.id,
+        name: scenario.name,
+        description: scenario.description,
+        category: scenario.category,
+        isActive: scenario.isActive,
+        prompts: buildScenarioPromptPayload(scenario),
+      },
+      { silent: true },
+    );
+    migratePromptKeysAfterSave(scenario.id, prevPromptIds, saved.prompts);
+    syncScenarioSaveSnapshots(saved.id);
+    editingScenarioId.value = saved.id;
+    promptEditScenarioId.value = saved.id;
+    if (!options?.silent && options?.successMessage) {
+      message.success(options.successMessage);
+    }
+    markScenarioAutoSaved();
+    return saved;
+  } catch (error) {
+    scenarioSaveUi.value = 'error';
+    if (!options?.silent) {
+      message.error((error as Error)?.message || '提示词保存失败');
+    }
+    throw error;
+  }
 }
 
 async function toggleScenarioActive(item: ScenarioLibraryItem, checked: boolean) {
@@ -1228,7 +1477,7 @@ async function toggleScenarioActive(item: ScenarioLibraryItem, checked: boolean)
     return;
   }
   try {
-    await store.saveScenario(
+    const saved = await store.saveScenario(
       {
         id: item.id,
         name: item.name,
@@ -1238,6 +1487,7 @@ async function toggleScenarioActive(item: ScenarioLibraryItem, checked: boolean)
       },
       { successMessage: checked ? '场景已启用' : '场景已停用' },
     );
+    syncScenarioSaveSnapshots(saved.id);
   } catch {
     // 保存失败时保持开关与后端一致
     await store.loadScenarioLibrary();
@@ -1264,8 +1514,10 @@ function confirmDeleteScenario(scenarioId: string) {
 function addPromptRow() {
   const scenario = activeScenario.value;
   if (!scenario) return;
+  const draftId = `draft-${Date.now()}`;
+  ensurePromptStableKey(draftId);
   scenario.prompts.unshift({
-    id: `draft-${Date.now()}`,
+    id: draftId,
     scenarioId: scenario.id,
     name: `提示词 ${scenario.prompts.length + 1}`,
     content: '',
@@ -1276,6 +1528,7 @@ function addPromptRow() {
     isActive: true,
     isDefault: false,
   });
+  scenarioSaveUi.value = 'idle';
 }
 
 function updatePromptContent(promptId: string, value: string) {
@@ -1313,9 +1566,10 @@ async function flushPromptSave(
   );
   if (duplicated) {
     message.warning('同一场景下提示词内容不能重复');
+    scenarioSaveUi.value = 'error';
     return;
   }
-  const notify = options?.notify !== false;
+  const notify = options?.notify === true;
   await persistScenarioPrompts(scenario, {
     successMessage: notify ? '提示词已保存' : undefined,
     silent: !notify,

@@ -2,18 +2,34 @@
  * 案例生成全局并发控制（单 API 进程内内存队列）
  *
  * 所有用户的 AI 案例生成共享同一组槽位，防止同时打满 AI Chat 接口。
- * 环境变量 CASE_GENERATE_CONCURRENCY：同时进行的 AI 调用数，默认 2，最大 5。
+ * 环境变量 CASE_GENERATE_CONCURRENCY：同时进行的 AI 调用数，默认 2，最大 32。
  *
  * 注意：多实例部署时每个实例各自计数，总并发 = 实例数 × limit。
  */
 
 const DEFAULT_CONCURRENCY = 2;
-const MAX_CONCURRENCY = 5;
+const MAX_CONCURRENCY = 32;
 
 /** 当前占用的槽位数 */
 let activeCount = 0;
 /** 等待槽位的任务队列（FIFO） */
 const waitQueue: Array<() => void> = [];
+let slotReleaseHook: (() => void) | undefined;
+
+/** 注册槽位释放回调（用于立刻拉起队列中的下一个生成任务） */
+export function setCaseGenerateSlotReleaseHook(hook: (() => void) | undefined) {
+  slotReleaseHook = hook;
+}
+
+/** 当前占用的槽位数 */
+export function getCaseGenerateActiveCount() {
+  return activeCount;
+}
+
+/** 当前等待槽位的任务数 */
+export function getCaseGenerateWaitingCount() {
+  return waitQueue.length;
+}
 
 /** 从环境变量读取案例生成并发上限 */
 export function getCaseGenerateConcurrency() {
@@ -31,6 +47,7 @@ function releaseSlot() {
   if (next) {
     next();
   }
+  slotReleaseHook?.();
 }
 
 function acquireSlot(limit: number) {

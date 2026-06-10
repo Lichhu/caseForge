@@ -33,17 +33,8 @@ export default (): AppConfig => ({
     publicBaseUrl: process.env.MINIO_PUBLIC_BASE_URL ?? "",
   },
   aiWorkflow: {
-    isExternalNetwork: process.env.IS_EXTERNAL_NETWORK === "true",
-    invokeUrl: process.env.AI_WORKFLOW_INVOKE_URL ?? "",
-    stopUrl: process.env.AI_WORKFLOW_STOP_URL ?? "",
-    workflowId: process.env.AI_WORKFLOW_ID ?? "",
     reqDocSkillUrl: process.env.REQ_DOC_SKILL_URL ?? "",
     caseDocPromoteUrl: process.env.CASE_DOC_PROMOTE_URL ?? "",
-    dify: {
-      workflowUrl: process.env.DIFY_WORKFLOW_URL ?? "",
-      apiKey: process.env.DIFY_WORKFLOW_ID ?? "",
-      user: process.env.DIFY_WORKFLOW_USER ?? "caseforge",
-    },
     aiChat: {
       url: process.env.AI_CHAT_URL ?? "",
       model: process.env.AI_CHAT_MODEL ?? "qwen-72b",

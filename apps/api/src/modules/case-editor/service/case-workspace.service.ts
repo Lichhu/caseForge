@@ -19,11 +19,12 @@
  * 取消生成仅由用户点「停止」触发 POST /generate/cancel，刷新页面不会 cancel。
  */
 import {
+  forwardRef,
+  Inject,
   BadRequestException,
   Injectable,
   Logger,
   NotFoundException,
-  OnModuleInit,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { extractTextFromBuffer } from "../../../common/document/document-text.util";
@@ -61,7 +62,6 @@ import {
   findOwnedProject,
   scopedWhere,
 } from "../../../common/audit/user-scope";
-import { withCaseGenerateSlot } from "../util/case-generate-concurrency";
 import {
   cancelCaseGenerate,
   clearCaseGenerateSlot,
@@ -76,12 +76,13 @@ import {
   reassignCaseTreeNodeIds,
 } from "../util/case-tree-merge.util";
 import { withProjectCaseTreeMerge } from "../util/case-tree-merge-lock";
-import { buildCaseGenerateInterruptedMessage } from "../util/case-generate-interrupted.util";
 import { touchProjectUpdatedAt } from "../../../common/project/touch-project.util";
+import { CaseGenerateQueueService } from "./case-generate-queue.service";
+import { StructDocService } from "@struct-doc/service/struct-doc.service";
 
 /** 案例编辑器工作区业务编排服务 */
 @Injectable()
-export class CaseWorkspaceService implements OnModuleInit {
+export class CaseWorkspaceService {
   private readonly logger = new Logger(CaseWorkspaceService.name);
 
   constructor(
@@ -99,23 +100,10 @@ export class CaseWorkspaceService implements OnModuleInit {
     private readonly promptSelectionRepo: Repository<TestPointPromptEntity>,
     private readonly caseEditorService: CaseEditorService,
     private readonly pipeline: CasePipelineService,
+    @Inject(forwardRef(() => CaseGenerateQueueService))
+    private readonly generateQueueService: CaseGenerateQueueService,
+    private readonly structDocService: StructDocService,
   ) {}
-
-  /** 服务启动时将遗留的「生成中」测试要点标记为失败（常见于生成中重启） */
-  async onModuleInit() {
-    const result = await this.instructRepo.update(
-      { status: "生成中" },
-      {
-        status: "生成失败",
-        modifiedBy: "system",
-      },
-    );
-    if (result.affected) {
-      this.logger.warn(
-        `服务启动：已将 ${result.affected} 条中断的案例生成任务标记为失败（${buildCaseGenerateInterruptedMessage()}）`,
-      );
-    }
-  }
 
   /** 获取项目完整工作区视图 */
   async getProjectWorkspace(projectId: string) {
@@ -241,60 +229,28 @@ export class CaseWorkspaceService implements OnModuleInit {
     }
 
     await this.loadAndValidateGenerateTestPoints(projectId, testPointIds);
-    // 登记内存槽：记录「若用户点停止，应回退到什么状态」（已编辑/再编辑）
-    await this.registerGenerateSlots(projectId, testPointIds);
-
-    if (testPointIds.length === 1) {
-      // 单条：在全局 AI 并发槽内同步跑完
-      return withCaseGenerateSlot(() =>
-        this.generateCasesInternal(projectId, dto),
-      );
-    }
-
-    // 批量：先落库「生成中」，前端刷新也能看到；不阻塞 HTTP
     await this.updateDynamicStatus(testPointIds, "生成中");
-    void this.runBatchGenerateInBackground(projectId, dto, testPointIds).catch(
-      (error) => {
-        this.logger.error(
-          `批量案例生成后台任务异常: ${(error as Error).message}`,
-        );
-      },
-    );
+    await this.generateQueueService.enqueue(projectId, testPointIds, dto.model);
     return this.buildProjectView(projectId);
   }
 
-  /**
-   * 批量生成的后台 worker（fire-and-forget）
-   *
-   * 按 testPointIds 顺序逐条调用 generateCasesInternal；
-   * 每条之间竞争 withCaseGenerateSlot，与别的用户/别的批量任务共享并发上限。
-   * skipGeneratingStatus=true 因为入口已统一标过「生成中」。
-   */
-  private async runBatchGenerateInBackground(
-    projectId: string,
-    dto: GenerateCasesDto,
-    testPointIds: string[],
-  ) {
-    for (const testPointId of testPointIds) {
-      if (isCaseGenerateCancelled(projectId, testPointId)) {
-        await this.revertCancelledGenerations(projectId, [testPointId]);
-        clearCaseGenerateSlot(projectId, testPointId);
-        continue;
-      }
-      try {
-        await withCaseGenerateSlot(() =>
-          this.generateCasesInternal(
-            projectId,
-            { ...dto, testPointIds: [testPointId] },
-            { skipGeneratingStatus: true },
-          ),
-        );
-      } catch (error) {
-        this.logger.warn(
-          `测试要点 ${testPointId} 案例生成失败: ${(error as Error).message}`,
-        );
-      }
-    }
+  async getGenerateQueueStatus(projectId: string, testPointIds?: string[]) {
+    await this.ensureProject(projectId);
+    return this.generateQueueService.getQueueStatus(projectId, testPointIds);
+  }
+
+  /** 队列 worker 执行单条测试要点生成 */
+  async runQueuedGenerateJob(input: {
+    projectId: string;
+    testPointId: string;
+    model?: string;
+  }) {
+    await this.registerGenerateSlots(input.projectId, [input.testPointId]);
+    return this.generateCasesInternal(
+      input.projectId,
+      { testPointIds: [input.testPointId], model: input.model },
+      { skipGeneratingStatus: true },
+    );
   }
 
   /**
@@ -343,6 +299,8 @@ export class CaseWorkspaceService implements OnModuleInit {
       await this.updateDynamicStatus(ids, status);
     }
 
+    await this.generateQueueService.cancelJobs(projectId, testPointIds);
+
     return this.buildProjectView(projectId);
   }
 
@@ -373,12 +331,8 @@ export class CaseWorkspaceService implements OnModuleInit {
       throw new BadRequestException("请指定要生成案例的测试要点");
     }
 
-    const requirementContext = project.document.structuredMarkdown.trim();
-    if (!requirementContext) {
-      throw new BadRequestException(
-        "需求前景为空，请先在「结构化需求文档」完成结构化并保存",
-      );
-    }
+    const requirementContext =
+      await this.structDocService.ensureSummaryStructDoc(projectId);
 
     const selectedTestPoints = await this.loadAndValidateGenerateTestPoints(
       projectId,
@@ -508,7 +462,11 @@ export class CaseWorkspaceService implements OnModuleInit {
         await this.revertCancelledGenerations(projectId, cancelledTestPointIds);
       }
       if (failedTestPointIds.length) {
-        await this.updateDynamicStatus(failedTestPointIds, "生成失败");
+        await this.updateDynamicStatus(
+          failedTestPointIds,
+          "生成失败",
+          this.extractGenerateErrorMessage(error),
+        );
       }
       if (!failedTestPointIds.length) {
         return this.buildProjectView(projectId);
@@ -586,7 +544,7 @@ export class CaseWorkspaceService implements OnModuleInit {
     const existing = await this.structDocRepo.findOne({
       where: scopedWhere({ projectId }),
     });
-    return this.structDocRepo.save(
+    const saved = await this.structDocRepo.save(
       this.structDocRepo.create({
         ...existing,
         projectId,
@@ -603,6 +561,10 @@ export class CaseWorkspaceService implements OnModuleInit {
           `${document.analysis.requirementId || "structured"}-structured.md`,
       }),
     );
+    await this.structDocRepo.update(saved.id, {
+      summaryStructDoc: null,
+    } as never);
+    return saved;
   }
 
   private toRequirementDocument(
@@ -923,8 +885,12 @@ export class CaseWorkspaceService implements OnModuleInit {
     }
   }
 
-  /** 批量更新 case_test_point_instruct.status */
-  private async updateDynamicStatus(testPointIds: string[], status: string) {
+  /** 批量更新 case_test_point_instruct.status，并在非失败状态时清空 generateError */
+  private async updateDynamicStatus(
+    testPointIds: string[],
+    status: string,
+    generateError?: string | null,
+  ) {
     if (!testPointIds.length) {
       return;
     }
@@ -933,10 +899,24 @@ export class CaseWorkspaceService implements OnModuleInit {
       .update(TestPointInstructEntity)
       .set({
         status: status as TestPointInstructEntity["status"],
+        generateError:
+          status === "生成失败"
+            ? generateError?.trim() || "案例生成失败，请稍后重试"
+            : null,
         ...auditFieldsForUpdate(),
       })
       .where("testPointId IN (:...testPointIds)", { testPointIds })
       .execute();
+  }
+
+  private extractGenerateErrorMessage(error: unknown) {
+    if (error instanceof BadRequestException) {
+      return error.message;
+    }
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return "案例生成失败，请稍后重试";
   }
 
   private toConstraint(entity: CaseConstraintEntity): ConstraintInstruction {

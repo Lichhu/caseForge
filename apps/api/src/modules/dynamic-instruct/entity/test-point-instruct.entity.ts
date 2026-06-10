@@ -61,6 +61,10 @@ export class TestPointInstructEntity {
   @Column({ type: "text", nullable: true })
   naturalText?: string;
 
+  /** 最近一次案例生成失败原因（status 为「生成失败」时展示） */
+  @Column({ type: "text", nullable: true })
+  generateError?: string | null;
+
   @Column({ default: true })
   isFull: boolean;
 

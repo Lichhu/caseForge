@@ -96,7 +96,10 @@
               :class="thClass(column)"
               :style="stickyStyle(column)"
             >
-              {{ column.label }}
+              <span class="th-label-row">
+                <span>{{ column.label }}</span>
+                <EditOutlined v-if="!column.hierarchy" class="th-edit-icon" />
+              </span>
             </th>
           </tr>
         </thead>
@@ -156,6 +159,7 @@
                   v-else-if="isMultilineColumn(column.key)"
                   v-model="draftRows[originalIndex][column.key]"
                   class="cell-input cell-textarea"
+                  :placeholder="cellPlaceholder(column.key)"
                   @input="onTextareaInput"
                   @blur="emitRowChange(originalIndex)"
                 />
@@ -164,6 +168,7 @@
                   v-model="draftRows[originalIndex][column.key]"
                   class="cell-input"
                   type="text"
+                  :placeholder="cellPlaceholder(column.key)"
                   @blur="emitRowChange(originalIndex)"
                 />
               </td>
@@ -190,7 +195,13 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
-import { DeleteOutlined, MenuFoldOutlined, MenuUnfoldOutlined, PlusOutlined } from '@ant-design/icons-vue';
+import {
+  DeleteOutlined,
+  EditOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  PlusOutlined,
+} from '@ant-design/icons-vue';
 import { Modal, message } from 'ant-design-vue';
 import type {
   CaseExcelMergeCell,
@@ -313,6 +324,10 @@ const visibleColumns = computed(() => {
 
 const lastVisibleStickyCol = computed(
   () => visibleColumns.value.filter((column) => column.sticky).at(-1)?.col,
+);
+
+const firstEditableColumn = computed(() =>
+  visibleColumns.value.find((column) => !column.hierarchy),
 );
 
 const tableMinWidthPx = computed(() => {
@@ -533,6 +548,8 @@ function thClass(column: ExcelColumn) {
   return {
     'th-hierarchy': column.hierarchy,
     'th-case': !column.hierarchy,
+    'th-editable': !column.hierarchy,
+    'editable-zone-start': column.key === firstEditableColumn.value?.key,
     'sticky-col': column.sticky,
     'sticky-col-last':
       column.sticky && column.col === lastVisibleStickyCol.value,
@@ -543,6 +560,8 @@ function tdClass(column: ExcelColumn, displayIndex: number) {
   return {
     'td-hierarchy': column.hierarchy,
     'td-case': !column.hierarchy,
+    'td-editable': !column.hierarchy,
+    'editable-zone-start': column.key === firstEditableColumn.value?.key,
     'td-merged': column.hierarchy && isMergedCell(displayIndex, column.col),
     'sticky-col': column.sticky,
     'sticky-col-last':
@@ -632,6 +651,17 @@ function isMultilineColumn(key: ExcelColumnKey) {
 
 function isEnumColumn(key: ExcelColumnKey) {
   return key === 'caseNature' || key === 'priority';
+}
+
+function cellPlaceholder(key: ExcelColumnKey) {
+  const placeholders: Partial<Record<ExcelColumnKey, string>> = {
+    caseName: '输入案例名称',
+    caseTitle: '输入案例标题',
+    caseCondition: '输入前置条件',
+    caseStep: '输入测试步骤',
+    caseExpected: '输入预期结果',
+  };
+  return placeholders[key] ?? '';
 }
 
 function enumOptions(key: ExcelColumnKey): Array<{ label: string; value: CaseNature | CasePriority }> {
@@ -881,6 +911,25 @@ function deleteSelectedRows() {
   color: #b60f2d;
 }
 
+.excel-edit-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px dashed rgb(182 15 45 / 28%);
+  background: #fff9fa;
+  color: #9f1239;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.excel-edit-hint :deep(.anticon) {
+  font-size: 11px;
+}
+
 .excel-save-status {
   font-size: 12px;
   line-height: 24px;
@@ -1042,10 +1091,30 @@ function deleteSelectedRows() {
 
 .excel-table .th-hierarchy {
   background: #eef2f6;
+  color: var(--cf-text-secondary, #667085);
 }
 
 .excel-table .th-case {
-  background: #f9fafb;
+  background: #fff;
+}
+
+.excel-table .th-editable {
+  background: #fff9fa;
+}
+
+.excel-table .editable-zone-start {
+  border-left: 2px solid rgb(182 15 45 / 22%);
+}
+
+.th-label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.th-edit-icon {
+  color: rgb(182 15 45 / 55%);
+  font-size: 11px;
 }
 
 .excel-table tbody tr.row-alt td.td-case {
@@ -1107,7 +1176,7 @@ function deleteSelectedRows() {
 
 .excel-table .td-hierarchy {
   vertical-align: middle;
-  background: #f9fafb;
+  background: #f5f6f8;
 }
 
 .excel-table .td-hierarchy.td-merged {
@@ -1119,13 +1188,18 @@ function deleteSelectedRows() {
   background: #fff;
 }
 
+.excel-table .td-editable {
+  padding: 6px 8px;
+}
+
 .cell-readonly {
   padding: 10px 12px;
-  color: var(--cf-text-body, #344054);
+  color: var(--cf-text-secondary, #667085);
   font-size: 13px;
   line-height: 1.5;
   word-break: break-word;
   white-space: pre-wrap;
+  cursor: default;
 }
 
 .cell-readonly--merged {
@@ -1148,19 +1222,40 @@ function deleteSelectedRows() {
 
 .cell-input {
   width: 100%;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  border: 1px solid #d0d5dd;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: none;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .cell-input,
 .cell-textarea {
-  padding: 10px 12px;
+  padding: 8px 10px;
   font-size: 13px;
   line-height: 1.55;
   font-family: inherit;
   color: var(--cf-text-body, #344054);
+}
+
+.cell-input::placeholder,
+.cell-textarea::placeholder {
+  color: #98a2b3;
+}
+
+.cell-input:not(:focus):placeholder-shown,
+.cell-textarea:not(:focus):placeholder-shown {
+  border-style: dashed;
+  border-color: #d0d5dd;
+  background: #fafafa;
+}
+
+.cell-input:hover,
+.cell-textarea:hover {
+  border-color: #98a2b3;
 }
 
 .cell-textarea {
@@ -1168,13 +1263,26 @@ function deleteSelectedRows() {
   overflow: hidden;
   min-height: 56px;
   field-sizing: content;
+  cursor: text;
+}
+
+.cell-select {
+  cursor: pointer;
+  appearance: none;
+  padding-right: 28px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23667085' d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
 }
 
 .cell-input:focus,
-.cell-textarea:focus {
+.cell-textarea:focus,
+.cell-select:focus {
   outline: none;
-  background: #fff !important;
-  box-shadow: inset 0 0 0 2px rgb(182 15 45 / 18%);
+  border-color: rgb(182 15 45 / 50%);
+  border-style: solid;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgb(182 15 45 / 12%);
 }
 
 .excel-empty {

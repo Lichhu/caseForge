@@ -50,7 +50,7 @@ export class StructDocEntity {
   @Column({ nullable: true })
   reqDocPath?: string;
 
-  /** AI Workflow 返回的原始响应 JSON */
+  /** AI 结构化返回的原始响应 JSON */
   @Column({ type: "json", nullable: true })
   aiResponse?: Record<string, unknown>;
 
@@ -65,6 +65,10 @@ export class StructDocEntity {
   /** 在线编辑中的临时结构化 Markdown，尚未写入 MinIO */
   @Column({ type: "longtext", nullable: true })
   tempStructDoc?: string;
+
+  /** 案例生成共用的需求总结（由 tempStructDoc 压缩生成，显著短于全文） */
+  @Column({ type: "longtext", nullable: true })
+  summaryStructDoc?: string;
 
   /** 异步结构化任务状态 */
   @Column({

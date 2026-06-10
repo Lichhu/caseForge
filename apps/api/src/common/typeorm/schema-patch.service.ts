@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { DataSource } from "typeorm";
 import { applyApiTestSchemaMigrations } from "./api-schema-migrations.util";
+import { ensureCaseEditorUtf8mb4TextColumns } from "./utf8mb4-schema.util";
 
 /**
  * 本地/生产库未开 synchronize 时，补齐关键 schema 变更，避免 500。
@@ -14,6 +15,11 @@ export class SchemaPatchService implements OnModuleInit {
   async onModuleInit() {
     await this.ensureProjectPlatformColumn();
     await this.ensureCaseNodeMetadataCaseNatureColumn();
+    await this.ensureTestPointInstructGenerateErrorColumn();
+    await this.ensureCaseGenerateJobTable();
+    await this.ensureStructRequirementJobTable();
+    await this.ensureSummaryStructDocColumn();
+    await ensureCaseEditorUtf8mb4TextColumns(this.dataSource, this.logger);
     await applyApiTestSchemaMigrations(this.dataSource);
   }
 
@@ -81,6 +87,107 @@ export class SchemaPatchService implements OnModuleInit {
       END
     `);
     this.logger.log("case_node_metadata.caseNature 列已补齐");
+  }
+
+  private async ensureTestPointInstructGenerateErrorColumn() {
+    const rows: Array<{ Field: string }> = await this.dataSource.query(
+      "SHOW COLUMNS FROM case_test_point_instruct LIKE 'generateError'",
+    );
+    if (rows.length > 0) {
+      return;
+    }
+
+    this.logger.warn(
+      "检测到 case_test_point_instruct 缺少 generateError 列，正在自动执行 schema 补丁…",
+    );
+    await this.dataSource.query(`
+      ALTER TABLE case_test_point_instruct
+        ADD COLUMN generateError TEXT NULL COMMENT '最近一次案例生成失败原因'
+        AFTER naturalText
+    `);
+    this.logger.log("case_test_point_instruct.generateError 列已补齐");
+  }
+
+  private async ensureCaseGenerateJobTable() {
+    const rows: Array<{ Tables_in_db?: string }> = await this.dataSource.query(
+      "SHOW TABLES LIKE 'case_generate_job'",
+    );
+    if (rows.length > 0) {
+      return;
+    }
+
+    this.logger.warn(
+      "检测到缺少 case_generate_job 表，正在自动执行 schema 补丁…",
+    );
+    await this.dataSource.query(`
+      CREATE TABLE case_generate_job (
+        id CHAR(36) NOT NULL PRIMARY KEY,
+        projectId CHAR(36) NOT NULL,
+        testPointId CHAR(36) NOT NULL,
+        status ENUM('queued','running','completed','failed','cancelled') NOT NULL DEFAULT 'queued',
+        model VARCHAR(255) NULL,
+        queuedAt DATETIME(3) NOT NULL,
+        startedAt DATETIME(3) NULL,
+        finishedAt DATETIME(3) NULL,
+        errorMessage TEXT NULL,
+        createdBy VARCHAR(255) NULL DEFAULT 'system',
+        createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+        updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+        INDEX idx_case_generate_job_status_queued (status, queuedAt),
+        INDEX idx_case_generate_job_project_test_point (projectId, testPointId)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    this.logger.log("case_generate_job 表已创建");
+  }
+
+  private async ensureStructRequirementJobTable() {
+    const rows: Array<{ Tables_in_db?: string }> = await this.dataSource.query(
+      "SHOW TABLES LIKE 'struct_requirement_job'",
+    );
+    if (rows.length > 0) {
+      return;
+    }
+
+    this.logger.warn(
+      "检测到缺少 struct_requirement_job 表，正在自动执行 schema 补丁…",
+    );
+    await this.dataSource.query(`
+      CREATE TABLE struct_requirement_job (
+        id CHAR(36) NOT NULL PRIMARY KEY,
+        projectId CHAR(36) NOT NULL,
+        structDocId CHAR(36) NOT NULL,
+        status ENUM('queued','running','completed','failed','cancelled') NOT NULL DEFAULT 'queued',
+        queuedAt DATETIME(3) NOT NULL,
+        startedAt DATETIME(3) NULL,
+        finishedAt DATETIME(3) NULL,
+        errorMessage TEXT NULL,
+        createdBy VARCHAR(255) NULL DEFAULT 'system',
+        createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+        updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+        INDEX idx_struct_requirement_job_status_queued (status, queuedAt),
+        INDEX idx_struct_requirement_job_project (projectId)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    this.logger.log("struct_requirement_job 表已创建");
+  }
+
+  private async ensureSummaryStructDocColumn() {
+    const rows: Array<{ Field: string }> = await this.dataSource.query(
+      "SHOW COLUMNS FROM case_struct_doc LIKE 'summaryStructDoc'",
+    );
+    if (rows.length > 0) {
+      return;
+    }
+
+    this.logger.warn(
+      "检测到 case_struct_doc 缺少 summaryStructDoc 列，正在自动执行 schema 补丁…",
+    );
+    await this.dataSource.query(`
+      ALTER TABLE case_struct_doc
+        ADD COLUMN summaryStructDoc LONGTEXT NULL COMMENT '案例生成共用的需求总结'
+        AFTER tempStructDoc
+    `);
+    this.logger.log("case_struct_doc.summaryStructDoc 列已补齐");
   }
 
 }

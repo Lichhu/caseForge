@@ -11,7 +11,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  OnModuleInit,
+  forwardRef,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
@@ -20,7 +20,9 @@ import {
   SaveTestPointDto,
 } from "@struct-doc/dto/save-struct-doc.dto";
 import { StructDocEntity } from "@struct-doc/entity/struct-doc.entity";
+import { StructRequirementJobEntity } from "@struct-doc/entity/struct-requirement-job.entity";
 import { TestPointEntity } from "@struct-doc/entity/test-point.entity";
+import { StructRequirementQueueService } from "@struct-doc/service/struct-requirement-queue.service";
 import {
   buildStructuredDocName,
   extractRequirementNo,
@@ -34,15 +36,12 @@ import {
 import { touchProjectUpdatedAt } from "../../../common/project/touch-project.util";
 import {
   buildStructuringCancelledMessage,
-  buildStructuringInterruptedMessage,
   buildStructuringTimeoutMessage,
   getStructuringTimeoutMs,
-  isSameStructuringTaskStart,
   isStructuringTimedOut,
 } from "@struct-doc/util/structuring-timeout.util";
 import { In, Repository } from "typeorm";
 import { auditFieldsForUpdate } from "../../../common/audit/request-context";
-import { RequestContext } from "../../../common/audit/request-context";
 import {
   findOwnedProject,
   getScopedUserName,
@@ -51,7 +50,7 @@ import {
 
 /** 结构化需求文档核心业务逻辑。 */
 @Injectable()
-export class StructDocService implements OnModuleInit {
+export class StructDocService {
   private readonly logger = new Logger(StructDocService.name);
 
   constructor(
@@ -65,25 +64,9 @@ export class StructDocService implements OnModuleInit {
     private readonly minioService: MinioStorageService,
     @Inject(AiWorkflowService)
     private readonly aiWorkflowService: AiWorkflowService,
+    @Inject(forwardRef(() => StructRequirementQueueService))
+    private readonly structRequirementQueue: StructRequirementQueueService,
   ) {}
-
-  /** 服务启动时将遗留的 processing 标记为失败（常见于生成中重启） */
-  async onModuleInit() {
-    const message = buildStructuringInterruptedMessage();
-    const result = await this.structDocRepo.update(
-      { structuringStatus: "processing" },
-      {
-        structuringStatus: "failed",
-        structuringError: message,
-        modifiedBy: "system",
-      },
-    );
-    if (result.affected) {
-      this.logger.warn(
-        `服务启动：已将 ${result.affected} 条中断的结构化任务标记为失败`,
-      );
-    }
-  }
 
   /**
    * 取消进行中的结构化任务（用于服务重启后状态未恢复等场景）
@@ -99,6 +82,7 @@ export class StructDocService implements OnModuleInit {
       );
     }
     if (existing.structuringStatus === "processing") {
+      await this.structRequirementQueue.cancelJobs(projectId);
       await this.markStructuringFailed(
         existing.id,
         buildStructuringCancelledMessage(),
@@ -209,6 +193,7 @@ export class StructDocService implements OnModuleInit {
               reqDocPath: payload.reqDocPath,
               aiResponse: null,
               tempStructDoc: null,
+              summaryStructDoc: null,
               structuredDocName: null,
               structDocPath: null,
               structuringStatus: "idle" as const,
@@ -240,7 +225,7 @@ export class StructDocService implements OnModuleInit {
 
   /**
    * 启动异步结构化任务。
-   * 若已在处理中则直接返回当前详情，否则后台调用 AI Workflow。
+   * 若已在处理中则直接返回当前详情，否则后台调用 AI Chat 结构化。
    *
    * @param projectId 项目 ID
    */
@@ -256,224 +241,164 @@ export class StructDocService implements OnModuleInit {
     if (existing.structuringStatus === "processing") {
       const afterExpire = await this.expireStaleStructuring(existing);
       if (afterExpire.structuringStatus === "processing") {
-        return this.getByProjectId(projectId);
+        const activeJob =
+          await this.structRequirementQueue.findActiveJob(projectId);
+        if (activeJob) {
+          return this.getByProjectId(projectId);
+        }
       }
     }
 
-    const userName = getScopedUserName();
-
-    await this.structDocRepo.update(existing.id, {
-      structuringStatus: "processing",
-      structuringError: undefined,
-      structuringStartedAt: new Date(),
-      ...auditFieldsForUpdate(),
-    });
-    await touchProjectUpdatedAt(this.projectRepo, projectId);
-
-    const refreshed = await this.structDocRepo.findOne({
-      where: { id: existing.id, projectId },
-    });
-    const structuringStartedAt = refreshed?.structuringStartedAt;
-    if (!structuringStartedAt) {
-      throw new BadRequestException("无法启动结构化任务");
-    }
-
-    void this.runStructRequirement(
+    await this.structRequirementQueue.enqueue(
       projectId,
       existing.id,
-      structuringStartedAt,
-      userName,
-    ).catch((error) => {
-      this.logger.error(
-        `结构化任务异常 projectId=${projectId}: ${(error as Error).message}`,
-        (error as Error).stack,
-      );
-    });
+      getScopedUserName(),
+    );
+    await touchProjectUpdatedAt(this.projectRepo, projectId);
 
     return this.getByProjectId(projectId);
   }
 
-  /**
-   * 后台执行结构化：调用 AI、解析 Markdown、写入临时文档并同步测试要点。
-   *
-   * @param projectId 项目 ID
-   * @param structDocId 结构化文档记录 ID
-   */
-  private async runStructRequirement(
-    projectId: string,
-    structDocId: string,
-    structuringStartedAt: Date,
-    userName: string,
-  ) {
-    await RequestContext.run(userName, async () => {
-      await withStructuringSlot(projectId, async () => {
-        let taskStartedAt = structuringStartedAt;
+  /** 队列 worker：执行单次结构化任务 */
+  async runQueuedStructRequirement(job: StructRequirementJobEntity) {
+    const { projectId, structDocId } = job;
 
-        if (
-          !(await this.isStructuringTaskActive(
-            projectId,
-            structDocId,
-            structuringStartedAt,
-          ))
-        ) {
+    if (!(await this.isJobActive(job.id))) {
+      return;
+    }
+
+    await withStructuringSlot(projectId, async () => {
+      const startedAt = new Date();
+      await this.structDocRepo.update(structDocId, {
+        structuringStartedAt: startedAt,
+        structuringStatus: "processing",
+        structuringError: undefined,
+        ...auditFieldsForUpdate(),
+      });
+
+      if (!(await this.isJobActive(job.id))) {
+        return;
+      }
+
+      const existing = await this.structDocRepo.findOne({
+        where: scopedWhere({ id: structDocId, projectId }),
+      });
+      if (!existing?.reqDocPath) {
+        throw new BadRequestException("需求文档不存在");
+      }
+
+      const requireFileUrl = await this.minioService.getAccessUrl(
+        existing.reqDocPath,
+        24 * 3600,
+      );
+      if (!requireFileUrl) {
+        throw new BadRequestException("需求文档地址无效，请重新上传");
+      }
+
+      try {
+        const { markdown, rawResponse } = await this.withStructuringDeadline(
+          startedAt,
+          () =>
+            this.aiWorkflowService.structRequirement(
+              requireFileUrl,
+              undefined,
+              existing.reqDocName,
+            ),
+        );
+
+        if (!(await this.isJobActive(job.id))) {
+          this.logger.log(
+            `结构化结果已丢弃（任务已被取代）projectId=${projectId}`,
+          );
           return;
         }
 
-        await this.structDocRepo.update(structDocId, {
-          structuringStartedAt: new Date(),
-          ...auditFieldsForUpdate(),
-        });
-        const afterSlot = await this.structDocRepo.findOne({
+        const parsedTestPoints = parseStructuredDoc(markdown);
+        if (!parsedTestPoints.length && markdown.trim()) {
+          this.logger.warn(
+            `结构化完成但未解析到测试要点 projectId=${projectId}，请检查 Markdown 是否包含「系统」「功能模块」「测试要点」结构`,
+          );
+        }
+        const structuredDocName = buildStructuredDocName(existing.reqDocName);
+        const latest = await this.structDocRepo.findOne({
           where: scopedWhere({ id: structDocId, projectId }),
         });
-        if (!afterSlot?.structuringStartedAt) {
+        if (!latest) {
           return;
         }
-        taskStartedAt = afterSlot.structuringStartedAt;
+
+        await this.structDocRepo.save(
+          this.structDocRepo.create({
+            ...latest,
+            aiResponse: rawResponse as Record<string, unknown>,
+            tempStructDoc: markdown,
+            summaryStructDoc: undefined,
+            structuredDocName,
+            structuringStatus: "completed",
+            structuringError: undefined,
+          }),
+        );
+
+        if (parsedTestPoints.length) {
+          const merged = await this.mergeParsedTestPointsWithExisting(
+            projectId,
+            latest.id,
+            parsedTestPoints,
+          );
+          await this.replaceTestPoints(projectId, latest.id, merged);
+        }
 
         try {
-          const existing = afterSlot;
-          if (!existing?.reqDocPath) {
-            throw new BadRequestException("需求文档不存在");
-          }
-          if (
-            !(await this.isStructuringTaskActive(
-              projectId,
-              structDocId,
-              taskStartedAt,
-            ))
-          ) {
-            this.logger.log(
-              `跳过已过期的结构化任务 projectId=${projectId} structDocId=${structDocId}`,
-            );
-            return;
-          }
-
-          const requireFileUrl = await this.minioService.getAccessUrl(
-            existing.reqDocPath,
-            24 * 3600,
-          );
-          if (!requireFileUrl) {
-            throw new BadRequestException("需求文档地址无效，请重新上传");
-          }
-
-          const { markdown, rawResponse } = await this.withStructuringDeadline(
-            taskStartedAt,
-            () =>
-              this.aiWorkflowService.structRequirement(
-                requireFileUrl,
-                undefined,
-                existing.reqDocName,
-              ),
-          );
-
-          if (
-            !(await this.isStructuringTaskActive(
-              projectId,
-              structDocId,
-              taskStartedAt,
-            ))
-          ) {
-            this.logger.log(
-              `结构化结果已丢弃（任务已被取代）projectId=${projectId}`,
-            );
-            return;
-          }
-
-          const parsedTestPoints = parseStructuredDoc(markdown);
-          if (!parsedTestPoints.length && markdown.trim()) {
-            this.logger.warn(
-              `结构化完成但未解析到测试要点 projectId=${projectId}，请检查 Markdown 是否包含「系统」「功能模块」「测试要点」结构`,
-            );
-          }
-          const structuredDocName = buildStructuredDocName(existing.reqDocName);
-          const latest = await this.structDocRepo.findOne({
-            where: scopedWhere({ id: structDocId, projectId }),
-          });
-          if (!latest) {
-            return;
-          }
-
-          await this.structDocRepo.save(
-            this.structDocRepo.create({
-              ...latest,
-              aiResponse: rawResponse as Record<string, unknown>,
-              tempStructDoc: markdown,
-              structuredDocName,
-              structuringStatus: "completed",
-              structuringError: undefined,
-            }),
-          );
-
-          if (parsedTestPoints.length) {
-            const merged = await this.mergeParsedTestPointsWithExisting(
-              projectId,
-              latest.id,
-              parsedTestPoints,
-            );
-            await this.replaceTestPoints(projectId, latest.id, merged);
-          }
-
-          const requirementNo = extractRequirementNo(markdown);
-          await touchProjectUpdatedAt(
-            this.projectRepo,
+          await this.generateAndSaveSummaryStructDoc(
             projectId,
-            requirementNo ? { requirementNo } : undefined,
+            latest.id,
+            markdown,
           );
         } catch (error) {
-          if (
-            await this.isStructuringTaskActive(
-              projectId,
-              structDocId,
-              taskStartedAt,
-            )
-          ) {
-            await this.structDocRepo.update(structDocId, {
-              structuringStatus: "failed",
-              structuringError: (error as Error).message || "结构化失败",
-              ...auditFieldsForUpdate(),
-            });
-          }
+          this.logger.warn(
+            `结构化完成后生成案例用需求总结失败 projectId=${projectId}: ${(error as Error).message}`,
+          );
         }
-      });
+
+        const requirementNo = extractRequirementNo(markdown);
+        await touchProjectUpdatedAt(
+          this.projectRepo,
+          projectId,
+          requirementNo ? { requirementNo } : undefined,
+        );
+      } catch (error) {
+        if (await this.isJobActive(job.id)) {
+          await this.markStructuringFailed(
+            structDocId,
+            (error as Error).message || "结构化失败",
+          );
+        }
+        throw error;
+      }
     });
   }
 
-  /**
-   * 判断后台结构化任务是否仍为当前有效任务（防止多项目/重复触发串写）
-   */
-  private async isStructuringTaskActive(
-    projectId: string,
-    structDocId: string,
-    structuringStartedAt: Date,
-  ) {
+  private async isJobActive(jobId: string) {
+    const job = await this.structRequirementQueue.findJobById(jobId);
+    if (!job || job.status !== "running") {
+      return false;
+    }
+
     const latest = await this.structDocRepo.findOne({
-      where: { id: structDocId, projectId },
+      where: { id: job.structDocId, projectId: job.projectId },
     });
     if (!latest || latest.structuringStatus !== "processing") {
       return false;
     }
-    if (
-      isStructuringTimedOut(latest.structuringStartedAt) &&
-      isStructuringSlotActive(projectId)
-    ) {
-      await this.markStructuringFailed(
-        structDocId,
-        buildStructuringTimeoutMessage(),
-      );
+
+    if (job.startedAt && isStructuringTimedOut(job.startedAt)) {
+      const message = buildStructuringTimeoutMessage();
+      await this.markStructuringFailed(job.structDocId, message);
+      await this.structRequirementQueue.failJob(jobId, message);
       return false;
     }
-    if (!latest.structuringStartedAt) {
-      await this.markStructuringFailed(
-        structDocId,
-        buildStructuringTimeoutMessage(),
-      );
-      return false;
-    }
-    return isSameStructuringTaskStart(
-      latest.structuringStartedAt,
-      structuringStartedAt,
-    );
+
+    return true;
   }
 
   /** 查询/轮询时将超时的 processing 标记为 failed */
@@ -489,6 +414,10 @@ export class StructDocService implements OnModuleInit {
     }
     await this.markStructuringFailed(
       structDoc.id,
+      buildStructuringTimeoutMessage(),
+    );
+    await this.structRequirementQueue.failActiveJobs(
+      structDoc.projectId,
       buildStructuringTimeoutMessage(),
     );
     const refreshed = await this.structDocRepo.findOne({
@@ -514,8 +443,7 @@ export class StructDocService implements OnModuleInit {
     run: () => Promise<T>,
   ): Promise<T> {
     const remaining =
-      getStructuringTimeoutMs() -
-      (Date.now() - structuringStartedAt.getTime());
+      getStructuringTimeoutMs() - (Date.now() - structuringStartedAt.getTime());
     if (remaining <= 0) {
       throw new Error(buildStructuringTimeoutMessage());
     }
@@ -539,6 +467,59 @@ export class StructDocService implements OnModuleInit {
   }
 
   /**
+   * 获取案例生成用的需求上下文：优先返回已缓存的总结，缺失时按需生成。
+   * 生成失败时回退为完整结构化 Markdown。
+   */
+  async ensureSummaryStructDoc(projectId: string): Promise<string> {
+    const existing = await this.structDocRepo.findOne({
+      where: scopedWhere({ projectId }),
+    });
+    const sourceMarkdown = existing?.tempStructDoc?.trim();
+    if (!existing || !sourceMarkdown) {
+      throw new BadRequestException(
+        "需求前景为空，请先在「结构化需求文档」完成结构化并保存",
+      );
+    }
+    if (existing.summaryStructDoc?.trim()) {
+      return existing.summaryStructDoc.trim();
+    }
+
+    try {
+      return await this.generateAndSaveSummaryStructDoc(
+        projectId,
+        existing.id,
+        sourceMarkdown,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `生成案例用需求总结失败，回退全文 projectId=${projectId}: ${(error as Error).message}`,
+      );
+      return sourceMarkdown;
+    }
+  }
+
+  private async generateAndSaveSummaryStructDoc(
+    projectId: string,
+    structDocId: string,
+    sourceMarkdown: string,
+  ) {
+    const { text } = await this.aiWorkflowService.summarizeForCaseGenerate(
+      sourceMarkdown,
+    );
+    const summary = text.trim();
+    if (!summary) {
+      throw new Error("AI 未返回有效需求总结");
+    }
+
+    await this.structDocRepo.update(structDocId, {
+      summaryStructDoc: summary,
+      ...auditFieldsForUpdate(),
+    });
+    await touchProjectUpdatedAt(this.projectRepo, projectId);
+    return summary;
+  }
+
+  /**
    * 自动保存在线编辑中的临时结构化 Markdown。
    *
    * @param projectId 项目 ID
@@ -555,10 +536,15 @@ export class StructDocService implements OnModuleInit {
       );
     }
 
+    const nextTempStructDoc = tempStructDoc ?? existing.tempStructDoc;
+    const shouldClearSummary =
+      tempStructDoc !== undefined && tempStructDoc !== existing.tempStructDoc;
+
     await this.structDocRepo.update(existing.id, {
-      tempStructDoc: tempStructDoc ?? existing.tempStructDoc,
+      tempStructDoc: nextTempStructDoc,
+      ...(shouldClearSummary ? { summaryStructDoc: null } : {}),
       ...auditFieldsForUpdate(),
-    });
+    } as never);
     await touchProjectUpdatedAt(this.projectRepo, projectId);
 
     return this.getByProjectId(projectId);
@@ -607,8 +593,11 @@ export class StructDocService implements OnModuleInit {
         structDocPath: objectPath,
       }),
     );
+    await this.structDocRepo.update(structDoc.id, {
+      summaryStructDoc: null,
+    } as never);
 
-    if (dto.testPoints?.length) {
+    if (dto.testPoints !== undefined) {
       await this.replaceTestPoints(projectId, structDoc.id, dto.testPoints);
     } else {
       await this.syncTestPointsFromMarkdown(
@@ -700,7 +689,11 @@ export class StructDocService implements OnModuleInit {
       }
       if (!system || !featureModule || !testPoint) {
         const label =
-          testPoint || system || featureModule || item.id || `第 ${index + 1} 条`;
+          testPoint ||
+          system ||
+          featureModule ||
+          item.id ||
+          `第 ${index + 1} 条`;
         throw new BadRequestException(
           `测试要点「${label}」的系统、功能模块、测试要点均不能为空`,
         );

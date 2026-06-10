@@ -3,14 +3,18 @@
  *
  * **当前主路径**：generateJsonCaseTree（promote-skill + AI Chat + JSON → 案例树）
  *
- * **遗留路径**：generateCaseTree（旧 case-skill Markdown 工作流），保留作参考/未配置 AI Chat 时本地规则。
+ * **遗留路径**：generateCaseTree（旧 case-skill Markdown），保留作参考/未配置 AI Chat 时本地规则。
  *
  * Skill 文件均从 MinIO URL 拉取：promote-skill / case-skill / require-skill
  */
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { AiWorkflowService } from "../../../common/ai-workflow/service/ai-workflow.service";
-import { fetchTextFromUrl } from "../../../common/ai-workflow/util/workflow-input.util";
+import {
+  buildStructRequirementPrompt,
+  fetchTextFromUrl,
+} from "../../../common/ai-workflow/util/workflow-input.util";
+import { sanitizeStructuredMarkdown } from "@struct-doc/util/struct-doc.parser";
 import { MinioStorageService } from "../../../common/minio/service/minio.service";
 import type {
   CaseNature,
@@ -111,7 +115,7 @@ export class CasePipelineService {
     ]
       .filter(Boolean)
       .join("\n");
-    const aiMarkdown = await this.generateMarkdownByWorkflow(
+    const aiMarkdown = await this.generateMarkdownByAiChat(
       requirementInput,
       "req",
     );
@@ -128,9 +132,9 @@ export class CasePipelineService {
     };
   }
 
-  /** 检查 AI Workflow 是否已配置 */
+  /** 检查 AI Chat 与 Skill 是否已配置 */
   isAiConfigured() {
-    return this.aiWorkflow.isConfigured();
+    return this.aiWorkflow.isAiConfigured();
   }
 
   /** 从结构化 Markdown 重建需求分析对象 */
@@ -1438,12 +1442,11 @@ export class CasePipelineService {
       : ["响应时效、异常提示、数据一致性和可追溯性需重点验证。"];
   }
 
-  private async generateMarkdownByWorkflow(
+  private async generateMarkdownByAiChat(
     prompt: string,
     skill: "req",
   ): Promise<string | null> {
-    const skillUrl = this.resolveSkillUrl(skill);
-    if (!skillUrl || !this.aiWorkflow.isConfigured()) {
+    if (!this.aiWorkflow.canStructRequirement()) {
       return null;
     }
 
@@ -1453,11 +1456,12 @@ export class CasePipelineService {
         return null;
       }
 
-      const { text } = await this.aiWorkflow.runWithContent(prompt, skillText);
-      return text ? this.stripMarkdownFence(text) : null;
+      const chatPrompt = buildStructRequirementPrompt(skillText, prompt);
+      const { text } = await this.aiWorkflow.runWithAiChat(chatPrompt);
+      return text ? sanitizeStructuredMarkdown(text) : null;
     } catch (error) {
       this.logger.warn(
-        `AI Workflow Markdown 生成失败，回退本地逻辑: ${(error as Error).message}`,
+        `AI Chat 结构化 Markdown 生成失败，回退本地逻辑: ${(error as Error).message}`,
       );
       return null;
     }
