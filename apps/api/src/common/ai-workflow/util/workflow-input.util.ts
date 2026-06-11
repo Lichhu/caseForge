@@ -5,6 +5,10 @@ import {
   assertReadableText,
   extractTextFromBuffer,
 } from "../../document/document-text.util";
+import type {
+  RequirementStructChunk,
+  RequirementStructMeta,
+} from "@struct-doc/util/struct-doc-chunk.util";
 
 /** 从 URL 路径解析文件名（用于判断扩展名） */
 function extractFileNameFromUrl(url: string) {
@@ -83,6 +87,62 @@ export function buildStructRequirementPrompt(
   ]
     .filter((line, index, arr) => !(line === "" && arr[index - 1] === ""))
     .join("\n");
+}
+
+/** 分段结构化：首段含需求概述，后续段仅输出本片段涉及的新增系统/模块/测试要点 */
+export function buildStructRequirementChunkPrompt(
+  skillText: string,
+  chunk: RequirementStructChunk,
+  meta: RequirementStructMeta,
+  requireFileName?: string,
+) {
+  const fileNameLine = requireFileName?.trim()
+    ? `文件名：${requireFileName.trim()}\n\n`
+    : "";
+
+  const metaLines = [
+    meta.requirementNo ? `- 需求编号：${meta.requirementNo}` : "",
+    meta.requirementName ? `- 需求名称：${meta.requirementName}` : "",
+    meta.businessScope ? `- 业务范围：${meta.businessScope}` : "",
+  ].filter(Boolean);
+
+  const segmentIntro = [
+    `# 分段结构化任务（第 ${chunk.index + 1}/${chunk.total} 段）`,
+    "",
+    "以下是一份较长需求文档的**片段**。请严格按技能文档中的 Markdown 模板，**仅结构化管理本片段中出现的功能内容**。",
+    "",
+    "## 全局需求背景（仅供理解，不要在本段重复输出完整需求概述）",
+    ...metaLines,
+    "",
+    chunk.includeOverview
+      ? "## 本段输出要求"
+      : "## 本段输出要求（重要）",
+    chunk.includeOverview
+      ? "- 输出完整文档头部：`# 标题`、`## 需求概述`（可精炼）、`## 系统与功能测试分析`"
+      : "- **不要**输出 `# 标题` 或 `## 需求概述`",
+    "- 仅输出本片段中能够识别到的 `### 系统：` / `#### 功能模块：` / `测试要点` 块",
+    "- 不要编造本片段未出现的系统或功能",
+    "- 不要输出 ```markdown 代码块或 thinking 标签",
+    chunk.total > 1
+      ? `- 这是第 ${chunk.index + 1}/${chunk.total} 段，后续片段会补充其他系统/模块，本段宁缺毋滥`
+      : "",
+    "",
+    "---",
+    "",
+    "# 待结构化的需求文档片段",
+    "",
+    fileNameLine + chunk.text.trim(),
+    "",
+    "---",
+    "",
+    chunk.includeOverview
+      ? "请输出本段对应的完整 Markdown（含需求概述与本段系统/模块/测试要点）。"
+      : "请仅输出本段新增的 `### 系统：` 模块块（可含多个系统，每个系统下含功能模块与测试要点）。",
+  ]
+    .filter(Boolean)
+    .filter((line, index, arr) => !(line === "" && arr[index - 1] === ""));
+
+  return [skillText.trim(), "", ...segmentIntro].join("\n");
 }
 
 /** 组装案例生成用需求总结 AI Chat 提示词（压缩结构化 Markdown） */

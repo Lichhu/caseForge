@@ -21,7 +21,7 @@ const DEFAULT_SYSTEM = "业务系统";
 const FEATURE_MODULE_PATTERN =
   /\n#{2,5}\s*(?:\*\*)?功能模块(?:\*\*)?[：:]\s*([^\n]+)\n?/g;
 const SYSTEM_HEADING_PATTERN =
-  /^#{2,3}\s*(?:\*\*)?系统(?:\*\*)?[：:]\s*([^\n]+)/gm;
+  /^#{2,5}\s*(?:\*\*)?系统(?:\*\*)?[：:]\s*([^\n]+)/gm;
 
 /**
  * 解析结构化 Markdown 文档，提取测试要点列表。
@@ -37,10 +37,10 @@ export function parseStructuredDoc(markdown: string): ParsedTestPoint[] {
   }
 
   const strategies = [
-    () => parsePlainTextStructuredDoc(normalized),
     () => parseFromFeatureModuleBlocks(normalized),
-    () => parseLegacyBlocks(normalized),
     () => parseRelaxedFeatureModules(normalized),
+    () => parseLegacyBlocks(normalized),
+    () => parsePlainTextStructuredDoc(normalized),
     () => parseGlobalTestPointSections(normalized),
   ];
 
@@ -188,16 +188,18 @@ function parsePlainTextStructuredDoc(text: string) {
     return [];
   }
 
-  const system =
-    cleanText(text.match(PLAIN_SYSTEM_PATTERN)?.[1] || "") || DEFAULT_SYSTEM;
   const results: ParsedTestPoint[] = [];
 
   for (let i = 0; i < moduleMatches.length; i += 1) {
     const featureModule = cleanText(moduleMatches[i][1]);
-    const bodyStart =
-      (moduleMatches[i].index ?? 0) + moduleMatches[i][0].length;
+    const moduleStart = moduleMatches[i].index ?? 0;
+    const bodyStart = moduleStart + moduleMatches[i][0].length;
     const bodyEnd = moduleMatches[i + 1]?.index ?? text.length;
     const body = text.slice(bodyStart, bodyEnd);
+    const system =
+      findSystemBefore(text, moduleStart) ||
+      cleanText(text.match(PLAIN_SYSTEM_PATTERN)?.[1] || "") ||
+      DEFAULT_SYSTEM;
 
     const featureDesc = cleanText(
       body.match(plainLabelPattern("功能描述", "m"))?.[1] || "",

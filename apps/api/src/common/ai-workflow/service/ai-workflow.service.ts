@@ -10,8 +10,15 @@ import {
   buildCaseGenerateSummaryPrompt,
   fetchWorkflowFileContents,
   buildStructRequirementPrompt,
+  buildStructRequirementChunkPrompt,
 } from "../util/workflow-input.util";
 import { sanitizeStructuredMarkdown } from "@struct-doc/util/struct-doc.parser";
+import {
+  estimateRequirementChunkCount,
+  extractRequirementStructMeta,
+  mergeStructuredMarkdownParts,
+  splitRequirementForStructuring,
+} from "@struct-doc/util/struct-doc-chunk.util";
 
 /** AI Chat 调用结果 */
 export interface AiChatResult {
@@ -23,6 +30,8 @@ export interface AiChatResult {
 export interface StructRequirementResult {
   markdown: string;
   rawResponse: unknown;
+  /** 实际使用的分段数（1 表示单次调用） */
+  chunkCount: number;
 }
 
 /** AI Chat + Skill 文件能力封装 */
@@ -82,20 +91,96 @@ export class AiWorkflowService {
       skillFileUrl,
       requireFileName,
     );
-    const prompt = buildStructRequirementPrompt(
-      skillText,
+    return this.structRequirementFromText(
       requireText,
+      skillText,
       requireFileName,
     );
-    const { text, rawResponse } = await this.runWithAiChat(prompt);
-    if (!text.trim()) {
-      throw new Error("AI Chat 未返回结构化 Markdown 内容");
+  }
+
+  /**
+   * 对已提取的需求正文做结构化（支持长文档分段）
+   */
+  async structRequirementFromText(
+    requireText: string,
+    skillText: string,
+    requireFileName?: string,
+  ): Promise<StructRequirementResult> {
+    if (!requireText?.trim()) {
+      throw new Error("需求文档内容为空");
+    }
+    if (!skillText?.trim()) {
+      throw new Error("技能文档内容为空");
+    }
+
+    const chunks = splitRequirementForStructuring(requireText);
+    const meta = extractRequirementStructMeta(requireText);
+
+    if (!chunks?.length) {
+      const prompt = buildStructRequirementPrompt(
+        skillText,
+        requireText,
+        requireFileName,
+      );
+      const { text, rawResponse } = await this.runWithAiChat(prompt);
+      if (!text.trim()) {
+        throw new Error("AI Chat 未返回结构化 Markdown 内容");
+      }
+      return {
+        markdown: sanitizeStructuredMarkdown(text),
+        rawResponse,
+        chunkCount: 1,
+      };
+    }
+
+    this.logger.log(
+      `需求文档启用分段结构化：${requireText.length} 字符 → ${chunks.length} 段（按系统章节切分或体积分段）`,
+    );
+
+    const parts: string[] = [];
+    const partResponses: unknown[] = [];
+
+    for (const chunk of chunks) {
+      const prompt = buildStructRequirementChunkPrompt(
+        skillText,
+        chunk,
+        meta,
+        requireFileName,
+      );
+      const { text, rawResponse } = await this.runWithAiChat(prompt);
+      if (!text.trim()) {
+        throw new Error(
+          `AI Chat 未返回第 ${chunk.index + 1}/${chunk.total} 段结构化内容`,
+        );
+      }
+      parts.push(sanitizeStructuredMarkdown(text));
+      partResponses.push(rawResponse);
+      this.logger.log(
+        `分段结构化完成 ${chunk.index + 1}/${chunk.total}，输出 ${text.length} 字符`,
+      );
+    }
+
+    const markdown = sanitizeStructuredMarkdown(
+      mergeStructuredMarkdownParts(parts, meta),
+    );
+    if (!markdown.trim()) {
+      throw new Error("分段结构化合并结果为空");
     }
 
     return {
-      markdown: sanitizeStructuredMarkdown(text),
-      rawResponse,
+      markdown,
+      rawResponse: {
+        chunked: true,
+        chunkCount: chunks.length,
+        parts: partResponses,
+      },
+      chunkCount: chunks.length,
     };
+  }
+
+  /** 预估结构化分段数（用于超时计算） */
+  estimateStructRequirementChunks(requireText: string) {
+    return estimateRequirementChunkCount(requireText);
   }
 
   /** 将结构化 Markdown 压缩为案例生成共用的需求总结 */

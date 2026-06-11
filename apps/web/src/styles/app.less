@@ -2015,6 +2015,36 @@ textarea {
   font-size: 12px;
 }
 
+/* show-search 时搜索框与已选文字同层叠放，收起态需隐藏搜索框避免光标遮挡文字 */
+.test-point-filter-bar .ant-select-single.ant-select-show-search {
+  .ant-select-selection-item {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &:not(.ant-select-open) .ant-select-selection-search {
+    width: 0 !important;
+    margin: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  &:not(.ant-select-open) .ant-select-selection-search-input {
+    caret-color: transparent;
+  }
+
+  &.ant-select-open .ant-select-selection-item {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  &.ant-select-open .ant-select-selection-search {
+    inset-inline-start: 4px;
+    inset-inline-end: 4px;
+  }
+}
+
 .test-point-filter-sep {
   flex-shrink: 0;
   color: #d0d5dd;

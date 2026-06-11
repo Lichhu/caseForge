@@ -40,6 +40,7 @@ import {
   getStructuringTimeoutMs,
   isStructuringTimedOut,
 } from "@struct-doc/util/structuring-timeout.util";
+import { fetchWorkflowFileContents } from "../../../common/ai-workflow/util/workflow-input.util";
 import { In, Repository } from "typeorm";
 import { auditFieldsForUpdate } from "../../../common/audit/request-context";
 import {
@@ -300,16 +301,32 @@ export class StructDocService {
         throw new BadRequestException("需求文档地址无效，请重新上传");
       }
 
-      try {
-        const { markdown, rawResponse } = await this.withStructuringDeadline(
-          startedAt,
-          () =>
-            this.aiWorkflowService.structRequirement(
-              requireFileUrl,
-              undefined,
-              existing.reqDocName,
-            ),
+      const skillFileUrl = this.aiWorkflowService.getReqDocSkillUrl();
+      const [requireText, skillText] = await fetchWorkflowFileContents(
+        requireFileUrl,
+        skillFileUrl,
+        existing.reqDocName,
+      );
+      const plannedChunkCount =
+        this.aiWorkflowService.estimateStructRequirementChunks(requireText);
+      if (plannedChunkCount > 1) {
+        this.logger.log(
+          `项目 ${projectId} 需求文档 ${requireText.length} 字符，计划分 ${plannedChunkCount} 段结构化`,
         );
+      }
+
+      try {
+        const { markdown, rawResponse, chunkCount } =
+          await this.withStructuringDeadline(
+            startedAt,
+            () =>
+              this.aiWorkflowService.structRequirementFromText(
+                requireText,
+                skillText,
+                existing.reqDocName,
+              ),
+            plannedChunkCount,
+          );
 
         if (!(await this.isJobActive(job.id))) {
           this.logger.log(
@@ -349,6 +366,12 @@ export class StructDocService {
             projectId,
             latest.id,
             parsedTestPoints,
+          );
+        }
+
+        if (chunkCount > 1) {
+          this.logger.log(
+            `分段结构化完成 projectId=${projectId} chunks=${chunkCount} testPoints=${parsedTestPoints.length}`,
           );
         }
 
@@ -445,11 +468,13 @@ export class StructDocService {
   private async withStructuringDeadline<T>(
     structuringStartedAt: Date,
     run: () => Promise<T>,
+    chunkCount = 1,
   ): Promise<T> {
     const remaining =
-      getStructuringTimeoutMs() - (Date.now() - structuringStartedAt.getTime());
+      getStructuringTimeoutMs(chunkCount) -
+      (Date.now() - structuringStartedAt.getTime());
     if (remaining <= 0) {
-      throw new Error(buildStructuringTimeoutMessage());
+      throw new Error(buildStructuringTimeoutMessage(chunkCount));
     }
 
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -458,7 +483,7 @@ export class StructDocService {
         run(),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
-            () => reject(new Error(buildStructuringTimeoutMessage())),
+            () => reject(new Error(buildStructuringTimeoutMessage(chunkCount))),
             remaining,
           );
         }),
