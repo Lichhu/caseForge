@@ -17,6 +17,7 @@ import {
   runAssertions,
 } from "../util/assertion-runner.util";
 import type { ApiRunItemStatus } from "@case-forge/shared";
+import { toPublicApiRun } from "../../../common/http/public-response.util";
 
 const DEFAULT_CONCURRENCY = 5;
 const MAX_CONCURRENCY = 10;
@@ -150,7 +151,7 @@ export class ApiExecutionService {
   }
 
   async listRuns(projectId: string, executionSetId?: string) {
-    return this.runRepo.find({
+    const runs = await this.runRepo.find({
       where: scopedWhere({
         projectId,
         ...(executionSetId ? { executionSetId } : {}),
@@ -158,6 +159,7 @@ export class ApiExecutionService {
       order: { createdAt: "DESC" },
       take: 50,
     });
+    return runs.map((run) => toPublicApiRun(run));
   }
 
   async getRunDetail(projectId: string, runId: string) {
@@ -171,7 +173,7 @@ export class ApiExecutionService {
       where: { runId: run.id },
       order: { createdAt: "ASC" },
     });
-    return { ...run, items };
+    return toPublicApiRun(run, items);
   }
 
   private async executeSingleCase(input: {

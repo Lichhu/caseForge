@@ -369,6 +369,98 @@ export interface CaseExcelViewModel {
   merges: CaseExcelMergeCell[];
 }
 
+export interface CaseExcelRowListQuery {
+  requirement?: string;
+  priority?: CasePriority;
+  caseNature?: CaseNature;
+  keyword?: string;
+}
+
+export interface CaseExcelRowListPage {
+  items: CaseExcelRow[];
+  total: number;
+  totalRows: number;
+  page: number;
+  pageSize: number;
+  requirements: string[];
+  focusPage?: number;
+  /** idsOnly 查询时返回的全部匹配 caseNodeId */
+  ids?: string[];
+}
+
+export function matchesCaseExcelRowFilter(
+  row: CaseExcelRow,
+  query: CaseExcelRowListQuery,
+): boolean {
+  if (query.requirement && row.requirement !== query.requirement) {
+    return false;
+  }
+  if (query.priority && row.priority !== query.priority) {
+    return false;
+  }
+  if (query.caseNature && row.caseNature !== query.caseNature) {
+    return false;
+  }
+  const keyword = query.keyword?.trim().toLowerCase();
+  if (!keyword) {
+    return true;
+  }
+  const haystack = [
+    row.caseName,
+    row.caseTitle,
+    row.caseNature,
+    row.priority,
+    row.caseCondition,
+    row.caseStep,
+    row.caseExpected,
+  ]
+    .join('\n')
+    .toLowerCase();
+  return haystack.includes(keyword);
+}
+
+export function filterCaseExcelRows(
+  rows: CaseExcelRow[],
+  query: CaseExcelRowListQuery,
+): CaseExcelRow[] {
+  return rows.filter((row) => matchesCaseExcelRowFilter(row, query));
+}
+
+export function collectCaseExcelRequirements(rows: CaseExcelRow[]): string[] {
+  const seen = new Set<string>();
+  const requirements: string[] = [];
+  for (const row of rows) {
+    const requirement = row.requirement.trim();
+    if (!requirement || seen.has(requirement)) {
+      continue;
+    }
+    seen.add(requirement);
+    requirements.push(requirement);
+  }
+  return requirements.sort((a, b) => a.localeCompare(b, 'zh-CN'));
+}
+
+export function paginateCaseExcelRows(
+  rows: CaseExcelRow[],
+  page: number,
+  pageSize: number,
+): CaseExcelRow[] {
+  const start = (Math.max(1, page) - 1) * pageSize;
+  return rows.slice(start, start + pageSize);
+}
+
+export function findCaseExcelRowPage(
+  rows: CaseExcelRow[],
+  caseNodeId: string,
+  pageSize: number,
+): number | undefined {
+  const index = rows.findIndex((row) => row.caseNodeId === caseNodeId);
+  if (index < 0) {
+    return undefined;
+  }
+  return Math.floor(index / pageSize) + 1;
+}
+
 export function getCaseElementContent(caseNode: CaseTreeNode, kind: CaseElementKind) {
   const child = caseNode.children?.find((item) => item.kind === kind);
   if (child) {
@@ -760,6 +852,36 @@ function findNodeById(node: CaseTreeNode, nodeId: string): CaseTreeNode | null {
     }
   }
   return null;
+}
+
+/** 在案例树中按 ID 查找节点 */
+export function findCaseTreeNodeById(node: CaseTreeNode, nodeId: string): CaseTreeNode | null {
+  return findNodeById(node, nodeId);
+}
+
+/** 测试要点节点下直接子案例数量 */
+export function countDirectCaseChildren(node: CaseTreeNode): number {
+  return (node.children || []).filter(
+    (child) => child.kind === 'case' || child.kind === 'scenario',
+  ).length;
+}
+
+/** 按需加载：某测试要点下的子节点（案例子树） */
+export interface RunNodeChildrenResponse {
+  nodeId: string;
+  children: CaseTreeNode[];
+  total: number;
+}
+
+/** 统计案例叶子节点数量（case / scenario） */
+export function countCaseTreeLeaves(node: CaseTreeNode): number {
+  if (node.kind === 'case' || node.kind === 'scenario') {
+    return 1;
+  }
+  return (node.children || []).reduce(
+    (total, child) => total + countCaseTreeLeaves(child),
+    0,
+  );
 }
 
 function cryptoRandomId() {

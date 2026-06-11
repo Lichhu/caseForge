@@ -17,6 +17,7 @@ import {
   ReplaceExecutionSetCasesDto,
   SaveApiExecutionSetDto,
 } from "../dto/execution-platform.dto";
+import { toPublicApiExecutionSet } from "../../../common/http/public-response.util";
 
 @Injectable()
 export class ApiExecutionSetService {
@@ -50,11 +51,12 @@ export class ApiExecutionSetService {
       caseIdsMap.set(link.executionSetId, ids);
     }
 
-    return sets.map((set) => ({
-      ...set,
-      caseCount: countMap.get(set.id) ?? 0,
-      caseIds: caseIdsMap.get(set.id) ?? [],
-    }));
+    return sets.map((set) =>
+      toPublicApiExecutionSet(set, {
+        caseCount: countMap.get(set.id) ?? 0,
+        caseIds: caseIdsMap.get(set.id) ?? [],
+      }),
+    );
   }
 
   async createSet(
@@ -70,7 +72,7 @@ export class ApiExecutionSetService {
       enabled: payload.enabled ?? true,
       ...auditFieldsForCreate(),
     });
-    return this.setRepo.save(entity);
+    return toPublicApiExecutionSet(await this.setRepo.save(entity));
   }
 
   async updateSet(
@@ -83,7 +85,9 @@ export class ApiExecutionSetService {
     existing.name = payload.name.trim();
     existing.description = payload.description?.trim();
     if (payload.enabled !== undefined) existing.enabled = payload.enabled;
-    return this.setRepo.save({ ...existing, ...auditFieldsForUpdate() });
+    return toPublicApiExecutionSet(
+      await this.setRepo.save({ ...existing, ...auditFieldsForUpdate() }),
+    );
   }
 
   async deleteSet(projectId: string, transactionId: string, setId: string) {

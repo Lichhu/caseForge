@@ -23,6 +23,7 @@ import {
   nextCaseNo,
 } from "../util/api-case-ai.util";
 import { buildFallbackCasesForEndpoint } from "../util/case-fallback.generator";
+import { toPublicApiCase } from "../../../common/http/public-response.util";
 
 @Injectable()
 export class ApiCaseService {
@@ -41,26 +42,28 @@ export class ApiCaseService {
   ) {}
 
   async listCases(projectId: string, transactionId?: string) {
-    if (!transactionId) {
-      return this.caseRepo.find({
-        where: scopedWhere({ projectId }),
-        relations: ["endpoint"],
-        order: { updatedAt: "DESC" },
-      });
-    }
-    const endpoints = await this.endpointRepo.find({
-      where: { projectId, transactionId },
-      select: ["id"],
-    });
-    const endpointIds = endpoints.map((item) => item.id);
-    if (!endpointIds.length) {
-      return [];
-    }
-    return this.caseRepo.find({
-      where: { projectId, endpointId: In(endpointIds) },
-      relations: ["endpoint"],
-      order: { updatedAt: "DESC" },
-    });
+    const rows = !transactionId
+      ? await this.caseRepo.find({
+          where: scopedWhere({ projectId }),
+          relations: ["endpoint"],
+          order: { updatedAt: "DESC" },
+        })
+      : await (async () => {
+          const endpoints = await this.endpointRepo.find({
+            where: { projectId, transactionId },
+            select: ["id"],
+          });
+          const endpointIds = endpoints.map((item) => item.id);
+          if (!endpointIds.length) {
+            return [];
+          }
+          return this.caseRepo.find({
+            where: { projectId, endpointId: In(endpointIds) },
+            relations: ["endpoint"],
+            order: { updatedAt: "DESC" },
+          });
+        })();
+    return rows.map(toPublicApiCase);
   }
 
   async createCase(
@@ -99,7 +102,13 @@ export class ApiCaseService {
       metadata: { source: "manual" },
       ...auditFieldsForCreate(),
     });
-    return this.caseRepo.save(entity);
+    const saved = await this.caseRepo.save(entity);
+    return toPublicApiCase(
+      (await this.caseRepo.findOne({
+        where: scopedWhere({ projectId, id: saved.id }),
+        relations: ["endpoint"],
+      })) ?? saved,
+    );
   }
 
   async updateCase(projectId: string, caseId: string, payload: SaveApiCaseDto) {
@@ -133,7 +142,13 @@ export class ApiCaseService {
       ...existing.metadata,
       source: existing.metadata?.source === "ai" ? "ai_edited" : "manual",
     };
-    return this.caseRepo.save({ ...existing, ...auditFieldsForUpdate() });
+    const saved = await this.caseRepo.save({ ...existing, ...auditFieldsForUpdate() });
+    return toPublicApiCase(
+      (await this.caseRepo.findOne({
+        where: scopedWhere({ projectId, id: saved.id }),
+        relations: ["endpoint"],
+      })) ?? saved,
+    );
   }
 
   async deleteCase(projectId: string, caseId: string) {
@@ -202,7 +217,10 @@ export class ApiCaseService {
         created.push(await this.caseRepo.save(entity));
       }
     }
-    return { count: created.length, cases: created };
+    return {
+      count: created.length,
+      cases: created.map(toPublicApiCase),
+    };
   }
 
   private validateCasePayload(payload: SaveApiCaseDto) {

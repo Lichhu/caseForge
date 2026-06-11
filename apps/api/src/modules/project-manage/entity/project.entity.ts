@@ -17,9 +17,13 @@ export const PROJECT_PLATFORMS = ["case-forge", "api-test"] as const;
  * 案例项目实体：标题、描述、需求编号及审计字段
  */
 @Entity("case_project")
-@Index("idx_case_project_requirement_no", ["requirementNo"])
-@Index("idx_case_project_updated_at", ["updatedAt"])
 @Index("idx_case_project_platform_updated", ["platform", "updatedAt"])
+@Index("idx_case_project_user_platform_updated", [
+  "createdBy",
+  "platform",
+  "updatedAt",
+])
+@Index("idx_case_project_platform_requirement", ["platform", "requirementNo"])
 export class CaseProjectEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;

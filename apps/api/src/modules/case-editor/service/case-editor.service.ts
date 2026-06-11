@@ -2,10 +2,29 @@
  * 案例编辑运行持久化服务：负责案例树运行记录的创建、
  * 查询、更新及树形结构的读写。
  */
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
-import type { CaseTreeNode, GenerationRun, MindMapExtras } from "@case-forge/shared";
-import { ensureCaseMetadata, isCaseLikeKind, normalizeCaseNature, normalizeCasePriority } from "@case-forge/shared";
+import type {
+  CaseTreeNode,
+  CaseExcelRowListPage,
+  GenerationRun,
+  GenerationRunSummary,
+  MindMapExtras,
+} from "@case-forge/shared";
+import {
+  ensureCaseMetadata,
+  isCaseLikeKind,
+  normalizeCaseNature,
+  normalizeCasePriority,
+  flattenCaseTreeToExcel,
+  filterCaseExcelRows,
+  collectCaseExcelRequirements,
+  paginateCaseExcelRows,
+  findCaseExcelRowPage,
+  normalizeCaseForgePageSize,
+  findCaseTreeNodeById,
+  type RunNodeChildrenResponse,
+} from "@case-forge/shared";
 import { randomUUID } from "node:crypto";
 import { CaseEditorEntity } from "@case-editor/entity/case-editor.entity";
 import { CaseNodeMetadataEntity } from "@case-editor/entity/case-node-metadata.entity";
@@ -20,6 +39,7 @@ import {
   isFullTreeReplace,
   type CaseTreePersistContext,
 } from "@case-editor/util/case-tree-diff.util";
+import type { ListCaseRowsDto } from "@case-editor/dto/list-case-rows.dto";
 
 interface TreeSaveContext extends CaseTreePersistContext {}
 
@@ -83,6 +103,20 @@ export class CaseEditorService {
     return this.toGenerationRun(editor, input.tree);
   }
 
+  /** 查询项目下运行摘要（不含案例树，供 workspace 等轻量接口） */
+  async listRunSummaries(projectId: string): Promise<GenerationRunSummary[]> {
+    const editors = await this.caseEditorRepo.find({
+      where: scopedWhere({ projectId }),
+      order: { createdAt: "DESC" },
+      select: ["id", "title", "createdAt"],
+    });
+    return editors.map((editor) => ({
+      id: editor.id,
+      title: editor.title || "未命名",
+      createdAt: editor.createdAt.toISOString(),
+    }));
+  }
+
   /** 查询项目下所有案例生成运行记录 */
   async listRuns(projectId: string): Promise<GenerationRun[]> {
     const editors = await this.caseEditorRepo.find({
@@ -110,6 +144,74 @@ export class CaseEditorService {
     }
     const tree = await this.loadTree(editor.caseTreeId, editor.id);
     return this.toGenerationRun(editor, tree);
+  }
+
+  /** 按需加载测试要点下的案例子树（XMind 懒加载） */
+  async listRunNodeChildren(
+    projectId: string,
+    runId: string,
+    nodeId: string,
+  ): Promise<RunNodeChildrenResponse> {
+    const run = await this.getRun(projectId, runId);
+    const node = findCaseTreeNodeById(run.tree, nodeId);
+    if (!node) {
+      throw new NotFoundException(`Node ${nodeId} not found`);
+    }
+    if (node.kind !== "requirement") {
+      throw new BadRequestException("仅支持查询测试要点节点的子节点");
+    }
+    const children = node.children || [];
+    return {
+      nodeId,
+      children,
+      total: children.length,
+    };
+  }
+
+  /** 分页查询案例 Excel 行（筛选 + 分页，基于内存摊平） */
+  async listCaseRows(
+    projectId: string,
+    runId: string,
+    query: ListCaseRowsDto,
+  ): Promise<CaseExcelRowListPage> {
+    const run = await this.getRun(projectId, runId);
+    const { rows } = flattenCaseTreeToExcel(run.tree);
+    const pageSize = normalizeCaseForgePageSize(query.pageSize);
+    const page = Math.max(1, Number(query.page) || 1);
+    const filterQuery = {
+      requirement: query.requirement?.trim() || undefined,
+      priority: query.priority,
+      caseNature: query.caseNature,
+      keyword: query.keyword?.trim() || undefined,
+    };
+    const filtered = filterCaseExcelRows(rows, filterQuery);
+    const requirements = collectCaseExcelRequirements(rows);
+    if (query.idsOnly) {
+      return {
+        items: [],
+        ids: filtered.map((row) => row.caseNodeId),
+        total: filtered.length,
+        totalRows: rows.length,
+        page: 1,
+        pageSize: filtered.length,
+        requirements,
+      };
+    }
+    const focusCaseNodeId = query.focusCaseNodeId?.trim();
+    const focusPage = focusCaseNodeId
+      ? findCaseExcelRowPage(filtered, focusCaseNodeId, pageSize)
+      : undefined;
+    const effectivePage = focusPage ?? page;
+    const items = paginateCaseExcelRows(filtered, effectivePage, pageSize);
+    return {
+      items,
+      total: filtered.length,
+      totalRows: rows.length,
+      page: effectivePage,
+      pageSize,
+      requirements,
+      ...(focusPage !== undefined ? { focusPage } : {}),
+    };
   }
 
   /** 更新运行记录关联的案例树并递增版本号 */
@@ -235,7 +337,7 @@ export class CaseEditorService {
   /** 保存接口仅返回运行元数据，避免大树重复下发 */
   private toGenerationRunMeta(editor: CaseEditorEntity): GenerationRun {
     return {
-      id: editor.id,
+      ...this.toRunSummary(editor),
       projectId: editor.projectId,
       constraintId: editor.constraintId,
       prompt: editor.prompt || "",
@@ -248,7 +350,6 @@ export class CaseEditorService {
       },
       mindMapExtras: editor.mindMapExtras,
       sourceTestPointIds: editor.sourceTestPointIds,
-      createdAt: editor.createdAt.toISOString(),
     };
   }
 
@@ -256,9 +357,12 @@ export class CaseEditorService {
     rootId: string,
     caseEditorId?: string,
   ): Promise<CaseTreeNode> {
-    const nodes = caseEditorId
+    let nodes = caseEditorId
       ? await this.loadTreeNodesByEditor(caseEditorId)
       : await this.collectTreeNodes(rootId);
+    if (!nodes.length && caseEditorId) {
+      nodes = await this.collectTreeNodes(rootId);
+    }
     const nodeMap = new Map<string, CaseTreeNode>();
     for (const entity of nodes) {
       nodeMap.set(entity.id, {
@@ -358,7 +462,7 @@ export class CaseEditorService {
     tree: CaseTreeNode,
   ): GenerationRun {
     return {
-      id: editor.id,
+      ...this.toRunSummary(editor),
       projectId: editor.projectId,
       constraintId: editor.constraintId,
       prompt: editor.prompt || "",
@@ -366,6 +470,13 @@ export class CaseEditorService {
       tree,
       mindMapExtras: editor.mindMapExtras,
       sourceTestPointIds: editor.sourceTestPointIds,
+    };
+  }
+
+  private toRunSummary(editor: CaseEditorEntity): GenerationRunSummary {
+    return {
+      id: editor.id,
+      title: editor.title || "未命名",
       createdAt: editor.createdAt.toISOString(),
     };
   }

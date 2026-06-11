@@ -27,6 +27,10 @@ import { findOwnedProject } from "../../../common/audit/user-scope";
 import { touchProjectUpdatedAt } from "../../../common/project/touch-project.util";
 import { StructDocService } from "@struct-doc/service/struct-doc.service";
 import { stripDocumentExtension } from "@struct-doc/util/struct-doc.parser";
+import {
+  MAX_REQUIREMENT_DOC_SIZE_BYTES,
+  MAX_REQUIREMENT_DOC_SIZE_MB,
+} from "@case-forge/shared";
 import { Repository } from "typeorm";
 
 @ApiTags("struct-doc")
@@ -56,7 +60,11 @@ export class StructDocController {
     required: false,
     description: "已存在需求文档时，传 true 强制重新上传",
   })
-  @UseInterceptors(FileInterceptor("file"))
+  @UseInterceptors(
+    FileInterceptor("file", {
+      limits: { fileSize: MAX_REQUIREMENT_DOC_SIZE_BYTES },
+    }),
+  )
   @Post(":projectId/document/upload")
   async uploadRequirement(
     @Param("projectId") projectId: string,
@@ -65,6 +73,12 @@ export class StructDocController {
   ) {
     if (!file) {
       throw new BadRequestException("请选择 doc 或 docx 需求文档");
+    }
+
+    if (file.size > MAX_REQUIREMENT_DOC_SIZE_BYTES) {
+      throw new BadRequestException(
+        `需求文档大小不能超过 ${MAX_REQUIREMENT_DOC_SIZE_MB}MB`,
+      );
     }
 
     const extension = file.originalname.split(".").pop()?.toLowerCase();
@@ -110,8 +124,18 @@ export class StructDocController {
   /** 查询项目结构化文档详情及测试要点列表。 */
   @Get(":projectId")
   @ApiOperation({ summary: "查询项目结构化文档和测试要点" })
-  async getProjectStructDoc(@Param("projectId") projectId: string) {
-    return this.structDocService.getByProjectId(projectId);
+  @ApiQuery({
+    name: "includeTestPoints",
+    required: false,
+    description: "设为 false 时仅返回文档元数据与状态，不下发测试要点列表",
+  })
+  async getProjectStructDoc(
+    @Param("projectId") projectId: string,
+    @Query("includeTestPoints") includeTestPoints?: string,
+  ) {
+    return this.structDocService.getByProjectId(projectId, {
+      includeTestPoints: includeTestPoints !== "false",
+    });
   }
 
   /** 自动保存在线编辑中的临时结构化 Markdown。 */

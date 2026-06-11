@@ -10,6 +10,7 @@ import {
 @Index("uk_api_test_exec_set_case", ["executionSetId", "caseId"], {
   unique: true,
 })
+@Index("idx_api_test_exec_set_case_sort", ["executionSetId", "sortOrder"])
 export class ApiTestExecutionSetCaseEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;

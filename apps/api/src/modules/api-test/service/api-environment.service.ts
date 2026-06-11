@@ -15,6 +15,7 @@ import {
   encryptSecrets,
   maskSecret,
 } from "../util/secret-crypto.util";
+import { toPublicApiEnvironmentService } from "../../../common/http/public-response.util";
 
 @Injectable()
 export class ApiEnvironmentService {
@@ -135,10 +136,11 @@ export class ApiEnvironmentService {
 
   async listEnvironmentServices(projectId: string, environmentId: string) {
     await this.requireEnv(projectId, environmentId);
-    return this.serviceRepo.find({
+    const rows = await this.serviceRepo.find({
       where: scopedWhere({ projectId, environmentId }),
       order: { sortOrder: "ASC", createdAt: "ASC" },
     });
+    return rows.map((row) => toPublicApiEnvironmentService(row));
   }
 
   async createEnvironmentService(
@@ -162,7 +164,7 @@ export class ApiEnvironmentService {
       enabled: payload.enabled ?? true,
       ...auditFieldsForCreate(),
     });
-    return this.serviceRepo.save(entity);
+    return toPublicApiEnvironmentService(await this.serviceRepo.save(entity));
   }
 
   async updateEnvironmentService(
@@ -178,7 +180,9 @@ export class ApiEnvironmentService {
     existing.headers = payload.headers ?? {};
     existing.variables = payload.variables ?? {};
     if (payload.enabled !== undefined) existing.enabled = payload.enabled;
-    return this.serviceRepo.save({ ...existing, ...auditFieldsForUpdate() });
+    return toPublicApiEnvironmentService(
+      await this.serviceRepo.save({ ...existing, ...auditFieldsForUpdate() }),
+    );
   }
 
   async deleteEnvironmentService(
@@ -244,8 +248,6 @@ export class ApiEnvironmentService {
       hasToken: Boolean(token),
       isDefault: row.isDefault,
       enabled: row.enabled,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
     };
   }
 }

@@ -7,7 +7,6 @@ import { TypeOrmModule } from "@nestjs/typeorm";
 import { AiWorkflowModule } from "../../common/ai-workflow";
 import { MinioStorageModule } from "@minio/index";
 import { ProjectManageModule } from "@project-manage/index";
-import { CaseConstraintEntity } from "./entity/case-constraint.entity";
 import { CaseEditorEntity } from "./entity/case-editor.entity";
 import { CaseNodeMetadataEntity } from "./entity/case-node-metadata.entity";
 import { CaseTreeEntity } from "./entity/case-tree.entity";
@@ -33,7 +32,6 @@ import { TestPointEntity } from "@struct-doc/entity/test-point.entity";
       CaseEditorEntity,
       CaseTreeEntity,
       CaseNodeMetadataEntity,
-      CaseConstraintEntity,
       CaseGenerateJobEntity,
       CaseProjectEntity,
       StructDocEntity,

@@ -8,8 +8,11 @@ import {
 } from "typeorm";
 
 @Entity("api_test_execution_set")
-@Index("idx_api_test_exec_set_project", ["projectId"])
-@Index("idx_api_test_exec_set_transaction", ["transactionId"])
+@Index("idx_api_test_exec_set_project_tx_updated", [
+  "projectId",
+  "transactionId",
+  "updatedAt",
+])
 export class ApiTestExecutionSetEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;

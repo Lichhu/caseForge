@@ -78,8 +78,7 @@ async function ensureApiTransactionTable(runner: Queryable) {
         sortOrder INT NOT NULL DEFAULT 0,
         createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
         updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-        UNIQUE KEY uk_api_transaction_project_code (projectId, code),
-        KEY idx_api_transaction_project (projectId)
+        UNIQUE KEY uk_api_transaction_project_code (projectId, code)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
     return;
@@ -198,7 +197,8 @@ async function ensureExecutionPlatformTables(runner: Queryable) {
         modifiedBy VARCHAR(255) NULL DEFAULT 'system',
         createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
         updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-        KEY idx_api_test_env_service_env (environmentId)
+        KEY idx_api_test_env_service_env (environmentId),
+        KEY idx_api_test_env_service_project_env (projectId, environmentId)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
   }
@@ -221,8 +221,7 @@ async function ensureExecutionPlatformTables(runner: Queryable) {
         modifiedBy VARCHAR(255) NULL DEFAULT 'system',
         createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
         updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-        KEY idx_api_test_exec_set_project (projectId),
-        KEY idx_api_test_exec_set_transaction (transactionId)
+        KEY idx_api_test_exec_set_project_tx_updated (projectId, transactionId, updatedAt)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
   }
@@ -246,7 +245,8 @@ async function ensureExecutionPlatformTables(runner: Queryable) {
         caseId VARCHAR(36) CHARACTER SET utf8 NOT NULL,
         sortOrder INT NOT NULL DEFAULT 0,
         createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-        UNIQUE KEY uk_api_test_exec_set_case (executionSetId, caseId)
+        UNIQUE KEY uk_api_test_exec_set_case (executionSetId, caseId),
+        KEY idx_api_test_exec_set_case_sort (executionSetId, sortOrder)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
   }

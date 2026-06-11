@@ -1,7 +1,7 @@
 /**
  * 案例工作区编排服务
  *
- * 职责：聚合项目视图，协调「需求格式化 → 约束 → 案例生成 → 编辑台运行记录」。
+ * 职责：聚合项目视图，协调「需求格式化 → 动态指令 → 案例生成 → 编辑台运行记录」。
  *
  * ## 案例生成主流程（promote-skill + AI Chat）
  *
@@ -31,8 +31,6 @@ import { extractTextFromBuffer } from "../../../common/document/document-text.ut
 import type {
   CaseForgeProject,
   CaseTreeNode,
-  ConstraintInput,
-  ConstraintInstruction,
   RequirementAnalysis,
   RequirementDocument,
   RequirementModule,
@@ -40,8 +38,6 @@ import type {
 import { CaseEditorService } from "@case-editor/service/case-editor.service";
 import { TestPointInstructEntity } from "@dynamic-instruct/entity/test-point-instruct.entity";
 import { TestPointPromptEntity } from "@dynamic-instruct/entity/test-point-prompt.entity";
-import { CaseConstraintEntity } from "@case-editor/entity/case-constraint.entity";
-import { BuildConstraintsDto } from "../dto/build-constraints.dto";
 import {
   buildCaseWorkflowInput,
   mapTestPointsForWorkflow,
@@ -92,8 +88,6 @@ export class CaseWorkspaceService {
     private readonly structDocRepo: Repository<StructDocEntity>,
     @InjectRepository(TestPointEntity)
     private readonly testPointRepo: Repository<TestPointEntity>,
-    @InjectRepository(CaseConstraintEntity)
-    private readonly constraintRepo: Repository<CaseConstraintEntity>,
     @InjectRepository(TestPointInstructEntity)
     private readonly instructRepo: Repository<TestPointInstructEntity>,
     @InjectRepository(TestPointPromptEntity)
@@ -104,11 +98,6 @@ export class CaseWorkspaceService {
     private readonly generateQueueService: CaseGenerateQueueService,
     private readonly structDocService: StructDocService,
   ) {}
-
-  /** 获取项目完整工作区视图 */
-  async getProjectWorkspace(projectId: string) {
-    return this.buildProjectView(projectId);
-  }
 
   private async formatRequirement(
     projectId: string,
@@ -167,49 +156,32 @@ export class CaseWorkspaceService {
     structuredMarkdown: string,
     rawText?: string,
   ) {
-    const project = await this.buildProjectView(projectId);
-    if (!project.document) {
+    const { project, structDoc } = await this.loadProjectBundle(projectId);
+    if (!structDoc) {
       throw new NotFoundException("Requirement document not found");
     }
+    const existing = this.toRequirementDocument(structDoc);
     const document: RequirementDocument = {
-      ...project.document,
+      ...existing,
       structuredMarkdown,
-      rawText: rawText || project.document.rawText,
+      rawText: rawText || existing.rawText,
       analysis: this.pipeline.rebuildAnalysisFromMarkdown(structuredMarkdown),
       updatedAt: new Date().toISOString(),
     };
-    const structDoc = await this.saveRequirementDocument(
+    const saved = await this.saveRequirementDocument(
       projectId,
       document,
-      project.document.fileName,
+      existing.fileName,
     );
     await this.syncTestPointsFromAnalysis(
       projectId,
-      structDoc.id,
+      saved.id,
       document.analysis,
     );
     await touchProjectUpdatedAt(this.projectRepo, projectId, {
       title: document.analysis.requirementName || project.title,
       requirementNo: document.analysis.requirementId,
     });
-    return this.buildProjectView(projectId);
-  }
-
-  /** 保存约束输入（JSON）快照 */
-  async buildConstraints(projectId: string, dto: BuildConstraintsDto) {
-    const project = await this.buildProjectView(projectId);
-    const input = this.normalizeConstraintInput(
-      dto,
-      project.document?.analysis,
-    );
-    const constraintEntity = this.constraintRepo.create({
-      projectId,
-      structDocId: await this.getStructDocId(projectId),
-      input: input as unknown as Record<string, unknown>,
-      markdown: "",
-    });
-    await this.constraintRepo.save(constraintEntity);
-    await touchProjectUpdatedAt(this.projectRepo, projectId);
     return this.buildProjectView(projectId);
   }
 
@@ -320,8 +292,8 @@ export class CaseWorkspaceService {
     dto: GenerateCasesDto,
     options?: { skipGeneratingStatus?: boolean },
   ) {
-    const { view: project, structDoc } = await this.loadProjectBundle(projectId);
-    if (!project.document || !structDoc) {
+    const { project, structDoc } = await this.loadProjectBundle(projectId);
+    if (!structDoc) {
       throw new BadRequestException(
         "Requirement document must be formatted before generation",
       );
@@ -340,8 +312,9 @@ export class CaseWorkspaceService {
     );
 
     const analysis = this.buildAnalysisFromTestPoints(
-      project.document.analysis,
+      project.requirementNo?.trim() || "",
       selectedTestPoints,
+      project.title,
     );
     const testPointInputs =
       await this.buildTestPointWorkflowInputs(selectedTestPoints);
@@ -370,10 +343,11 @@ export class CaseWorkspaceService {
 
     try {
       // --- AI 生成案例 JSON 并转为六级案例树 ---
+      const requirementDocument = this.toRequirementDocument(structDoc);
       const { tree: generatedTree } =
         await this.pipeline.generateJsonCaseTree({
           document: {
-            ...project.document,
+            ...requirementDocument,
             analysis,
             structuredMarkdown: requirementContext,
           },
@@ -503,37 +477,25 @@ export class CaseWorkspaceService {
     return updated;
   }
 
-  /** 一次加载项目、结构化文档、约束与运行记录（避免重复查 structDoc） */
+  /** 加载项目实体与 struct-doc（生成/文档保存等内部流程用） */
   private async loadProjectBundle(projectId: string) {
     const project = await this.ensureProject(projectId);
-    const [structDoc, constraints, runs] = await Promise.all([
-      this.structDocRepo.findOne({
-        where: scopedWhere({ projectId }),
-      }),
-      this.constraintRepo.find({
-        where: scopedWhere({ projectId }),
-        order: { createdAt: "DESC" },
-      }),
-      this.caseEditorService.listRuns(projectId),
-    ]);
-
-    const view: CaseForgeProject = {
-      id: project.id,
-      title: project.title || "未命名案例生成项目",
-      description: project.description || "",
-      document: structDoc ? this.toRequirementDocument(structDoc) : undefined,
-      constraints: constraints.map((item) => this.toConstraint(item)),
-      runs,
-      createdAt: project.createdAt.toISOString(),
-      updatedAt: project.updatedAt.toISOString(),
-    };
-
-    return { project, structDoc: structDoc ?? undefined, view };
+    const structDoc = await this.structDocRepo.findOne({
+      where: scopedWhere({ projectId }),
+    });
+    return { project, structDoc: structDoc ?? undefined };
   }
 
   private async buildProjectView(projectId: string): Promise<CaseForgeProject> {
-    const { view } = await this.loadProjectBundle(projectId);
-    return view;
+    const project = await this.ensureProject(projectId);
+    return {
+      id: project.id,
+      title: project.title || "未命名案例生成项目",
+      description: project.description || "",
+      requirementNo: project.requirementNo,
+      createdAt: project.createdAt.toISOString(),
+      updatedAt: project.updatedAt.toISOString(),
+    };
   }
 
   private async saveRequirementDocument(
@@ -631,55 +593,6 @@ export class CaseWorkspaceService {
     }
   }
 
-  private normalizeConstraintInput(
-    dto: BuildConstraintsDto,
-    analysis?: RequirementAnalysis,
-  ): ConstraintInput {
-    return {
-      scenarioTags: dto.scenarioTags?.length
-        ? dto.scenarioTags
-        : ["positive", "negative"],
-      testDimensions: dto.testDimensions?.length
-        ? dto.testDimensions
-        : ["functional", "interface"],
-      grouping: dto.grouping || "bySystem",
-      knowledgeBaseIds: dto.knowledgeBaseIds || [],
-      naturalLanguage: dto.naturalLanguage || "",
-      featureInstructions: this.normalizeFeatureInstructions(
-        dto.featureInstructions,
-        analysis,
-      ),
-    };
-  }
-
-  private normalizeFeatureInstructions(
-    instructions: BuildConstraintsDto["featureInstructions"] | undefined,
-    analysis?: RequirementAnalysis,
-  ) {
-    const byModuleId = new Map(
-      (instructions || []).map((item) => [item.moduleId, item]),
-    );
-    if (!analysis?.modules.length) {
-      return (instructions || []).map((item) => ({
-        moduleId: item.moduleId,
-        system: item.system,
-        featureName: item.featureName,
-        instruction: item.instruction,
-      }));
-    }
-    return analysis.modules.map((module) => {
-      const matched = byModuleId.get(module.id);
-      return {
-        moduleId: module.id,
-        system: module.system,
-        featureName: module.name,
-        instruction:
-          matched?.instruction?.trim() ||
-          `围绕“${module.name}”生成可执行案例，每个测试要点包含正向与反向案例，步骤从系统登录或访问系统开始。`,
-      };
-    });
-  }
-
   /**
    * 从 DB 拉取测试要点关联数据，供 promote-skill 拼 {prompts} 使用
    *
@@ -731,63 +644,10 @@ export class CaseWorkspaceService {
     }));
   }
 
-  private async buildConstraintInputFromDynamic(
-    projectId: string,
-    analysis: RequirementAnalysis,
-    testPoints: TestPointEntity[],
-  ): Promise<ConstraintInput> {
-    const testPointIds = testPoints.map((item) => item.id);
-    const [instructs, selections] = await Promise.all([
-      this.instructRepo.find({ where: { testPointId: In(testPointIds) } }),
-      this.promptSelectionRepo.find({
-        where: { testPointId: In(testPointIds) },
-        relations: ["prompt"],
-        order: { createdAt: "ASC" },
-      }),
-    ]);
-
-    const instructMap = new Map(
-      instructs.map((item) => [item.testPointId, item]),
-    );
-    const selectionMap = new Map<string, TestPointPromptEntity[]>();
-    for (const row of selections) {
-      selectionMap.set(row.testPointId, [
-        ...(selectionMap.get(row.testPointId) || []),
-        row,
-      ]);
-    }
-
-    return {
-      scenarioTags: ["positive", "negative"],
-      testDimensions: ["functional", "interface", "data"],
-      grouping: "bySystem",
-      knowledgeBaseIds: [],
-      naturalLanguage: "",
-      featureInstructions: testPoints.map((testPoint) => {
-        const instruct = instructMap.get(testPoint.id);
-        const promptText = (selectionMap.get(testPoint.id) || [])
-          .map((item) => item.prompt?.content?.trim())
-          .filter(Boolean)
-          .join("\n");
-        const naturalText = instruct?.naturalText?.trim() || "";
-        const instruction = [promptText, naturalText]
-          .filter(Boolean)
-          .join("\n");
-        return {
-          moduleId: testPoint.id,
-          system: testPoint.system,
-          featureName: `${testPoint.featureModule} / ${testPoint.testPoint}`,
-          instruction:
-            instruction ||
-            `围绕“${testPoint.testPoint}”生成可执行案例，覆盖业务规则、系统交互、异常分支和数据一致性断言。`,
-        };
-      }),
-    };
-  }
-
   private buildAnalysisFromTestPoints(
-    baseAnalysis: RequirementAnalysis,
+    requirementId: string,
     testPoints: TestPointEntity[],
+    projectTitle?: string,
   ): RequirementAnalysis {
     const modules: RequirementModule[] = testPoints.map((item) => ({
       id: item.id,
@@ -799,7 +659,11 @@ export class CaseWorkspaceService {
       interactions: [item.featureDesc].filter(Boolean),
     }));
     return {
-      ...baseAnalysis,
+      requirementId,
+      requirementName: projectTitle || "",
+      businessScope: "",
+      summary: "",
+      risks: [],
       modules,
     };
   }
@@ -917,15 +781,6 @@ export class CaseWorkspaceService {
       return error.message;
     }
     return "案例生成失败，请稍后重试";
-  }
-
-  private toConstraint(entity: CaseConstraintEntity): ConstraintInstruction {
-    return {
-      id: entity.id,
-      projectId: entity.projectId,
-      input: entity.input as unknown as ConstraintInput,
-      createdAt: entity.createdAt.toISOString(),
-    };
   }
 
   private async ensureProject(projectId: string) {

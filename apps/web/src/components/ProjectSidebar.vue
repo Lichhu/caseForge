@@ -448,9 +448,9 @@ function cleanProjectTitle(title: string) {
   );
 }
 
-function projectMeta(project: { runCount: number; document?: { analysis?: { requirementId?: string } } }) {
-  const requirementId = project.document?.analysis?.requirementId;
-  return requirementId ? `${requirementId} · ${project.runCount} 次生成` : `${project.runCount} 次生成`;
+function projectMeta(project: { runCount: number; requirementNo?: string | null }) {
+  const requirementNo = project.requirementNo?.trim();
+  return requirementNo ? `${requirementNo} · ${project.runCount} 次生成` : `${project.runCount} 次生成`;
 }
 
 function normalizeSearchText(value: string) {

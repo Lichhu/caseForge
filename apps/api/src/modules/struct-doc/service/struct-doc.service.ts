@@ -47,6 +47,7 @@ import {
   getScopedUserName,
   scopedWhere,
 } from "../../../common/audit/user-scope";
+import { toPublicStructDocDetail } from "../../../common/http/public-response.util";
 
 /** 结构化需求文档核心业务逻辑。 */
 @Injectable()
@@ -104,8 +105,6 @@ export class StructDocService {
     return {
       hasExisting: Boolean(structDoc?.reqDocPath),
       reqDocName: structDoc?.reqDocName,
-      reqDocPath: structDoc?.reqDocPath,
-      structDocPath: structDoc?.structDocPath,
     };
   }
 
@@ -115,7 +114,10 @@ export class StructDocService {
    * @param projectId 项目 ID
    * @returns 含访问 URL 与操作权限标志的详情，无记录时返回 null
    */
-  async getByProjectId(projectId: string) {
+  async getByProjectId(
+    projectId: string,
+    options?: { includeTestPoints?: boolean },
+  ) {
     await this.ensureProject(projectId);
     const structDoc = await this.structDocRepo.findOne({
       where: scopedWhere({ projectId }),
@@ -126,12 +128,15 @@ export class StructDocService {
 
     const activeDoc = await this.expireStaleStructuring(structDoc);
 
-    const testPoints = await this.testPointRepo.find({
-      where: scopedWhere({ projectId, structDocId: activeDoc.id }),
-      order: {
-        createdAt: "ASC",
-      },
-    });
+    const testPoints =
+      options?.includeTestPoints === false
+        ? []
+        : await this.testPointRepo.find({
+            where: scopedWhere({ projectId, structDocId: activeDoc.id }),
+            order: {
+              createdAt: "ASC",
+            },
+          });
 
     return await this.toDetail(activeDoc, testPoints);
   }
@@ -340,12 +345,11 @@ export class StructDocService {
         );
 
         if (parsedTestPoints.length) {
-          const merged = await this.mergeParsedTestPointsWithExisting(
+          await this.appendMissingTestPoints(
             projectId,
             latest.id,
             parsedTestPoints,
           );
-          await this.replaceTestPoints(projectId, latest.id, merged);
         }
 
         try {
@@ -619,13 +623,8 @@ export class StructDocService {
   }
 
   /**
-   * 全量替换指定结构化文档下的测试要点（增量更新：保留传入 ID，删除其余）。
-   *
-   * @param projectId 项目 ID
-   * @param structDocId 结构化文档 ID
-   * @param items 测试要点列表
+   * 从 Markdown 解析测试要点并增量同步：已存在的（按项目 + 系统 + 功能模块 + 测试要点标题）保留不动，仅新增缺失项。
    */
-  /** 从 Markdown 解析测试要点并同步（解析失败时不删除已有数据） */
   private async syncTestPointsFromMarkdown(
     projectId: string,
     structDocId: string,
@@ -639,43 +638,71 @@ export class StructDocService {
       }
       return;
     }
-    const merged = await this.mergeParsedTestPointsWithExisting(
-      projectId,
-      structDocId,
-      parsed,
-    );
-    await this.replaceTestPoints(projectId, structDocId, merged);
+    await this.appendMissingTestPoints(projectId, structDocId, parsed);
   }
 
   /**
-   * 按「系统 + 功能模块 + 测试要点」匹配已有记录，保留 id 以维持动态指令关联
+   * 按「项目 ID + 系统 + 功能模块 + 测试要点标题」判断是否已存在；存在则跳过，不存在则新增，不删除、不覆盖已有记录。
    */
-  private async mergeParsedTestPointsWithExisting(
+  private async appendMissingTestPoints(
     projectId: string,
     structDocId: string,
-    parsed: ReturnType<typeof parseStructuredDoc>,
-  ): Promise<SaveTestPointDto[]> {
-    const existing = await this.testPointRepo.find({
-      where: scopedWhere({ projectId, structDocId }),
-    });
-    const idByKey = new Map(
-      existing.map((item) => [this.testPointMatchKey(item), item.id]),
-    );
+    items: SaveTestPointDto[],
+  ) {
+    this.assertTestPointDefinitionFields(items);
 
-    return parsed.map((item) => ({
-      ...item,
-      id: idByKey.get(this.testPointMatchKey(item)),
-    }));
+    const existing = await this.testPointRepo.find({
+      where: scopedWhere({ projectId }),
+    });
+    const existingByContent = new Map<string, TestPointEntity>();
+    for (const row of existing) {
+      const key = this.testPointContentKey(row);
+      if (key && !existingByContent.has(key)) {
+        existingByContent.set(key, row);
+      }
+    }
+
+    const seenIncoming = new Set<string>();
+    const toInsert = items.filter((item) => {
+      const key = this.testPointContentKey(item);
+      if (!key || seenIncoming.has(key)) {
+        return false;
+      }
+      seenIncoming.add(key);
+      return !existingByContent.has(key);
+    });
+
+    if (!toInsert.length) {
+      return;
+    }
+
+    const entities = toInsert.map((item) =>
+      this.testPointRepo.create({
+        projectId,
+        structDocId,
+        system: item.system?.trim() || "",
+        systemDesc: item.systemDesc?.trim() || "",
+        featureModule: item.featureModule?.trim() || "",
+        featureDesc: item.featureDesc?.trim() || "",
+        testPoint: item.testPoint?.trim() || "",
+        testPointDesc: item.testPointDesc?.trim() || "",
+      }),
+    );
+    await this.testPointRepo.save(entities);
   }
 
-  private testPointMatchKey(item: {
+  private testPointContentKey(item: {
     system?: string;
     featureModule?: string;
     testPoint?: string;
   }) {
-    return [item.system, item.featureModule, item.testPoint]
-      .map((value) => value?.trim() || "")
-      .join("|");
+    const system = item.system?.trim() || "";
+    const featureModule = item.featureModule?.trim() || "";
+    const testPoint = item.testPoint?.trim() || "";
+    if (!system || !featureModule || !testPoint) {
+      return "";
+    }
+    return `${system}|${featureModule}|${testPoint}`;
   }
 
   private assertTestPointDefinitionFields(items: SaveTestPointDto[]) {
@@ -701,6 +728,9 @@ export class StructDocService {
     }
   }
 
+  /**
+   * 全量替换测试要点（仅用于前端显式提交 testPoints 列表时，支持删改）。
+   */
   private async replaceTestPoints(
     projectId: string,
     structDocId: string,
@@ -757,20 +787,10 @@ export class StructDocService {
       this.minioService.getAccessUrl(structDoc.structDocPath),
     ]);
 
-    return {
-      ...structDoc,
+    return toPublicStructDocDetail(structDoc, testPoints, {
       reqDocUrl,
       structDocUrl,
-      canStructure:
-        Boolean(structDoc.reqDocPath) &&
-        structDoc.structuringStatus !== "processing",
-      canSave:
-        Boolean(structDoc.tempStructDoc?.trim()) &&
-        structDoc.structuringStatus !== "processing",
-      isStructuring: structDoc.structuringStatus === "processing",
-      canEnterDynamicInstruct: Boolean(structDoc.structDocPath),
-      testPoints,
-    };
+    });
   }
 
   /**

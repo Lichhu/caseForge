@@ -8,7 +8,7 @@ import {
 } from "typeorm";
 
 @Entity("api_test_environment")
-@Index("idx_api_test_env_project", ["projectId"])
+@Index("idx_api_test_env_project_default", ["projectId", "isDefault"])
 export class ApiTestEnvironmentEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;

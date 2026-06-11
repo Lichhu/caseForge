@@ -23,6 +23,13 @@ export type CaseGenerateJobStatus = (typeof CASE_GENERATE_JOB_STATUS)[number];
 @Entity("case_generate_job")
 @Index("idx_case_generate_job_status_queued", ["status", "queuedAt"])
 @Index("idx_case_generate_job_project_test_point", ["projectId", "testPointId"])
+@Index("idx_case_generate_job_project_status_queued", [
+  "projectId",
+  "status",
+  "queuedAt",
+])
+@Index("idx_case_generate_job_test_point_status", ["testPointId", "status"])
+@Index("idx_case_generate_job_status_finished", ["status", "finishedAt"])
 export class CaseGenerateJobEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;

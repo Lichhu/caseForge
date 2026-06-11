@@ -9,6 +9,7 @@ import {
 
 @Entity("api_test_environment_service")
 @Index("idx_api_test_env_service_env", ["environmentId"])
+@Index("idx_api_test_env_service_project_env", ["projectId", "environmentId"])
 export class ApiTestEnvironmentServiceEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;

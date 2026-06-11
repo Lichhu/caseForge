@@ -20,6 +20,7 @@ import {
   scopedWhere,
   scopedWhereWithSystem,
 } from "../../../common/audit/user-scope";
+import { toPublicScenario } from "../../../common/http/public-response.util";
 
 /**
  * 场景服务：场景的增删改查及下属提示词的同步保存
@@ -35,7 +36,7 @@ export class ScenarioService {
 
   /** 列出系统预置与当前用户维护的场景及其提示词 */
   async listScenarios() {
-    return this.scenarioRepo.find({
+    const rows = await this.scenarioRepo.find({
       where: scopedWhereWithSystem(),
       relations: ["prompts"],
       order: {
@@ -46,6 +47,7 @@ export class ScenarioService {
         },
       },
     });
+    return rows.map(toPublicScenario);
   }
 
   /**
@@ -53,6 +55,10 @@ export class ScenarioService {
    * @param id - 场景 ID
    */
   async getScenario(id: string) {
+    return toPublicScenario(await this.findScenarioEntity(id));
+  }
+
+  private async findScenarioEntity(id: string) {
     const scenario = await this.scenarioRepo.findOne({
       where: { id },
       relations: ["prompts"],
@@ -68,7 +74,7 @@ export class ScenarioService {
   }
 
   private async getOwnedScenario(id: string) {
-    const scenario = await this.getScenario(id);
+    const scenario = await this.findScenarioEntity(id);
     assertOwned(scenario, "场景");
     return scenario;
   }

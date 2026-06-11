@@ -82,6 +82,10 @@ import { computed, ref, watch } from 'vue';
 import MarkdownIt from 'markdown-it';
 import { message, Modal } from 'ant-design-vue';
 import { BranchesOutlined, SaveOutlined, UploadOutlined } from '@ant-design/icons-vue';
+import {
+  MAX_REQUIREMENT_DOC_SIZE_BYTES,
+  MAX_REQUIREMENT_DOC_SIZE_MB,
+} from '@case-forge/shared';
 import { useCaseForgeStore } from '@/stores/caseForge';
 
 const store = useCaseForgeStore();
@@ -189,7 +193,12 @@ function handleUpload(file: File) {
     return false;
   }
 
-  if (store.structDoc?.reqDocPath) {
+  if (file.size > MAX_REQUIREMENT_DOC_SIZE_BYTES) {
+    message.error(`需求文档大小不能超过 ${MAX_REQUIREMENT_DOC_SIZE_MB}MB`);
+    return false;
+  }
+
+  if (store.structDoc?.reqDocName) {
     Modal.confirm({
       title: '重新上传需求文档？',
       content: '当前项目已存在需求文档，重新上传需要重新结构化并重新保存，建议新建项目操作。是否继续？',

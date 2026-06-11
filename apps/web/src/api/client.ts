@@ -2,12 +2,17 @@ import axios from 'axios';
 import { getUserApiBaseUrl } from '@/utils/apiPath';
 import { getUserName } from '@/utils/userContext';
 import type {
+  CaseExcelRow,
+  CaseExcelRowListPage,
   CaseForgeProject,
+  CaseNature,
+  CasePriority,
   CaseTreeNode,
-  ConstraintInput,
   GenerationRun,
+  GenerationRunSummary,
   MindMapExtras,
   ProjectPlatform,
+  RunNodeChildrenResponse,
 } from '@case-forge/shared';
 
 export const http = axios.create({
@@ -21,9 +26,28 @@ http.interceptors.request.use((config) => {
   return config;
 });
 
-export interface ProjectListItem extends Omit<CaseForgeProject, 'runs'> {
+export interface ProjectListItem extends CaseForgeProject {
   runCount: number;
-  requirementNo?: string;
+}
+
+function mapProjectDetail(raw: {
+  id: string;
+  title: string;
+  description?: string | null;
+  requirementNo?: string | null;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+  generationCount?: number;
+}): CaseForgeProject {
+  return {
+    id: raw.id,
+    title: raw.title,
+    description: raw.description ?? '',
+    requirementNo: raw.requirementNo,
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : raw.createdAt.toISOString(),
+    updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : raw.updatedAt.toISOString(),
+    runCount: raw.generationCount,
+  };
 }
 
 export interface PromptLibraryItem {
@@ -67,7 +91,7 @@ export interface ScenarioLibraryPayload {
   }>;
 }
 
-export interface TestPointInstructionItem {
+export interface TestPointSummaryItem {
   id: string;
   projectId: string;
   structDocId: string;
@@ -78,22 +102,45 @@ export interface TestPointInstructionItem {
   testPoint: string;
   testPointDesc: string;
   status: '待编辑' | '已编辑' | '再编辑' | '生成中' | '生成失败' | '生成完成';
-  naturalText: string;
   generateError?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface TestPointInstructionItem extends TestPointSummaryItem {
+  naturalText: string;
   isFull: boolean;
   isAppend: boolean;
   promptIds: string[];
   prompts: PromptLibraryItem[];
 }
 
+export interface TestPointListPage {
+  items: TestPointSummaryItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  systems: string[];
+  featureModules: string[];
+}
+
+export interface TestPointWorkspaceMeta {
+  featureModules: string[];
+  systems: string[];
+  definitionSamples: TestPointSummaryItem[];
+}
+
+export interface GeneratingTestPointRef {
+  id: string;
+  testPoint: string;
+}
+
 export interface StructDocDetail {
   id: string;
   projectId: string;
   reqDocName?: string;
-  reqDocPath?: string;
   reqDocUrl?: string;
   structuredDocName?: string;
-  structDocPath?: string;
   structDocUrl?: string;
   tempStructDoc?: string;
   structuringStatus?: 'idle' | 'processing' | 'completed' | 'failed';
@@ -103,14 +150,20 @@ export interface StructDocDetail {
   canSave?: boolean;
   canEnterDynamicInstruct?: boolean;
   isStructuring?: boolean;
-  testPoints: TestPointInstructionItem[];
+  testPoints: Array<{
+    id: string;
+    system: string;
+    systemDesc: string;
+    featureModule: string;
+    featureDesc: string;
+    testPoint: string;
+    testPointDesc: string;
+  }>;
 }
 
 export interface StructDocUploadStatus {
   hasExisting: boolean;
   reqDocName?: string;
-  reqDocPath?: string;
-  structDocPath?: string;
 }
 
 export async function listProjects(platform: ProjectPlatform = 'case-forge') {
@@ -133,17 +186,47 @@ export async function createProject(payload: {
       title: payload.title ?? '',
       description: payload.description ?? '',
       requirementNo: payload.requirementNo,
-      constraints: [],
-      runs: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     } as CaseForgeProject & { requirementNo?: string };
   }
-  return getProject(created.id);
+  return fetchProjectDetail(created.id);
 }
 
+/** 项目基础信息（project-manage）；不含 struct-doc / runs / 动态指令 */
+export async function fetchProjectDetail(projectId: string) {
+  const { data } = await http.get<{
+    id: string;
+    title: string;
+    description?: string | null;
+    requirementNo?: string | null;
+    createdAt: string;
+    updatedAt: string;
+    generationCount?: number;
+  }>(`/project-manage/projects/${projectId}`);
+  return mapProjectDetail(data);
+}
+
+/** @deprecated 使用 fetchProjectDetail */
 export async function getProject(projectId: string) {
-  const { data } = await http.get<CaseForgeProject>(`/case-editor/projects/${projectId}/workspace`);
+  return fetchProjectDetail(projectId);
+}
+
+export async function listRunSummaries(projectId: string) {
+  const { data } = await http.get<GenerationRunSummary[]>(
+    `/case-editor/projects/${projectId}/runs`,
+  );
+  return data;
+}
+
+export async function getRun(projectId: string, runId: string) {
+  const { data } = await http.get<GenerationRun>(
+    `/case-editor/projects/${projectId}/runs/${runId}`,
+    {
+      params: { _ts: Date.now() },
+      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+    },
+  );
   return data;
 }
 
@@ -199,8 +282,16 @@ export async function autoSaveStructDoc(projectId: string, payload: { tempStruct
   return data;
 }
 
-export async function getProjectStructDoc(projectId: string) {
-  const { data } = await http.get<StructDocDetail | null>(`/struct-doc/${projectId}`);
+export async function getProjectStructDoc(
+  projectId: string,
+  options?: { includeTestPoints?: boolean },
+) {
+  const { data } = await http.get<StructDocDetail | null>(`/struct-doc/${projectId}`, {
+    params:
+      options?.includeTestPoints === false
+        ? { includeTestPoints: 'false' }
+        : undefined,
+  });
   return data;
 }
 
@@ -221,11 +312,6 @@ export async function saveStructDocTestPoints(
   },
 ) {
   const { data } = await http.patch<StructDocDetail>(`/struct-doc/${projectId}`, payload);
-  return data;
-}
-
-export async function buildConstraints(projectId: string, payload: ConstraintInput) {
-  const { data } = await http.post<CaseForgeProject>(`/case-editor/projects/${projectId}/constraints`, payload);
   return data;
 }
 
@@ -339,6 +425,47 @@ export async function syncRunToTestPlatform(
   return data;
 }
 
+export type { CaseExcelRowListPage, RunNodeChildrenResponse };
+
+export async function listRunNodeChildren(
+  projectId: string,
+  runId: string,
+  nodeId: string,
+) {
+  const { data } = await http.get<RunNodeChildrenResponse>(
+    `/case-editor/projects/${projectId}/runs/${runId}/nodes/${nodeId}/children`,
+    {
+      params: { _ts: Date.now() },
+      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+    },
+  );
+  return data;
+}
+
+export async function listRunCaseRows(
+  projectId: string,
+  runId: string,
+  params: {
+    page?: number;
+    pageSize?: number;
+    requirement?: string;
+    priority?: CasePriority;
+    caseNature?: CaseNature;
+    keyword?: string;
+    focusCaseNodeId?: string;
+    idsOnly?: boolean;
+  },
+) {
+  const { data } = await http.get<CaseExcelRowListPage>(
+    `/case-editor/projects/${projectId}/runs/${runId}/case-rows`,
+    {
+      params: { ...params, _ts: Date.now() },
+      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+    },
+  );
+  return data;
+}
+
 export async function listScenarioLibrary() {
   const { data } = await http.get<ScenarioLibraryItem[]>('/scenario/list');
   return data;
@@ -362,11 +489,77 @@ export async function deleteScenarioLibraryItem(id: string) {
   return data;
 }
 
-export async function listDynamicTestPoints(projectId: string, structDocId: string) {
-  const { data } = await http.get<TestPointInstructionItem[]>('/dynamic-instruct/test-points', {
+export async function listDynamicTestPoints(params: {
+  projectId: string;
+  structDocId: string;
+  system?: string;
+  featureModule?: string;
+  page?: number;
+  pageSize?: number;
+}) {
+  const { data } = await http.get<TestPointListPage>('/dynamic-instruct/test-points', {
+    params: { ...params, _ts: Date.now() },
+    headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+  });
+  return data;
+}
+
+export async function getDynamicTestPointMeta(projectId: string, structDocId: string) {
+  const { data } = await http.get<TestPointWorkspaceMeta>('/dynamic-instruct/test-points/meta', {
     params: { projectId, structDocId, _ts: Date.now() },
     headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
   });
+  return data;
+}
+
+export async function listGeneratingDynamicTestPoints(projectId: string, structDocId: string) {
+  const { data } = await http.get<GeneratingTestPointRef[]>('/dynamic-instruct/test-points/generating', {
+    params: { projectId, structDocId, _ts: Date.now() },
+    headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+  });
+  return data;
+}
+
+export async function getDynamicTestPointInstruction(testPointId: string) {
+  const { data } = await http.get<TestPointInstructionItem>(`/dynamic-instruct/test-points/${testPointId}`);
+  return data;
+}
+
+export async function createDynamicTestPoint(payload: {
+  projectId: string;
+  structDocId: string;
+  system?: string;
+  systemDesc?: string;
+  featureModule?: string;
+  featureDesc?: string;
+  testPoint?: string;
+  testPointDesc?: string;
+}) {
+  const { data } = await http.post<TestPointSummaryItem>('/dynamic-instruct/test-points', payload);
+  return data;
+}
+
+export async function deleteDynamicTestPoints(testPointIds: string[]) {
+  const { data } = await http.delete<{ deleted: number; testPointIds: string[] }>(
+    '/dynamic-instruct/test-points',
+    { data: { testPointIds } },
+  );
+  return data;
+}
+
+export async function updateDynamicTestPointDefinition(
+  testPointId: string,
+  payload: Partial<
+    Pick<
+      TestPointSummaryItem,
+      'system' | 'systemDesc' | 'featureModule' | 'featureDesc' | 'testPoint' | 'testPointDesc'
+    >
+  >,
+) {
+  const { data } = await http.patch<TestPointInstructionItem>(
+    `/dynamic-instruct/test-points/${testPointId}/definition`,
+    payload,
+  );
   return data;
 }
 

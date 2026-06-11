@@ -46,7 +46,29 @@
               class="case-filter-control"
               placeholder="在当前范围内搜索案例名称"
               allow-clear
-              :disabled="!caseRows.length"
+              :disabled="!totalRows"
+            />
+          </div>
+          <div class="case-filter-item case-filter-item--compact">
+            <label class="case-filter-label" for="case-priority-filter">优先级</label>
+            <a-select
+              id="case-priority-filter"
+              v-model:value="selectedPriority"
+              class="case-filter-control"
+              placeholder="全部"
+              allow-clear
+              :options="priorityOptions"
+            />
+          </div>
+          <div class="case-filter-item case-filter-item--compact">
+            <label class="case-filter-label" for="case-nature-filter">案例性质</label>
+            <a-select
+              id="case-nature-filter"
+              v-model:value="selectedCaseNature"
+              class="case-filter-control"
+              placeholder="全部"
+              allow-clear
+              :options="caseNatureOptions"
             />
           </div>
         </div>
@@ -55,7 +77,7 @@
         </div>
         <div class="case-select-toolbar">
           <div class="case-select-actions">
-            <a-button size="small" :disabled="!filteredCaseRows.length" @click="selectAllFiltered">
+            <a-button size="small" :disabled="!totalFiltered || listLoading" @click="selectAllFiltered">
               全选当前结果
             </a-button>
             <a-button size="small" :disabled="!selectedRowKeys.length" @click="clearSelection">
@@ -64,38 +86,40 @@
           </div>
           <div class="case-select-stats">
             <span class="case-stat-pill case-stat-pill--primary">已选 {{ selectedRowKeys.length }}</span>
-            <span v-if="caseRows.length" class="case-stat-pill">
-              当前 {{ filteredCaseRows.length }} / 共 {{ caseRows.length }}
+            <span v-if="totalRows" class="case-stat-pill">
+              当前 {{ totalFiltered }} / 共 {{ totalRows }}
             </span>
           </div>
         </div>
       </section>
 
       <div class="case-select-table-wrap">
-        <a-table
-          size="small"
-          row-key="caseNodeId"
-          :columns="tableColumns"
-          :data-source="filteredCaseRows"
-          :pagination="tablePagination"
-          :scroll="{ y: 340 }"
-          :row-selection="rowSelection"
-          :custom-row="customRow"
-          :locale="{ emptyText: ' ' }"
-        >
-          <template #bodyCell="{ column, text }">
-            <a-tooltip v-if="isLongTextColumn(column.dataIndex) && text" :title="text">
-              <div class="case-select-cell">{{ text }}</div>
-            </a-tooltip>
-            <span v-else>{{ text }}</span>
-          </template>
-          <template #emptyText>
-            <a-empty
-              class="case-select-empty"
-              :description="tableEmptyText"
-            />
-          </template>
-        </a-table>
+        <a-spin :spinning="listLoading">
+          <a-table
+            size="small"
+            row-key="caseNodeId"
+            :columns="tableColumns"
+            :data-source="tableRows"
+            :pagination="tablePagination"
+            :scroll="{ y: 340 }"
+            :row-selection="rowSelection"
+            :custom-row="customRow"
+            :locale="{ emptyText: ' ' }"
+          >
+            <template #bodyCell="{ column, text }">
+              <a-tooltip v-if="isLongTextColumn(column.dataIndex) && text" :title="text">
+                <div class="case-select-cell">{{ text }}</div>
+              </a-tooltip>
+              <span v-else>{{ text }}</span>
+            </template>
+            <template #emptyText>
+              <a-empty
+                class="case-select-empty"
+                :description="tableEmptyText"
+              />
+            </template>
+          </a-table>
+        </a-spin>
       </div>
     </div>
 
@@ -121,9 +145,16 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { DownloadOutlined } from '@ant-design/icons-vue';
-import type { TableColumnType } from 'ant-design-vue';
-import type { CaseTreeNode } from '@case-forge/shared';
-import { flattenCaseTreeToExcel } from '@case-forge/shared';
+import type { TableColumnType, TablePaginationConfig } from 'ant-design-vue';
+import type { CaseNature, CasePriority } from '@case-forge/shared';
+import {
+  caseForgePageSizeOptionLabels,
+  DEFAULT_CASE_FORGE_PAGE_SIZE,
+  normalizeCaseForgePageSize,
+  shouldShowCaseForgePagination,
+} from '@case-forge/shared';
+import { listRunCaseRows } from '@/api/client';
+import { debounce } from '@/utils/debounce';
 import { IMMERSIVE_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 
 export type CaseSelectionMode = 'sync' | 'excel';
@@ -132,11 +163,16 @@ export interface CaseSelectionRow {
   caseNodeId: string;
   requirement: string;
   caseTitle: string;
+  caseNature: string;
+  priority: string;
 }
+
+const pageSizeOptions = caseForgePageSizeOptionLabels();
 
 const props = defineProps<{
   open: boolean;
-  tree: CaseTreeNode | null;
+  projectId?: string;
+  runId?: string;
   mode?: CaseSelectionMode;
   confirmLoading?: boolean;
 }>();
@@ -149,7 +185,28 @@ const emit = defineEmits<{
 
 const selectedRowKeys = ref<string[]>([]);
 const selectedRequirement = ref<string>();
+const selectedPriority = ref<string>();
+const selectedCaseNature = ref<string>();
 const caseKeyword = ref('');
+const listPage = ref(1);
+const listPageSize = ref(DEFAULT_CASE_FORGE_PAGE_SIZE);
+const listLoading = ref(false);
+const tableRows = ref<CaseSelectionRow[]>([]);
+const totalFiltered = ref(0);
+const totalRows = ref(0);
+const serverRequirements = ref<string[]>([]);
+let fetchSeq = 0;
+
+const priorityOptions = [
+  { label: '高', value: '高' },
+  { label: '中', value: '中' },
+  { label: '低', value: '低' },
+];
+
+const caseNatureOptions = [
+  { label: '正', value: '正' },
+  { label: '反', value: '反' },
+];
 
 const modalTitle = computed(() =>
   props.mode === 'excel' ? '导出 Excel' : '同步至测管平台',
@@ -171,43 +228,66 @@ function onOpenChange(value: boolean) {
   emit('update:open', value);
 }
 
-const caseRows = computed<CaseSelectionRow[]>(() => {
-  if (!props.tree) {
-    return [];
-  }
-  const { rows } = flattenCaseTreeToExcel(props.tree);
-  return rows.map((row) => ({
-    caseNodeId: row.caseNodeId,
-    requirement: row.requirement,
-    caseTitle: row.caseTitle || row.caseName,
-  }));
-});
+function buildListParams(options?: { idsOnly?: boolean }) {
+  return {
+    page: listPage.value,
+    pageSize: listPageSize.value,
+    requirement: selectedRequirement.value,
+    priority: selectedPriority.value as CasePriority | undefined,
+    caseNature: selectedCaseNature.value as CaseNature | undefined,
+    keyword: caseKeyword.value.trim() || undefined,
+    idsOnly: options?.idsOnly,
+  };
+}
 
-const requirementOptions = computed(() => {
-  const unique = new Set<string>();
-  for (const row of caseRows.value) {
-    const requirement = row.requirement?.trim();
-    if (requirement) {
-      unique.add(requirement);
+async function fetchRows() {
+  const projectId = props.projectId;
+  const runId = props.runId;
+  if (!props.open || !projectId || !runId) {
+    tableRows.value = [];
+    totalFiltered.value = 0;
+    totalRows.value = 0;
+    serverRequirements.value = [];
+    return;
+  }
+  const seq = ++fetchSeq;
+  listLoading.value = true;
+  try {
+    const result = await listRunCaseRows(projectId, runId, buildListParams());
+    if (seq !== fetchSeq) {
+      return;
+    }
+    tableRows.value = result.items.map((row) => ({
+      caseNodeId: row.caseNodeId,
+      requirement: row.requirement,
+      caseTitle: row.caseTitle || row.caseName,
+      caseNature: row.caseNature,
+      priority: row.priority,
+    }));
+    totalFiltered.value = result.total;
+    totalRows.value = result.totalRows;
+    serverRequirements.value = result.requirements;
+    const maxPage = Math.max(1, Math.ceil(result.total / listPageSize.value));
+    if (listPage.value > maxPage) {
+      listPage.value = maxPage;
+      if (maxPage !== result.page) {
+        await fetchRows();
+      }
+    }
+  } finally {
+    if (seq === fetchSeq) {
+      listLoading.value = false;
     }
   }
-  return [...unique]
-    .sort((left, right) => left.localeCompare(right, 'zh-CN'))
-    .map((value) => ({ value, label: value }));
-});
+}
 
-const filteredCaseRows = computed(() => {
-  const keyword = caseKeyword.value.trim().toLowerCase();
-  return caseRows.value.filter((row) => {
-    if (selectedRequirement.value && row.requirement !== selectedRequirement.value) {
-      return false;
-    }
-    if (!keyword) {
-      return true;
-    }
-    return row.caseTitle.toLowerCase().includes(keyword);
-  });
-});
+const debouncedFetchRows = debounce(() => {
+  void fetchRows();
+}, 300);
+
+const requirementOptions = computed(() =>
+  serverRequirements.value.map((value) => ({ value, label: value })),
+);
 
 const activeFilterSummary = computed(() => {
   const parts: string[] = [];
@@ -216,6 +296,12 @@ const activeFilterSummary = computed(() => {
   }
   if (caseKeyword.value.trim()) {
     parts.push(`案例关键词：${caseKeyword.value.trim()}`);
+  }
+  if (selectedPriority.value) {
+    parts.push(`优先级：${selectedPriority.value}`);
+  }
+  if (selectedCaseNature.value) {
+    parts.push(`案例性质：${selectedCaseNature.value}`);
   }
   if (!parts.length) {
     return '';
@@ -243,14 +329,36 @@ const tableColumns = computed<TableColumnType<CaseSelectionRow>[]>(() => {
   return columns;
 });
 
-const tablePagination = computed(() => (
-  filteredCaseRows.value.length > 10
-    ? { pageSize: 10, showSizeChanger: false, size: 'small' as const }
-    : false
-));
+const tablePagination = computed<TablePaginationConfig | false>(() => {
+  if (!shouldShowCaseForgePagination(totalFiltered.value)) {
+    return false;
+  }
+  return {
+    current: listPage.value,
+    pageSize: listPageSize.value,
+    total: totalFiltered.value,
+    showSizeChanger: true,
+    pageSizeOptions,
+    size: 'small',
+    showTotal: (value: number) => `共 ${value} 条`,
+    onChange: (page: number, pageSize: number) => {
+      void handleTablePaginationChange(page, pageSize);
+    },
+    onShowSizeChange: (page: number, pageSize: number) => {
+      void handleTablePaginationChange(page, pageSize);
+    },
+  };
+});
+
+async function handleTablePaginationChange(page: number, pageSize: number) {
+  const sizeChanged = pageSize !== listPageSize.value;
+  listPageSize.value = normalizeCaseForgePageSize(pageSize);
+  listPage.value = sizeChanged ? 1 : page;
+  await fetchRows();
+}
 
 const tableEmptyText = computed(() => {
-  if (!caseRows.value.length) {
+  if (!totalRows.value) {
     return emptyText.value;
   }
   return '没有符合筛选条件的案例';
@@ -270,6 +378,7 @@ const rowSelection = computed(() => ({
   onChange: (keys: (string | number)[]) => {
     selectedRowKeys.value = keys.map(String);
   },
+  preserveSelectedRowKeys: true,
 }));
 
 function isSelectionColumnClick(target: EventTarget | null) {
@@ -303,6 +412,11 @@ function customRow(record: CaseSelectionRow) {
   };
 }
 
+function resetFiltersAndFetch() {
+  listPage.value = 1;
+  void fetchRows();
+}
+
 watch(
   () => props.open,
   (visible) => {
@@ -311,24 +425,52 @@ watch(
     }
     selectedRowKeys.value = [];
     selectedRequirement.value = undefined;
+    selectedPriority.value = undefined;
+    selectedCaseNature.value = undefined;
     caseKeyword.value = '';
+    listPage.value = 1;
+    void fetchRows();
   },
 );
 
-watch(caseRows, (rows) => {
-  if (!props.open) {
-    return;
-  }
-  const available = new Set(rows.map((row) => row.caseNodeId));
-  selectedRowKeys.value = selectedRowKeys.value.filter((id) => available.has(id));
+watch(selectedRequirement, () => {
+  if (!props.open) return;
+  resetFiltersAndFetch();
 });
 
-function selectAllFiltered() {
-  const keys = new Set(selectedRowKeys.value);
-  for (const row of filteredCaseRows.value) {
-    keys.add(row.caseNodeId);
+watch(selectedPriority, () => {
+  if (!props.open) return;
+  resetFiltersAndFetch();
+});
+
+watch(selectedCaseNature, () => {
+  if (!props.open) return;
+  resetFiltersAndFetch();
+});
+
+watch(caseKeyword, () => {
+  if (!props.open) return;
+  listPage.value = 1;
+  debouncedFetchRows();
+});
+
+async function selectAllFiltered() {
+  const projectId = props.projectId;
+  const runId = props.runId;
+  if (!projectId || !runId || !totalFiltered.value) {
+    return;
   }
-  selectedRowKeys.value = [...keys];
+  listLoading.value = true;
+  try {
+    const result = await listRunCaseRows(projectId, runId, buildListParams({ idsOnly: true }));
+    const keys = new Set(selectedRowKeys.value);
+    for (const id of result.ids ?? []) {
+      keys.add(id);
+    }
+    selectedRowKeys.value = [...keys];
+  } finally {
+    listLoading.value = false;
+  }
 }
 
 function clearSelection() {
@@ -409,6 +551,15 @@ function handleCancel() {
 
 .case-filter-item:first-child {
   flex: 1.1 1 0;
+}
+
+.case-filter-item--compact {
+  flex: 0 1 148px;
+  max-width: 168px;
+}
+
+.case-filter-item--compact .case-filter-label {
+  width: 52px;
 }
 
 .case-filter-label {

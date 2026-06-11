@@ -1,5 +1,5 @@
 /**
- * 案例编辑器 HTTP 接口：工作区查询、约束保存、案例生成、
+ * 案例编辑器 HTTP 接口：工作区查询、案例生成、
  * 运行记录管理与多格式导出。
  */
 import {
@@ -16,12 +16,12 @@ import {
 } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
-import { BuildConstraintsDto } from "../dto/build-constraints.dto";
 import { CancelGenerateDto } from "../dto/cancel-generate.dto";
 import { GenerateCasesDto } from "../dto/generate-cases.dto";
 import { RegenerateNodeDto } from "../dto/regenerate-node.dto";
 import { SyncToTestPlatformDto } from "../dto/sync-to-test-platform.dto";
 import { UpdateRunTreeDto } from "../dto/update-run-tree.dto";
+import { ListCaseRowsDto } from "../dto/list-case-rows.dto";
 import { CaseEditorService } from "../service/case-editor.service";
 import { CaseWorkspaceService } from "../service/case-workspace.service";
 import { ExportService } from "../service/export.service";
@@ -41,23 +41,6 @@ export class CaseEditorController {
     @Inject(CaseTestPlatformSyncService)
     private readonly testPlatformSync: CaseTestPlatformSyncService,
   ) {}
-
-  /** 获取项目工作区（文档、约束、案例运行） */
-  @Get("projects/:projectId/workspace")
-  @ApiOperation({ summary: "获取项目工作区（文档、约束、案例运行）" })
-  getProjectWorkspace(@Param("projectId") projectId: string) {
-    return this.workspaceService.getProjectWorkspace(projectId);
-  }
-
-  /** 保存约束快照 */
-  @Post("projects/:projectId/constraints")
-  @ApiOperation({ summary: "保存约束快照" })
-  buildConstraints(
-    @Param("projectId") projectId: string,
-    @Body() dto: BuildConstraintsDto,
-  ) {
-    return this.workspaceService.buildConstraints(projectId, dto);
-  }
 
   /**
    * 触发案例生成
@@ -112,11 +95,11 @@ export class CaseEditorController {
     return this.workspaceService.regenerateNode(projectId, dto);
   }
 
-  /** 查询项目案例编辑运行记录 */
+  /** 查询项目案例编辑运行摘要（不含案例树） */
   @Get("projects/:projectId/runs")
-  @ApiOperation({ summary: "查询项目案例编辑运行记录" })
+  @ApiOperation({ summary: "查询项目案例编辑运行摘要" })
   listRuns(@Param("projectId") projectId: string) {
-    return this.caseEditorService.listRuns(projectId);
+    return this.caseEditorService.listRunSummaries(projectId);
   }
 
   /** 查询单个案例树运行记录 */
@@ -124,6 +107,28 @@ export class CaseEditorController {
   @ApiOperation({ summary: "查询单个案例树运行记录" })
   getRun(@Param("projectId") projectId: string, @Param("runId") runId: string) {
     return this.caseEditorService.getRun(projectId, runId);
+  }
+
+  /** 按需加载测试要点下的案例子树 */
+  @Get("projects/:projectId/runs/:runId/nodes/:nodeId/children")
+  @ApiOperation({ summary: "按需加载测试要点下的案例子树" })
+  listRunNodeChildren(
+    @Param("projectId") projectId: string,
+    @Param("runId") runId: string,
+    @Param("nodeId") nodeId: string,
+  ) {
+    return this.caseEditorService.listRunNodeChildren(projectId, runId, nodeId);
+  }
+
+  /** 分页查询案例 Excel 行 */
+  @Get("projects/:projectId/runs/:runId/case-rows")
+  @ApiOperation({ summary: "分页查询案例 Excel 行" })
+  listCaseRows(
+    @Param("projectId") projectId: string,
+    @Param("runId") runId: string,
+    @Query() query: ListCaseRowsDto,
+  ) {
+    return this.caseEditorService.listCaseRows(projectId, runId, query);
   }
 
   /** 导出案例树（支持 excel、xmind；excel 可按 caseNodeIds 筛选） */

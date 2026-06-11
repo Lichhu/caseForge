@@ -33,6 +33,7 @@ export type TestPointInstructStatus = (typeof TEST_POINT_INSTRUCT_STATUS)[number
 @Index("uk_case_test_point_instruct_test_point", ["testPointId"], {
   unique: true,
 })
+@Index("idx_case_test_point_instruct_status", ["status"])
 export class TestPointInstructEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;

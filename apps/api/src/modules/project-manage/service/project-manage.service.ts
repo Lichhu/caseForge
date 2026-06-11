@@ -20,6 +20,7 @@ import {
   findOwnedProject,
   scopedWhere,
 } from "../../../common/audit/user-scope";
+import { toPublicProject } from "../../../common/http/public-response.util";
 
 function normalizeRequirementNo(raw: string): string {
   const trimmed = raw.trim();
@@ -32,8 +33,8 @@ function normalizeRequirementNo(raw: string): string {
   return code.toUpperCase();
 }
 
-/** 项目列表项：实体字段 + 案例生成次数 */
-export type ProjectListItem = CaseProjectEntity & {
+/** 项目列表项：对外字段 + 案例生成次数 */
+export type ProjectListItem = ReturnType<typeof toPublicProject> & {
   generationCount: number;
 };
 
@@ -55,7 +56,7 @@ export class ProjectManageService {
    * 创建项目，未传标题时自动生成默认名称
    * @param dto - 创建载荷
    */
-  async createProject(dto: CreateProjectDto): Promise<CaseProjectEntity> {
+  async createProject(dto: CreateProjectDto): Promise<ReturnType<typeof toPublicProject>> {
     const platform: ProjectPlatform = dto.platform ?? "case-forge";
     if (platform === "api-test") {
       const title = dto.title?.trim();
@@ -75,7 +76,7 @@ export class ProjectManageService {
         platform,
         ...auditFieldsForCreate(),
       });
-      return await this.projectRepo.save(project);
+      return toPublicProject(await this.projectRepo.save(project));
     }
 
     const total = await this.projectRepo.count({
@@ -88,7 +89,7 @@ export class ProjectManageService {
       platform,
       ...auditFieldsForCreate(),
     });
-    return await this.projectRepo.save(project);
+    return toPublicProject(await this.projectRepo.save(project));
   }
 
   /** 校验项目属于指定平台 */
@@ -141,7 +142,7 @@ export class ProjectManageService {
 
     return {
       rows: rows.map((row) => ({
-        ...row,
+        ...toPublicProject(row),
         generationCount: generationCountMap.get(String(row.id)) ?? 0,
       })),
       count,
@@ -159,7 +160,7 @@ export class ProjectManageService {
       String(project.id),
     ]);
     return {
-      ...project,
+      ...toPublicProject(project),
       generationCount: generationCountMap.get(String(project.id)) ?? 0,
     };
   }
@@ -172,7 +173,7 @@ export class ProjectManageService {
   async updateProject(
     projectId: string,
     dto: UpdateProjectDto,
-  ): Promise<CaseProjectEntity> {
+  ): Promise<ReturnType<typeof toPublicProject>> {
     const project = await findOwnedProject(this.projectRepo, projectId);
 
     if (project.platform === "api-test") {
@@ -207,7 +208,7 @@ export class ProjectManageService {
       project.description = dto.description.trim();
     }
 
-    return await this.projectRepo.save(project);
+    return toPublicProject(await this.projectRepo.save(project));
   }
 
   private async assertApiTestRequirementAvailable(

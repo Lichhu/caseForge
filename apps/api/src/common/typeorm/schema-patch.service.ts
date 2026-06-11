@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { DataSource } from "typeorm";
 import { applyApiTestSchemaMigrations } from "./api-schema-migrations.util";
+import { ensureDatabaseIndexes } from "./database-indexes.util";
 import { ensureCaseEditorUtf8mb4TextColumns } from "./utf8mb4-schema.util";
 
 /**
@@ -21,6 +22,7 @@ export class SchemaPatchService implements OnModuleInit {
     await this.ensureSummaryStructDocColumn();
     await ensureCaseEditorUtf8mb4TextColumns(this.dataSource, this.logger);
     await applyApiTestSchemaMigrations(this.dataSource);
+    await ensureDatabaseIndexes(this.dataSource);
   }
 
   private async ensureProjectPlatformColumn() {
@@ -134,7 +136,10 @@ export class SchemaPatchService implements OnModuleInit {
         createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
         updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
         INDEX idx_case_generate_job_status_queued (status, queuedAt),
-        INDEX idx_case_generate_job_project_test_point (projectId, testPointId)
+        INDEX idx_case_generate_job_project_test_point (projectId, testPointId),
+        INDEX idx_case_generate_job_project_status_queued (projectId, status, queuedAt),
+        INDEX idx_case_generate_job_test_point_status (testPointId, status),
+        INDEX idx_case_generate_job_status_finished (status, finishedAt)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
     this.logger.log("case_generate_job 表已创建");
@@ -165,7 +170,7 @@ export class SchemaPatchService implements OnModuleInit {
         createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
         updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
         INDEX idx_struct_requirement_job_status_queued (status, queuedAt),
-        INDEX idx_struct_requirement_job_project (projectId)
+        INDEX idx_struct_requirement_job_project_status_queued (projectId, status, queuedAt)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
     this.logger.log("struct_requirement_job 表已创建");

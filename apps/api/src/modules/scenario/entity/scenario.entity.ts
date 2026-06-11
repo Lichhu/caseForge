@@ -18,6 +18,7 @@ import { PromptEntity } from "./prompt.entity";
 @Entity("scenario_library")
 @Index("idx_scenario_library_active_updated", ["isActive", "updatedAt"])
 @Index("idx_scenario_library_name", ["name"])
+@Index("idx_scenario_library_user_updated", ["createdBy", "updatedAt"])
 export class ScenarioEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;

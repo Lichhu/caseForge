@@ -19,7 +19,6 @@ import {
  */
 @Entity("case_test_point_prompt")
 @Index("uk_case_test_point_prompt", ["testPointId", "promptId"], { unique: true })
-@Index(["testPointId"])
 @Index("idx_test_point_prompt_prompt", ["promptId"])
 export class TestPointPromptEntity {
   @PrimaryGeneratedColumn("uuid")

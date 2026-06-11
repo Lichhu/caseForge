@@ -55,7 +55,6 @@ export class ProjectManageController {
       requirementNo: row.requirementNo,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
-      constraints: [],
       runCount: row.generationCount,
     }));
   }

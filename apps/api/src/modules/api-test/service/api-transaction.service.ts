@@ -13,6 +13,7 @@ import { touchProjectUpdatedAt } from "../../../common/project/touch-project.uti
 import { ApiDocEntity } from "../entity/api-doc.entity";
 import { ApiTransactionEntity } from "../entity/api-transaction.entity";
 import { SaveApiTransactionDto } from "../dto/save-transaction.dto";
+import { toPublicApiTransaction } from "../../../common/http/public-response.util";
 
 @Injectable()
 export class ApiTransactionService {
@@ -45,11 +46,10 @@ export class ApiTransactionService {
     );
     return rows.map((row) => {
       const doc = docByTransaction.get(row.id);
-      return {
-        ...row,
+      return toPublicApiTransaction(row, {
         docStatus: doc?.structuringStatus ?? "idle",
         hasDocument: Boolean(doc?.sourceDocName),
-      };
+      });
     });
   }
 
@@ -158,6 +158,6 @@ export class ApiTransactionService {
     if (!transaction) {
       throw new NotFoundException("交易码不存在");
     }
-    return transaction;
+    return toPublicApiTransaction(transaction);
   }
 }

@@ -23,7 +23,11 @@ export type StructRequirementJobStatus =
 
 @Entity("struct_requirement_job")
 @Index("idx_struct_requirement_job_status_queued", ["status", "queuedAt"])
-@Index("idx_struct_requirement_job_project", ["projectId"])
+@Index("idx_struct_requirement_job_project_status_queued", [
+  "projectId",
+  "status",
+  "queuedAt",
+])
 export class StructRequirementJobEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;

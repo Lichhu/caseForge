@@ -24,6 +24,7 @@ import {
 } from "../util/api-doc.parser";
 import type { ApiEndpointPayload } from "@case-forge/shared";
 import { SaveApiDocDto } from "../dto/save-api-doc.dto";
+import { toPublicApiDoc } from "../../../common/http/public-response.util";
 
 @Injectable()
 export class ApiDocService {
@@ -178,15 +179,14 @@ export class ApiDocService {
       order: { sortOrder: "ASC", createdAt: "ASC" },
     });
     const endpointCount = endpoints.length;
-    return {
-      ...doc,
+    return toPublicApiDoc(doc, {
       transactionId,
       sourceDocUrl: await this.minio.getAccessUrl(doc.sourceDocPath),
       endpoints,
       canEnterCases: endpointCount > 0,
       canEnterRunner: endpointCount > 0,
       endpointCount,
-    };
+    });
   }
 
   private async ensureDoc(projectId: string, transactionId: string) {

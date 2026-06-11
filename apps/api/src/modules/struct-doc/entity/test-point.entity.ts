@@ -21,7 +21,16 @@ import {
 
 /** 结构化文档解析出的测试要点，关联项目与结构化文档。 */
 @Entity("case_test_point")
-@Index(["projectId", "structDocId"])
+@Index("idx_case_test_point_project_struct_created", [
+  "projectId",
+  "structDocId",
+  "createdAt",
+])
+@Index("idx_case_test_point_project_struct_module", [
+  "projectId",
+  "structDocId",
+  "featureModule",
+])
 @Index(["structDocId", "testPoint"])
 export class TestPointEntity {
     @PrimaryGeneratedColumn("uuid")

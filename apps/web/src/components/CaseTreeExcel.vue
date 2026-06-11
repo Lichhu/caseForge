@@ -1,6 +1,6 @@
 <template>
   <div class="excel-wrap">
-    <div v-if="draftRows.length" class="excel-toolbar">
+    <div v-if="totalRows > 0" class="excel-toolbar">
       <div class="excel-toolbar-row">
         <div class="excel-toolbar-main">
           <span class="excel-stat-pill">{{ rowCountLabel }}</span>
@@ -49,6 +49,22 @@
             allow-clear
             :placeholder="searchPlaceholder"
           />
+          <a-select
+            v-model:value="priorityFilter"
+            class="excel-filter-select excel-filter-select--compact"
+            size="small"
+            allow-clear
+            placeholder="全部优先级"
+            :options="priorityFilterOptions"
+          />
+          <a-select
+            v-model:value="caseNatureFilter"
+            class="excel-filter-select excel-filter-select--compact"
+            size="small"
+            allow-clear
+            placeholder="全部性质"
+            :options="caseNatureFilterOptions"
+          />
         </div>
         <div class="excel-toolbar-actions">
           <a-button size="small" type="primary" @click="openAddModal">
@@ -72,7 +88,8 @@
       </div>
     </div>
     <div ref="scrollEl" class="excel-scroll">
-      <table v-if="filteredIndices.length" class="excel-table">
+      <a-spin :spinning="listLoading">
+      <table v-if="draftRows.length" class="excel-table">
         <colgroup>
           <col v-if="showRowSelection" class="excel-select-col" />
           <col
@@ -105,9 +122,9 @@
         </thead>
         <tbody>
           <tr
-            v-for="(originalIndex, displayIndex) in filteredIndices"
-            :key="draftRows[originalIndex].caseNodeId"
-            :class="{ 'row-alt': displayIndex % 2 === 1 }"
+            v-for="(row, rowIndex) in draftRows"
+            :key="row.caseNodeId"
+            :class="{ 'row-alt': rowIndex % 2 === 1 }"
           >
             <td
               v-if="showRowSelection"
@@ -115,37 +132,37 @@
               @click.stop
             >
               <a-checkbox
-                :checked="isRowSelected(originalIndex)"
+                :checked="isRowSelected(rowIndex)"
                 @click.stop
-                @change="(event) => toggleRowSelect(originalIndex, !!event.target?.checked)"
+                @change="(event) => toggleRowSelect(rowIndex, !!event.target?.checked)"
               />
             </td>
             <template
               v-for="column in visibleColumns"
-              :key="`${draftRows[originalIndex].caseNodeId}-${column.key}`"
+              :key="`${row.caseNodeId}-${column.key}`"
             >
               <td
-                v-if="shouldRenderCell(displayIndex, column.col)"
-                :rowspan="getRowSpan(displayIndex, column.col)"
-                :class="tdClass(column, displayIndex)"
+                v-if="shouldRenderCell(rowIndex, column.col)"
+                :rowspan="getRowSpan(rowIndex, column.col)"
+                :class="tdClass(column, rowIndex)"
                 :style="stickyStyle(column)"
               >
                 <div
                   v-if="column.hierarchy"
                   class="cell-readonly"
                   :class="{
-                    'cell-readonly--merged': isMergedCell(displayIndex, column.col),
+                    'cell-readonly--merged': isMergedCell(rowIndex, column.col),
                     'cell-readonly--requirement': column.key === 'requirement',
                   }"
-                  :title="cellText(originalIndex, column.key)"
+                  :title="cellText(rowIndex, column.key)"
                 >
-                  {{ cellText(originalIndex, column.key) }}
+                  {{ cellText(rowIndex, column.key) }}
                 </div>
                 <select
                   v-else-if="isEnumColumn(column.key)"
-                  v-model="draftRows[originalIndex][column.key]"
+                  v-model="draftRows[rowIndex][column.key]"
                   class="cell-input cell-select"
-                  @change="emitRowChange(originalIndex)"
+                  @change="emitRowChange(rowIndex)"
                 >
                   <option
                     v-for="option in enumOptions(column.key)"
@@ -157,36 +174,49 @@
                 </select>
                 <textarea
                   v-else-if="isMultilineColumn(column.key)"
-                  v-model="draftRows[originalIndex][column.key]"
+                  v-model="draftRows[rowIndex][column.key]"
                   class="cell-input cell-textarea"
                   :placeholder="cellPlaceholder(column.key)"
                   @input="onTextareaInput"
-                  @blur="emitRowChange(originalIndex)"
+                  @blur="emitRowChange(rowIndex)"
                 />
                 <input
                   v-else
-                  v-model="draftRows[originalIndex][column.key]"
+                  v-model="draftRows[rowIndex][column.key]"
                   class="cell-input"
                   type="text"
                   :placeholder="cellPlaceholder(column.key)"
-                  @blur="emitRowChange(originalIndex)"
+                  @blur="emitRowChange(rowIndex)"
                 />
               </td>
             </template>
           </tr>
         </tbody>
       </table>
+      <div v-if="showExcelPagination" class="excel-pagination">
+        <a-pagination
+          size="small"
+          :current="listPage"
+          :page-size="listPageSize"
+          :total="totalFiltered"
+          :show-size-changer="true"
+          :page-size-options="pageSizeOptions"
+          @change="handleExcelPaginationChange"
+          @showSizeChange="handleExcelPaginationChange"
+        />
+      </div>
       <a-empty
-        v-else-if="draftRows.length"
+        v-else-if="!listLoading && totalRows > 0 && !draftRows.length"
         class="excel-filter-empty"
         description="没有匹配的案例，请调整筛选或搜索条件"
       />
+      </a-spin>
     </div>
-    <a-empty v-if="!draftRows.length" class="excel-empty" description="暂无案例数据，请先生成案例树" />
+    <a-empty v-if="!listLoading && !totalRows" class="excel-empty" description="暂无案例数据，请先生成案例树" />
 
     <CaseAddModal
       v-model:open="addModalOpen"
-      :rows="draftRows"
+      :rows="pathRowsForAddModal"
       :initial-path="addModalInitialPath"
       @submit="handleAddCaseSubmit"
     />
@@ -194,7 +224,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import {
   DeleteOutlined,
   EditOutlined,
@@ -215,11 +245,18 @@ import type {
 import {
   addCaseRowToTree,
   applyExcelRowToTree,
+  caseForgePageSizeOptionLabels,
+  countCaseTreeLeaves,
+  DEFAULT_CASE_FORGE_PAGE_SIZE,
   flattenCaseTreeToExcel,
+  normalizeCaseForgePageSize,
   pickCaseExcelRowPath,
   removeCaseFromTree,
+  shouldShowCaseForgePagination,
   simplifyRequirementTitleForDisplay,
 } from '@case-forge/shared';
+import { listRunCaseRows } from '@/api/client';
+import { debounce } from '@/utils/debounce';
 import { useCaseForgeStore } from '@/stores/caseForge';
 import CaseAddModal from '@/components/CaseAddModal.vue';
 
@@ -232,6 +269,7 @@ const COLLAPSIBLE_HIERARCHY_KEYS = [
 ] as const;
 
 const SELECT_COL_WIDTH = 28;
+const pageSizeOptions = caseForgePageSizeOptionLabels();
 
 type ExcelColumnKey =
   | 'root'
@@ -259,6 +297,7 @@ interface ExcelColumn {
 
 const props = defineProps<{
   tree: CaseTreeNode | null;
+  listRefreshKey?: number;
 }>();
 
 const store = useCaseForgeStore();
@@ -293,10 +332,13 @@ const columns: ExcelColumn[] = columnDefs.map((column) => {
 
 const hierarchyCollapsed = ref(true);
 const requirementFilter = ref<string | undefined>(undefined);
+const priorityFilter = ref<string | undefined>(undefined);
+const caseNatureFilter = ref<string | undefined>(undefined);
 const caseKeyword = ref('');
+const listPage = ref(1);
+const listPageSize = ref(DEFAULT_CASE_FORGE_PAGE_SIZE);
 const scrollEl = ref<HTMLElement | null>(null);
 const selectedCaseNodeIds = ref<Set<string>>(new Set());
-const pendingSelectCaseId = ref<string | null>(null);
 const addModalOpen = ref(false);
 const addModalInitialPath = ref<CaseExcelRowPath | null>(null);
 
@@ -338,6 +380,22 @@ const tableMinWidthPx = computed(() => {
 
 const draftRows = ref<CaseExcelRow[]>([]);
 const savedRowFingerprints = ref<Map<string, string>>(new Map());
+const listLoading = ref(false);
+const totalFiltered = ref(0);
+const totalRows = ref(0);
+const serverRequirements = ref<string[]>([]);
+let fetchSeq = 0;
+
+const projectId = computed(() => store.activeProject?.id);
+const runId = computed(() => store.activeRun?.id);
+
+const pathRowsForAddModal = computed(() =>
+  props.tree ? flattenCaseTreeToExcel(props.tree).rows : [],
+);
+
+const treeCaseCount = computed(() =>
+  props.tree ? countCaseTreeLeaves(props.tree) : 0,
+);
 
 function rowFingerprint(row: CaseExcelRow) {
   return JSON.stringify({
@@ -351,15 +409,56 @@ function rowFingerprint(row: CaseExcelRow) {
   });
 }
 
-function syncDraftFromTree() {
-  draftRows.value = viewModel.value.rows.map((row) => ({ ...row }));
-  savedRowFingerprints.value = new Map(
-    viewModel.value.rows.map((row) => [row.caseNodeId, rowFingerprint(row)]),
-  );
+async function fetchCaseRows(options?: { focusCaseNodeId?: string }) {
+  const pid = projectId.value;
+  const rid = runId.value;
+  if (!pid || !rid || !props.tree) {
+    draftRows.value = [];
+    totalFiltered.value = 0;
+    totalRows.value = 0;
+    serverRequirements.value = [];
+    return;
+  }
+  const seq = ++fetchSeq;
+  listLoading.value = true;
+  try {
+    const result = await listRunCaseRows(pid, rid, {
+      page: listPage.value,
+      pageSize: listPageSize.value,
+      requirement: requirementFilter.value,
+      priority: priorityFilter.value as CasePriority | undefined,
+      caseNature: caseNatureFilter.value as CaseNature | undefined,
+      keyword: caseKeyword.value.trim() || undefined,
+      focusCaseNodeId: options?.focusCaseNodeId,
+    });
+    if (seq !== fetchSeq) {
+      return;
+    }
+    draftRows.value = result.items.map((row) => ({ ...row }));
+    for (const row of result.items) {
+      savedRowFingerprints.value.set(row.caseNodeId, rowFingerprint(row));
+    }
+    totalFiltered.value = result.total;
+    totalRows.value = result.totalRows;
+    serverRequirements.value = result.requirements;
+    if (result.focusPage) {
+      listPage.value = result.focusPage;
+    } else {
+      const maxPage = Math.max(1, Math.ceil(result.total / listPageSize.value));
+      if (listPage.value > maxPage) {
+        listPage.value = maxPage;
+      }
+    }
+  } finally {
+    if (seq === fetchSeq) {
+      listLoading.value = false;
+    }
+  }
 }
-const viewModel = computed(() =>
-  props.tree ? flattenCaseTreeToExcel(props.tree) : { rows: [], merges: [] },
-);
+
+const debouncedFetchCaseRows = debounce(() => {
+  void fetchCaseRows();
+}, 300);
 
 const REQUIREMENT_SELECT_LABEL_MAX = 48;
 
@@ -382,22 +481,12 @@ function isLongRequirementText(full: string) {
   );
 }
 
-const requirementOptions = computed(() => {
-  const seen = new Set<string>();
-  const options: Array<{ label: string; value: string }> = [];
-  for (const row of draftRows.value) {
-    const requirement = row.requirement.trim();
-    if (!requirement || seen.has(requirement)) {
-      continue;
-    }
-    seen.add(requirement);
-    options.push({
-      label: requirementSelectLabel(requirement),
-      value: requirement,
-    });
-  }
-  return options.sort((a, b) => a.value.localeCompare(b.value, 'zh-CN'));
-});
+const requirementOptions = computed(() =>
+  serverRequirements.value.map((requirement) => ({
+    label: requirementSelectLabel(requirement),
+    value: requirement,
+  })),
+);
 
 const selectedRequirementPreview = computed(() => {
   const full = requirementFilter.value?.trim();
@@ -408,67 +497,57 @@ const selectedRequirementPreview = computed(() => {
 });
 
 const isFiltering = computed(
-  () => Boolean(requirementFilter.value) || Boolean(caseKeyword.value.trim()),
+  () =>
+    Boolean(requirementFilter.value) ||
+    Boolean(priorityFilter.value) ||
+    Boolean(caseNatureFilter.value) ||
+    Boolean(caseKeyword.value.trim()),
 );
+
+const priorityFilterOptions = [
+  { label: '高', value: '高' },
+  { label: '中', value: '中' },
+  { label: '低', value: '低' },
+];
+
+const caseNatureFilterOptions = [
+  { label: '正', value: '正' },
+  { label: '反', value: '反' },
+];
 
 const rowCountLabel = computed(() => {
-  const total = draftRows.value.length;
-  const visible = filteredIndices.value.length;
-  if (!isFiltering.value) {
-    return `共 ${total} 条案例`;
+  if (isFiltering.value) {
+    if (totalFiltered.value > listPageSize.value) {
+      return `共 ${totalFiltered.value} / ${totalRows.value} 条 · 第 ${listPage.value}/${excelTotalPages.value} 页`;
+    }
+    return `共 ${totalFiltered.value} / ${totalRows.value} 条案例`;
   }
-  return `共 ${visible} / ${total} 条案例`;
+  if (totalRows.value > listPageSize.value) {
+    return `共 ${totalRows.value} 条案例 · 第 ${listPage.value}/${excelTotalPages.value} 页`;
+  }
+  return `共 ${totalRows.value} 条案例`;
 });
 
-const searchPlaceholder = computed(() =>
-  requirementFilter.value
-    ? '搜索当前要点下的案例'
-    : '搜索案例',
+const excelTotalPages = computed(() =>
+  Math.max(1, Math.ceil(totalFiltered.value / listPageSize.value)),
 );
 
-function rowMatchesFilter(row: CaseExcelRow) {
-  if (requirementFilter.value && row.requirement !== requirementFilter.value) {
-    return false;
-  }
-  const keyword = caseKeyword.value.trim().toLowerCase();
-  if (!keyword) {
-    return true;
-  }
-  const haystack = [
-    row.caseName,
-    row.caseTitle,
-    row.caseNature,
-    row.priority,
-    row.caseCondition,
-    row.caseStep,
-    row.caseExpected,
-  ]
-    .join('\n')
-    .toLowerCase();
-  return haystack.includes(keyword);
-}
-
-const filteredIndices = computed(() =>
-  draftRows.value.reduce<number[]>((indices, row, index) => {
-    if (rowMatchesFilter(row)) {
-      indices.push(index);
-    }
-    return indices;
-  }, []),
+const showExcelPagination = computed(() =>
+  shouldShowCaseForgePagination(totalFiltered.value),
 );
 
-const filteredCaseNodeIds = computed(() =>
-  filteredIndices.value.map((index) => draftRows.value[index].caseNodeId),
+const currentPageCaseNodeIds = computed(() =>
+  draftRows.value.map((row) => row.caseNodeId),
 );
 
 const allFilteredSelected = computed(
   () =>
-    filteredCaseNodeIds.value.length > 0
-    && filteredCaseNodeIds.value.every((id) => selectedCaseNodeIds.value.has(id)),
+    currentPageCaseNodeIds.value.length > 0
+    && currentPageCaseNodeIds.value.every((id) => selectedCaseNodeIds.value.has(id)),
 );
 
 const someFilteredSelected = computed(() =>
-  filteredCaseNodeIds.value.some((id) => selectedCaseNodeIds.value.has(id)),
+  currentPageCaseNodeIds.value.some((id) => selectedCaseNodeIds.value.has(id)),
 );
 
 const canDeleteSelected = computed(
@@ -477,57 +556,94 @@ const canDeleteSelected = computed(
 
 const selectedCount = computed(() => selectedCaseNodeIds.value.size);
 
-const displayMerges = computed(() =>
-  buildDisplayMerges(filteredIndices.value.map((index) => draftRows.value[index])),
+const searchPlaceholder = computed(() =>
+  requirementFilter.value
+    ? '搜索当前要点下的案例'
+    : '搜索案例',
 );
 
-watch(
-  () => props.tree,
-  async () => {
-    syncDraftFromTree();
-    pruneRowSelection();
-    if (pendingSelectCaseId.value) {
-      const caseNodeId = pendingSelectCaseId.value;
-      pendingSelectCaseId.value = null;
-      if (hierarchyCollapsed.value) {
-        selectedCaseNodeIds.value = new Set([caseNodeId]);
-      }
-      await nextTick();
-      scrollToCaseNodeId(caseNodeId);
-    }
-    await nextTick();
-    resizeAllTextareas();
-  },
-  { immediate: true },
-);
+const displayMerges = computed(() => buildDisplayMerges(draftRows.value));
+
+onMounted(() => {
+  void fetchCaseRows();
+});
 
 watch(
-  () => store.activeRun?.id,
+  () => [projectId.value, runId.value, props.tree?.id] as const,
   () => {
     requirementFilter.value = undefined;
+    priorityFilter.value = undefined;
+    caseNatureFilter.value = undefined;
     caseKeyword.value = '';
+    listPage.value = 1;
     selectedCaseNodeIds.value = new Set();
+    void fetchCaseRows();
   },
 );
 
+watch(
+  () => props.listRefreshKey,
+  () => {
+    void fetchCaseRows();
+  },
+);
+
+watch(treeCaseCount, (next, prev) => {
+  if (prev !== undefined && next !== prev) {
+    void fetchCaseRows();
+  }
+});
+
+function resetExcelListPage() {
+  listPage.value = 1;
+}
+
 watch(requirementFilter, () => {
+  resetExcelListPage();
   selectedCaseNodeIds.value = new Set();
+  void fetchCaseRows();
+});
+
+watch(priorityFilter, () => {
+  resetExcelListPage();
+  selectedCaseNodeIds.value = new Set();
+  void fetchCaseRows();
+});
+
+watch(caseNatureFilter, () => {
+  resetExcelListPage();
+  selectedCaseNodeIds.value = new Set();
+  void fetchCaseRows();
 });
 
 watch(caseKeyword, () => {
+  resetExcelListPage();
   selectedCaseNodeIds.value = new Set();
+  debouncedFetchCaseRows();
 });
 
 watch(hierarchyCollapsed, (collapsed) => {
   if (!collapsed) {
     selectedCaseNodeIds.value = new Set();
   }
+  resetExcelListPage();
+  void fetchCaseRows();
 });
 
-watch([filteredIndices, hierarchyCollapsed], async () => {
+watch([draftRows, hierarchyCollapsed], async () => {
   await nextTick();
   resizeAllTextareas();
 });
+
+async function handleExcelPaginationChange(page: number, pageSize: number) {
+  const sizeChanged = pageSize !== listPageSize.value;
+  listPageSize.value = normalizeCaseForgePageSize(pageSize);
+  listPage.value = sizeChanged ? 1 : page;
+  await fetchCaseRows();
+  await nextTick();
+  resizeAllTextareas();
+  scrollEl.value?.scrollTo({ top: 0, behavior: 'auto' });
+}
 
 function colStyle(column: ExcelColumn) {
   return {
@@ -704,6 +820,7 @@ function emitRowChange(rowIndex: number) {
     return;
   }
   emit('change', applyExcelRowToTree(props.tree, row));
+  savedRowFingerprints.value.set(row.caseNodeId, rowFingerprint(row));
 }
 
 function resolveAddContext(): CaseExcelRowPath | null {
@@ -715,12 +832,14 @@ function resolveAddContext(): CaseExcelRowPath | null {
     }
   }
   if (requirementFilter.value) {
-    const matched = draftRows.value.find((row) => row.requirement === requirementFilter.value);
+    const matched = pathRowsForAddModal.value.find(
+      (row) => row.requirement === requirementFilter.value,
+    );
     if (matched) {
       return pickCaseExcelRowPath(matched);
     }
   }
-  const last = draftRows.value[draftRows.value.length - 1];
+  const last = pathRowsForAddModal.value[pathRowsForAddModal.value.length - 1];
   if (last?.requirement.trim()) {
     return pickCaseExcelRowPath(last);
   }
@@ -749,7 +868,7 @@ function toggleRowSelect(originalIndex: number, checked: boolean) {
 function toggleSelectAllFiltered(event: { target: { checked: boolean } }) {
   const checked = event.target.checked;
   const next = new Set(selectedCaseNodeIds.value);
-  for (const caseNodeId of filteredCaseNodeIds.value) {
+  for (const caseNodeId of currentPageCaseNodeIds.value) {
     if (checked) {
       next.add(caseNodeId);
     } else {
@@ -766,21 +885,25 @@ function pruneRowSelection() {
   );
 }
 
-function scrollToCaseNodeId(caseNodeId: string) {
-  const originalIndex = draftRows.value.findIndex((row) => row.caseNodeId === caseNodeId);
-  if (originalIndex < 0) {
+function scrollToCaseNodeIdInPage(caseNodeId: string) {
+  const rowIndex = draftRows.value.findIndex((row) => row.caseNodeId === caseNodeId);
+  if (rowIndex < 0) {
     return;
   }
-  const root = scrollEl.value;
-  if (!root) {
-    return;
-  }
-  const displayIndex = filteredIndices.value.indexOf(originalIndex);
-  if (displayIndex < 0) {
-    return;
-  }
-  const rowEl = root.querySelectorAll<HTMLTableRowElement>('tbody tr')[displayIndex];
-  rowEl?.scrollIntoView({ block: 'nearest' });
+  void nextTick(() => {
+    const root = scrollEl.value;
+    if (!root) {
+      return;
+    }
+    const rowEl = root.querySelectorAll<HTMLTableRowElement>('tbody tr')[rowIndex];
+    rowEl?.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+async function scrollToCaseNodeId(caseNodeId: string) {
+  await fetchCaseRows({ focusCaseNodeId: caseNodeId });
+  await nextTick();
+  scrollToCaseNodeIdInPage(caseNodeId);
 }
 
 function openAddModal() {
@@ -800,9 +923,15 @@ function handleAddCaseSubmit(path: CaseExcelRowPath, input: NewCaseRowInput) {
     message.error('无法添加案例，请检查归属层级是否完整');
     return;
   }
-  pendingSelectCaseId.value = result.caseNodeId;
   emit('change', result.tree);
   addModalOpen.value = false;
+  void fetchCaseRows({ focusCaseNodeId: result.caseNodeId }).then(async () => {
+    if (hierarchyCollapsed.value) {
+      selectedCaseNodeIds.value = new Set([result.caseNodeId]);
+    }
+    await nextTick();
+    scrollToCaseNodeIdInPage(result.caseNodeId);
+  });
 }
 
 function deleteSelectedRows() {
@@ -826,7 +955,7 @@ function deleteSelectedRows() {
     cancelText: '取消',
     okType: 'danger',
     centered: true,
-    onOk: () => {
+    onOk: async () => {
       let nextTree = props.tree!;
       for (const caseNodeId of ids) {
         const next = removeCaseFromTree(nextTree, caseNodeId);
@@ -836,6 +965,7 @@ function deleteSelectedRows() {
       }
       selectedCaseNodeIds.value = new Set();
       emit('change', nextTree);
+      await fetchCaseRows();
     },
   });
 }
@@ -947,6 +1077,21 @@ function deleteSelectedRows() {
   max-width: 240px;
 }
 
+.excel-filter-select--compact {
+  width: 108px;
+  min-width: 96px;
+  flex: 0 0 108px;
+  max-width: 120px;
+}
+
+.excel-pagination {
+  display: flex;
+  justify-content: center;
+  padding: 12px 16px 16px;
+  border-top: 1px solid #eef2f6;
+  background: #fff;
+}
+
 .excel-filter-select :deep(.ant-select-selection-item) {
   white-space: nowrap;
   overflow: hidden;
@@ -1019,6 +1164,15 @@ function deleteSelectedRows() {
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   scrollbar-gutter: stable;
+}
+
+/* 全局 spin 默认 height:100% 会撑破滚动区，此处让内容自然增高由外层滚动 */
+.excel-scroll :deep(.ant-spin-nested-loading),
+.excel-scroll :deep(.ant-spin-container) {
+  display: block;
+  height: auto;
+  min-height: 0;
+  overflow: visible;
 }
 
 .excel-table {

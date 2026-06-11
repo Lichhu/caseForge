@@ -30,6 +30,7 @@ export type StructuringStatus = (typeof STRUCTURING_STATUS)[number];
 /** 项目级结构化需求文档记录，每个项目唯一一条。 */
 @Entity("case_struct_doc")
 @Index("uk_case_struct_doc_project", ["projectId"], { unique: true })
+@Index("idx_case_struct_doc_structuring_status", ["structuringStatus"])
 export class StructDocEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;

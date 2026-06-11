@@ -11,7 +11,6 @@ import { randomUUID } from "node:crypto";
 import type { CaseTreeNode, RequirementAnalysis } from "@case-forge/shared";
 import { AppModule } from "../src/app.module";
 import { CaseEditorService } from "../src/modules/case-editor/service/case-editor.service";
-import { CaseConstraintEntity } from "../src/modules/case-editor/entity/case-constraint.entity";
 import { CaseProjectEntity } from "../src/modules/project-manage/entity/project.entity";
 import { StructDocEntity } from "../src/modules/struct-doc/entity/struct-doc.entity";
 import { TestPointEntity } from "../src/modules/struct-doc/entity/test-point.entity";
@@ -247,9 +246,6 @@ async function main() {
     const instructRepo = app.get<Repository<TestPointInstructEntity>>(
       getRepositoryToken(TestPointInstructEntity),
     );
-    const constraintRepo = app.get<Repository<CaseConstraintEntity>>(
-      getRepositoryToken(CaseConstraintEntity),
-    );
     const scenarioRepo = app.get<Repository<ScenarioEntity>>(
       getRepositoryToken(ScenarioEntity),
     );
@@ -350,32 +346,10 @@ async function main() {
       );
     }
 
-    const constraint = await constraintRepo.save(
-      constraintRepo.create({
-        projectId: project.id,
-        structDocId: structDoc.id,
-        input: {
-          scenarioTags: ["positive", "exception", "boundary"],
-          testDimensions: ["functional", "interface"],
-          grouping: "bySystem",
-          knowledgeBaseIds: [],
-          naturalLanguage: "演示数据：重点验证异常恢复与批量提交。",
-          featureInstructions: testPoints.map((tp) => ({
-            moduleId: tp.id,
-            system: tp.system,
-            featureName: `${tp.featureModule} / ${tp.testPoint}`,
-            instruction: tp.testPointDesc,
-          })),
-        },
-        markdown: "# 约束指令\n\n演示项目自动生成的约束快照。",
-      }),
-    );
-
     const tree = buildDemoCaseTree();
     const run = await caseEditorService.createRun({
       projectId: project.id,
       structDocId: structDoc.id,
-      constraintId: constraint.id,
       prompt: "演示案例树 seed 数据",
       model: "seed-demo",
       tree,

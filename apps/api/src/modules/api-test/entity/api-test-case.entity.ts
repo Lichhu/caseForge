@@ -20,6 +20,7 @@ import {
 
 @Entity("api_test_case")
 @Index("idx_api_test_case_project", ["projectId"])
+@Index("idx_api_test_case_project_endpoint", ["projectId", "endpointId"])
 export class ApiTestCaseEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;

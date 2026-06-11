@@ -12,7 +12,6 @@ import {
 
 @Entity("api_transaction")
 @Index("uk_api_transaction_project_code", ["projectId", "code"], { unique: true })
-@Index("idx_api_transaction_project", ["projectId"])
 export class ApiTransactionEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;

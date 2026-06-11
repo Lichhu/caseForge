@@ -12,6 +12,7 @@ import {
 
 @Entity("api_test_run_item")
 @Index("idx_api_test_run_item_run", ["runId"])
+@Index("idx_api_test_run_item_run_created", ["runId", "createdAt"])
 export class ApiTestRunItemEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;

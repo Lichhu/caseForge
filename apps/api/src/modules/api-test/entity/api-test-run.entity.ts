@@ -9,7 +9,7 @@ import {
 } from "typeorm";
 
 @Entity("api_test_run")
-@Index("idx_api_test_run_project", ["projectId"])
+@Index("idx_api_test_run_project_created", ["projectId", "createdAt"])
 export class ApiTestRunEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;

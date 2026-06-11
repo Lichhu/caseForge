@@ -22,11 +22,48 @@
       </div>
     </div>
 
-    <div v-if="store.testPoints.length" class="dynamic-layout">
+    <div v-if="store.hasTestPointsInProject" class="dynamic-layout">
       <div class="test-point-list test-point-list-panel">
-        <div class="test-point-list-head">
-          <strong>测试要点</strong>
-          <span>{{ store.testPoints.length }} 条</span>
+        <div class="test-point-list-header">
+          <div class="test-point-list-head">
+            <strong>测试要点</strong>
+            <span class="test-point-count">{{ store.testPointTotal }} 条</span>
+          </div>
+          <div class="test-point-filter-bar">
+            <a-select
+              v-model:value="systemFilter"
+              size="small"
+              allow-clear
+              show-search
+              placeholder="系统"
+              :options="systemFilterOptions"
+              :filter-option="filterSystemOption"
+              :dropdown-match-select-width="false"
+              popup-class-name="test-point-filter-dropdown"
+              @change="handleSystemFilterChange"
+            />
+            <span class="test-point-filter-sep" aria-hidden="true">/</span>
+            <a-select
+              v-model:value="featureModuleFilter"
+              size="small"
+              allow-clear
+              show-search
+              placeholder="功能模块"
+              :options="featureModuleFilterOptions"
+              :filter-option="filterFeatureModuleOption"
+              :dropdown-match-select-width="false"
+              popup-class-name="test-point-filter-dropdown"
+              @change="handleFeatureModuleFilterChange"
+            />
+            <button
+              v-if="hasActiveListFilter"
+              type="button"
+              class="test-point-filter-reset"
+              @click="clearListFilters"
+            >
+              重置
+            </button>
+          </div>
         </div>
         <div v-if="batchMode" class="list-toolbar batch-list-toolbar">
           <a-checkbox
@@ -34,12 +71,13 @@
             :indeterminate="selectionIndeterminate"
             @change="toggleSelectAll"
           >
-            全选
+            全选当前页
           </a-checkbox>
           <span>已选 {{ selectedRows.length }} / {{ selectableRows.length }}</span>
         </div>
 
         <div class="test-point-list-scroll">
+        <a-spin :spinning="listLoading">
         <article
           v-for="item in store.testPoints"
           :key="item.id"
@@ -63,8 +101,7 @@
             />
             <div class="test-point-card-title">
               <strong>{{ item.testPoint || '未命名测试要点' }}</strong>
-              <small v-if="batchMode">{{ item.system }}</small>
-              <small v-else>{{ item.system }} / {{ item.featureModule }}</small>
+              <small v-if="cardPathLabel(item)">{{ cardPathLabel(item) }}</small>
             </div>
             <div class="test-point-card-status">
               <div
@@ -94,10 +131,25 @@
             {{ generateProgressSubtitle(item.id) }}
           </p>
         </article>
+        <a-empty v-if="!store.testPoints.length" description="当前筛选下暂无测试要点" />
+        </a-spin>
+        </div>
+        <div v-if="showTestPointPagination" class="test-point-list-pagination">
+          <a-pagination
+            size="small"
+            :current="store.testPointListPage"
+            :page-size="store.testPointListPageSize"
+            :total="store.testPointTotal"
+            :show-size-changer="true"
+            :page-size-options="pageSizeOptions"
+            @change="handleTestPointPageChange"
+            @showSizeChange="handleTestPointPageSizeChange"
+          />
         </div>
       </div>
 
       <div class="instruction-editor instruction-editor-panel">
+        <a-spin :spinning="detailLoading">
         <div v-if="batchMode && selectedRows.length" class="instruction-editor-shell">
           <div class="instruction-editor-body">
           <div class="editor-hero editor-hero-batch">
@@ -343,6 +395,7 @@
         <div v-else class="instruction-editor-placeholder">
           <a-empty :description="batchMode ? '请从左侧勾选测试要点进行批量操作' : '请从左侧选择一条测试要点'" />
         </div>
+        </a-spin>
       </div>
     </div>
 
@@ -496,7 +549,11 @@ import {
   SettingOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons-vue';
-import type { ScenarioLibraryItem, TestPointInstructionItem } from '@/api/client';
+import type { ScenarioLibraryItem, TestPointInstructionItem, TestPointSummaryItem } from '@/api/client';
+import {
+  caseForgePageSizeOptionLabels,
+  shouldShowCaseForgePagination,
+} from '@case-forge/shared';
 import { useCaseForgeStore } from '@/stores/caseForge';
 import { configureAppMessage, configureScenarioModalMessage } from '@/utils/globalFeedback';
 import {
@@ -507,6 +564,10 @@ import { formatDurationSeconds } from '@/utils/formatDuration';
 
 const IMMERSIVE_OVERLAY_Z_INDEX = 2600;
 const SCENARIO_AUTO_SAVE_DELAY_MS = 600;
+const pageSizeOptions = caseForgePageSizeOptionLabels();
+const showTestPointPagination = computed(() =>
+  shouldShowCaseForgePagination(store.testPointTotal),
+);
 
 const FIELD_LIMITS = {
   scenarioName: 120,
@@ -532,9 +593,9 @@ function filterAutocompleteOption(input: string, option: { value?: string; label
 }
 
 function buildDefinitionFieldOptions(
-  getFieldValue: (item: TestPointInstructionItem) => string | undefined,
+  getFieldValue: (item: TestPointSummaryItem) => string | undefined,
   draftValue: string,
-  sourceItems: TestPointInstructionItem[] = store.testPoints,
+  sourceItems: TestPointSummaryItem[] = definitionSampleRows.value,
 ) {
   const values = new Set<string>();
   for (const item of sourceItems) {
@@ -563,6 +624,9 @@ function filterDefinitionFieldOptions(
 
 const store = useCaseForgeStore();
 const batchMode = ref(false);
+const listLoading = ref(false);
+const featureModuleFilter = ref('');
+const systemFilter = ref('');
 const scenarioModalOpen = ref(false);
 const editingScenarioId = ref('');
 const promptTableWrapRef = ref<HTMLElement | null>(null);
@@ -644,8 +708,38 @@ const instructionDraft = reactive({
   naturalText: '',
 });
 
+const definitionSampleRows = computed(() => store.testPointDefinitionSamples);
+
+const systemFilterOptions = computed(() =>
+  store.testPointSystems.map((value) => ({ label: value, value })),
+);
+
+const featureModuleFilterOptions = computed(() =>
+  store.testPointFeatureModules.map((value) => ({ label: value, value })),
+);
+
+const hasActiveListFilter = computed(
+  () => Boolean(store.testPointSystemFilter || store.testPointFeatureModuleFilter),
+);
+
+function cardPathLabel(item: TestPointSummaryItem) {
+  if (batchMode.value) {
+    return item.system?.trim() || '';
+  }
+  const parts: string[] = [];
+  if (!store.testPointSystemFilter?.trim()) {
+    parts.push(item.system?.trim() || '');
+  }
+  if (!store.testPointFeatureModuleFilter?.trim()) {
+    parts.push(item.featureModule?.trim() || '');
+  }
+  return parts.filter(Boolean).join(' · ');
+}
+
 const selectedRows = computed(() =>
-  store.testPoints.filter((item) => store.selectedTestPointIds.includes(item.id)),
+  store.selectedTestPointIds
+    .map((id) => store.mergedTestPoint(id))
+    .filter((row): row is TestPointInstructionItem => Boolean(row)),
 );
 
 const selectableRows = computed(() =>
@@ -653,7 +747,11 @@ const selectableRows = computed(() =>
 );
 
 const activeRow = computed(() =>
-  store.testPoints.find((item) => item.id === activeTestPointId.value) || null,
+  activeTestPointId.value ? store.mergedTestPoint(activeTestPointId.value) : null,
+);
+
+const detailLoading = computed(() =>
+  Boolean(activeTestPointId.value && store.testPointDetailLoadingIds.includes(activeTestPointId.value)),
 );
 
 const activeScenario = computed(() =>
@@ -738,7 +836,7 @@ const selectionIndeterminate = computed(() => {
   return count > 0 && count < selectableRows.value.length;
 });
 
-function isTestPointLocked(item: TestPointInstructionItem) {
+function isTestPointLocked(item: Pick<TestPointSummaryItem, 'id' | 'status'>) {
   return item.status === '生成中' || store.generatingTestPointIds.includes(item.id);
 }
 
@@ -748,7 +846,7 @@ function isCancellingGenerate(testPointId: string) {
   return cancellingTestPointIds.value.includes(testPointId);
 }
 
-async function cancelGenerating(item: TestPointInstructionItem) {
+async function cancelGenerating(item: Pick<TestPointSummaryItem, 'id' | 'testPoint'>) {
   if (isCancellingGenerate(item.id)) {
     return;
   }
@@ -787,8 +885,8 @@ const systemOptions = computed(() =>
 const featureModuleOptions = computed(() => {
   const system = definitionDraft.system.trim();
   const sourceItems = system
-    ? store.testPoints.filter((item) => (item.system?.trim() || '') === system)
-    : store.testPoints;
+    ? definitionSampleRows.value.filter((item) => (item.system?.trim() || '') === system)
+    : definitionSampleRows.value;
   return filterDefinitionFieldOptions(
     buildDefinitionFieldOptions(
       (item) => item.featureModule,
@@ -799,11 +897,94 @@ const featureModuleOptions = computed(() => {
   );
 });
 
+function filterSystemOption(input: string, option: { label?: string; value?: string }) {
+  return filterAutocompleteOption(input, {
+    value: option?.value,
+    label: option?.label,
+  });
+}
+
+function filterFeatureModuleOption(input: string, option: { label?: string; value?: string }) {
+  return filterAutocompleteOption(input, {
+    value: option?.value,
+    label: option?.label,
+  });
+}
+
+async function handleSystemFilterChange(value: unknown) {
+  listLoading.value = true;
+  try {
+    await store.setTestPointSystemFilter(typeof value === 'string' ? value : '');
+  } finally {
+    listLoading.value = false;
+  }
+}
+
+async function handleFeatureModuleFilterChange(value: unknown) {
+  listLoading.value = true;
+  try {
+    await store.setTestPointFeatureModuleFilter(typeof value === 'string' ? value : '');
+  } finally {
+    listLoading.value = false;
+  }
+}
+
+async function clearListFilters() {
+  listLoading.value = true;
+  try {
+    await store.clearTestPointListFilters();
+  } finally {
+    listLoading.value = false;
+  }
+}
+
+async function handleTestPointPageChange(page: number) {
+  listLoading.value = true;
+  try {
+    await store.setTestPointListPage(page);
+    if (!batchMode.value && store.testPoints[0]) {
+      activeTestPointId.value = store.testPoints[0].id;
+      store.setSelectedTestPointIds([store.testPoints[0].id]);
+    }
+  } finally {
+    listLoading.value = false;
+  }
+}
+
+async function handleTestPointPageSizeChange(_page: number, pageSize: number) {
+  listLoading.value = true;
+  try {
+    await store.setTestPointListPageSize(pageSize);
+    if (!batchMode.value && store.testPoints[0]) {
+      activeTestPointId.value = store.testPoints[0].id;
+      store.setSelectedTestPointIds([store.testPoints[0].id]);
+    }
+  } finally {
+    listLoading.value = false;
+  }
+}
+
 const promptColumns: TableColumnsType = [
   { title: '提示词内容', key: 'content', dataIndex: 'content' },
   { title: '启用', key: 'isActive', width: 88 },
   { title: '操作', key: 'actions', width: 72 },
 ];
+
+watch(
+  () => store.testPointSystemFilter,
+  (value) => {
+    systemFilter.value = value;
+  },
+  { immediate: true },
+);
+
+watch(
+  () => store.testPointFeatureModuleFilter,
+  (value) => {
+    featureModuleFilter.value = value;
+  },
+  { immediate: true },
+);
 
 watch(
   () => store.testPoints.map((item) => item.id).join(','),
@@ -820,6 +1001,23 @@ watch(
     }
   },
   { immediate: true },
+);
+
+watch(activeTestPointId, async (testPointId) => {
+  if (!testPointId || batchMode.value) {
+    return;
+  }
+  await store.ensureTestPointDetail(testPointId);
+});
+
+watch(
+  () => [batchMode.value, store.selectedTestPointIds.join(',')],
+  async () => {
+    if (!batchMode.value || !store.selectedTestPointIds.length) {
+      return;
+    }
+    await Promise.all(store.selectedTestPointIds.map((id) => store.ensureTestPointDetail(id)));
+  },
 );
 
 watch(
@@ -897,7 +1095,7 @@ function isActiveCard(testPointId: string) {
   return activeTestPointId.value === testPointId;
 }
 
-function handleCardClick(item: TestPointInstructionItem) {
+function handleCardClick(item: TestPointSummaryItem) {
   if (batchMode.value) {
     if (isTestPointLocked(item)) {
       return;
@@ -906,6 +1104,7 @@ function handleCardClick(item: TestPointInstructionItem) {
     return;
   }
   activeTestPointId.value = item.id;
+  void store.ensureTestPointDetail(item.id);
   store.setSelectedTestPointIds([item.id]);
 }
 
@@ -1093,19 +1292,8 @@ function confirmRemoveTestPoints(testPointIds: string[]) {
     centered: true,
     zIndex: IMMERSIVE_OVERLAY_Z_INDEX,
     onOk: async () => {
-      const nextList = store.testPoints
-        .filter((item) => !testPointIds.includes(item.id))
-        .map((item) => ({
-          id: item.id,
-          system: item.system,
-          systemDesc: item.systemDesc,
-          featureModule: item.featureModule,
-          featureDesc: item.featureDesc,
-          testPoint: item.testPoint,
-          testPointDesc: item.testPointDesc,
-        }));
       try {
-        await store.saveTestPointDefinitions(nextList, {
+        await store.deleteTestPoints(testPointIds, {
           successMessage:
             testPointIds.length > 1
               ? `已删除 ${testPointIds.length} 条测试要点`
@@ -1115,11 +1303,14 @@ function confirmRemoveTestPoints(testPointIds: string[]) {
         message.error((error as Error)?.message || '删除测试要点失败');
         throw error;
       }
-      store.setSelectedTestPointIds(
-        store.selectedTestPointIds.filter((id) => !testPointIds.includes(id)),
-      );
-      if (testPointIds.includes(activeTestPointId.value)) {
-        activeTestPointId.value = store.testPoints[0]?.id || '';
+      if (batchMode.value) {
+        batchMode.value = false;
+      }
+      store.setSelectedTestPointIds([]);
+      activeTestPointId.value = store.testPoints[0]?.id || '';
+      if (activeTestPointId.value) {
+        store.setSelectedTestPointIds([activeTestPointId.value]);
+        await store.ensureTestPointDetail(activeTestPointId.value);
       }
     },
   });
@@ -1136,37 +1327,26 @@ function removeSelectedTestPoints() {
 }
 
 async function addTestPoint() {
-  const nextList = [
-    ...store.testPoints.map((item) => ({
-      id: item.id,
-      system: item.system,
-      systemDesc: item.systemDesc,
-      featureModule: item.featureModule,
-      featureDesc: item.featureDesc,
-      testPoint: item.testPoint,
-      testPointDesc: item.testPointDesc,
-    })),
-    {
+  try {
+    const created = await store.createTestPoint({
       system: '',
       systemDesc: '',
       featureModule: '',
       featureDesc: '',
       testPoint: '',
       testPointDesc: '',
-    },
-  ];
-  try {
-    await store.saveTestPointDefinitions(nextList, {
-      successMessage: '已新增测试要点，请填写系统、功能模块与测试要点后保存',
     });
-    const created = store.testPoints[store.testPoints.length - 1];
-    if (created) {
-      activeTestPointId.value = created.id;
-      store.setSelectedTestPointIds([created.id]);
-      if (!batchMode.value) {
-        syncDefinitionDraft(created);
-        syncInstructionDraft([created]);
-      }
+    if (!created) {
+      return;
+    }
+    message.success('已新增测试要点，请填写系统、功能模块与测试要点后保存');
+    batchMode.value = false;
+    activeTestPointId.value = created.id;
+    store.setSelectedTestPointIds([created.id]);
+    const merged = store.mergedTestPoint(created.id);
+    if (merged) {
+      syncDefinitionDraft(merged);
+      syncInstructionDraft([merged]);
     }
   } catch (error) {
     message.error((error as Error)?.message || '新增测试要点失败');
