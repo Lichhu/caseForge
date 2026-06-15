@@ -25,10 +25,27 @@ export const PLATFORMS: PlatformMeta[] = [
   },
 ];
 
-export function getPlatformByRoute(path: string): PlatformMeta {
-  return PLATFORMS.find((item) => path.startsWith(item.route)) ?? PLATFORMS[0];
-}
+type RouteLike = {
+  path: string;
+  name?: string | symbol | null | undefined;
+};
 
 export function getPlatformById(id: PlatformId): PlatformMeta {
   return PLATFORMS.find((item) => item.id === id) ?? PLATFORMS[0];
+}
+
+export function resolvePlatformFromPath(pathname: string): PlatformMeta | undefined {
+  return PLATFORMS.find(
+    (item) => pathname === item.route || pathname.startsWith(`${item.route}/`),
+  );
+}
+
+export function getPlatformByRoute(route: RouteLike | string): PlatformMeta {
+  if (typeof route === 'string') {
+    return resolvePlatformFromPath(route) ?? PLATFORMS[0];
+  }
+  if (route.name === 'case-forge' || route.name === 'api-test') {
+    return getPlatformById(route.name);
+  }
+  return resolvePlatformFromPath(route.path) ?? PLATFORMS[0];
 }

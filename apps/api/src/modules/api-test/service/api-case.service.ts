@@ -42,27 +42,26 @@ export class ApiCaseService {
   ) {}
 
   async listCases(projectId: string, transactionId?: string) {
-    const rows = !transactionId
-      ? await this.caseRepo.find({
-          where: scopedWhere({ projectId }),
-          relations: ["endpoint"],
-          order: { updatedAt: "DESC" },
-        })
-      : await (async () => {
-          const endpoints = await this.endpointRepo.find({
-            where: { projectId, transactionId },
-            select: ["id"],
-          });
-          const endpointIds = endpoints.map((item) => item.id);
-          if (!endpointIds.length) {
-            return [];
-          }
-          return this.caseRepo.find({
-            where: { projectId, endpointId: In(endpointIds) },
-            relations: ["endpoint"],
-            order: { updatedAt: "DESC" },
-          });
-        })();
+    if (!transactionId) {
+      const rows = await this.caseRepo.find({
+        where: scopedWhere({ projectId }),
+        relations: ["endpoint"],
+        order: { updatedAt: "DESC" },
+      });
+      return rows.map(toPublicApiCase);
+    }
+
+    const rows = await this.caseRepo
+      .createQueryBuilder("c")
+      .innerJoinAndSelect("c.endpoint", "e")
+      .where("c.projectId = :projectId", { projectId })
+      .andWhere("c.createdBy = :userName", {
+        userName: RequestContext.getUserName(),
+      })
+      .andWhere("e.transactionId = :transactionId", { transactionId })
+      .orderBy("c.updatedAt", "DESC")
+      .getMany();
+
     return rows.map(toPublicApiCase);
   }
 
@@ -72,7 +71,11 @@ export class ApiCaseService {
     payload: SaveApiCaseDto,
   ) {
     this.validateCasePayload(payload);
-    const endpoint = await this.requireEndpoint(projectId, payload.endpointId);
+    const endpoint = await this.requireEndpoint(
+      projectId,
+      payload.endpointId,
+      transactionId,
+    );
     const transaction = await this.requireTransaction(projectId, transactionId);
     const userName = RequestContext.getUserName();
     const caseNo =
@@ -187,6 +190,9 @@ export class ApiCaseService {
 
     const created: ApiTestCaseEntity[] = [];
     for (const endpoint of endpoints) {
+      if (endpoint.transactionId !== transactionId) {
+        throw new BadRequestException("接口端点不属于当前交易码");
+      }
       let payloads;
       try {
         if (structuredDoc && this.aiWorkflow.canGenerateJsonCases()) {
@@ -235,7 +241,11 @@ export class ApiCaseService {
     }
   }
 
-  private async requireEndpoint(projectId: string, endpointId?: string) {
+  private async requireEndpoint(
+    projectId: string,
+    endpointId?: string,
+    transactionId?: string,
+  ) {
     if (!endpointId) {
       throw new BadRequestException("请选择绑定的接口端点");
     }
@@ -244,6 +254,13 @@ export class ApiCaseService {
     });
     if (!endpoint) {
       throw new NotFoundException("接口端点不存在");
+    }
+    if (
+      transactionId &&
+      endpoint.transactionId &&
+      endpoint.transactionId !== transactionId
+    ) {
+      throw new BadRequestException("接口端点不属于当前交易码");
     }
     return endpoint;
   }

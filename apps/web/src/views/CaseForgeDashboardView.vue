@@ -122,6 +122,9 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  if (immersiveMode.value) {
+    void exitImmersiveMode();
+  }
   unbindImmersiveListeners(handleKeydown);
 });
 </script>

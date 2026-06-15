@@ -246,10 +246,14 @@ import {
   addCaseRowToTree,
   applyExcelRowToTree,
   caseForgePageSizeOptionLabels,
+  collectCaseExcelRequirements,
   countCaseTreeLeaves,
   DEFAULT_CASE_FORGE_PAGE_SIZE,
+  filterCaseExcelRows,
+  findCaseExcelRowPage,
   flattenCaseTreeToExcel,
   normalizeCaseForgePageSize,
+  paginateCaseExcelRows,
   pickCaseExcelRowPath,
   removeCaseFromTree,
   shouldShowCaseForgePagination,
@@ -409,6 +413,61 @@ function rowFingerprint(row: CaseExcelRow) {
   });
 }
 
+function buildCaseRowFilterQuery() {
+  return {
+    requirement: requirementFilter.value?.trim() || undefined,
+    priority: priorityFilter.value as CasePriority | undefined,
+    caseNature: caseNatureFilter.value as CaseNature | undefined,
+    keyword: caseKeyword.value.trim() || undefined,
+  };
+}
+
+function mergeDraftRowsFromItems(items: CaseExcelRow[]) {
+  const previousById = new Map(
+    draftRows.value.map((row) => [row.caseNodeId, row] as const),
+  );
+  draftRows.value = items.map((serverRow) => {
+    const localRow = previousById.get(serverRow.caseNodeId);
+    if (
+      localRow
+      && rowFingerprint(localRow) !== rowFingerprint(serverRow)
+    ) {
+      return { ...localRow };
+    }
+    return { ...serverRow };
+  });
+  for (const row of draftRows.value) {
+    savedRowFingerprints.value.set(row.caseNodeId, rowFingerprint(row));
+  }
+}
+
+function loadCaseRowsFromLocalTree(options?: {
+  focusCaseNodeId?: string;
+  tree?: CaseTreeNode;
+  page?: number;
+}) {
+  const tree = options?.tree ?? props.tree ?? store.activeRun?.tree;
+  if (!tree) {
+    return;
+  }
+  const { rows } = flattenCaseTreeToExcel(tree);
+  const filtered = filterCaseExcelRows(rows, buildCaseRowFilterQuery());
+  const focusCaseNodeId = options?.focusCaseNodeId?.trim();
+  const focusPage = focusCaseNodeId
+    ? findCaseExcelRowPage(filtered, focusCaseNodeId, listPageSize.value)
+    : undefined;
+  const page = focusPage ?? options?.page ?? listPage.value;
+  if (focusPage) {
+    listPage.value = focusPage;
+  } else if (options?.page) {
+    listPage.value = options.page;
+  }
+  mergeDraftRowsFromItems(paginateCaseExcelRows(filtered, page, listPageSize.value));
+  totalFiltered.value = filtered.length;
+  totalRows.value = rows.length;
+  serverRequirements.value = collectCaseExcelRequirements(rows);
+}
+
 async function fetchCaseRows(options?: { focusCaseNodeId?: string }) {
   const pid = projectId.value;
   const rid = runId.value;
@@ -434,10 +493,17 @@ async function fetchCaseRows(options?: { focusCaseNodeId?: string }) {
     if (seq !== fetchSeq) {
       return;
     }
-    draftRows.value = result.items.map((row) => ({ ...row }));
-    for (const row of result.items) {
-      savedRowFingerprints.value.set(row.caseNodeId, rowFingerprint(row));
+    const localTree = props.tree ?? store.activeRun?.tree;
+    const localTotal = localTree ? flattenCaseTreeToExcel(localTree).rows.length : 0;
+    if (localTotal > result.totalRows) {
+      loadCaseRowsFromLocalTree({
+        focusCaseNodeId: options?.focusCaseNodeId,
+        tree: localTree,
+        page: result.focusPage ?? listPage.value,
+      });
+      return;
     }
+    mergeDraftRowsFromItems(result.items);
     totalFiltered.value = result.total;
     totalRows.value = result.totalRows;
     serverRequirements.value = result.requirements;
@@ -794,32 +860,51 @@ function enumOptions(key: ExcelColumnKey): Array<{ label: string; value: CaseNat
   ];
 }
 
-function autoResizeTextarea(el: HTMLTextAreaElement | null) {
-  if (!el) return;
-  el.style.height = 'auto';
-  el.style.height = `${el.scrollHeight}px`;
+function syncRowCellHeights(row: HTMLTableRowElement) {
+  const inputs = row.querySelectorAll<HTMLElement>('.cell-input');
+  if (!inputs.length) return;
+
+  inputs.forEach((el) => {
+    el.style.height = 'auto';
+  });
+
+  let maxHeight = 56;
+  inputs.forEach((el) => {
+    maxHeight = Math.max(maxHeight, el.scrollHeight);
+  });
+
+  const height = `${maxHeight}px`;
+  inputs.forEach((el) => {
+    el.style.height = height;
+  });
 }
 
 function resizeAllTextareas() {
   const root = scrollEl.value;
   if (!root) return;
-  root.querySelectorAll<HTMLTextAreaElement>('textarea.cell-textarea').forEach((el) => {
-    autoResizeTextarea(el);
+  root.querySelectorAll<HTMLTableRowElement>('tbody tr').forEach((row) => {
+    syncRowCellHeights(row);
   });
 }
 
 function onTextareaInput(event: Event) {
-  autoResizeTextarea(event.target as HTMLTextAreaElement);
+  const textarea = event.target as HTMLTextAreaElement;
+  const row = textarea.closest('tr');
+  if (row) {
+    syncRowCellHeights(row);
+  }
 }
 
-function emitRowChange(rowIndex: number) {
-  if (!props.tree) return;
+async function emitRowChange(rowIndex: number) {
+  await nextTick();
+  const tree = store.activeRun?.tree ?? props.tree;
+  if (!tree) return;
   const row = draftRows.value[rowIndex];
   if (!row) return;
   if (savedRowFingerprints.value.get(row.caseNodeId) === rowFingerprint(row)) {
     return;
   }
-  emit('change', applyExcelRowToTree(props.tree, row));
+  emit('change', applyExcelRowToTree(tree, row));
   savedRowFingerprints.value.set(row.caseNodeId, rowFingerprint(row));
 }
 
@@ -896,14 +981,41 @@ function scrollToCaseNodeIdInPage(caseNodeId: string) {
       return;
     }
     const rowEl = root.querySelectorAll<HTMLTableRowElement>('tbody tr')[rowIndex];
-    rowEl?.scrollIntoView({ block: 'nearest' });
+    rowEl?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  });
+}
+
+function focusCaseRowEditor(caseNodeId: string) {
+  const rowIndex = draftRows.value.findIndex((row) => row.caseNodeId === caseNodeId);
+  if (rowIndex < 0) {
+    return;
+  }
+  void nextTick(() => {
+    const root = scrollEl.value;
+    if (!root) {
+      return;
+    }
+    const rowEl = root.querySelectorAll<HTMLTableRowElement>('tbody tr')[rowIndex];
+    const input = rowEl?.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+      '.cell-input:not(.cell-select)',
+    );
+    input?.focus();
+    if (input instanceof HTMLInputElement) {
+      input.select();
+    }
   });
 }
 
 async function scrollToCaseNodeId(caseNodeId: string) {
-  await fetchCaseRows({ focusCaseNodeId: caseNodeId });
+  const tree = props.tree ?? store.activeRun?.tree;
+  if (tree) {
+    loadCaseRowsFromLocalTree({ focusCaseNodeId: caseNodeId, tree });
+  } else {
+    await fetchCaseRows({ focusCaseNodeId: caseNodeId });
+  }
   await nextTick();
   scrollToCaseNodeIdInPage(caseNodeId);
+  focusCaseRowEditor(caseNodeId);
 }
 
 function openAddModal() {
@@ -925,12 +1037,15 @@ function handleAddCaseSubmit(path: CaseExcelRowPath, input: NewCaseRowInput) {
   }
   emit('change', result.tree);
   addModalOpen.value = false;
-  void fetchCaseRows({ focusCaseNodeId: result.caseNodeId }).then(async () => {
+  void nextTick().then(async () => {
+    const tree = store.activeRun?.tree ?? result.tree;
+    loadCaseRowsFromLocalTree({ focusCaseNodeId: result.caseNodeId, tree });
     if (hierarchyCollapsed.value) {
       selectedCaseNodeIds.value = new Set([result.caseNodeId]);
     }
     await nextTick();
     scrollToCaseNodeIdInPage(result.caseNodeId);
+    focusCaseRowEditor(result.caseNodeId);
   });
 }
 
@@ -1344,6 +1459,12 @@ function deleteSelectedRows() {
 
 .excel-table .td-editable {
   padding: 6px 8px;
+  vertical-align: top;
+}
+
+.excel-table .td-editable .cell-input {
+  display: block;
+  box-sizing: border-box;
 }
 
 .cell-readonly {
@@ -1414,9 +1535,8 @@ function deleteSelectedRows() {
 
 .cell-textarea {
   resize: none;
-  overflow: hidden;
+  overflow-y: auto;
   min-height: 56px;
-  field-sizing: content;
   cursor: text;
 }
 
@@ -1424,6 +1544,7 @@ function deleteSelectedRows() {
   cursor: pointer;
   appearance: none;
   padding-right: 28px;
+  min-height: 56px;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23667085' d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;

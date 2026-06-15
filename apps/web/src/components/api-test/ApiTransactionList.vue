@@ -35,7 +35,7 @@
           size="middle"
           row-key="id"
           :pagination="false"
-          :data-source="filteredTransactions"
+          :data-source="paginatedTransactions"
           :columns="columns"
           :row-selection="rowSelection"
           :custom-row="customRow"
@@ -70,6 +70,19 @@
           :description="emptyDescription"
         />
       </div>
+      <div v-if="showPagination" class="transaction-list-pagination">
+        <a-pagination
+          size="small"
+          :current="listPage"
+          :page-size="listPageSize"
+          :total="filteredTransactions.length"
+          :show-size-changer="true"
+          :page-size-options="pageSizeOptions"
+          :show-total="(total: number) => `共 ${total} 条`"
+          @change="handlePaginationChange"
+          @showSizeChange="handlePaginationChange"
+        />
+      </div>
     </div>
 
     <a-modal
@@ -99,6 +112,11 @@
 import { computed, reactive, ref, watch } from 'vue';
 import { PlusOutlined, SearchOutlined } from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
+import {
+  caseForgePageSizeOptionLabels,
+  DEFAULT_CASE_FORGE_PAGE_SIZE,
+  normalizeCaseForgePageSize,
+} from '@case-forge/shared';
 import { useApiTestStore } from '@/stores/apiTest';
 import type { ApiTransactionRow } from '@/api/apiTestClient';
 
@@ -108,6 +126,9 @@ const saving = ref(false);
 const deleting = ref(false);
 const editingId = ref('');
 const keyword = ref('');
+const listPage = ref(1);
+const listPageSize = ref(DEFAULT_CASE_FORGE_PAGE_SIZE);
+const pageSizeOptions = caseForgePageSizeOptionLabels();
 const selectedRowKeys = ref<string[]>([]);
 const form = reactive({
   code: '',
@@ -122,6 +143,10 @@ watch(
     selectedRowKeys.value = selectedRowKeys.value.filter((id) => existingIds.has(id));
   },
 );
+
+watch(keyword, () => {
+  listPage.value = 1;
+});
 
 const columns = [
   { title: '交易码', dataIndex: 'code', key: 'code', width: 200 },
@@ -142,6 +167,30 @@ const filteredTransactions = computed(() => {
     return normalizeSearchText(haystack).includes(normalizedKeyword);
   });
 });
+
+const showPagination = computed(() => filteredTransactions.value.length > 0);
+
+const paginatedTransactions = computed(() => {
+  const items = filteredTransactions.value;
+  const start = (listPage.value - 1) * listPageSize.value;
+  return items.slice(start, start + listPageSize.value);
+});
+
+function handlePaginationChange(page: number, pageSize: number) {
+  const sizeChanged = pageSize !== listPageSize.value;
+  listPageSize.value = normalizeCaseForgePageSize(pageSize);
+  listPage.value = sizeChanged ? 1 : page;
+}
+
+watch(
+  () => filteredTransactions.value.length,
+  (total) => {
+    const maxPage = Math.max(1, Math.ceil(total / listPageSize.value));
+    if (listPage.value > maxPage) {
+      listPage.value = maxPage;
+    }
+  },
+);
 
 const emptyDescription = computed(() => {
   if (!apiStore.transactions.length) return '暂无交易码，请点击右上角「新建」';
@@ -398,5 +447,14 @@ function onBatchDelete() {
 
 :deep(.transaction-row:hover > td) {
   background: var(--cf-brand-soft, #fff5f6) !important;
+}
+
+.transaction-list-pagination {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  padding: 10px 12px 12px;
+  border-top: 1px solid #eef2f6;
+  background: #fff;
 }
 </style>

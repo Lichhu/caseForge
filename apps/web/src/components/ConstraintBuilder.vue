@@ -76,8 +76,9 @@
           <span>已选 {{ selectedRows.length }} / {{ selectableRows.length }}</span>
         </div>
 
-        <div class="test-point-list-scroll">
-        <a-spin :spinning="listLoading">
+        <div class="test-point-list-body">
+          <div class="test-point-list-scroll">
+          <a-spin :spinning="listLoading">
         <article
           v-for="item in store.testPoints"
           :key="item.id"
@@ -133,18 +134,37 @@
         </article>
         <a-empty v-if="!store.testPoints.length" description="当前筛选下暂无测试要点" />
         </a-spin>
-        </div>
-        <div v-if="showTestPointPagination" class="test-point-list-pagination">
-          <a-pagination
-            size="small"
-            :current="store.testPointListPage"
-            :page-size="store.testPointListPageSize"
-            :total="store.testPointTotal"
-            :show-size-changer="true"
-            :page-size-options="pageSizeOptions"
-            @change="handleTestPointPageChange"
-            @showSizeChange="handleTestPointPageSizeChange"
-          />
+          </div>
+          <div v-if="showTestPointPagination" class="test-point-list-pagination">
+            <button
+              type="button"
+              class="test-point-page-nav"
+              :disabled="store.testPointListPage <= 1 || listLoading"
+              aria-label="上一页"
+              @click="goTestPointPrevPage"
+            >
+              ‹
+            </button>
+            <span class="test-point-page-indicator">
+              {{ store.testPointListPage }}/{{ testPointTotalPages }}
+            </span>
+            <button
+              type="button"
+              class="test-point-page-nav"
+              :disabled="store.testPointListPage >= testPointTotalPages || listLoading"
+              aria-label="下一页"
+              @click="goTestPointNextPage"
+            >
+              ›
+            </button>
+            <a-select
+              size="small"
+              class="test-point-page-size"
+              :value="store.testPointListPageSize"
+              :options="pageSizeSelectOptions"
+              @change="handleTestPointPageSizeSelect"
+            />
+          </div>
         </div>
       </div>
 
@@ -565,8 +585,15 @@ import { formatDurationSeconds } from '@/utils/formatDuration';
 const IMMERSIVE_OVERLAY_Z_INDEX = 2600;
 const SCENARIO_AUTO_SAVE_DELAY_MS = 600;
 const pageSizeOptions = caseForgePageSizeOptionLabels();
+const pageSizeSelectOptions = pageSizeOptions.map((value) => ({
+  label: `${value} 条/页`,
+  value: Number(value),
+}));
 const showTestPointPagination = computed(() =>
   shouldShowCaseForgePagination(store.testPointTotal),
+);
+const testPointTotalPages = computed(() =>
+  Math.max(1, Math.ceil(store.testPointTotal / store.testPointListPageSize)),
 );
 
 const FIELD_LIMITS = {
@@ -951,7 +978,21 @@ async function handleTestPointPageChange(page: number) {
   }
 }
 
-async function handleTestPointPageSizeChange(_page: number, pageSize: number) {
+function goTestPointPrevPage() {
+  if (store.testPointListPage <= 1) return;
+  void handleTestPointPageChange(store.testPointListPage - 1);
+}
+
+function goTestPointNextPage() {
+  if (store.testPointListPage >= testPointTotalPages.value) return;
+  void handleTestPointPageChange(store.testPointListPage + 1);
+}
+
+async function handleTestPointPageSizeSelect(pageSize: number) {
+  await applyTestPointPageSizeChange(pageSize);
+}
+
+async function applyTestPointPageSizeChange(pageSize: number) {
   listLoading.value = true;
   try {
     await store.setTestPointListPageSize(pageSize);

@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import PlatformLayout from '@/layouts/PlatformLayout.vue';
 import ApiTestDashboardView from '@/views/ApiTestDashboardView.vue';
 import CaseForgeDashboardView from '@/views/CaseForgeDashboardView.vue';
 import { getUserName, syncUserNameFromQuery } from '@/utils/userContext';
@@ -16,27 +15,15 @@ const router = createRouter({
     },
     {
       path: '/case-forge',
-      component: PlatformLayout,
-      children: [
-        {
-          path: '',
-          name: 'case-forge',
-          component: CaseForgeDashboardView,
-          meta: { platform: 'case-forge', title: '智能生成案例平台' },
-        },
-      ],
+      name: 'case-forge',
+      component: CaseForgeDashboardView,
+      meta: { platform: 'case-forge', title: '智能生成案例平台' },
     },
     {
       path: '/api-test',
-      component: PlatformLayout,
-      children: [
-        {
-          path: '',
-          name: 'api-test',
-          component: ApiTestDashboardView,
-          meta: { platform: 'api-test', title: '智能接口测试平台' },
-        },
-      ],
+      name: 'api-test',
+      component: ApiTestDashboardView,
+      meta: { platform: 'api-test', title: '智能接口测试平台' },
     },
   ],
 });

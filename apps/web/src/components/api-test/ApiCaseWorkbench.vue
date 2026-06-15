@@ -21,8 +21,19 @@
           <template #icon><PlusOutlined /></template>
           新建案例
         </a-button>
+        <a-select
+          v-model:value="apiStore.selectedEnvironmentId"
+          style="min-width: 160px"
+          placeholder="选择环境"
+          :options="envOptions"
+          @change="onEnvChange"
+        />
+        <a-button @click="envModalOpen = true">
+          <template #icon><SettingOutlined /></template>
+          环境
+        </a-button>
         <a-button
-          :disabled="!selectedIds.length || !apiStore.selectedEnvironmentId"
+          :disabled="!canRunSelected"
           :loading="apiStore.running"
           @click="onRunSelected"
         >
@@ -165,7 +176,7 @@
               <template #icon><DeleteOutlined /></template>
               删除
             </a-button>
-            <a-button v-if="!isNewCase" :disabled="!apiStore.selectedEnvironmentId" @click="onRunOne">
+            <a-button v-if="!isNewCase" :disabled="!canRunSingle" @click="onRunOne">
               执行
             </a-button>
             <a-button type="primary" :loading="saving" @click="onSave">
@@ -187,23 +198,28 @@
       description="暂无案例，请先结构化接口文档后 AI 生成，或手动新建"
     />
   </section>
+
+  <ApiEnvironmentMaintainModal v-model:open="envModalOpen" />
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onActivated, reactive, ref, watch } from 'vue';
 import {
   DeleteOutlined,
   PlusOutlined,
   SaveOutlined,
+  SettingOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons-vue';
 import { message } from 'ant-design-vue';
 import type { ApiTestCaseRow } from '@/api/apiTestClient';
+import ApiEnvironmentMaintainModal from '@/components/api-test/ApiEnvironmentMaintainModal.vue';
 import { useApiTestStore } from '@/stores/apiTest';
 
 const apiStore = useApiTestStore();
 const saving = ref(false);
 const isNewCase = ref(false);
+const envModalOpen = ref(false);
 
 const projectId = computed(() => apiStore.activeProjectId ?? '');
 const transactionId = computed(() => apiStore.activeTransactionId ?? '');
@@ -220,6 +236,13 @@ const allSelected = computed(
 const selectionIndeterminate = computed(
   () => selectedIds.value.length > 0 && !allSelected.value,
 );
+const envOptions = computed(() =>
+  apiStore.environments.map((env) => ({ label: env.name, value: env.id })),
+);
+const canRunSelected = computed(
+  () => selectedIds.value.length > 0 && apiStore.environments.length > 0,
+);
+const canRunSingle = computed(() => apiStore.environments.length > 0);
 
 const form = reactive({
   endpointId: '',
@@ -255,15 +278,6 @@ const endpointOptions = computed(() =>
 );
 
 watch(
-  () => apiStore.activeCaseId,
-  (caseId) => {
-    if (!caseId || isNewCase.value) return;
-    const row = apiStore.cases.find((item) => item.id === caseId);
-    if (row) loadForm(row);
-  },
-);
-
-watch(
   () => apiStore.cases,
   (cases) => {
     if (isNewCase.value) return;
@@ -274,9 +288,35 @@ watch(
     if (!cases.some((item) => item.id === apiStore.activeCaseId)) {
       apiStore.activeCaseId = cases[0]?.id ?? '';
     }
+    const row = cases.find((item) => item.id === apiStore.activeCaseId);
+    if (row) loadForm(row);
   },
   { immediate: true },
 );
+
+onActivated(() => {
+  const projectId = apiStore.activeProjectId;
+  const transactionId = apiStore.activeTransactionId;
+  if (projectId && transactionId) {
+    apiStore.ensureSelectedEnvironment();
+    void apiStore.refreshCases(projectId, transactionId);
+  }
+});
+
+watch(
+  () => apiStore.selectedEnvironmentId,
+  async (environmentId) => {
+    const projectId = apiStore.activeProjectId;
+    if (projectId && environmentId) {
+      await apiStore.refreshEnvironmentServices(projectId, environmentId);
+    }
+    apiStore.selectedEnvironmentServiceId = '';
+  },
+);
+
+function onEnvChange() {
+  apiStore.selectedEnvironmentServiceId = '';
+}
 
 function statusLabel(status: string) {
   if (status === 'draft') return '草稿';
@@ -396,6 +436,11 @@ async function onDelete() {
 
 async function onRunOne() {
   if (!projectId.value || !transactionId.value || !apiStore.activeCaseId) return;
+  if (!apiStore.ensureSelectedEnvironment()) {
+    message.warning('请先创建并选择执行环境');
+    envModalOpen.value = true;
+    return;
+  }
   const run = await apiStore.executeCases(projectId.value, transactionId.value, [
     apiStore.activeCaseId,
   ]);
@@ -404,6 +449,11 @@ async function onRunOne() {
 
 async function onRunSelected() {
   if (!projectId.value || !transactionId.value || !selectedIds.value.length) return;
+  if (!apiStore.ensureSelectedEnvironment()) {
+    message.warning('请先创建并选择执行环境');
+    envModalOpen.value = true;
+    return;
+  }
   const run = await apiStore.executeCases(
     projectId.value,
     transactionId.value,

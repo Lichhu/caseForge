@@ -254,6 +254,7 @@ export async function saveApiDocument(
 export async function listApiCases(projectId: string, transactionId: string) {
   const { data } = await http.get<ApiTestCaseRow[]>(
     `${transactionBase(projectId, transactionId)}/cases`,
+    { headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' } },
   );
   return data;
 }

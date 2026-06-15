@@ -137,12 +137,15 @@ function canOpenStage(stage: ApiWorkspaceStage | string) {
   return false;
 }
 
-function switchStage(stage: string) {
+async function switchStage(stage: string) {
   if (!canOpenStage(stage)) return;
   const projectId = apiStore.activeProjectId;
   const transactionId = apiStore.activeTransactionId;
   if (projectId && transactionId) {
     apiStore.setWorkspaceStage(projectId, transactionId, stage as ApiWorkspaceStage);
+    if (stage === 'api-cases') {
+      await apiStore.refreshCases(projectId, transactionId);
+    }
   }
   scheduleViewportRefresh();
 }
@@ -170,6 +173,9 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  if (immersiveMode.value) {
+    void exitImmersiveMode();
+  }
   unbindImmersiveListeners(handleKeydown);
 });
 </script>

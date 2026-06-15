@@ -6,7 +6,7 @@ import type {
   GenerationRun,
   GenerationRunSummary,
 } from '@case-forge/shared';
-import { normalizeCaseForgePageSize } from '@case-forge/shared';
+import { cloneCaseTree, normalizeCaseForgePageSize } from '@case-forge/shared';
 import {
   autoSaveStructDoc,
   batchSaveDynamicTestPointInstruction,
@@ -1290,23 +1290,26 @@ export const useCaseForgeStore = defineStore('caseForge', {
       if (!this.activeProject || !this.activeRun) return;
       this.treeSaving = true;
       try {
-        const localTree = this.activeRun.tree;
+        const runId = this.activeRun.id;
+        const mindMapExtras = this.activeRun.mindMapExtras;
+        const treeSnapshot = cloneCaseTree(this.activeRun.tree);
         const saved = await saveRunTree(
           this.activeProject.id,
-          this.activeRun.id,
-          localTree,
-          this.activeRun.mindMapExtras,
+          runId,
+          treeSnapshot,
+          mindMapExtras,
         );
+        const latestTree = this.activeRun.tree;
         this.activeRun = {
           ...this.activeRun,
           ...saved,
-          tree: localTree,
+          tree: latestTree,
         };
         const index = this.runSummaries.findIndex((run) => run.id === this.activeRun?.id);
         if (index >= 0) {
           this.runSummaries[index] = {
             ...this.runSummaries[index],
-            title: localTree.title || this.runSummaries[index].title,
+            title: latestTree.title || this.runSummaries[index].title,
           };
         }
         message.success(options?.successMessage ?? '案例树已保存');
