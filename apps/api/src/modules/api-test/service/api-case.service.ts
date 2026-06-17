@@ -12,18 +12,24 @@ import {
   auditFieldsForUpdate,
   RequestContext,
 } from "../../../common/audit/request-context";
-import { scopedWhere } from "../../../common/audit/user-scope";
+import { scopedWhere, scopedWhereWithSystem } from "../../../common/audit/user-scope";
+import { PromptEntity } from "@scenario/entity/prompt.entity";
 import { ApiDocEntity } from "../entity/api-doc.entity";
 import { ApiEndpointEntity } from "../entity/api-endpoint.entity";
 import { ApiTestCaseEntity } from "../entity/api-test-case.entity";
 import { ApiTransactionEntity } from "../entity/api-transaction.entity";
 import { SaveApiCaseDto } from "../dto/save-api-case.dto";
+import { ListApiCasesDto } from "../dto/list-api-cases.dto";
 import {
   generateCasesWithAi,
   nextCaseNo,
 } from "../util/api-case-ai.util";
 import { buildFallbackCasesForEndpoint } from "../util/case-fallback.generator";
 import { toPublicApiCase } from "../../../common/http/public-response.util";
+import {
+  DEFAULT_CASE_FORGE_PAGE_SIZE,
+  normalizeCaseForgePageSize,
+} from "@case-forge/shared";
 
 @Injectable()
 export class ApiCaseService {
@@ -38,20 +44,22 @@ export class ApiCaseService {
     private readonly apiDocRepo: Repository<ApiDocEntity>,
     @InjectRepository(ApiTransactionEntity)
     private readonly transactionRepo: Repository<ApiTransactionEntity>,
+    @InjectRepository(PromptEntity)
+    private readonly promptRepo: Repository<PromptEntity>,
     private readonly aiWorkflow: AiWorkflowService,
   ) {}
 
-  async listCases(projectId: string, transactionId?: string) {
-    if (!transactionId) {
-      const rows = await this.caseRepo.find({
-        where: scopedWhere({ projectId }),
-        relations: ["endpoint"],
-        order: { updatedAt: "DESC" },
-      });
-      return rows.map(toPublicApiCase);
-    }
+  async listCases(
+    projectId: string,
+    transactionId: string,
+    query: ListApiCasesDto = {},
+  ) {
+    const page = Math.max(1, query.page ?? 1);
+    const pageSize = normalizeCaseForgePageSize(
+      query.pageSize ?? DEFAULT_CASE_FORGE_PAGE_SIZE,
+    );
 
-    const rows = await this.caseRepo
+    const qb = this.caseRepo
       .createQueryBuilder("c")
       .innerJoinAndSelect("c.endpoint", "e")
       .where("c.projectId = :projectId", { projectId })
@@ -60,9 +68,16 @@ export class ApiCaseService {
       })
       .andWhere("e.transactionId = :transactionId", { transactionId })
       .orderBy("c.updatedAt", "DESC")
-      .getMany();
+      .skip((page - 1) * pageSize)
+      .take(pageSize);
 
-    return rows.map(toPublicApiCase);
+    const [rows, count] = await qb.getManyAndCount();
+    return {
+      rows: rows.map(toPublicApiCase),
+      count,
+      page,
+      pageSize,
+    };
   }
 
   async createCase(
@@ -102,7 +117,10 @@ export class ApiCaseService {
       preconditions: payload.preconditions ?? [],
       request: payload.request,
       expected: payload.expected,
-      metadata: { source: "manual" },
+      metadata: {
+        source: "manual",
+        promptIds: payload.promptIds ?? [],
+      },
       ...auditFieldsForCreate(),
     });
     const saved = await this.caseRepo.save(entity);
@@ -144,6 +162,10 @@ export class ApiCaseService {
     existing.metadata = {
       ...existing.metadata,
       source: existing.metadata?.source === "ai" ? "ai_edited" : "manual",
+      promptIds:
+        payload.promptIds !== undefined
+          ? payload.promptIds
+          : existing.metadata?.promptIds ?? [],
     };
     const saved = await this.caseRepo.save({ ...existing, ...auditFieldsForUpdate() });
     return toPublicApiCase(
@@ -162,12 +184,13 @@ export class ApiCaseService {
   async generateCases(
     projectId: string,
     transactionId?: string,
-    endpointIds?: string[],
+    options?: { endpointIds?: string[]; promptIds?: string[] },
   ) {
     if (!transactionId) {
       throw new BadRequestException("请指定交易码后再生成案例");
     }
     const transaction = await this.requireTransaction(projectId, transactionId);
+    const endpointIds = options?.endpointIds;
     const baseWhere = { projectId, transactionId };
     const endpoints = await this.endpointRepo.find({
       where: endpointIds?.length
@@ -182,10 +205,22 @@ export class ApiCaseService {
     const doc = await this.apiDocRepo.findOne({
       where: scopedWhere({ projectId, transactionId }),
     });
+    if (!doc) {
+      throw new BadRequestException("请先上传并结构化接口文档");
+    }
+    if (options?.promptIds !== undefined) {
+      doc.metadata = {
+        ...doc.metadata,
+        promptIds: options.promptIds,
+      };
+      await this.apiDocRepo.save(doc);
+    }
+    const promptIds = doc.metadata?.promptIds ?? [];
+    const scenarioPromptText = await this.resolveScenarioPromptText(promptIds);
     const structuredDoc =
-      doc?.tempStructuredMarkdown?.trim() ||
-      doc?.structuredMarkdown?.trim() ||
-      doc?.extractedRawText?.trim() ||
+      doc.tempStructuredMarkdown?.trim() ||
+      doc.structuredMarkdown?.trim() ||
+      doc.extractedRawText?.trim() ||
       "";
 
     const created: ApiTestCaseEntity[] = [];
@@ -200,6 +235,7 @@ export class ApiCaseService {
             transactionCode: transaction.code,
             structuredDoc,
             endpoint,
+            scenarioPromptText,
           });
         } else {
           throw new Error("fallback");
@@ -218,6 +254,10 @@ export class ApiCaseService {
           ...payload,
           transactionCode: payload.transactionCode ?? transaction.code,
           owner: payload.owner?.trim() || RequestContext.getUserName(),
+          metadata: {
+            source: "ai",
+            promptIds: [...promptIds],
+          },
           ...auditFieldsForCreate(),
         });
         created.push(await this.caseRepo.save(entity));
@@ -227,6 +267,20 @@ export class ApiCaseService {
       count: created.length,
       cases: created.map(toPublicApiCase),
     };
+  }
+
+  private async resolveScenarioPromptText(promptIds: string[]) {
+    if (!promptIds.length) {
+      return "";
+    }
+    const prompts = await this.promptRepo.find({
+      where: scopedWhereWithSystem({ id: In(promptIds) }),
+    });
+    const promptMap = new Map(prompts.map((prompt) => [prompt.id, prompt]));
+    return promptIds
+      .map((id) => promptMap.get(id)?.content?.trim())
+      .filter((content): content is string => Boolean(content))
+      .join("\n\n");
   }
 
   private validateCasePayload(payload: SaveApiCaseDto) {

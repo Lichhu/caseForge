@@ -13,6 +13,12 @@ import type {
   MindMapExtras,
   ProjectPlatform,
   RunNodeChildrenResponse,
+  type ScenarioScope,
+} from '@case-forge/shared';
+import {
+  DEFAULT_PROJECT_PAGE_SIZE,
+  normalizeProjectPageSize,
+  SCENARIO_SCOPE_CASE,
 } from '@case-forge/shared';
 
 export const http = axios.create({
@@ -28,6 +34,38 @@ http.interceptors.request.use((config) => {
 
 export interface ProjectListItem extends CaseForgeProject {
   runCount: number;
+}
+
+export interface ProjectListQuery {
+  platform?: ProjectPlatform;
+  page?: number;
+  size?: number;
+  input?: string;
+}
+
+export interface ProjectListResult {
+  rows: ProjectListItem[];
+  count: number;
+}
+
+function mapProjectListRow(raw: {
+  id: string;
+  title: string;
+  description?: string | null;
+  requirementNo?: string | null;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+  generationCount?: number;
+}): ProjectListItem {
+  return {
+    id: raw.id,
+    title: raw.title,
+    description: raw.description ?? '',
+    requirementNo: raw.requirementNo ?? undefined,
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : raw.createdAt.toISOString(),
+    updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : raw.updatedAt.toISOString(),
+    runCount: raw.generationCount ?? 0,
+  };
 }
 
 function mapProjectDetail(raw: {
@@ -68,6 +106,7 @@ export interface ScenarioLibraryItem {
   name: string;
   description: string;
   category: string;
+  scope?: ScenarioScope;
   isActive: boolean;
   prompts: PromptLibraryItem[];
 }
@@ -76,6 +115,7 @@ export interface ScenarioLibraryPayload {
   name: string;
   description: string;
   category: string;
+  scope?: ScenarioScope;
   isActive: boolean;
   prompts: Array<{
     id?: string;
@@ -166,11 +206,36 @@ export interface StructDocUploadStatus {
   reqDocName?: string;
 }
 
-export async function listProjects(platform: ProjectPlatform = 'case-forge') {
-  const { data } = await http.get<ProjectListItem[]>('/project-manage/projects/sidebar', {
-    params: { platform },
+export async function listProjects(
+  query: ProjectListQuery = {},
+): Promise<ProjectListResult> {
+  const platform = query.platform ?? 'case-forge';
+  const page = query.page ?? 1;
+  const size = normalizeProjectPageSize(query.size ?? DEFAULT_PROJECT_PAGE_SIZE);
+  const input = query.input?.trim();
+  const { data } = await http.get<{
+    rows: Array<{
+      id: string;
+      title: string;
+      description?: string | null;
+      requirementNo?: string | null;
+      createdAt: string | Date;
+      updatedAt: string | Date;
+      generationCount?: number;
+    }>;
+    count: number;
+  }>('/project-manage/projects', {
+    params: {
+      platform,
+      page,
+      size,
+      ...(input ? { input } : {}),
+    },
   });
-  return data;
+  return {
+    rows: data.rows.map(mapProjectListRow),
+    count: data.count,
+  };
 }
 
 export async function createProject(payload: {
@@ -466,13 +531,18 @@ export async function listRunCaseRows(
   return data;
 }
 
-export async function listScenarioLibrary() {
-  const { data } = await http.get<ScenarioLibraryItem[]>('/scenario/list');
+export async function listScenarioLibrary(scope: ScenarioScope = SCENARIO_SCOPE_CASE) {
+  const { data } = await http.get<ScenarioLibraryItem[]>('/scenario/list', {
+    params: { scope },
+  });
   return data;
 }
 
 export async function createScenarioLibraryItem(payload: ScenarioLibraryPayload) {
-  const { data } = await http.post<ScenarioLibraryItem>('/scenario', payload);
+  const { data } = await http.post<ScenarioLibraryItem>('/scenario', {
+    ...payload,
+    scope: payload.scope ?? SCENARIO_SCOPE_CASE,
+  });
   return data;
 }
 

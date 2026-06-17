@@ -45,6 +45,7 @@ export interface ApiTestCasePayload {
   metadata?: {
     source?: ApiCaseSource;
     inferredFields?: string[];
+    promptIds?: string[];
   };
 }
 

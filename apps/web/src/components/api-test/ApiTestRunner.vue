@@ -162,7 +162,7 @@
     >
       <p class="manage-hint">同一执行集内案例不可重复；同一案例可被多个执行集引用。</p>
       <a-checkbox-group v-model:value="selectedCaseIds" class="case-checkbox-group">
-        <a-checkbox v-for="item in apiStore.cases" :key="item.id" :value="item.id">
+        <a-checkbox v-for="item in apiStore.runnerCases" :key="item.id" :value="item.id">
           {{ item.caseNo || item.title }}
         </a-checkbox>
       </a-checkbox-group>

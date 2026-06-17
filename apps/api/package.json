@@ -12,8 +12,8 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "format": "prettier \"src/**/*.ts\" --write",
-    "seed:demo": "cross-env NODE_ENV=development ts-node -r tsconfig-paths/register scripts/seed-demo-data.ts",
-    "seed:api-test": "cross-env NODE_ENV=development ts-node -r tsconfig-paths/register scripts/seed-api-test-demo.ts",
+    "seed:demo": "cross-env NODE_ENV=local ts-node -r tsconfig-paths/register scripts/seed-demo-data.ts",
+    "seed:api-test": "cross-env NODE_ENV=local ts-node -r tsconfig-paths/register scripts/seed-api-test-demo.ts",
     "db:indexes": "echo '请在 MySQL 中执行: source apps/api/scripts/add-database-indexes.sql'",
     "db:platform": "echo '请在 MySQL 中执行: source apps/api/scripts/add-project-platform-column.sql'"
   },

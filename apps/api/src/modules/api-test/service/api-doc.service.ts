@@ -13,6 +13,7 @@ import { assertApiTestProject } from "../util/assert-api-project.util";
 import { touchProjectUpdatedAt } from "../../../common/project/touch-project.util";
 import { ApiDocEntity } from "../entity/api-doc.entity";
 import { ApiEndpointEntity } from "../entity/api-endpoint.entity";
+import { ApiTestCaseEntity } from "../entity/api-test-case.entity";
 import { ApiTransactionEntity } from "../entity/api-transaction.entity";
 import {
   extractDocumentText,
@@ -24,7 +25,9 @@ import {
 } from "../util/api-doc.parser";
 import type { ApiEndpointPayload } from "@case-forge/shared";
 import { SaveApiDocDto } from "../dto/save-api-doc.dto";
+import { SaveApiDocGenerationDto } from "../dto/save-api-doc-generation.dto";
 import { toPublicApiDoc } from "../../../common/http/public-response.util";
+import { RequestContext } from "../../../common/audit/request-context";
 
 @Injectable()
 export class ApiDocService {
@@ -33,6 +36,8 @@ export class ApiDocService {
     private readonly apiDocRepo: Repository<ApiDocEntity>,
     @InjectRepository(ApiEndpointEntity)
     private readonly endpointRepo: Repository<ApiEndpointEntity>,
+    @InjectRepository(ApiTestCaseEntity)
+    private readonly caseRepo: Repository<ApiTestCaseEntity>,
     @InjectRepository(ApiTransactionEntity)
     private readonly transactionRepo: Repository<ApiTransactionEntity>,
     @InjectRepository(CaseProjectEntity)
@@ -168,6 +173,21 @@ export class ApiDocService {
     return this.getByTransactionId(projectId, transactionId);
   }
 
+  async saveGenerationPrompts(
+    projectId: string,
+    transactionId: string,
+    payload: SaveApiDocGenerationDto,
+  ) {
+    const doc = await this.ensureDoc(projectId, transactionId);
+    doc.metadata = {
+      ...doc.metadata,
+      promptIds: payload.promptIds ?? [],
+    };
+    await this.apiDocRepo.save({ ...doc, ...auditFieldsForUpdate() });
+    await touchProjectUpdatedAt(this.projectRepo, projectId);
+    return this.getByTransactionId(projectId, transactionId);
+  }
+
   async getByTransactionId(projectId: string, transactionId: string) {
     await this.assertTransaction(projectId, transactionId);
     const doc = await this.apiDocRepo.findOne({
@@ -179,13 +199,26 @@ export class ApiDocService {
       order: { sortOrder: "ASC", createdAt: "ASC" },
     });
     const endpointCount = endpoints.length;
+    const transactionCaseCount = await this.caseRepo
+      .createQueryBuilder("c")
+      .innerJoin("c.endpoint", "e")
+      .where("c.projectId = :projectId", { projectId })
+      .andWhere("c.createdBy = :userName", {
+        userName: RequestContext.getUserName(),
+      })
+      .andWhere("e.transactionId = :transactionId", { transactionId })
+      .getCount();
+    const canGenerateCases =
+      endpointCount > 0 && doc.structuringStatus === "completed";
     return toPublicApiDoc(doc, {
       transactionId,
       sourceDocUrl: await this.minio.getAccessUrl(doc.sourceDocPath),
       endpoints,
-      canEnterCases: endpointCount > 0,
-      canEnterRunner: endpointCount > 0,
+      canEnterCases: transactionCaseCount > 0,
+      canGenerateCases,
+      canEnterRunner: transactionCaseCount > 0,
       endpointCount,
+      caseCount: transactionCaseCount,
     });
   }
 

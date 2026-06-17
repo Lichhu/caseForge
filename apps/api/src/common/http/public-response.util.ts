@@ -36,6 +36,7 @@ export function toPublicScenario(scenario: ScenarioEntity) {
     name: scenario.name,
     description: scenario.description,
     category: scenario.category,
+    scope: scenario.scope,
     isActive: scenario.isActive,
     prompts: (scenario.prompts ?? []).map(toPublicPrompt),
   };
@@ -140,8 +141,10 @@ export function toPublicApiDoc(
     sourceDocUrl?: string;
     endpoints: ApiEndpointEntity[];
     canEnterCases: boolean;
+    canGenerateCases: boolean;
     canEnterRunner: boolean;
     endpointCount: number;
+    caseCount: number;
   },
 ) {
   return {
@@ -154,10 +157,13 @@ export function toPublicApiDoc(
     tempStructuredMarkdown: doc.tempStructuredMarkdown,
     structuringStatus: doc.structuringStatus,
     structuringError: doc.structuringError,
+    generationPromptIds: doc.metadata?.promptIds ?? [],
     endpoints: extra.endpoints.map(toPublicApiEndpoint),
     canEnterCases: extra.canEnterCases,
+    canGenerateCases: extra.canGenerateCases,
     canEnterRunner: extra.canEnterRunner,
     endpointCount: extra.endpointCount,
+    caseCount: extra.caseCount,
   };
 }
 

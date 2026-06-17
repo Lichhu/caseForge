@@ -64,6 +64,7 @@ export async function generateCasesWithAi(
     transactionCode: string;
     structuredDoc: string;
     endpoint: ApiEndpointEntity;
+    scenarioPromptText?: string;
   },
 ): Promise<ApiTestCasePayload[]> {
   const skillTemplate = loadAtCaseSkillText();
@@ -74,13 +75,16 @@ export async function generateCasesWithAi(
     throw new Error("AI Chat 未配置");
   }
 
-  const prompt = buildAtCasePrompt(skillTemplate, {
+  let prompt = buildAtCasePrompt(skillTemplate, {
     transactionCode: input.transactionCode,
     endpointName: input.endpoint.name,
     httpMethod: input.endpoint.method,
     endpointPath: input.endpoint.path,
     structuredDoc: input.structuredDoc,
   });
+  if (input.scenarioPromptText?.trim()) {
+    prompt += `\n\n## 场景约束\n${input.scenarioPromptText.trim()}`;
+  }
 
   const { text } = await aiWorkflow.runWithAiChat(prompt);
   const items = aiWorkflow.parseJsonArray<AiApiCaseItem>(text) ?? [];

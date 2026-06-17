@@ -10,10 +10,13 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import { ListScenariosQueryDto } from "@scenario/dto/list-scenarios-query.dto";
 import { SaveScenarioDto } from "@scenario/dto/save-scenario.dto";
 import { ScenarioService } from "@scenario/service/scenario.service";
+import { normalizeScenarioScope, SCENARIO_SCOPE_CASE } from "@case-forge/shared";
 
 @ApiTags("scenario")
 @Controller("scenario")
@@ -25,8 +28,10 @@ export class ScenarioController {
 
   /** 获取场景列表 */
   @Get("list")
-  async listScenarios() {
-    return this.scenarioService.listScenarios();
+  async listScenarios(@Query() query: ListScenariosQueryDto) {
+    return this.scenarioService.listScenarios(
+      normalizeScenarioScope(query.scope, SCENARIO_SCOPE_CASE),
+    );
   }
 
   /** 获取单个场景详情 */

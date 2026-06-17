@@ -14,6 +14,7 @@ import { ApiTestExecutionSetCaseEntity } from "./entity/api-test-execution-set-c
 import { ApiTestRunEntity } from "./entity/api-test-run.entity";
 import { ApiTestRunItemEntity } from "./entity/api-test-run-item.entity";
 import { ApiTransactionEntity } from "./entity/api-transaction.entity";
+import { PromptEntity } from "@scenario/entity/prompt.entity";
 import { ApiDocService } from "./service/api-doc.service";
 import { ApiCaseService } from "./service/api-case.service";
 import { ApiTransactionService } from "./service/api-transaction.service";
@@ -35,6 +36,7 @@ import { ApiReportService } from "./service/api-report.service";
       ApiTestRunEntity,
       ApiTestRunItemEntity,
       ApiTransactionEntity,
+      PromptEntity,
       CaseProjectEntity,
     ]),
     MinioStorageModule,

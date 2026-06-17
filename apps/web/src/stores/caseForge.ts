@@ -6,7 +6,13 @@ import type {
   GenerationRun,
   GenerationRunSummary,
 } from '@case-forge/shared';
-import { cloneCaseTree, normalizeCaseForgePageSize } from '@case-forge/shared';
+import {
+  cloneCaseTree,
+  DEFAULT_CASE_FORGE_PAGE_SIZE,
+  DEFAULT_PROJECT_PAGE_SIZE,
+  normalizeCaseForgePageSize,
+  normalizeProjectPageSize,
+} from '@case-forge/shared';
 import {
   autoSaveStructDoc,
   batchSaveDynamicTestPointInstruction,
@@ -56,6 +62,13 @@ import {
   toTestPointSummary,
 } from '@/utils/testPointMerge';
 import { isTestPointDefinitionComplete, testPointDefinitionLabel } from '@/utils/testPointDefinition';
+import {
+  getRecentWorkspaceEntry,
+  removeRecentWorkspaceEntry,
+  setRecentWorkspaceEntry,
+  syncLegacyWorkspaceRegistry,
+  WORKSPACE_STAGE_REGISTRY,
+} from '@/utils/workspaceStageStorage';
 
 export type WorkspaceStage = 'document' | 'constraints' | 'workbench';
 
@@ -86,6 +99,10 @@ function sleep(ms: number) {
 
 interface State {
   projects: ProjectListItem[];
+  projectListPage: number;
+  projectListPageSize: number;
+  projectListTotal: number;
+  projectListKeyword: string;
   activeProject: CaseForgeProject | null;
   /** 案例运行摘要（不含案例树），编辑台按需 GET .../runs/:runId 拉整树 */
   runSummaries: GenerationRunSummary[];
@@ -129,6 +146,10 @@ const stageStoragePrefix = 'case-forge:workspace-stage:';
 export const useCaseForgeStore = defineStore('caseForge', {
   state: (): State => ({
     projects: [],
+    projectListPage: 1,
+    projectListPageSize: DEFAULT_PROJECT_PAGE_SIZE,
+    projectListTotal: 0,
+    projectListKeyword: '',
     activeProject: null,
     runSummaries: [],
     structDoc: null,
@@ -197,6 +218,10 @@ export const useCaseForgeStore = defineStore('caseForge', {
   },
   actions: {
     async bootstrap() {
+      syncLegacyWorkspaceRegistry(
+        WORKSPACE_STAGE_REGISTRY.caseForgeProject,
+        stageStoragePrefix,
+      );
       this.loading = true;
       try {
         await this.refreshProjects();
@@ -209,8 +234,40 @@ export const useCaseForgeStore = defineStore('caseForge', {
         this.loading = false;
       }
     },
-    async refreshProjects() {
-      this.projects = await listProjects('case-forge');
+    async refreshProjects(options?: {
+      page?: number;
+      size?: number;
+      keyword?: string;
+      resetPage?: boolean;
+    }) {
+      if (options?.keyword !== undefined) {
+        this.projectListKeyword = options.keyword;
+      }
+      if (options?.size !== undefined) {
+        this.projectListPageSize = normalizeProjectPageSize(options.size);
+      }
+      if (options?.resetPage) {
+        this.projectListPage = 1;
+      } else if (options?.page !== undefined) {
+        this.projectListPage = Math.max(1, options.page);
+      }
+
+      const fetchPage = async (page: number) =>
+        listProjects({
+          platform: 'case-forge',
+          page,
+          size: this.projectListPageSize,
+          input: this.projectListKeyword,
+        });
+
+      let result = await fetchPage(this.projectListPage);
+      this.projectListTotal = result.count;
+      const maxPage = Math.max(1, Math.ceil(result.count / this.projectListPageSize) || 1);
+      if (this.projectListPage > maxPage) {
+        this.projectListPage = maxPage;
+        result = await fetchPage(maxPage);
+      }
+      this.projects = result.rows;
     },
     /** 刷新侧边栏列表，使当前编辑项目按 updatedAt 排到最前 */
     async bumpSidebarProjectOrder(projectId?: string) {
@@ -235,7 +292,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
       this.scenarios = [];
       this.resetTestPointWorkspaceState();
       this.setWorkspaceStage('document');
-      await this.refreshProjects();
+      await this.refreshProjects({ resetPage: true, keyword: '' });
     },
     async selectProject(projectId: string) {
       this.stopStructuringPoll();
@@ -347,7 +404,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
       }
     },
     async loadScenarioLibrary() {
-      const scenarios = await listScenarioLibrary();
+      const scenarios = await listScenarioLibrary('case');
       this.scenarios = scenarios.map((scenario) => normalizeScenarioLibraryItem(scenario));
     },
     /** 仅刷新测试要点列表（轻量，不拉场景库、不触发 orphan 恢复） */
@@ -596,7 +653,11 @@ export const useCaseForgeStore = defineStore('caseForge', {
       }
       this.workspaceStage = stage;
       if (this.activeProject) {
-        localStorage.setItem(`${stageStoragePrefix}${this.activeProject.id}`, stage);
+        setRecentWorkspaceEntry(
+          WORKSPACE_STAGE_REGISTRY.caseForgeProject,
+          `${stageStoragePrefix}${this.activeProject.id}`,
+          stage,
+        );
       }
       if (options?.refresh) {
         await this.refreshWorkspaceStageData(stage, { recoverOrphans: false });
@@ -657,7 +718,10 @@ export const useCaseForgeStore = defineStore('caseForge', {
     },
     async removeProject(projectId: string) {
       await deleteProject(projectId);
-      localStorage.removeItem(`${stageStoragePrefix}${projectId}`);
+      removeRecentWorkspaceEntry(
+        WORKSPACE_STAGE_REGISTRY.caseForgeProject,
+        `${stageStoragePrefix}${projectId}`,
+      );
       await this.refreshProjects();
       if (this.activeProject?.id === projectId) {
         const next = this.projects[0];
@@ -703,7 +767,12 @@ export const useCaseForgeStore = defineStore('caseForge', {
           message.warning(`${failedCount} 个项目删除失败，请稍后重试`);
         }
       }
-      ids.forEach((projectId) => localStorage.removeItem(`${stageStoragePrefix}${projectId}`));
+      ids.forEach((projectId) =>
+        removeRecentWorkspaceEntry(
+          WORKSPACE_STAGE_REGISTRY.caseForgeProject,
+          `${stageStoragePrefix}${projectId}`,
+        ),
+      );
       await this.refreshProjects();
       if (this.activeProject && ids.includes(this.activeProject.id)) {
         const next = this.projects[0];
@@ -850,7 +919,11 @@ export const useCaseForgeStore = defineStore('caseForge', {
       }
       this.structDoc = doc;
     },
-    async autoSaveDocument(markdown: string, projectId?: string) {
+    async autoSaveDocument(
+      markdown: string,
+      projectId?: string,
+      options?: { successMessage?: string },
+    ) {
       const targetProjectId = projectId ?? this.activeProject?.id;
       if (!targetProjectId || this.activeProject?.id !== targetProjectId) {
         return;
@@ -859,6 +932,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
       if (this.activeProject?.id === targetProjectId && this.structDoc) {
         this.structDoc = {
           ...this.structDoc,
+          tempStructDoc: structDoc.tempStructDoc,
           canSave: structDoc.canSave,
           canStructure: structDoc.canStructure,
           canEnterDynamicInstruct: structDoc.canEnterDynamicInstruct,
@@ -868,6 +942,9 @@ export const useCaseForgeStore = defineStore('caseForge', {
         };
       } else if (this.activeProject?.id === targetProjectId) {
         this.structDoc = structDoc;
+      }
+      if (options?.successMessage) {
+        message.success(options.successMessage);
       }
       await this.bumpSidebarProjectOrder(targetProjectId);
     },
@@ -1493,6 +1570,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
             ...(item.prompts !== undefined ? { prompts: item.prompts } : {}),
           })
         : await createScenarioLibraryItem({
+            scope: 'case',
             name: item.name,
             description: item.description,
             category: item.category,
@@ -1583,7 +1661,10 @@ function normalizeScenarioLibraryItem(scenario: ScenarioLibraryItem): ScenarioLi
 }
 
 function loadProjectStage(projectId: string): WorkspaceStage {
-  const stage = localStorage.getItem(`${stageStoragePrefix}${projectId}`);
+  const stage = getRecentWorkspaceEntry(
+    WORKSPACE_STAGE_REGISTRY.caseForgeProject,
+    `${stageStoragePrefix}${projectId}`,
+  );
   return stage === 'constraints' || stage === 'workbench' || stage === 'document'
     ? stage
     : 'document';

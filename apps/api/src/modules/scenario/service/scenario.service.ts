@@ -13,6 +13,11 @@ import {
 } from "@scenario/dto/save-scenario.dto";
 import { PromptEntity } from "@scenario/entity/prompt.entity";
 import { ScenarioEntity } from "@scenario/entity/scenario.entity";
+import {
+  normalizeScenarioScope,
+  SCENARIO_SCOPE_CASE,
+  type ScenarioScope,
+} from "@case-forge/shared";
 import { In, Repository } from "typeorm";
 import {
   assertAccessible,
@@ -34,10 +39,10 @@ export class ScenarioService {
     private readonly promptRepo: Repository<PromptEntity>,
   ) {}
 
-  /** 列出系统预置与当前用户维护的场景及其提示词 */
-  async listScenarios() {
+  /** 按归属列出系统预置与当前用户维护的场景及其提示词 */
+  async listScenarios(scope: ScenarioScope = SCENARIO_SCOPE_CASE) {
     const rows = await this.scenarioRepo.find({
-      where: scopedWhereWithSystem(),
+      where: scopedWhereWithSystem({ scope }),
       relations: ["prompts"],
       order: {
         updatedAt: "DESC",
@@ -84,12 +89,14 @@ export class ScenarioService {
    * @param dto - 保存载荷
    */
   async createScenario(dto: SaveScenarioDto) {
-    await this.ensureScenarioNameUnique(dto.name.trim());
+    const scope = normalizeScenarioScope(dto.scope, SCENARIO_SCOPE_CASE);
+    await this.ensureScenarioNameUnique(dto.name.trim(), scope);
     const scenario = await this.scenarioRepo.save(
       this.scenarioRepo.create({
         name: dto.name.trim(),
         description: dto.description?.trim() || "",
         category: dto.category.trim(),
+        scope,
         isActive: dto.isActive ?? true,
       }),
     );
@@ -107,7 +114,7 @@ export class ScenarioService {
    */
   async updateScenario(id: string, dto: SaveScenarioDto) {
     const scenario = await this.getOwnedScenario(id);
-    await this.ensureScenarioNameUnique(dto.name.trim(), id);
+    await this.ensureScenarioNameUnique(dto.name.trim(), scenario.scope, id);
     await this.scenarioRepo.save(
       this.scenarioRepo.create({
         ...scenario,
@@ -152,9 +159,13 @@ export class ScenarioService {
     await this.savePrompts(scenarioId, prompts);
   }
 
-  private async ensureScenarioNameUnique(name: string, excludeId?: string) {
+  private async ensureScenarioNameUnique(
+    name: string,
+    scope: ScenarioScope,
+    excludeId?: string,
+  ) {
     const existing = await this.scenarioRepo.findOne({
-      where: scopedWhere({ name }),
+      where: scopedWhereWithSystem({ name, scope }),
     });
     if (existing && existing.id !== excludeId) {
       throw new BadRequestException(`场景名称「${name}」已存在`);

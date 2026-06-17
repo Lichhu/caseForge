@@ -1,4 +1,8 @@
 import { http } from '@/api/client';
+import {
+  DEFAULT_CASE_FORGE_PAGE_SIZE,
+  normalizeCaseForgePageSize,
+} from '@case-forge/shared';
 import type {
   ApiCaseExpected,
   ApiCasePolarity,
@@ -33,9 +37,12 @@ export interface ApiDocDetail {
   structuringStatus: ApiStructuringStatus;
   structuringError?: string;
   endpoints: ApiEndpointRow[];
+  generationPromptIds?: string[];
   canEnterCases: boolean;
+  canGenerateCases: boolean;
   canEnterRunner: boolean;
   endpointCount: number;
+  caseCount?: number;
 }
 
 export interface ApiEndpointRow {
@@ -67,7 +74,7 @@ export interface ApiTestCaseRow {
   expected: ApiCaseExpected;
   endpoint?: ApiEndpointRow;
   createdBy?: string;
-  metadata?: { source?: string };
+  metadata?: { source?: string; promptIds?: string[] };
 }
 
 export interface ApiEnvironmentRow {
@@ -251,12 +258,60 @@ export async function saveApiDocument(
   return data;
 }
 
-export async function listApiCases(projectId: string, transactionId: string) {
-  const { data } = await http.get<ApiTestCaseRow[]>(
-    `${transactionBase(projectId, transactionId)}/cases`,
-    { headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' } },
+export async function saveApiDocumentGeneration(
+  projectId: string,
+  transactionId: string,
+  promptIds: string[],
+) {
+  const { data } = await http.patch<ApiDocDetail>(
+    `${transactionBase(projectId, transactionId)}/document/generation`,
+    { promptIds },
   );
   return data;
+}
+
+export interface ApiCaseListResult {
+  rows: ApiTestCaseRow[];
+  count: number;
+  page: number;
+  pageSize: number;
+}
+
+export async function listApiCases(
+  projectId: string,
+  transactionId: string,
+  params?: { page?: number; pageSize?: number },
+): Promise<ApiCaseListResult> {
+  const page = Math.max(1, params?.page ?? 1);
+  const pageSize = normalizeCaseForgePageSize(
+    params?.pageSize ?? DEFAULT_CASE_FORGE_PAGE_SIZE,
+  );
+  const { data } = await http.get<ApiCaseListResult>(
+    `${transactionBase(projectId, transactionId)}/cases`,
+    {
+      params: { page, pageSize },
+      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+    },
+  );
+  return data;
+}
+
+/** 执行集管理等场景需要完整案例列表时，分页拉取直至取完 */
+export async function listAllApiCases(
+  projectId: string,
+  transactionId: string,
+): Promise<ApiTestCaseRow[]> {
+  const pageSize = 100;
+  let page = 1;
+  const rows: ApiTestCaseRow[] = [];
+  let total = 0;
+  do {
+    const result = await listApiCases(projectId, transactionId, { page, pageSize });
+    rows.push(...result.rows);
+    total = result.count;
+    page += 1;
+  } while (rows.length < total);
+  return rows;
 }
 
 export async function createApiCase(
@@ -291,11 +346,11 @@ export async function deleteApiCase(projectId: string, transactionId: string, ca
 export async function generateApiCases(
   projectId: string,
   transactionId: string,
-  endpointIds?: string[],
+  options?: { endpointIds?: string[]; promptIds?: string[] },
 ) {
   const { data } = await http.post<{ count: number; cases?: ApiTestCaseRow[] }>(
     `${transactionBase(projectId, transactionId)}/cases/generate`,
-    { endpointIds },
+    options ?? {},
   );
   return data;
 }

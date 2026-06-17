@@ -66,6 +66,7 @@
           class="markdown-editor"
           :auto-size="false"
           placeholder="上传需求文档后点击结构化，或在此编辑结构化 Markdown"
+          @blur="handleEditorBlur"
         />
       </a-tab-pane>
       <a-tab-pane key="preview" tab="预览">
@@ -120,21 +121,46 @@ watch(
   },
 );
 
-watch(editorText, (value) => {
+watch(editorText, () => {
+  scheduleAutoSave();
+});
+
+function scheduleAutoSave() {
   const projectId = store.activeProject?.id;
-  if (!projectId || value === store.structDoc?.tempStructDoc) {
+  if (!projectId || editorText.value === store.structDoc?.tempStructDoc) {
     return;
   }
   if (autoSaveTimer.value) {
     window.clearTimeout(autoSaveTimer.value);
   }
   autoSaveTimer.value = window.setTimeout(() => {
-    if (store.activeProject?.id !== projectId) {
-      return;
-    }
-    void store.autoSaveDocument(value, projectId);
+    autoSaveTimer.value = null;
+    void flushAutoSave();
   }, 1200);
-});
+}
+
+function handleEditorBlur() {
+  void flushAutoSave({ notify: true });
+}
+
+async function flushAutoSave(options?: { notify?: boolean }) {
+  if (autoSaveTimer.value) {
+    window.clearTimeout(autoSaveTimer.value);
+    autoSaveTimer.value = null;
+  }
+  const projectId = store.activeProject?.id;
+  const value = editorText.value;
+  if (!projectId || value === store.structDoc?.tempStructDoc) {
+    return;
+  }
+  try {
+    await store.autoSaveDocument(value, projectId, {
+      successMessage: options?.notify ? '已自动保存' : undefined,
+    });
+  } catch (error) {
+    message.error((error as Error)?.message || '自动保存失败');
+  }
+}
 
 const previewHtml = ref('');
 let previewRenderTimer: ReturnType<typeof setTimeout> | undefined;

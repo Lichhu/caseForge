@@ -60,7 +60,12 @@ export function useImmersiveWorkspace(onViewportRefresh?: () => void) {
     immersiveDockOpen.value = false;
     await nextTick();
     configureAppMessage();
-    scheduleViewportRefresh();
+    // 等顶栏/导航恢复后再触发 resize，避免退出全屏后 flex 高度链未重算
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        scheduleViewportRefresh();
+      });
+    });
   }
 
   function startOrbDrag(event: PointerEvent) {

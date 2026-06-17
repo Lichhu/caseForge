@@ -152,4 +152,5 @@ export * from './case-tree';
 export * from './pagination';
 export * from './api-test';
 export * from './platform';
+export * from './scenario-scope';
 export * from './struct-doc';

@@ -150,9 +150,6 @@ importers:
       markdown-it:
         specifier: ^14.1.0
         version: 14.2.0
-      mind-elixir:
-        specifier: ^5.11.0
-        version: 5.12.2
       pinia:
         specifier: ^2.2.2
         version: 2.3.1(typescript@5.9.3)(vue@3.5.35(typescript@5.9.3))
@@ -2225,9 +2222,6 @@ packages:
   mimic-fn@2.1.0:
     resolution: {integrity: sha512-OqbOk5oEQeAZ8WXWydlu9HJjz9WVdEIvamMCcXmuqUYjTknH/sqsWvhQ3vgwKFRR1HpjvNBKQ37nbJgYzGqGcg==}
     engines: {node: '>=6'}
-
-  mind-elixir@5.12.2:
-    resolution: {integrity: sha512-G9eyrmjp6Ot+Llf5oPZPj2N5ivzDVwiQpiJEaX7uTUvIRkUwkyoTW1vSKKayl6ZzRoEWE87zupEdlEJWwtqqVg==}
 
   minimatch@3.1.5:
     resolution: {integrity: sha512-VgjWUsnnT6n+NUk6eZq77zeFdpW2LWDzP6zFGrCbHXiYNul5Dzqk2HHQ5uFH2DNW5Xbp8+jVzaeNt94ssEEl4w==}
@@ -5516,8 +5510,6 @@ snapshots:
   mime@1.6.0: {}
 
   mimic-fn@2.1.0: {}
-
-  mind-elixir@5.12.2: {}
 
   minimatch@3.1.5:
     dependencies:

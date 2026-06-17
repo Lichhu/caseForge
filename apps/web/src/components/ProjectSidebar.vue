@@ -28,7 +28,7 @@
       <a-checkbox
         :checked="allFilteredSelected"
         :indeterminate="selectionIndeterminate"
-        :disabled="!filteredProjects.length"
+        :disabled="!projectList.length"
         @change="toggleSelectAll"
       >
         全选
@@ -45,55 +45,92 @@
       </a-button>
     </div>
 
-    <div class="project-list">
-      <div
-        v-for="project in filteredProjects"
-        :key="project.id"
-        class="project-item"
-        :class="{ active: project.id === activeProjectId, batch: deleteMode }"
-        role="button"
-        tabindex="0"
-        @click="handleProjectClick(project.id)"
-        @keydown.enter.prevent="handleProjectClick(project.id)"
-        @keydown.space.prevent="handleProjectClick(project.id)"
-      >
-        <a-checkbox
-          v-if="deleteMode"
-          class="project-check"
-          :checked="selectedProjectIdSet.has(project.id)"
-          @click.stop
-          @change="toggleProjectSelection(project.id, $event)"
-        />
-        <div class="project-main">
-          <a-typography-text
-            class="project-title"
-            :ellipsis="{ tooltip: cleanProjectTitle(project.title) }"
-            :content="cleanProjectTitle(project.title)"
-          />
-          <span v-if="isApiPlatform && project.requirementNo" class="project-requirement">
-            {{ project.requirementNo }}
-          </span>
-        </div>
-        <button
-          v-if="!deleteMode"
-          class="project-edit"
-          :disabled="saving"
-          aria-label="编辑项目"
-          @click.stop="openEditProject(project)"
-        >
-          <EditOutlined />
-        </button>
-        <button
-          v-if="deleteMode"
-          class="project-delete"
-          :disabled="deleting"
-          aria-label="删除项目"
-          @click.stop="deleteSingleProject(project.id)"
-        >
-          <DeleteOutlined />
-        </button>
+    <div class="project-list-shell">
+      <div class="project-list">
+        <a-spin :spinning="listLoading">
+          <div
+            v-for="project in projectList"
+            :key="project.id"
+            class="project-item"
+            :class="{ active: project.id === activeProjectId, batch: deleteMode }"
+            role="button"
+            tabindex="0"
+            @click="handleProjectClick(project.id)"
+            @keydown.enter.prevent="handleProjectClick(project.id)"
+            @keydown.space.prevent="handleProjectClick(project.id)"
+          >
+            <a-checkbox
+              v-if="deleteMode"
+              class="project-check"
+              :checked="selectedProjectIdSet.has(project.id)"
+              @click.stop
+              @change="toggleProjectSelection(project.id, $event)"
+            />
+            <div class="project-main">
+              <a-typography-text
+                class="project-title"
+                :ellipsis="{ tooltip: cleanProjectTitle(project.title) }"
+                :content="cleanProjectTitle(project.title)"
+              />
+              <span v-if="isApiPlatform && project.requirementNo" class="project-requirement">
+                {{ project.requirementNo }}
+              </span>
+            </div>
+            <button
+              v-if="!deleteMode"
+              class="project-edit"
+              :disabled="saving"
+              aria-label="编辑项目"
+              @click.stop="openEditProject(project)"
+            >
+              <EditOutlined />
+            </button>
+            <button
+              v-if="deleteMode"
+              class="project-delete"
+              :disabled="deleting"
+              aria-label="删除项目"
+              @click.stop="deleteSingleProject(project.id)"
+            >
+              <DeleteOutlined />
+            </button>
+          </div>
+          <a-empty v-if="!projectList.length && !listLoading" class="project-empty" description="暂无匹配项目" />
+        </a-spin>
       </div>
-      <a-empty v-if="!filteredProjects.length" class="project-empty" description="暂无匹配项目" />
+
+      <div v-if="listTotal > 0" class="project-list-pagination">
+        <span class="project-page-total">共 {{ listTotal }} 项</span>
+        <div class="project-pagination-nav">
+          <button
+            type="button"
+            class="project-page-nav"
+            :disabled="listPage <= 1 || listLoading"
+            aria-label="上一页"
+            @click="goPrevPage"
+          >
+            ‹
+          </button>
+          <span class="project-page-indicator">{{ listPage }}/{{ totalPages }}</span>
+          <button
+            type="button"
+            class="project-page-nav"
+            :disabled="listPage >= totalPages || listLoading"
+            aria-label="下一页"
+            @click="goNextPage"
+          >
+            ›
+          </button>
+        </div>
+        <a-select
+          size="small"
+          class="project-page-size"
+          :value="listPageSize"
+          :options="pageSizeSelectOptions"
+          aria-label="每页条数"
+          @change="handlePageSizeSelect"
+        />
+      </div>
     </div>
 
     <a-modal
@@ -159,9 +196,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
+import { PROJECT_PAGE_SIZE_OPTIONS } from '@case-forge/shared';
 import { useCaseForgeStore } from '@/stores/caseForge';
 import { useApiTestStore } from '@/stores/apiTest';
 import type { ProjectListItem } from '@/api/client';
@@ -180,6 +218,7 @@ const projectList = computed(() =>
   isApiPlatform.value ? apiStore.projects : caseStore.projects,
 );
 const keyword = ref('');
+const listLoading = ref(false);
 const deleteMode = ref(false);
 const deleting = ref(false);
 const saving = ref(false);
@@ -207,32 +246,94 @@ const activeProjectId = computed(() =>
   isApiPlatform.value ? apiStore.activeProjectId : caseStore.activeProject?.id,
 );
 
-const filteredProjects = computed(() => {
-  const value = keyword.value.trim().toLowerCase();
-  if (!value) return projectList.value;
-  const normalizedKeyword = normalizeSearchText(value);
-  return projectList.value.filter((project) => {
-    const haystack = [
-      cleanProjectTitle(project.title),
-      project.description,
-      project.requirementNo,
-    ]
-      .filter(Boolean)
-      .join(' ');
-    return normalizeSearchText(haystack).includes(normalizedKeyword);
-  });
-});
+const listPage = computed(() =>
+  isApiPlatform.value ? apiStore.projectListPage : caseStore.projectListPage,
+);
+const listPageSize = computed(() =>
+  isApiPlatform.value ? apiStore.projectListPageSize : caseStore.projectListPageSize,
+);
+const listTotal = computed(() =>
+  isApiPlatform.value ? apiStore.projectListTotal : caseStore.projectListTotal,
+);
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(listTotal.value / listPageSize.value) || 1),
+);
+const pageSizeSelectOptions = computed(() =>
+  PROJECT_PAGE_SIZE_OPTIONS.map((value) => ({
+    label: String(value),
+    value,
+  })),
+);
 
-const filteredProjectIds = computed(() => filteredProjects.value.map((project) => project.id));
+const currentPageProjectIds = computed(() => projectList.value.map((project) => project.id));
 const selectedFilteredCount = computed(
-  () => filteredProjectIds.value.filter((projectId) => selectedProjectIdSet.value.has(projectId)).length,
+  () => currentPageProjectIds.value.filter((projectId) => selectedProjectIdSet.value.has(projectId)).length,
 );
 const allFilteredSelected = computed(
-  () => Boolean(filteredProjectIds.value.length) && selectedFilteredCount.value === filteredProjectIds.value.length,
+  () => Boolean(currentPageProjectIds.value.length) && selectedFilteredCount.value === currentPageProjectIds.value.length,
 );
 const selectionIndeterminate = computed(
-  () => selectedFilteredCount.value > 0 && selectedFilteredCount.value < filteredProjectIds.value.length,
+  () => selectedFilteredCount.value > 0 && selectedFilteredCount.value < currentPageProjectIds.value.length,
 );
+
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+const skipKeywordWatch = ref(true);
+
+async function reloadProjects(options?: {
+  page?: number;
+  size?: number;
+  keyword?: string;
+  resetPage?: boolean;
+}) {
+  listLoading.value = true;
+  try {
+    if (isApiPlatform.value) {
+      await apiStore.refreshProjects(options);
+    } else {
+      await caseStore.refreshProjects(options);
+    }
+  } finally {
+    listLoading.value = false;
+  }
+}
+
+function goPrevPage() {
+  if (listPage.value <= 1 || listLoading.value) return;
+  void reloadProjects({ page: listPage.value - 1 });
+}
+
+function goNextPage() {
+  if (listPage.value >= totalPages.value || listLoading.value) return;
+  void reloadProjects({ page: listPage.value + 1 });
+}
+
+function handlePageSizeSelect(value: number) {
+  void reloadProjects({ page: 1, size: value });
+}
+
+watch(keyword, (value) => {
+  if (skipKeywordWatch.value) {
+    return;
+  }
+  if (searchTimer) {
+    window.clearTimeout(searchTimer);
+  }
+  searchTimer = window.setTimeout(() => {
+    void reloadProjects({ page: 1, keyword: value.trim() });
+  }, 300);
+});
+
+onMounted(() => {
+  keyword.value = isApiPlatform.value ? apiStore.projectListKeyword : caseStore.projectListKeyword;
+  skipKeywordWatch.value = false;
+});
+
+onBeforeUnmount(() => {
+  if (searchTimer) {
+    window.clearTimeout(searchTimer);
+  }
+});
 
 watch(
   () => projectList.value.map((project) => project.id).join(','),
@@ -315,11 +416,11 @@ function toggleProjectSelection(projectId: string, event: { target: { checked: b
 
 function toggleSelectAll(event: { target: { checked: boolean } }) {
   if (event.target.checked) {
-    selectedProjectIds.value = [...new Set([...selectedProjectIds.value, ...filteredProjectIds.value])];
+    selectedProjectIds.value = [...new Set([...selectedProjectIds.value, ...currentPageProjectIds.value])];
     return;
   }
-  const filteredIds = new Set(filteredProjectIds.value);
-  selectedProjectIds.value = selectedProjectIds.value.filter((projectId) => !filteredIds.has(projectId));
+  const pageIds = new Set(currentPageProjectIds.value);
+  selectedProjectIds.value = selectedProjectIds.value.filter((projectId) => !pageIds.has(projectId));
 }
 
 function setProjectSelected(projectId: string, selected: boolean) {
@@ -363,7 +464,7 @@ async function deleteSelectedProjects(projectIds: string[]) {
         await caseStore.removeProjects(ids);
       }
       selectedProjectIds.value = [];
-      if (!projectList.value.length) {
+      if (!projectList.value.length && listTotal.value === 0) {
         deleteMode.value = false;
       }
     } finally {
@@ -452,11 +553,99 @@ function projectMeta(project: { runCount: number; requirementNo?: string | null 
   const requirementNo = project.requirementNo?.trim();
   return requirementNo ? `${requirementNo} · ${project.runCount} 次生成` : `${project.runCount} 次生成`;
 }
-
-function normalizeSearchText(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[‐‑‒–—―－]/g, '-')
-    .replace(/\s+/g, '');
-}
 </script>
+
+<style scoped>
+.project-list :deep(.ant-spin-nested-loading),
+.project-list :deep(.ant-spin-container) {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.project-list-pagination {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  padding: 8px 0 4px;
+  border-top: 1px solid #eef2f6;
+}
+
+.project-page-total {
+  flex-shrink: 0;
+  color: #667085;
+  font-size: 11px;
+  line-height: 24px;
+  white-space: nowrap;
+}
+
+.project-page-size {
+  width: 52px;
+}
+
+.project-page-size :deep(.ant-select-selector) {
+  height: 24px !important;
+  padding-inline: 4px !important;
+}
+
+.project-page-size :deep(.ant-select-selection-item) {
+  line-height: 22px !important;
+}
+
+.project-pagination-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.project-page-nav {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid #d0d5dd;
+  border-radius: 5px;
+  background: #fff;
+  color: #344054;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease,
+    background-color 0.12s ease;
+}
+
+.project-page-nav:hover:not(:disabled) {
+  border-color: var(--cf-brand);
+  color: var(--cf-brand);
+  background: #fff5f6;
+}
+
+.project-page-nav:disabled {
+  border-color: #eaecf0;
+  background: #f9fafb;
+  color: #d0d5dd;
+  cursor: not-allowed;
+}
+
+.project-page-indicator {
+  flex-shrink: 0;
+  min-width: 36px;
+  color: #344054;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 24px;
+  text-align: center;
+  user-select: none;
+}
+</style>

@@ -84,7 +84,7 @@ const {
 const stages = [
   { key: 'document' as const, index: '01', title: '结构化需求文档', shortTitle: '文档', description: '上传、清洗、编辑 Markdown' },
   { key: 'constraints' as const, index: '02', title: '动态指令', shortTitle: '指令', description: '功能点列表、逐条动态指令' },
-  { key: 'workbench' as const, index: '03', title: '案例编辑台', shortTitle: '编辑', description: '生成、编辑、导出 XMind' },
+  { key: 'workbench' as const, index: '03', title: '案例编辑台', shortTitle: '编辑', description: '在线编辑案例树，导出 Excel / XMind' },
 ];
 
 function canOpenStage(stage: WorkspaceStage) {

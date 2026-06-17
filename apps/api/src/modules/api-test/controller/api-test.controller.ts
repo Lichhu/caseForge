@@ -32,6 +32,7 @@ import {
   AutoSaveApiDocDto,
   SaveApiDocDto,
 } from "../dto/save-api-doc.dto";
+import { SaveApiDocGenerationDto } from "../dto/save-api-doc-generation.dto";
 import {
   ExportApiReportDto,
   GenerateApiCasesDto,
@@ -48,6 +49,7 @@ import {
 import { SaveApiEnvironmentDto } from "../dto/save-environment.dto";
 import { SaveApiTransactionDto } from "../dto/save-transaction.dto";
 import { BatchDeleteTransactionsDto } from "../dto/batch-delete-transactions.dto";
+import { ListApiCasesDto } from "../dto/list-api-cases.dto";
 
 const UPLOAD_EXTENSIONS = ["xls", "xlsx"];
 
@@ -214,6 +216,19 @@ export class ApiTestController {
     return this.apiDocService.saveDocument(projectId, transactionId, body);
   }
 
+  @Patch(":projectId/transactions/:transactionId/document/generation")
+  saveDocumentGeneration(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+    @Body() body: SaveApiDocGenerationDto,
+  ) {
+    return this.apiDocService.saveGenerationPrompts(
+      projectId,
+      transactionId,
+      body,
+    );
+  }
+
   @Get(":projectId/transactions/:transactionId/endpoints")
   async listEndpoints(
     @Param("projectId") projectId: string,
@@ -230,8 +245,9 @@ export class ApiTestController {
   listCases(
     @Param("projectId") projectId: string,
     @Param("transactionId") transactionId: string,
+    @Query() query: ListApiCasesDto,
   ) {
-    return this.apiCaseService.listCases(projectId, transactionId);
+    return this.apiCaseService.listCases(projectId, transactionId, query);
   }
 
   @Post(":projectId/transactions/:transactionId/cases")
@@ -271,7 +287,10 @@ export class ApiTestController {
     return this.apiCaseService.generateCases(
       projectId,
       transactionId,
-      body.endpointIds,
+      {
+        endpointIds: body.endpointIds,
+        promptIds: body.promptIds,
+      },
     );
   }
 

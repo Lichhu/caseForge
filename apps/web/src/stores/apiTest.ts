@@ -1,12 +1,24 @@
 import { defineStore } from "pinia";
 import { message } from "ant-design-vue";
 import {
+  DEFAULT_PROJECT_PAGE_SIZE,
+  DEFAULT_CASE_FORGE_PAGE_SIZE,
+  normalizeProjectPageSize,
+  normalizeCaseForgePageSize,
+} from "@case-forge/shared";
+import {
   batchDeleteProjects,
   createProject,
+  createScenarioLibraryItem,
   deleteProject,
+  deleteScenarioLibraryItem,
   listProjects,
+  listScenarioLibrary,
   updateProject,
+  updateScenarioLibraryItem,
   type ProjectListItem,
+  type ScenarioLibraryItem,
+  type ScenarioLibraryPayload,
 } from "@/api/client";
 import {
   autoSaveApiDocument,
@@ -26,6 +38,7 @@ import {
   getApiReportSummary,
   getApiRun,
   listApiCases,
+  listAllApiCases,
   listApiEnvironments,
   listApiEnvironmentServices,
   listApiExecutionSets,
@@ -35,6 +48,7 @@ import {
   runApiCases,
   runApiExecutionSet,
   saveApiDocument,
+  saveApiDocumentGeneration,
   structureApiDocument,
   updateApiCase,
   updateApiEnvironment,
@@ -50,6 +64,18 @@ import {
   type ApiTestCaseRow,
   type ApiTransactionRow,
 } from "@/api/apiTestClient";
+import {
+  applyScenarioLibraryItemInPlace,
+  normalizeScenarioLibraryItem,
+} from "@/utils/scenarioLibrary";
+import {
+  getRecentWorkspaceEntry,
+  removeApiTestProjectWorkspaceEntries,
+  removeRecentWorkspaceEntry,
+  setRecentWorkspaceEntry,
+  syncLegacyWorkspaceRegistry,
+  WORKSPACE_STAGE_REGISTRY,
+} from "@/utils/workspaceStageStorage";
 
 export type ApiWorkspaceStage =
   | "api-document"
@@ -65,11 +91,19 @@ const activeTransactionKey = (projectId: string) =>
 
 interface State {
   projects: ProjectListItem[];
+  projectListPage: number;
+  projectListPageSize: number;
+  projectListTotal: number;
+  projectListKeyword: string;
   activeProjectId: string;
   transactions: ApiTransactionRow[];
   activeTransactionId: string;
   apiDoc: ApiDocDetail | null;
   cases: ApiTestCaseRow[];
+  runnerCases: ApiTestCaseRow[];
+  caseListPage: number;
+  caseListPageSize: number;
+  caseListTotal: number;
   environments: ApiEnvironmentRow[];
   environmentServices: Record<string, ApiEnvironmentServiceRow[]>;
   executionSets: ApiExecutionSetRow[];
@@ -82,18 +116,28 @@ interface State {
   selectedEnvironmentServiceId: string;
   workspaceStage: ApiWorkspaceStage;
   loading: boolean;
-  generatingCases: boolean;
+  stageLoading: boolean;
+  generatingCaseTransactionIds: string[];
   running: boolean;
+  apiScenarios: ScenarioLibraryItem[];
 }
 
 export const useApiTestStore = defineStore("apiTest", {
   state: (): State => ({
     projects: [],
+    projectListPage: 1,
+    projectListPageSize: DEFAULT_PROJECT_PAGE_SIZE,
+    projectListTotal: 0,
+    projectListKeyword: "",
     activeProjectId: localStorage.getItem(activeProjectKey) ?? "",
     transactions: [],
     activeTransactionId: "",
     apiDoc: null,
     cases: [],
+    runnerCases: [],
+    caseListPage: 1,
+    caseListPageSize: DEFAULT_CASE_FORGE_PAGE_SIZE,
+    caseListTotal: 0,
     environments: [],
     environmentServices: {},
     executionSets: [],
@@ -106,8 +150,10 @@ export const useApiTestStore = defineStore("apiTest", {
     selectedEnvironmentServiceId: "",
     workspaceStage: "api-document",
     loading: false,
-    generatingCases: false,
+    stageLoading: false,
+    generatingCaseTransactionIds: [],
     running: false,
+    apiScenarios: [],
   }),
   getters: {
     activeProject(state): ProjectListItem | null {
@@ -122,12 +168,16 @@ export const useApiTestStore = defineStore("apiTest", {
     },
     inTransactionWorkspace: (state) =>
       Boolean(state.activeProjectId && state.activeTransactionId),
-    canEnterCases: (state) =>
-      Boolean(state.apiDoc?.canEnterCases) || state.cases.length > 0,
-    canEnterRunner: (state) =>
-      (Boolean(state.apiDoc?.canEnterRunner) ||
-        state.cases.some((item) => item.enabled)) &&
-      state.cases.some((item) => item.enabled),
+    canEnterCases: (state) => Boolean(state.apiDoc?.canEnterCases),
+    canGenerateCases: (state) => Boolean(state.apiDoc?.canGenerateCases),
+    canEnterRunner: (state) => {
+      const pool =
+        state.runnerCases.length > 0 ? state.runnerCases : state.cases;
+      if (pool.length) {
+        return pool.some((item) => item.enabled);
+      }
+      return Boolean(state.apiDoc?.canEnterRunner);
+    },
     transactionRuns(state): ApiRunDetail[] {
       return state.runs.filter((run) => {
         if (state.activeExecutionSetId) {
@@ -142,6 +192,14 @@ export const useApiTestStore = defineStore("apiTest", {
   },
   actions: {
     async bootstrap() {
+      syncLegacyWorkspaceRegistry(
+        WORKSPACE_STAGE_REGISTRY.apiTestStage,
+        "case-forge:api-stage:",
+      );
+      syncLegacyWorkspaceRegistry(
+        WORKSPACE_STAGE_REGISTRY.apiTestTransaction,
+        "case-forge:api-active-transaction:",
+      );
       this.loading = true;
       try {
         await this.refreshProjects();
@@ -157,8 +215,40 @@ export const useApiTestStore = defineStore("apiTest", {
         this.loading = false;
       }
     },
-    async refreshProjects() {
-      this.projects = await listProjects("api-test");
+    async refreshProjects(options?: {
+      page?: number;
+      size?: number;
+      keyword?: string;
+      resetPage?: boolean;
+    }) {
+      if (options?.keyword !== undefined) {
+        this.projectListKeyword = options.keyword;
+      }
+      if (options?.size !== undefined) {
+        this.projectListPageSize = normalizeProjectPageSize(options.size);
+      }
+      if (options?.resetPage) {
+        this.projectListPage = 1;
+      } else if (options?.page !== undefined) {
+        this.projectListPage = Math.max(1, options.page);
+      }
+
+      const fetchPage = async (page: number) =>
+        listProjects({
+          platform: "api-test",
+          page,
+          size: this.projectListPageSize,
+          input: this.projectListKeyword,
+        });
+
+      let result = await fetchPage(this.projectListPage);
+      this.projectListTotal = result.count;
+      const maxPage = Math.max(1, Math.ceil(result.count / this.projectListPageSize) || 1);
+      if (this.projectListPage > maxPage) {
+        this.projectListPage = maxPage;
+        result = await fetchPage(maxPage);
+      }
+      this.projects = result.rows;
     },
     async newProject(payload: {
       title: string;
@@ -174,23 +264,32 @@ export const useApiTestStore = defineStore("apiTest", {
       this.activeProjectId = project.id;
       localStorage.setItem(activeProjectKey, project.id);
       this.clearTransactionWorkspace();
-      await this.refreshProjects();
+      await this.refreshProjects({ resetPage: true, keyword: "" });
       await this.selectProject(project.id, false);
     },
     clearTransactionWorkspace() {
       this.activeTransactionId = "";
       this.apiDoc = null;
       this.cases = [];
+      this.runnerCases = [];
+      this.caseListPage = 1;
+      this.caseListPageSize = DEFAULT_CASE_FORGE_PAGE_SIZE;
+      this.caseListTotal = 0;
+      this.environments = [];
+      this.environmentServices = {};
       this.executionSets = [];
       this.activeExecutionSetId = "";
       this.runs = [];
       this.activeRun = null;
       this.selectedCaseIds = [];
       this.activeCaseId = "";
+      this.selectedEnvironmentId = "";
+      this.selectedEnvironmentServiceId = "";
       this.workspaceStage = "api-document";
     },
     async removeProject(projectId: string) {
       await deleteProject(projectId);
+      removeApiTestProjectWorkspaceEntries(projectId);
       await this.refreshProjects();
       if (this.activeProjectId === projectId) {
         const next = this.projects[0];
@@ -206,6 +305,7 @@ export const useApiTestStore = defineStore("apiTest", {
     },
     async removeProjects(projectIds: string[]) {
       await batchDeleteProjects(projectIds);
+      projectIds.forEach((projectId) => removeApiTestProjectWorkspaceEntries(projectId));
       await this.refreshProjects();
       if (projectIds.includes(this.activeProjectId)) {
         const next = this.projects[0];
@@ -225,10 +325,19 @@ export const useApiTestStore = defineStore("apiTest", {
       await this.refreshProjects();
     },
     restoreStage(projectId: string, transactionId: string) {
-      const saved = localStorage.getItem(
+      const saved = getRecentWorkspaceEntry(
+        WORKSPACE_STAGE_REGISTRY.apiTestStage,
         stageKey(projectId, transactionId),
-      ) as ApiWorkspaceStage | null;
-      this.workspaceStage = saved ?? "api-document";
+      );
+      const validStages: ApiWorkspaceStage[] = [
+        "api-document",
+        "api-cases",
+        "api-runner",
+        "api-report",
+      ];
+      this.workspaceStage = validStages.includes(saved as ApiWorkspaceStage)
+        ? (saved as ApiWorkspaceStage)
+        : "api-document";
     },
     setWorkspaceStage(
       projectId: string,
@@ -236,7 +345,11 @@ export const useApiTestStore = defineStore("apiTest", {
       stage: ApiWorkspaceStage,
     ) {
       this.workspaceStage = stage;
-      localStorage.setItem(stageKey(projectId, transactionId), stage);
+      setRecentWorkspaceEntry(
+        WORKSPACE_STAGE_REGISTRY.apiTestStage,
+        stageKey(projectId, transactionId),
+        stage,
+      );
     },
     async selectProject(projectId: string, restoreTransaction = true) {
       this.activeProjectId = projectId;
@@ -244,7 +357,10 @@ export const useApiTestStore = defineStore("apiTest", {
       this.clearTransactionWorkspace();
       await this.refreshTransactions(projectId);
       if (restoreTransaction) {
-        const savedTx = localStorage.getItem(activeTransactionKey(projectId));
+        const savedTx = getRecentWorkspaceEntry(
+          WORKSPACE_STAGE_REGISTRY.apiTestTransaction,
+          activeTransactionKey(projectId),
+        );
         if (savedTx && this.transactions.some((item) => item.id === savedTx)) {
           await this.selectTransaction(savedTx);
         }
@@ -285,16 +401,26 @@ export const useApiTestStore = defineStore("apiTest", {
         ids,
       );
       await this.refreshTransactions(this.activeProjectId);
+      for (const transactionId of ids) {
+        removeRecentWorkspaceEntry(
+          WORKSPACE_STAGE_REGISTRY.apiTestStage,
+          stageKey(this.activeProjectId, transactionId),
+        );
+      }
       if (ids.includes(this.activeTransactionId)) {
         this.clearTransactionWorkspace();
-        localStorage.removeItem(activeTransactionKey(this.activeProjectId));
+        removeRecentWorkspaceEntry(
+          WORKSPACE_STAGE_REGISTRY.apiTestTransaction,
+          activeTransactionKey(this.activeProjectId),
+        );
       }
       message.success(`已删除 ${result.count} 条交易码`);
     },
     async selectTransaction(transactionId: string) {
       if (!this.activeProjectId) return;
       this.activeTransactionId = transactionId;
-      localStorage.setItem(
+      setRecentWorkspaceEntry(
+        WORKSPACE_STAGE_REGISTRY.apiTestTransaction,
         activeTransactionKey(this.activeProjectId),
         transactionId,
       );
@@ -303,35 +429,98 @@ export const useApiTestStore = defineStore("apiTest", {
     exitTransactionWorkspace() {
       if (!this.activeProjectId) return;
       this.clearTransactionWorkspace();
-      localStorage.removeItem(activeTransactionKey(this.activeProjectId));
+      removeRecentWorkspaceEntry(
+        WORKSPACE_STAGE_REGISTRY.apiTestTransaction,
+        activeTransactionKey(this.activeProjectId),
+      );
     },
     async loadTransactionWorkspace(projectId: string, transactionId: string) {
-      this.loading = true;
+      this.restoreStage(projectId, transactionId);
+      this.apiDoc = null;
+      this.cases = [];
+      this.runnerCases = [];
+      this.caseListPage = 1;
+      this.caseListPageSize = DEFAULT_CASE_FORGE_PAGE_SIZE;
+      this.caseListTotal = 0;
+      this.environments = [];
+      this.environmentServices = {};
+      this.executionSets = [];
+      this.activeExecutionSetId = "";
+      this.runs = [];
+      this.activeRun = null;
+      this.selectedCaseIds = [];
+      this.activeCaseId = "";
+      this.selectedEnvironmentId = "";
+      this.selectedEnvironmentServiceId = "";
+      await this.loadWorkspaceStage(projectId, transactionId, this.workspaceStage);
+    },
+    async loadWorkspaceStage(
+      projectId: string,
+      transactionId: string,
+      stage: ApiWorkspaceStage = this.workspaceStage,
+    ) {
+      this.stageLoading = true;
       try {
-        this.restoreStage(projectId, transactionId);
-        const [cases, envs, runs, sets] = await Promise.all([
-          listApiCases(projectId, transactionId),
-          listApiEnvironments(projectId),
-          listApiRuns(projectId),
-          listApiExecutionSets(projectId, transactionId),
-        ]);
-        this.cases = cases;
-        this.environments = envs;
-        this.runs = runs;
-        this.executionSets = sets;
-        this.activeExecutionSetId = sets[0]?.id ?? "";
-        this.selectedCaseIds = [];
-        try {
-          this.apiDoc = await getApiDocument(projectId, transactionId);
-        } catch {
-          this.apiDoc = null;
-          message.error("接口文档加载失败，请刷新页面或重启 API");
+        switch (stage) {
+          case "api-document":
+            await this.loadDocumentStage(projectId, transactionId);
+            break;
+          case "api-cases":
+            await this.loadCasesStage(projectId, transactionId);
+            break;
+          case "api-runner":
+            await this.loadRunnerStage(projectId, transactionId);
+            break;
+          case "api-report":
+            await this.loadReportStage(projectId);
+            break;
         }
-        const defaultEnv = envs.find((item) => item.isDefault) ?? envs[0];
-        if (defaultEnv) this.selectedEnvironmentId = defaultEnv.id;
-        this.selectedEnvironmentServiceId = "";
       } finally {
-        this.loading = false;
+        this.stageLoading = false;
+      }
+    },
+    async loadDocumentStage(projectId: string, transactionId: string) {
+      try {
+        this.apiDoc = await getApiDocument(projectId, transactionId);
+      } catch {
+        this.apiDoc = null;
+        message.error("接口文档加载失败，请刷新页面或重启 API");
+      }
+      await this.loadApiScenarioLibrary().catch(() => undefined);
+    },
+    async loadCasesStage(projectId: string, transactionId: string) {
+      const doc = this.apiDoc
+        ? this.apiDoc
+        : await getApiDocument(projectId, transactionId).catch(() => null);
+      if (doc) {
+        this.apiDoc = doc;
+      }
+      await this.refreshCases(projectId, transactionId, { resetPage: true });
+    },
+    async loadRunnerStage(projectId: string, transactionId: string) {
+      const [_, envs, sets] = await Promise.all([
+        this.refreshRunnerCases(projectId, transactionId),
+        listApiEnvironments(projectId),
+        listApiExecutionSets(projectId, transactionId),
+      ]);
+      this.environments = envs;
+      this.executionSets = sets;
+      if (
+        !this.activeExecutionSetId ||
+        !sets.some((item) => item.id === this.activeExecutionSetId)
+      ) {
+        this.activeExecutionSetId = sets[0]?.id ?? "";
+      }
+      this.ensureSelectedEnvironment();
+      this.selectedEnvironmentServiceId = "";
+    },
+    async loadReportStage(projectId: string) {
+      this.runs = await listApiRuns(projectId);
+      if (
+        this.activeRun &&
+        !this.runs.some((run) => run.id === this.activeRun?.id)
+      ) {
+        this.activeRun = null;
       }
     },
     async uploadDocument(
@@ -348,7 +537,8 @@ export const useApiTestStore = defineStore("apiTest", {
           file,
           force,
         );
-        message.success("接口文档已上传");
+        this.apiDoc = await structureApiDocument(projectId, transactionId);
+        message.success("接口文档已上传并完成结构化");
       } finally {
         this.loading = false;
       }
@@ -374,15 +564,49 @@ export const useApiTestStore = defineStore("apiTest", {
       });
       message.success("接口文档已保存");
     },
-    async autoSave(projectId: string, transactionId: string, markdown: string) {
+    async autoSave(
+      projectId: string,
+      transactionId: string,
+      markdown: string,
+      options?: { successMessage?: string },
+    ) {
       this.apiDoc = await autoSaveApiDocument(
         projectId,
         transactionId,
         markdown,
       );
+      if (options?.successMessage) {
+        message.success(options.successMessage);
+      }
     },
-    async refreshCases(projectId: string, transactionId: string) {
-      this.cases = await listApiCases(projectId, transactionId);
+    async refreshCases(
+      projectId: string,
+      transactionId: string,
+      options?: { page?: number; pageSize?: number; resetPage?: boolean },
+    ) {
+      if (options?.resetPage) {
+        this.caseListPage = 1;
+      }
+      const page = options?.page ?? this.caseListPage;
+      const pageSize = normalizeCaseForgePageSize(
+        options?.pageSize ?? this.caseListPageSize,
+      );
+      const result = await listApiCases(projectId, transactionId, {
+        page,
+        pageSize,
+      });
+      const maxPage = Math.max(1, Math.ceil(result.count / pageSize) || 1);
+      if (result.count > 0 && page > maxPage) {
+        await this.refreshCases(projectId, transactionId, {
+          page: maxPage,
+          pageSize,
+        });
+        return;
+      }
+      this.cases = result.rows;
+      this.caseListTotal = result.count;
+      this.caseListPage = result.page;
+      this.caseListPageSize = result.pageSize;
       if (
         this.activeCaseId &&
         !this.cases.some((item) => item.id === this.activeCaseId)
@@ -390,26 +614,57 @@ export const useApiTestStore = defineStore("apiTest", {
         this.activeCaseId = this.cases[0]?.id ?? "";
       }
     },
+    async refreshRunnerCases(projectId: string, transactionId: string) {
+      this.runnerCases = await listAllApiCases(projectId, transactionId);
+    },
     async generateCases(
       projectId: string,
       transactionId: string,
-      endpointIds?: string[],
+      options?: { endpointIds?: string[]; promptIds?: string[] },
     ) {
-      this.generatingCases = true;
+      if (!this.generatingCaseTransactionIds.includes(transactionId)) {
+        this.generatingCaseTransactionIds = [
+          ...this.generatingCaseTransactionIds,
+          transactionId,
+        ];
+      }
       try {
         const result = await generateApiCases(
           projectId,
           transactionId,
-          endpointIds,
+          options,
         );
-        await this.refreshCases(projectId, transactionId);
-        if (result.cases?.[0]?.id) {
-          this.activeCaseId = result.cases[0].id;
+        if (this.activeTransactionId === transactionId) {
+          this.apiDoc = await getApiDocument(projectId, transactionId).catch(
+            () => this.apiDoc,
+          );
+          await this.refreshCases(projectId, transactionId, { resetPage: true });
+          if (result.cases?.[0]?.id) {
+            this.activeCaseId = result.cases[0].id;
+          }
         }
         message.success(`已生成 ${result.count} 条案例`);
+        return result;
       } finally {
-        this.generatingCases = false;
+        this.generatingCaseTransactionIds =
+          this.generatingCaseTransactionIds.filter(
+            (id) => id !== transactionId,
+          );
       }
+    },
+    async saveDocumentGenerationPrompts(
+      projectId: string,
+      transactionId: string,
+      promptIds: string[],
+    ) {
+      this.apiDoc = await saveApiDocumentGeneration(
+        projectId,
+        transactionId,
+        promptIds,
+      );
+    },
+    isGeneratingCases(transactionId: string) {
+      return this.generatingCaseTransactionIds.includes(transactionId);
     },
     async saveCase(
       projectId: string,
@@ -433,6 +688,24 @@ export const useApiTestStore = defineStore("apiTest", {
       }
       await this.refreshCases(projectId, transactionId);
     },
+    async removeCases(
+      projectId: string,
+      transactionId: string,
+      caseIds: string[],
+    ) {
+      if (!caseIds.length) return;
+      for (const caseId of caseIds) {
+        await deleteApiCase(projectId, transactionId, caseId);
+      }
+      this.selectedCaseIds = this.selectedCaseIds.filter(
+        (id) => !caseIds.includes(id),
+      );
+      if (caseIds.includes(this.activeCaseId)) {
+        this.activeCaseId = "";
+      }
+      await this.refreshCases(projectId, transactionId);
+      message.success(`已删除 ${caseIds.length} 条案例`);
+    },
     toggleCaseSelection(caseId: string, checked: boolean) {
       if (checked) {
         if (!this.selectedCaseIds.includes(caseId)) {
@@ -446,6 +719,26 @@ export const useApiTestStore = defineStore("apiTest", {
     },
     async refreshEnvironments(projectId: string) {
       this.environments = await listApiEnvironments(projectId);
+      this.ensureSelectedEnvironment();
+    },
+    /** 确保已选中有效环境；无环境时返回 false */
+    ensureSelectedEnvironment(): boolean {
+      if (!this.environments.length) {
+        this.selectedEnvironmentId = "";
+        return false;
+      }
+      const current = this.environments.find(
+        (item) => item.id === this.selectedEnvironmentId,
+      );
+      if (current?.enabled) {
+        return true;
+      }
+      const fallback =
+        this.environments.find((item) => item.isDefault && item.enabled) ??
+        this.environments.find((item) => item.enabled) ??
+        this.environments[0];
+      this.selectedEnvironmentId = fallback?.id ?? "";
+      return Boolean(this.selectedEnvironmentId);
     },
     async saveEnvironment(
       projectId: string,
@@ -610,6 +903,55 @@ export const useApiTestStore = defineStore("apiTest", {
       runId?: string,
     ) {
       return getApiReportSummary(projectId, transactionId, runId);
+    },
+    async loadApiScenarioLibrary() {
+      const scenarios = await listScenarioLibrary("api");
+      this.apiScenarios = scenarios.map((item) => normalizeScenarioLibraryItem(item));
+    },
+    async saveApiScenario(
+      item: Partial<ScenarioLibraryPayload> & {
+        id?: string;
+        name: string;
+        description: string;
+        category: string;
+        isActive: boolean;
+      },
+      options?: { successMessage?: string; silent?: boolean },
+    ) {
+      const saved = item.id
+        ? await updateScenarioLibraryItem(item.id, {
+            name: item.name,
+            description: item.description,
+            category: item.category,
+            isActive: item.isActive,
+            ...(item.prompts !== undefined ? { prompts: item.prompts } : {}),
+          })
+        : await createScenarioLibraryItem({
+            scope: "api",
+            name: item.name,
+            description: item.description,
+            category: item.category,
+            isActive: item.isActive,
+            prompts: item.prompts ?? [],
+          });
+      const normalized = normalizeScenarioLibraryItem(saved);
+      const index = this.apiScenarios.findIndex(
+        (scenario) => scenario.id === normalized.id,
+      );
+      if (index >= 0) {
+        applyScenarioLibraryItemInPlace(this.apiScenarios[index], normalized);
+      } else {
+        this.apiScenarios.unshift(normalized);
+      }
+      if (!options?.silent) {
+        message.success(options?.successMessage ?? "已保存");
+      }
+      return normalized;
+    },
+    async deleteApiScenario(id: string) {
+      await deleteScenarioLibraryItem(id);
+      this.apiScenarios = this.apiScenarios.filter((item) => item.id !== id);
+      message.success("场景库已删除");
     },
     async exportReport(
       projectId: string,
