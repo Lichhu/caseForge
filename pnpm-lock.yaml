@@ -50,6 +50,9 @@ importers:
       express:
         specifier: ^5.2.1
         version: 5.2.1
+      iconv-lite:
+        specifier: ^0.6.3
+        version: 0.6.3
       jszip:
         specifier: ^3.10.1
         version: 3.10.1
@@ -150,6 +153,9 @@ importers:
       markdown-it:
         specifier: ^14.1.0
         version: 14.2.0
+      mind-elixir:
+        specifier: ^5.12.2
+        version: 5.12.2
       pinia:
         specifier: ^2.2.2
         version: 2.3.1(typescript@5.9.3)(vue@3.5.35(typescript@5.9.3))
@@ -163,9 +169,15 @@ importers:
       '@vitejs/plugin-vue':
         specifier: ^5.1.2
         version: 5.2.4(vite@5.4.21(@types/node@20.19.42)(less@4.6.4)(terser@5.48.0))(vue@3.5.35(typescript@5.9.3))
+      autoprefixer:
+        specifier: ^10.4.19
+        version: 10.5.0(postcss@8.5.15)
       less:
         specifier: ^4.2.0
         version: 4.6.4
+      postcss:
+        specifier: ^8.4.40
+        version: 8.5.15
       typescript:
         specifier: ^5.4.5
         version: 5.9.3
@@ -1046,6 +1058,13 @@ packages:
   asynckit@0.4.0:
     resolution: {integrity: sha512-Oei9OH4tRh0YqU3GxhX79dM/mwVgvbZJaSNaRk+bshkj0S5cfHcgYakreBjrHwatXKbz+IoIdYLxrKim2MjW0Q==}
 
+  autoprefixer@10.5.0:
+    resolution: {integrity: sha512-FMhOoZV4+qR6aTUALKX2rEqGG+oyATvwBt9IIzVR5rMa2HRWPkxf+P+PAJLD1I/H5/II+HuZcBJYEFBpq39ong==}
+    engines: {node: ^10 || ^12 || >=14}
+    hasBin: true
+    peerDependencies:
+      postcss: ^8.1.0
+
   available-typed-arrays@1.0.7:
     resolution: {integrity: sha512-wvUjBtSGN7+7SjNpq/9M2Tg350UZD3q62IFZLbRAR1bSMlCo1ZaeW+BJ+D090e4hIIZLBcTDWe4Mh4jvUDajzQ==}
     engines: {node: '>= 0.4'}
@@ -1693,6 +1712,9 @@ packages:
     resolution: {integrity: sha512-w/XBfkibaTl3YDqASwfDUqkna4Z2p9cFSr1aHDt0WoMTECnRfBOv2WArlZILlqgWlmdIlALXGpM2AOhEk5W3IA==}
     engines: {node: '>=0.8'}
 
+  fraction.js@5.3.4:
+    resolution: {integrity: sha512-1X1NTtiJphryn/uLQz3whtY6jK3fTqoE3ohKs0tT+Ujr1W59oopxmoEh7Lu5p6vBaPbgoM0bzveAW4Qi5RyWDQ==}
+
   fresh@0.5.2:
     resolution: {integrity: sha512-zJ2mQYM18rEFOudeV4GShTGIQ7RbzA7ozbU9I/XBpm7kqgMywgmylMwXHxZJmkVoYkna9d2pVXVXPdYTP9ej8Q==}
     engines: {node: '>= 0.6'}
@@ -2223,6 +2245,9 @@ packages:
     resolution: {integrity: sha512-OqbOk5oEQeAZ8WXWydlu9HJjz9WVdEIvamMCcXmuqUYjTknH/sqsWvhQ3vgwKFRR1HpjvNBKQ37nbJgYzGqGcg==}
     engines: {node: '>=6'}
 
+  mind-elixir@5.12.2:
+    resolution: {integrity: sha512-G9eyrmjp6Ot+Llf5oPZPj2N5ivzDVwiQpiJEaX7uTUvIRkUwkyoTW1vSKKayl6ZzRoEWE87zupEdlEJWwtqqVg==}
+
   minimatch@3.1.5:
     resolution: {integrity: sha512-VgjWUsnnT6n+NUk6eZq77zeFdpW2LWDzP6zFGrCbHXiYNul5Dzqk2HHQ5uFH2DNW5Xbp8+jVzaeNt94ssEEl4w==}
 
@@ -2487,6 +2512,9 @@ packages:
   possible-typed-array-names@1.1.0:
     resolution: {integrity: sha512-/+5VFTchJDoVj3bhoqi6UeymcD00DAwb1nJwamzPvHEszJ4FpF6SNNbUbOS8yI56qHzdV8eK0qEfOSiodkTdxg==}
     engines: {node: '>= 0.4'}
+
+  postcss-value-parser@4.2.0:
+    resolution: {integrity: sha512-1NNCs6uurfkVbeXG4S8JFT9t19m45ICnif8zWLd5oPSZ50QnwMfK+H3jv408d4jw/7Bttv5axS5IiHoLaVNHeQ==}
 
   postcss@8.5.15:
     resolution: {integrity: sha512-FfR8sjd4em2T6fb3I2MwAJU7HWVMr9zba+enmQeeWFfCbm+UOC/0X4DS8XtpUTMwWMGbjKYP7xjfNekzyGmB3A==}
@@ -4228,6 +4256,15 @@ snapshots:
 
   asynckit@0.4.0: {}
 
+  autoprefixer@10.5.0(postcss@8.5.15):
+    dependencies:
+      browserslist: 4.28.2
+      caniuse-lite: 1.0.30001797
+      fraction.js: 5.3.4
+      picocolors: 1.1.1
+      postcss: 8.5.15
+      postcss-value-parser: 4.2.0
+
   available-typed-arrays@1.0.7:
     dependencies:
       possible-typed-array-names: 1.1.0
@@ -4984,6 +5021,8 @@ snapshots:
 
   frac@1.1.2: {}
 
+  fraction.js@5.3.4: {}
+
   fresh@0.5.2: {}
 
   fresh@2.0.0: {}
@@ -5119,7 +5158,6 @@ snapshots:
   iconv-lite@0.6.3:
     dependencies:
       safer-buffer: 2.1.2
-    optional: true
 
   iconv-lite@0.7.2:
     dependencies:
@@ -5511,6 +5549,8 @@ snapshots:
 
   mimic-fn@2.1.0: {}
 
+  mind-elixir@5.12.2: {}
+
   minimatch@3.1.5:
     dependencies:
       brace-expansion: 1.1.15
@@ -5759,6 +5799,8 @@ snapshots:
   pnpm@10.34.1: {}
 
   possible-typed-array-names@1.1.0: {}
+
+  postcss-value-parser@4.2.0: {}
 
   postcss@8.5.15:
     dependencies:

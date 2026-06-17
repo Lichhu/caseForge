@@ -1,8 +1,8 @@
-import { http } from '@/api/client';
+import { http } from "@/api/client";
 import {
   DEFAULT_CASE_FORGE_PAGE_SIZE,
   normalizeCaseForgePageSize,
-} from '@case-forge/shared';
+} from "@case-forge/shared";
 import type {
   ApiCaseExpected,
   ApiCasePolarity,
@@ -10,10 +10,13 @@ import type {
   ApiCaseRequest,
   ApiCaseStatus,
   ApiEndpointPayload,
+  ApiMessageFormat,
+  ApiMessageFraming,
   ApiStructuringStatus,
+  ApiTransport,
   AssertionResult,
   ApiRunItemStatus,
-} from '@case-forge/shared';
+} from "@case-forge/shared";
 
 export interface ApiTransactionRow {
   id: string;
@@ -111,8 +114,14 @@ export interface ApiEnvironmentServiceRow {
   projectId: string;
   environmentId: string;
   name: string;
+  transport?: Extract<ApiTransport, "http" | "tcp">;
+  payloadFormat?: ApiMessageFormat;
   baseUrl?: string;
   pathPrefix?: string;
+  host?: string;
+  port?: number;
+  encoding?: string;
+  framing?: ApiMessageFraming;
   headers?: Record<string, string>;
   variables?: Record<string, string>;
   sortOrder: number;
@@ -129,7 +138,7 @@ export interface ApiExecutionSetRow {
   caseCount?: number;
   caseIds?: string[];
   lastRunId?: string;
-  lastRunStatus?: 'running' | 'completed' | 'failed';
+  lastRunStatus?: "running" | "completed" | "failed";
   lastRunAt?: string;
   lastPassedCount?: number;
   lastTotalCount?: number;
@@ -158,7 +167,9 @@ function transactionBase(projectId: string, transactionId: string) {
 }
 
 export async function listApiTransactions(projectId: string) {
-  const { data } = await http.get<ApiTransactionRow[]>(`/api-test/${projectId}/transactions`);
+  const { data } = await http.get<ApiTransactionRow[]>(
+    `/api-test/${projectId}/transactions`,
+  );
   return data;
 }
 
@@ -166,7 +177,10 @@ export async function createApiTransaction(
   projectId: string,
   payload: { code: string; name: string; description?: string },
 ) {
-  const { data } = await http.post<ApiTransactionRow>(`/api-test/${projectId}/transactions`, payload);
+  const { data } = await http.post<ApiTransactionRow>(
+    `/api-test/${projectId}/transactions`,
+    payload,
+  );
   return data;
 }
 
@@ -182,11 +196,17 @@ export async function updateApiTransaction(
   return data;
 }
 
-export async function deleteApiTransaction(projectId: string, transactionId: string) {
+export async function deleteApiTransaction(
+  projectId: string,
+  transactionId: string,
+) {
   await http.delete(`/api-test/${projectId}/transactions/${transactionId}`);
 }
 
-export async function batchDeleteApiTransactions(projectId: string, ids: string[]) {
+export async function batchDeleteApiTransactions(
+  projectId: string,
+  ids: string[],
+) {
   const { data } = await http.post<{ ok: boolean; count: number }>(
     `/api-test/${projectId}/transactions/batch-delete`,
     { ids },
@@ -194,10 +214,14 @@ export async function batchDeleteApiTransactions(projectId: string, ids: string[
   return data;
 }
 
-export async function getApiDocUploadStatus(projectId: string, transactionId: string) {
-  const { data } = await http.get<{ hasExisting: boolean; sourceDocName?: string }>(
-    `${transactionBase(projectId, transactionId)}/upload-status`,
-  );
+export async function getApiDocUploadStatus(
+  projectId: string,
+  transactionId: string,
+) {
+  const { data } = await http.get<{
+    hasExisting: boolean;
+    sourceDocName?: string;
+  }>(`${transactionBase(projectId, transactionId)}/upload-status`);
   return data;
 }
 
@@ -208,19 +232,22 @@ export async function uploadApiDocument(
   force = false,
 ) {
   const form = new FormData();
-  form.append('file', file);
+  form.append("file", file);
   const { data } = await http.post<ApiDocDetail>(
     `${transactionBase(projectId, transactionId)}/document/upload`,
     form,
     {
       params: force ? { force: true } : undefined,
-      headers: { 'Content-Type': 'multipart/form-data' },
+      headers: { "Content-Type": "multipart/form-data" },
     },
   );
   return data;
 }
 
-export async function structureApiDocument(projectId: string, transactionId: string) {
+export async function structureApiDocument(
+  projectId: string,
+  transactionId: string,
+) {
   const { data } = await http.post<ApiDocDetail>(
     `${transactionBase(projectId, transactionId)}/document/structure`,
   );
@@ -290,7 +317,7 @@ export async function listApiCases(
     `${transactionBase(projectId, transactionId)}/cases`,
     {
       params: { page, pageSize },
-      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+      headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
     },
   );
   return data;
@@ -306,7 +333,10 @@ export async function listAllApiCases(
   const rows: ApiTestCaseRow[] = [];
   let total = 0;
   do {
-    const result = await listApiCases(projectId, transactionId, { page, pageSize });
+    const result = await listApiCases(projectId, transactionId, {
+      page,
+      pageSize,
+    });
     rows.push(...result.rows);
     total = result.count;
     page += 1;
@@ -339,8 +369,14 @@ export async function updateApiCase(
   return data;
 }
 
-export async function deleteApiCase(projectId: string, transactionId: string, caseId: string) {
-  await http.delete(`${transactionBase(projectId, transactionId)}/cases/${caseId}`);
+export async function deleteApiCase(
+  projectId: string,
+  transactionId: string,
+  caseId: string,
+) {
+  await http.delete(
+    `${transactionBase(projectId, transactionId)}/cases/${caseId}`,
+  );
 }
 
 export async function generateApiCases(
@@ -348,20 +384,73 @@ export async function generateApiCases(
   transactionId: string,
   options?: { endpointIds?: string[]; promptIds?: string[] },
 ) {
-  const { data } = await http.post<{ count: number; cases?: ApiTestCaseRow[] }>(
+  const { data } = await http.post<{
+    jobId: string;
+    status: string;
+    phase: string;
+  }>(
     `${transactionBase(projectId, transactionId)}/cases/generate`,
     options ?? {},
+    {
+      timeout: 30_000,
+    },
+  );
+  return data;
+}
+
+export interface ApiCaseGenerateQueueStatus {
+  jobId?: string;
+  transactionId: string;
+  phase: "queued" | "running" | "completed" | "failed" | "cancelled" | "none";
+  queuePosition: number;
+  estimatedWaitSeconds: number;
+  estimatedRemainingSeconds: number;
+  elapsedSeconds: number;
+  resultCount?: number;
+  errorMessage?: string;
+  averageRunSeconds: number;
+  concurrency: number;
+  perUserMaxRunning: number;
+  globalQueuedCount: number;
+  globalRunningCount: number;
+  slotWaitingCount: number;
+}
+
+export async function getApiCaseGenerateStatus(
+  projectId: string,
+  transactionId: string,
+) {
+  const { data } = await http.get<ApiCaseGenerateQueueStatus>(
+    `${transactionBase(projectId, transactionId)}/cases/generate/status`,
+  );
+  return data;
+}
+
+export async function cancelApiCaseGenerate(
+  projectId: string,
+  transactionId: string,
+) {
+  const { data } = await http.post<{ ok: boolean }>(
+    `${transactionBase(projectId, transactionId)}/cases/generate/cancel`,
   );
   return data;
 }
 
 export async function listApiEnvironments(projectId: string) {
-  const { data } = await http.get<ApiEnvironmentRow[]>(`/api-test/${projectId}/environments`);
+  const { data } = await http.get<ApiEnvironmentRow[]>(
+    `/api-test/${projectId}/environments`,
+  );
   return data;
 }
 
-export async function createApiEnvironment(projectId: string, payload: Record<string, unknown>) {
-  const { data } = await http.post<ApiEnvironmentRow>(`/api-test/${projectId}/environments`, payload);
+export async function createApiEnvironment(
+  projectId: string,
+  payload: Record<string, unknown>,
+) {
+  const { data } = await http.post<ApiEnvironmentRow>(
+    `/api-test/${projectId}/environments`,
+    payload,
+  );
   return data;
 }
 
@@ -377,11 +466,17 @@ export async function updateApiEnvironment(
   return data;
 }
 
-export async function deleteApiEnvironment(projectId: string, environmentId: string) {
+export async function deleteApiEnvironment(
+  projectId: string,
+  environmentId: string,
+) {
   await http.delete(`/api-test/${projectId}/environments/${environmentId}`);
 }
 
-export async function listApiEnvironmentServices(projectId: string, environmentId: string) {
+export async function listApiEnvironmentServices(
+  projectId: string,
+  environmentId: string,
+) {
   const { data } = await http.get<ApiEnvironmentServiceRow[]>(
     `/api-test/${projectId}/environments/${environmentId}/services`,
   );
@@ -423,9 +518,28 @@ export async function deleteApiEnvironmentService(
   );
 }
 
-export async function listApiExecutionSets(projectId: string, transactionId: string) {
-  const { data } = await http.get<ApiExecutionSetRow[]>(
+export interface ApiExecutionSetListResult {
+  rows: ApiExecutionSetRow[];
+  count: number;
+  page: number;
+  pageSize: number;
+}
+
+export async function listApiExecutionSets(
+  projectId: string,
+  transactionId: string,
+  params?: { page?: number; pageSize?: number },
+): Promise<ApiExecutionSetListResult> {
+  const page = Math.max(1, params?.page ?? 1);
+  const pageSize = normalizeCaseForgePageSize(
+    params?.pageSize ?? DEFAULT_CASE_FORGE_PAGE_SIZE,
+  );
+  const { data } = await http.get<ApiExecutionSetListResult>(
     `${transactionBase(projectId, transactionId)}/execution-sets`,
+    {
+      params: { page, pageSize },
+      headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+    },
   );
   return data;
 }
@@ -460,7 +574,9 @@ export async function deleteApiExecutionSet(
   transactionId: string,
   setId: string,
 ) {
-  await http.delete(`${transactionBase(projectId, transactionId)}/execution-sets/${setId}`);
+  await http.delete(
+    `${transactionBase(projectId, transactionId)}/execution-sets/${setId}`,
+  );
 }
 
 export async function replaceApiExecutionSetCases(
@@ -469,7 +585,7 @@ export async function replaceApiExecutionSetCases(
   setId: string,
   caseIds: string[],
 ) {
-  const { data } = await http.put<{ caseIds: string[] }>(
+  const { data } = await http.put<{ caseIds: string[]; caseCount: number }>(
     `${transactionBase(projectId, transactionId)}/execution-sets/${setId}/cases`,
     { caseIds },
   );
@@ -480,7 +596,12 @@ export async function runApiExecutionSet(
   projectId: string,
   transactionId: string,
   setId: string,
-  payload: { environmentId: string; environmentServiceId?: string; concurrency?: number },
+  payload: {
+    environmentId: string;
+    environmentServiceId?: string;
+    concurrency?: number;
+    encoding?: string;
+  },
 ) {
   const { data } = await http.post<ApiRunDetail>(
     `${transactionBase(projectId, transactionId)}/execution-sets/${setId}/runs`,
@@ -507,12 +628,16 @@ export async function runApiCases(
 }
 
 export async function listApiRuns(projectId: string) {
-  const { data } = await http.get<ApiRunDetail[]>(`/api-test/${projectId}/runs`);
+  const { data } = await http.get<ApiRunDetail[]>(
+    `/api-test/${projectId}/runs`,
+  );
   return data;
 }
 
 export async function getApiRun(projectId: string, runId: string) {
-  const { data } = await http.get<ApiRunDetail>(`/api-test/${projectId}/runs/${runId}`);
+  const { data } = await http.get<ApiRunDetail>(
+    `/api-test/${projectId}/runs/${runId}`,
+  );
   return data;
 }
 
@@ -532,19 +657,19 @@ export async function exportApiReport(
   projectId: string,
   transactionId: string,
   runId: string,
-  format: 'xlsx' | 'pdf',
+  format: "xlsx" | "pdf",
 ) {
   const response = await http.post(
     `${transactionBase(projectId, transactionId)}/reports/export`,
     { runId, format },
-    { responseType: 'blob' },
+    { responseType: "blob" },
   );
   return response.data as Blob;
 }
 
 export function downloadBlob(blob: Blob, fileName: string) {
   const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
+  const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = fileName;
   anchor.click();

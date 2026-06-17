@@ -4,6 +4,7 @@ import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { MinioStorageModule } from "@minio/index";
 import { AiWorkflowModule } from "../../common/ai-workflow";
 import { ApiTestController } from "./controller/api-test.controller";
+import { ApiCaseGenerateJobEntity } from "./entity/api-case-generate-job.entity";
 import { ApiDocEntity } from "./entity/api-doc.entity";
 import { ApiEndpointEntity } from "./entity/api-endpoint.entity";
 import { ApiTestCaseEntity } from "./entity/api-test-case.entity";
@@ -17,6 +18,7 @@ import { ApiTransactionEntity } from "./entity/api-transaction.entity";
 import { PromptEntity } from "@scenario/entity/prompt.entity";
 import { ApiDocService } from "./service/api-doc.service";
 import { ApiCaseService } from "./service/api-case.service";
+import { ApiCaseGenerateQueueService } from "./service/api-case-generate-queue.service";
 import { ApiTransactionService } from "./service/api-transaction.service";
 import { ApiExecutionSetService } from "./service/api-execution-set.service";
 import { ApiEnvironmentService } from "./service/api-environment.service";
@@ -26,6 +28,7 @@ import { ApiReportService } from "./service/api-report.service";
 @Module({
   imports: [
     TypeOrmModule.forFeature([
+      ApiCaseGenerateJobEntity,
       ApiDocEntity,
       ApiEndpointEntity,
       ApiTestCaseEntity,
@@ -46,6 +49,7 @@ import { ApiReportService } from "./service/api-report.service";
   providers: [
     ApiDocService,
     ApiCaseService,
+    ApiCaseGenerateQueueService,
     ApiExecutionSetService,
     ApiEnvironmentService,
     ApiExecutionService,

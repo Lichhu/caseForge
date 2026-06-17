@@ -44,6 +44,9 @@
             <template v-if="column.key === 'code'">
               <span class="transaction-code">{{ record.code }}</span>
             </template>
+            <template v-else-if="column.key === 'name'">
+              <span class="transaction-muted">{{ displayTransactionName(record) }}</span>
+            </template>
             <template v-else-if="column.key === 'docStatus'">
               <span class="transaction-status" :class="{ done: record.hasDocument }">
                 {{ record.hasDocument ? '已上传文档' : '待上传' }}
@@ -97,8 +100,8 @@
         <a-form-item label="交易码" required>
           <a-input v-model:value="form.code" maxlength="128" placeholder="如 addCtmSealInfo" />
         </a-form-item>
-        <a-form-item label="接口名称" required>
-          <a-input v-model:value="form.name" maxlength="256" placeholder="接口中文名称" />
+        <a-form-item label="接口名称">
+          <a-input v-model:value="form.name" maxlength="256" placeholder="可选，默认同交易码" />
         </a-form-item>
         <a-form-item label="备注">
           <a-textarea v-model:value="form.description" :rows="3" maxlength="2000" placeholder="可选" />
@@ -245,20 +248,26 @@ function openEdit(item: ApiTransactionRow) {
   modalOpen.value = true;
 }
 
+function displayTransactionName(item: ApiTransactionRow) {
+  const name = item.name?.trim();
+  if (!name || name === item.code) return '—';
+  return name;
+}
+
 async function onSave() {
   const code = form.code.trim();
-  const name = form.name.trim();
   if (!code) {
     message.warning('请输入交易码');
     return Promise.reject();
   }
-  if (!name) {
-    message.warning('请输入接口名称');
-    return Promise.reject();
-  }
+  const name = form.name.trim();
   saving.value = true;
   try {
-    const payload = { code, name, description: form.description.trim() || undefined };
+    const payload = {
+      code,
+      name: name || undefined,
+      description: form.description.trim() || undefined,
+    };
     if (editingId.value) {
       await apiStore.updateTransactionInfo(editingId.value, payload);
     } else {

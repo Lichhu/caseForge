@@ -118,7 +118,9 @@ export function toPublicApiTransaction(
     description: row.description,
     sortOrder: row.sortOrder,
     ...(extra?.docStatus !== undefined ? { docStatus: extra.docStatus } : {}),
-    ...(extra?.hasDocument !== undefined ? { hasDocument: extra.hasDocument } : {}),
+    ...(extra?.hasDocument !== undefined
+      ? { hasDocument: extra.hasDocument }
+      : {}),
   };
 }
 
@@ -187,7 +189,9 @@ export function toPublicApiCase(testCase: ApiTestCaseEntity) {
     expected: testCase.expected,
     metadata: testCase.metadata,
     createdBy: testCase.createdBy,
-    ...(testCase.endpoint ? { endpoint: toPublicApiEndpoint(testCase.endpoint) } : {}),
+    ...(testCase.endpoint
+      ? { endpoint: toPublicApiEndpoint(testCase.endpoint) }
+      : {}),
   };
 }
 
@@ -199,8 +203,14 @@ export function toPublicApiEnvironmentService(
     projectId: row.projectId,
     environmentId: row.environmentId,
     name: row.name,
+    transport: row.transport ?? "http",
+    payloadFormat: row.payloadFormat,
     baseUrl: row.baseUrl,
     pathPrefix: row.pathPrefix,
+    host: row.host,
+    port: row.port,
+    encoding: row.encoding,
+    framing: row.framing,
     headers: row.headers ?? {},
     variables: row.variables ?? {},
     sortOrder: row.sortOrder,

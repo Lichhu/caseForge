@@ -41,8 +41,15 @@ body {
   background: var(--cf-canvas);
   color: var(--cf-text);
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Microsoft YaHei", sans-serif;
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "PingFang SC",
+    "Microsoft YaHei",
+    sans-serif;
   overflow: hidden;
 }
 
@@ -102,7 +109,7 @@ textarea {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  min-height: 0;
+  min-height: 100vh;
   height: 100%;
   background: var(--cf-canvas);
 }
@@ -182,7 +189,9 @@ textarea {
   font-size: 13px;
   white-space: nowrap;
   cursor: pointer;
-  transition: color 0.15s, background 0.15s;
+  transition:
+    color 0.15s,
+    background 0.15s;
 }
 
 .platform-switch-item:hover {
@@ -281,7 +290,8 @@ textarea {
 }
 
 // 全屏时隐藏平台顶栏与侧栏，避免顶栏 z-index 盖住沉浸工作区
-.platform-layout:has(.app-frame.immersive-mode) .platform-topbar {
+// 用 body class 而非 :has()，以兼容旧版 Edge / Firefox ESR
+body.cf-immersive-active .platform-topbar {
   display: none;
 }
 
@@ -769,6 +779,7 @@ textarea {
   border-radius: 6px;
   background: rgb(255 255 255 / 96%);
   box-shadow: 0 18px 42px rgb(16 24 40 / 18%);
+  -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
 
@@ -997,6 +1008,13 @@ textarea {
   max-height: 100%;
 }
 
+.immersive-stage .workbench-excel-grid :deep(.xmind-wrap) {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+}
+
 .panel {
   min-width: 0;
   border: 1px solid #e4e7ec;
@@ -1199,7 +1217,7 @@ textarea {
   margin-bottom: 0.45em;
 }
 
-.markdown-preview th, 
+.markdown-preview th,
 .markdown-preview td {
   border: 1px solid #dfe2e5;
   padding: 6px 13px;
@@ -1253,7 +1271,6 @@ textarea {
   font-weight: 800;
   box-shadow: 0 6px 16px rgb(182 15 45 / 22%);
 }
-
 
 .feature-instruction-panel {
   overflow: hidden;
@@ -1511,6 +1528,14 @@ textarea {
 }
 
 .workbench-excel-grid :deep(.excel-wrap) {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.workbench-excel-grid :deep(.xmind-wrap) {
   flex: 1 1 auto;
   min-height: 0;
   height: 100%;
@@ -2005,7 +2030,8 @@ textarea {
   font-size: 12px;
 }
 
-.test-point-filter-dropdown.ant-select-dropdown .ant-select-item-option-content {
+.test-point-filter-dropdown.ant-select-dropdown
+  .ant-select-item-option-content {
   white-space: normal;
   word-break: break-word;
 }
@@ -2330,6 +2356,7 @@ textarea {
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   word-break: break-word;
 }
 
@@ -2462,7 +2489,7 @@ textarea {
 .field-label--required::after {
   margin-left: 4px;
   color: #d92d20;
-  content: '*';
+  content: "*";
 }
 
 .editor-textarea {
@@ -2565,6 +2592,19 @@ textarea {
   gap: 0;
 }
 
+.api-generate-modal .ant-modal-body {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 160px);
+  overflow: hidden;
+}
+
+.api-generate-modal .generate-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .scenario-maintain-modal .scenario-manager {
   flex: 1 1 auto;
   min-height: 0;
@@ -2637,18 +2677,22 @@ textarea {
   flex-direction: column;
   gap: 10px;
   min-height: 0;
-  overflow: auto;
+  overflow-y: auto;
   padding-right: 2px;
+  padding-bottom: 4px;
 }
 
 .scenario-card {
+  flex-shrink: 0;
   border: 1px solid var(--cf-border);
   border-radius: var(--cf-radius);
   background: var(--cf-surface);
   padding: 12px;
   cursor: pointer;
   user-select: none;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .scenario-card .scenario-name-input,
@@ -2675,11 +2719,6 @@ textarea {
 }
 
 .scenario-name-input .ant-input-show-count-suffix {
-  color: #98a2b3;
-  font-size: 11px;
-}
-
-.scenario-prompt-table .ant-input-textarea-show-count::after {
   color: #98a2b3;
   font-size: 11px;
 }
@@ -2717,22 +2756,59 @@ textarea {
   background: #fff;
 }
 
+.scenario-prompt-list-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 4px;
+}
+
+.scenario-prompt-card {
+  flex-shrink: 0;
+  border: 1px solid #e4e7ec;
+  border-radius: 10px;
+  padding: 12px 12px 10px;
+  background: #fff;
+}
+
+.scenario-prompt-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.scenario-prompt-textarea textarea {
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.scenario-prompt-list-wrap .ant-input-textarea-show-count::after {
+  display: block;
+  margin-top: 6px;
+  text-align: right;
+  color: #98a2b3;
+  font-size: 11px;
+}
+
+.scenario-prompt-inline-empty {
+  margin: 24px 0;
+}
+
 .scenario-prompt-table-wrap {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .scenario-prompt-table .ant-table {
   background: #fff;
-}
-
-.scenario-prompt-table .ant-table-body {
-  overflow-y: auto !important;
-}
-
-.scenario-prompt-table .ant-table-tbody > tr:last-child > td {
-  padding-bottom: 24px;
 }
 
 .scenario-prompt-empty {

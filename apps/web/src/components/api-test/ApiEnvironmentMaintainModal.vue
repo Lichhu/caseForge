@@ -46,7 +46,15 @@
           :columns="serviceColumns"
         >
           <template #bodyCell="{ column, record }">
-            <template v-if="column.key === 'actions'">
+            <template v-if="column.key === 'transport'">
+              <a-tag :color="record.transport === 'tcp' ? 'orange' : 'blue'">
+                {{ record.transport === 'tcp' ? 'TCP' : 'HTTP' }}
+              </a-tag>
+            </template>
+            <template v-else-if="column.key === 'target'">
+              {{ serviceTargetLabel(record) }}
+            </template>
+            <template v-else-if="column.key === 'actions'">
               <a-space>
                 <a-button type="link" size="small" @click="openServiceEdit(record)">编辑</a-button>
                 <a-button type="link" size="small" danger @click="removeService(record.id)">删除</a-button>
@@ -65,7 +73,18 @@
     >
       <a-form layout="vertical">
         <a-form-item label="环境名称" required><a-input v-model:value="envForm.name" /></a-form-item>
-        <a-form-item label="Base URL" required><a-input v-model:value="envForm.baseUrl" /></a-form-item>
+        <a-form-item label="Base URL / 连接地址" required>
+          <a-input
+            v-model:value="envForm.baseUrl"
+            placeholder="HTTP: https://api.example.com · TCP: 32.114.71.6:60030"
+          />
+        </a-form-item>
+        <a-alert
+          type="info"
+          show-icon
+          message="HTTP 案例填 http(s):// 地址；TCP 案例填 host:port（如 32.114.71.6:60030）"
+          style="margin-bottom: 12px"
+        />
         <a-form-item label="Token"><a-input-password v-model:value="envForm.token" /></a-form-item>
         <a-form-item label="默认 Headers (JSON)"><a-textarea v-model:value="envForm.headersJson" :rows="2" /></a-form-item>
         <a-form-item label="变量 (JSON)"><a-textarea v-model:value="envForm.variablesJson" :rows="2" /></a-form-item>
@@ -80,9 +99,40 @@
     >
       <a-form layout="vertical">
         <a-form-item label="服务名称" required><a-input v-model:value="serviceForm.name" /></a-form-item>
-        <a-form-item label="服务 Base URL"><a-input v-model:value="serviceForm.baseUrl" placeholder="留空则继承环境 Base URL" /></a-form-item>
-        <a-form-item label="路径前缀"><a-input v-model:value="serviceForm.pathPrefix" placeholder="如 /gateway" /></a-form-item>
-        <a-form-item label="Headers (JSON)"><a-textarea v-model:value="serviceForm.headersJson" :rows="2" /></a-form-item>
+        <a-form-item label="传输协议" required>
+          <a-segmented
+            v-model:value="serviceForm.transport"
+            :options="[
+              { label: 'HTTP', value: 'http' },
+              { label: 'TCP', value: 'tcp' },
+            ]"
+          />
+        </a-form-item>
+        <a-form-item label="报文格式">
+          <a-select
+            v-model:value="serviceForm.payloadFormat"
+            :options="[
+              { label: 'JSON', value: 'json' },
+              { label: 'XML', value: 'xml' },
+              { label: 'TEXT', value: 'text' },
+              { label: 'SOAP', value: 'soap' },
+              { label: 'OTHER', value: 'other' },
+            ]"
+          />
+        </a-form-item>
+        <template v-if="serviceForm.transport === 'http'">
+          <a-form-item label="服务 Base URL">
+            <a-input v-model:value="serviceForm.baseUrl" placeholder="留空则继承环境 Base URL，如 http://localhost:8080" />
+          </a-form-item>
+          <a-form-item label="路径前缀"><a-input v-model:value="serviceForm.pathPrefix" placeholder="如 /gateway" /></a-form-item>
+          <a-form-item label="Headers (JSON)"><a-textarea v-model:value="serviceForm.headersJson" :rows="2" /></a-form-item>
+        </template>
+        <template v-else>
+          <a-form-item label="Host" required><a-input v-model:value="serviceForm.host" placeholder="如 32.114.71.6" /></a-form-item>
+          <a-form-item label="Port" required><a-input-number v-model:value="serviceForm.port" :min="1" :max="65535" style="width: 100%" /></a-form-item>
+          <a-form-item label="编码"><a-select v-model:value="serviceForm.encoding" :options="encodingOptions" /></a-form-item>
+          <a-form-item label="长度前缀位数"><a-input-number v-model:value="serviceForm.lengthPrefixWidth" :min="0" :max="16" style="width: 100%" /></a-form-item>
+        </template>
         <a-form-item label="变量 (JSON)"><a-textarea v-model:value="serviceForm.variablesJson" :rows="2" /></a-form-item>
       </a-form>
     </a-modal>
@@ -114,22 +164,42 @@ const envForm = reactive({
 
 const serviceForm = reactive({
   name: '',
+  transport: 'http' as 'http' | 'tcp',
+  payloadFormat: 'json',
   baseUrl: '',
   pathPrefix: '',
+  host: '',
+  port: undefined as number | undefined,
+  encoding: 'UTF-8',
+  lengthPrefixWidth: 0,
   headersJson: '{}',
   variablesJson: '{}',
 });
 
+const encodingOptions = [
+  { label: 'UTF-8', value: 'UTF-8' },
+  { label: 'GBK', value: 'GBK' },
+];
+
 const serviceColumns = [
   { title: '服务名', dataIndex: 'name', key: 'name' },
-  { title: 'Base URL', dataIndex: 'baseUrl', key: 'baseUrl', ellipsis: true },
-  { title: '路径前缀', dataIndex: 'pathPrefix', key: 'pathPrefix', width: 100 },
+  { title: '协议', key: 'transport', width: 84 },
+  { title: '格式', dataIndex: 'payloadFormat', key: 'payloadFormat', width: 84 },
+  { title: '目标地址', key: 'target', ellipsis: true },
   { title: '操作', key: 'actions', width: 120 },
 ];
 
 const services = computed(
   () => apiStore.environmentServices[activeEnvId.value] ?? [],
 );
+
+function serviceTargetLabel(row: ApiEnvironmentServiceRow) {
+  if ((row.transport ?? 'http') === 'tcp') {
+    return row.host && row.port ? `${row.host}:${row.port}` : '未配置 TCP 地址';
+  }
+  const base = row.baseUrl || '继承环境 Base URL';
+  return row.pathPrefix ? `${base}${row.pathPrefix.startsWith('/') ? row.pathPrefix : `/${row.pathPrefix}`}` : base;
+}
 
 watch(
   () => apiStore.selectedEnvironmentId,
@@ -221,8 +291,14 @@ function removeEnv() {
 function openServiceCreate() {
   serviceEditingId.value = '';
   serviceForm.name = '';
+  serviceForm.transport = 'http';
+  serviceForm.payloadFormat = 'json';
   serviceForm.baseUrl = '';
   serviceForm.pathPrefix = '';
+  serviceForm.host = '';
+  serviceForm.port = undefined;
+  serviceForm.encoding = 'UTF-8';
+  serviceForm.lengthPrefixWidth = 0;
   serviceForm.headersJson = '{}';
   serviceForm.variablesJson = '{}';
   serviceModalOpen.value = true;
@@ -231,8 +307,14 @@ function openServiceCreate() {
 function openServiceEdit(row: ApiEnvironmentServiceRow) {
   serviceEditingId.value = row.id;
   serviceForm.name = row.name;
+  serviceForm.transport = row.transport ?? 'http';
+  serviceForm.payloadFormat = row.payloadFormat ?? (serviceForm.transport === 'tcp' ? 'xml' : 'json');
   serviceForm.baseUrl = row.baseUrl ?? '';
   serviceForm.pathPrefix = row.pathPrefix ?? '';
+  serviceForm.host = row.host ?? '';
+  serviceForm.port = row.port;
+  serviceForm.encoding = row.encoding ?? 'UTF-8';
+  serviceForm.lengthPrefixWidth = row.framing?.width ?? 0;
   serviceForm.headersJson = JSON.stringify(row.headers ?? {}, null, 2);
   serviceForm.variablesJson = JSON.stringify(row.variables ?? {}, null, 2);
   serviceModalOpen.value = true;
@@ -243,9 +325,18 @@ async function saveService() {
   if (!projectId || !activeEnvId.value) return;
   const payload = {
     name: serviceForm.name,
-    baseUrl: serviceForm.baseUrl || undefined,
-    pathPrefix: serviceForm.pathPrefix || undefined,
-    headers: JSON.parse(serviceForm.headersJson || '{}'),
+    transport: serviceForm.transport,
+    payloadFormat: serviceForm.payloadFormat,
+    baseUrl: serviceForm.transport === 'http' ? serviceForm.baseUrl || undefined : undefined,
+    pathPrefix: serviceForm.transport === 'http' ? serviceForm.pathPrefix || undefined : undefined,
+    host: serviceForm.transport === 'tcp' ? serviceForm.host || undefined : undefined,
+    port: serviceForm.transport === 'tcp' ? serviceForm.port : undefined,
+    encoding: serviceForm.transport === 'tcp' ? serviceForm.encoding : undefined,
+    framing:
+      serviceForm.transport === 'tcp' && serviceForm.lengthPrefixWidth > 0
+        ? { type: 'length-prefix', width: serviceForm.lengthPrefixWidth, encoding: serviceForm.encoding }
+        : undefined,
+    headers: serviceForm.transport === 'http' ? JSON.parse(serviceForm.headersJson || '{}') : {},
     variables: JSON.parse(serviceForm.variablesJson || '{}'),
   };
   await apiStore.saveEnvironmentService(

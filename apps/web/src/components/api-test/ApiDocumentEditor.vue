@@ -48,6 +48,14 @@
     </div>
 
     <a-alert
+      v-if="generatingCases"
+      type="info"
+      show-icon
+      message="正在后台生成案例，完成后将自动进入案例编辑"
+      class="document-panel-alert"
+    />
+
+    <a-alert
       v-if="apiStore.apiDoc?.structuringStatus === 'failed'"
       type="error"
       show-icon
@@ -104,27 +112,31 @@
   <a-modal
     v-model:open="generateModalOpen"
     title="AI 生成案例"
-    :width="720"
+    :width="800"
     ok-text="开始生成"
     cancel-text="取消"
     :confirm-loading="generatingCases"
     destroy-on-close
+    wrap-class-name="api-generate-modal"
     @ok="onConfirmGenerate"
     @cancel="onCancelGenerate"
   >
-    <a-alert
-      v-if="apiStore.apiDoc?.caseCount"
-      type="warning"
-      show-icon
-      class="generate-modal-alert"
-      message="将基于当前接口文档与场景约束重新生成案例，不会自动删除已有案例。"
-    />
-    <p class="generate-modal-hint">场景提示词为可选项，不选择也可直接开始生成。</p>
-    <ScenarioPromptPicker
-      v-model:prompt-ids="generatePromptIds"
-      scope="api"
-      optional
-    />
+    <div class="generate-modal-body">
+      <a-alert
+        v-if="apiStore.apiDoc?.caseCount"
+        type="warning"
+        show-icon
+        class="generate-modal-alert"
+        message="将基于当前接口文档与场景约束重新生成案例，不会自动删除已有案例。"
+      />
+      <p class="generate-modal-hint">场景提示词为可选项，不选择也可直接开始生成。</p>
+      <ScenarioPromptPicker
+        v-model:prompt-ids="generatePromptIds"
+        scope="api"
+        optional
+        embedded
+      />
+    </div>
   </a-modal>
 </template>
 
@@ -141,7 +153,7 @@ import type { UploadProps } from 'ant-design-vue';
 import ScenarioMaintainModal from '@/components/ScenarioMaintainModal.vue';
 import ScenarioPromptPicker from '@/components/ScenarioPromptPicker.vue';
 import { useApiTestStore } from '@/stores/apiTest';
-import { filterSelectablePromptIds } from '@/utils/scenarioLibrary';
+import { filterSelectablePromptIds, collectDefaultPromptIds } from '@/utils/scenarioLibrary';
 import {
   parseApiDocTableText,
   sectionTableColumnKeys,
@@ -176,6 +188,11 @@ const generatingCases = computed(() =>
 onActivated(() => {
   panelActive.value = true;
   void ensureScenarioLibrary();
+  const pid = projectId.value;
+  const tid = transactionId.value;
+  if (pid && tid) {
+    void apiStore.syncCaseGenerateLoading(pid, tid);
+  }
 });
 
 onDeactivated(() => {
@@ -217,6 +234,14 @@ function syncTextFromTables() {
   sections.value = nextSections;
   editorText.value = serializeApiDocTableText(nextSections);
 }
+
+watch(
+  () => [projectId.value, transactionId.value] as const,
+  ([pid, tid]) => {
+    if (!panelActive.value || !pid || !tid) return;
+    void apiStore.syncCaseGenerateLoading(pid, tid);
+  },
+);
 
 watch(
   () => apiStore.apiDoc?.tempStructuredMarkdown ?? apiStore.apiDoc?.structuredMarkdown,
@@ -373,10 +398,13 @@ async function onGenerate() {
   if (!pid || !tid) return;
 
   await ensureScenarioLibrary();
-  generatePromptIds.value = filterSelectablePromptIds(
+  const saved = filterSelectablePromptIds(
     apiStore.apiScenarios,
     docPromptIds.value,
   );
+  generatePromptIds.value = saved.length
+    ? saved
+    : collectDefaultPromptIds(apiStore.apiScenarios);
   generateModalOpen.value = true;
 }
 
@@ -384,25 +412,31 @@ function onCancelGenerate() {
   generateModalOpen.value = false;
 }
 
-async function onConfirmGenerate() {
+function onConfirmGenerate() {
   const pid = projectId.value;
   const tid = transactionId.value;
   if (!pid || !tid) return;
 
   docPromptIds.value = [...generatePromptIds.value];
-  await apiStore.saveDocumentGenerationPrompts(pid, tid, docPromptIds.value);
-  await runGenerate(pid, tid);
+  apiStore.markCaseGenerateStarted(tid);
   generateModalOpen.value = false;
+
+  void (async () => {
+    try {
+      await apiStore.saveDocumentGenerationPrompts(pid, tid, docPromptIds.value);
+      await runGenerate(pid, tid);
+    } catch {
+      apiStore.markCaseGenerateEnded(tid);
+      message.error('启动案例生成失败，请稍后重试');
+    }
+  })();
 }
 
 async function runGenerate(pid: string, tid: string) {
   await apiStore.generateCases(pid, tid, {
     promptIds: [...docPromptIds.value],
+    navigateToCases: true,
   });
-  if (apiStore.canEnterCases) {
-    apiStore.setWorkspaceStage(pid, tid, 'api-cases');
-    await apiStore.loadWorkspaceStage(pid, tid, 'api-cases');
-  }
 }
 
 async function onSave() {
@@ -438,6 +472,18 @@ async function onSave() {
   color: #667085;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.generate-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+}
+
+.generate-modal-body :deep(.scenario-prompt-picker--embedded) {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .document-table-scroll {

@@ -494,32 +494,25 @@
           <div
             v-if="activeScenario"
             :key="editingScenarioId"
-            ref="promptTableWrapRef"
-            class="scenario-prompt-table-wrap"
+            class="scenario-prompt-list-wrap"
           >
-          <a-table
-            class="scenario-prompt-table"
-            size="small"
-            :pagination="false"
-            :scroll="{ y: promptTableScrollY }"
-            :data-source="activeScenarioPrompts"
-            :columns="promptColumns"
-            :row-key="(record: ScenarioLibraryItem['prompts'][number]) => getPromptRowKey(record.id)"
-          >
-            <template #bodyCell="{ column, record }">
-              <template v-if="column.key === 'content'">
-                <a-textarea
-                  :value="record.content"
-                  :rows="3"
-                  :maxlength="FIELD_LIMITS.promptContent"
-                  show-count
-                  placeholder="请输入提示词内容"
-                  @update:value="(value: string) => handlePromptContentInput(record.id, value)"
-                  @focus="promptEditScenarioId = editingScenarioId"
-                  @blur="flushPromptSave(record, promptEditScenarioId, { notify: false })"
-                />
-              </template>
-              <template v-else-if="column.key === 'isActive'">
+            <article
+              v-for="record in activeScenarioPrompts"
+              :key="getPromptRowKey(record.id)"
+              class="scenario-prompt-card"
+            >
+              <a-textarea
+                :value="record.content"
+                class="scenario-prompt-textarea"
+                :auto-size="{ minRows: 3, maxRows: 32 }"
+                :maxlength="FIELD_LIMITS.promptContent"
+                show-count
+                placeholder="请输入提示词内容"
+                @update:value="(value: string) => handlePromptContentInput(record.id, value)"
+                @focus="promptEditScenarioId = editingScenarioId"
+                @blur="flushPromptSave(record, promptEditScenarioId, { notify: false })"
+              />
+              <div class="scenario-prompt-card-actions">
                 <div class="prompt-status-cell">
                   <a-switch
                     size="small"
@@ -528,12 +521,14 @@
                   />
                   <span>{{ record.isActive ? '启用' : '停用' }}</span>
                 </div>
-              </template>
-              <template v-else-if="column.key === 'actions'">
                 <a-button type="link" danger @click="confirmDeletePrompt(record.id)">删除</a-button>
-              </template>
-            </template>
-          </a-table>
+              </div>
+            </article>
+            <a-empty
+              v-if="!activeScenarioPrompts.length"
+              class="scenario-prompt-inline-empty"
+              description="暂无提示词，点击右上角新增"
+            />
           </div>
           <a-empty v-else class="scenario-prompt-empty" description="请先在左侧新增或选择场景" />
         </section>
@@ -560,7 +555,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onActivated, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { message, Modal } from 'ant-design-vue';
-import type { TableColumnsType } from 'ant-design-vue';
 import {
   DeleteOutlined,
   LoadingOutlined,
@@ -656,9 +650,6 @@ const featureModuleFilter = ref('');
 const systemFilter = ref('');
 const scenarioModalOpen = ref(false);
 const editingScenarioId = ref('');
-const promptTableWrapRef = ref<HTMLElement | null>(null);
-const promptTableScrollY = ref(320);
-let promptTableResizeObserver: ResizeObserver | undefined;
 const scenarioNameSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const promptSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const scenarioNameLastSaved = new Map<string, string>();
@@ -668,24 +659,8 @@ type ScenarioSaveUiState = 'idle' | 'saving' | 'saved' | 'error';
 const scenarioSaveUi = ref<ScenarioSaveUiState>('idle');
 let scenarioSavedFadeTimer: ReturnType<typeof setTimeout> | undefined;
 
-function syncPromptTableScrollY() {
-  const el = promptTableWrapRef.value;
-  if (!el) return;
-  promptTableScrollY.value = Math.max(120, Math.floor(el.getBoundingClientRect().height) - 2);
-}
-
-function bindPromptTableResizeObserver() {
-  promptTableResizeObserver?.disconnect();
-  const el = promptTableWrapRef.value;
-  if (!el) return;
-  promptTableResizeObserver = new ResizeObserver(() => syncPromptTableScrollY());
-  promptTableResizeObserver.observe(el);
-}
-
 watch(scenarioModalOpen, async (open) => {
   if (!open) {
-    promptTableResizeObserver?.disconnect();
-    promptTableResizeObserver = undefined;
     await flushPendingScenarioSaves();
     scenarioSaveUi.value = 'idle';
     if (scenarioSavedFadeTimer) {
@@ -698,15 +673,6 @@ watch(scenarioModalOpen, async (open) => {
   configureScenarioModalMessage();
   store.scenarios.forEach((scenario) => syncScenarioSaveSnapshots(scenario.id));
   scenarioSaveUi.value = 'idle';
-  await nextTick();
-  syncPromptTableScrollY();
-  bindPromptTableResizeObserver();
-});
-
-watch(editingScenarioId, async () => {
-  if (!scenarioModalOpen.value) return;
-  await nextTick();
-  syncPromptTableScrollY();
 });
 
 onActivated(() => {
@@ -716,7 +682,6 @@ onActivated(() => {
 });
 
 onBeforeUnmount(() => {
-  promptTableResizeObserver?.disconnect();
   clearScenarioAutoSaveTimers();
 });
 const activeTestPointId = ref('');
@@ -1004,12 +969,6 @@ async function applyTestPointPageSizeChange(pageSize: number) {
     listLoading.value = false;
   }
 }
-
-const promptColumns: TableColumnsType = [
-  { title: '提示词内容', key: 'content', dataIndex: 'content' },
-  { title: '启用', key: 'isActive', width: 88 },
-  { title: '操作', key: 'actions', width: 72 },
-];
 
 watch(
   () => store.testPointSystemFilter,

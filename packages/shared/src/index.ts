@@ -151,6 +151,8 @@ export interface CaseForgeProject {
 export * from './case-tree';
 export * from './pagination';
 export * from './api-test';
+export * from './api-execution-profile.util';
+export * from './xml-format.util';
 export * from './platform';
 export * from './scenario-scope';
 export * from './struct-doc';

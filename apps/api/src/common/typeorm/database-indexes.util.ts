@@ -127,6 +127,21 @@ const INDEX_SPECS: Array<{ table: string; name: string; columns: string }> = [
     columns: "projectId, status, queuedAt",
   },
   {
+    table: "api_case_generate_job",
+    name: "idx_api_case_generate_job_project_status_queued",
+    columns: "projectId, status, queuedAt",
+  },
+  {
+    table: "api_case_generate_job",
+    name: "idx_api_case_generate_job_transaction_status",
+    columns: "transactionId, status",
+  },
+  {
+    table: "api_case_generate_job",
+    name: "idx_api_case_generate_job_status_finished",
+    columns: "status, finishedAt",
+  },
+  {
     table: "api_endpoint",
     name: "idx_api_endpoint_project_transaction",
     columns: "projectId, transactionId",

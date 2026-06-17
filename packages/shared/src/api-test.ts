@@ -4,6 +4,23 @@ export type ApiCaseSource = 'ai' | 'manual' | 'ai_edited';
 export type ApiCaseStatus = 'draft' | 'ready' | 'disabled';
 export type ApiRunItemStatus = 'passed' | 'failed' | 'error' | 'skipped';
 export type ApiStructuringStatus = 'idle' | 'processing' | 'completed' | 'failed';
+export type ApiTransport = 'http' | 'tcp' | 'tuxedo' | 'other';
+export type ApiMessageFormat = 'json' | 'xml' | 'text' | 'soap' | 'other';
+
+export interface ApiMessageFraming {
+  type: 'length-prefix';
+  width: number;
+  encoding?: string;
+}
+
+export interface ApiTechnicalProfile {
+  transport: ApiTransport;
+  messageFormat: ApiMessageFormat;
+  encoding?: string;
+  invocationMode?: string;
+  maxMessageSize?: string;
+  businessHeaderMark?: string;
+}
 
 export interface ApiBodyAssertion {
   type: 'jsonPath' | 'contains' | 'equals' | 'matches';
@@ -15,16 +32,20 @@ export interface ApiBodyAssertion {
 export interface ApiCaseRequest {
   method: string;
   path: string;
+  transport?: ApiTransport;
   headers?: Record<string, string>;
   query?: Record<string, string | number | boolean>;
   body?: unknown;
   contentType?: string;
+  encoding?: string;
+  framing?: ApiMessageFraming;
 }
 
 export interface ApiCaseExpected {
-  statusCode: number | number[];
+  statusCode?: number | number[];
   bodyAssertions?: ApiBodyAssertion[];
   statusOnly?: boolean;
+  skipStatusCheck?: boolean;
   maxDurationMs?: number;
 }
 

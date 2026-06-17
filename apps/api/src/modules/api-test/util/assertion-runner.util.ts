@@ -66,17 +66,22 @@ export function runAssertions(input: {
   durationMs: number;
 }): AssertionResult[] {
   const results: AssertionResult[] = [];
-  const codes = Array.isArray(input.expected.statusCode)
-    ? input.expected.statusCode
-    : [input.expected.statusCode];
 
-  results.push({
-    name: "HTTP 状态码",
-    passed: codes.includes(input.statusCode),
-    expected: codes,
-    actual: input.statusCode,
-    message: codes.includes(input.statusCode) ? undefined : "状态码不匹配",
-  });
+  if (!input.expected.skipStatusCheck) {
+    const codes = Array.isArray(input.expected.statusCode)
+      ? input.expected.statusCode
+      : input.expected.statusCode !== undefined
+        ? [input.expected.statusCode]
+        : [200];
+
+    results.push({
+      name: "HTTP 状态码",
+      passed: codes.includes(input.statusCode),
+      expected: codes,
+      actual: input.statusCode,
+      message: codes.includes(input.statusCode) ? undefined : "状态码不匹配",
+    });
+  }
 
   if (input.expected.maxDurationMs) {
     results.push({

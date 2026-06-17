@@ -6,6 +6,11 @@
         <p>{{ store.workbenchTitle }}</p>
       </div>
       <div class="toolbar action-toolbar">
+        <a-segmented
+          v-model:value="activeView"
+          :options="viewOptions"
+          :disabled="!store.activeRun"
+        />
         <a-button
           type="primary"
           :disabled="!store.activeRun"
@@ -42,9 +47,17 @@
       <a-spin :spinning="store.activeRunLoading">
         <div v-if="store.activeRun" class="workbench-excel-grid">
           <CaseTreeExcel
+            v-if="activeView === 'excel'"
             :tree="store.activeRun.tree"
             :list-refresh-key="excelListRefreshKey"
             @change="handleExcelTreeChange"
+          />
+          <CaseTreeXmind
+            v-else
+            :tree="store.activeRun.tree"
+            :extras="store.activeRun.mindMapExtras"
+            @change="handleXmindTreeChange"
+            @extras-change="handleXmindExtrasChange"
           />
         </div>
 
@@ -113,7 +126,7 @@ import {
   SaveOutlined,
 } from "@ant-design/icons-vue";
 import { message, type MenuProps } from "ant-design-vue";
-import type { CaseTreeNode } from "@case-forge/shared";
+import type { CaseTreeNode, MindMapExtras } from "@case-forge/shared";
 import {
   cloneCaseTree,
   EDITOR_CASE_TREE_NORMALIZE_OPTIONS,
@@ -126,6 +139,7 @@ import {
 } from "@/api/client";
 import { useCaseForgeStore } from "@/stores/caseForge";
 import CaseTreeExcel from "@/components/CaseTreeExcel.vue";
+import CaseTreeXmind from "@/components/CaseTreeXmind.vue";
 import CaseSelectionModal, {
   type CaseSelectionMode,
 } from "@/components/CaseSelectionModal.vue";
@@ -142,6 +156,13 @@ const dirty = ref(false);
 const caseSelectModalOpen = ref(false);
 const caseSelectModalMode = ref<CaseSelectionMode>("sync");
 const caseSelectConfirmLoading = ref(false);
+
+const activeView = ref<"excel" | "xmind">("excel");
+
+const viewOptions = [
+  { label: "Excel", value: "excel" },
+  { label: "Xmind", value: "xmind" },
+];
 
 watch(
   () => store.activeRun?.id,
@@ -197,10 +218,27 @@ function handleExcelTreeChange(tree: CaseTreeNode) {
     EDITOR_CASE_TREE_NORMALIZE_OPTIONS,
   );
   dirty.value = true;
-  scheduleExcelAutoSave();
+  scheduleAutoSave();
 }
 
-const scheduleExcelAutoSave = debounce(async () => {
+function handleXmindTreeChange(tree: CaseTreeNode) {
+  if (!store.activeRun) return;
+  store.activeRun.tree = normalizeCaseTreeForSkill(
+    tree,
+    EDITOR_CASE_TREE_NORMALIZE_OPTIONS,
+  );
+  dirty.value = true;
+  scheduleAutoSave();
+}
+
+function handleXmindExtrasChange(extras: MindMapExtras) {
+  if (!store.activeRun) return;
+  store.activeRun.mindMapExtras = extras;
+  dirty.value = true;
+  scheduleAutoSave();
+}
+
+const scheduleAutoSave = debounce(async () => {
   if (!store.activeRun) return;
   try {
     await store.saveTree({ successMessage: "已自动保存" });

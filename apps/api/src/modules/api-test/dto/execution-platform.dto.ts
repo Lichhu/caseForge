@@ -1,10 +1,28 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { IsBoolean, IsObject, IsOptional, IsString } from "class-validator";
+import {
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+} from "class-validator";
 
 export class SaveApiEnvironmentServiceDto {
   @ApiProperty()
   @IsString()
   name!: string;
+
+  @ApiPropertyOptional({ enum: ["http", "tcp"] })
+  @IsOptional()
+  @IsIn(["http", "tcp"])
+  transport?: "http" | "tcp";
+
+  @ApiPropertyOptional({ enum: ["json", "xml", "text", "soap", "other"] })
+  @IsOptional()
+  @IsIn(["json", "xml", "text", "soap", "other"])
+  payloadFormat?: "json" | "xml" | "text" | "soap" | "other";
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -15,6 +33,26 @@ export class SaveApiEnvironmentServiceDto {
   @IsOptional()
   @IsString()
   pathPrefix?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  host?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  port?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  encoding?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsObject()
+  framing?: { type: "length-prefix"; width: number; encoding?: string };
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -50,6 +88,8 @@ export class SaveApiExecutionSetDto {
 
 export class ReplaceExecutionSetCasesDto {
   @ApiProperty({ type: [String] })
+  @IsArray()
+  @IsString({ each: true })
   caseIds!: string[];
 }
 
@@ -66,4 +106,9 @@ export class RunExecutionSetDto {
   @ApiPropertyOptional({ default: 5 })
   @IsOptional()
   concurrency?: number;
+
+  @ApiPropertyOptional({ description: "传输给接口的编码格式", example: "GBK" })
+  @IsOptional()
+  @IsString()
+  encoding?: string;
 }

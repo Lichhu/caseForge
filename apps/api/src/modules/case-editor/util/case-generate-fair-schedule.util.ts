@@ -1,4 +1,8 @@
-import type { CaseGenerateJobEntity } from "../entity/case-generate-job.entity";
+export type FairScheduleJob = {
+  id: string;
+  createdBy?: string | null;
+  queuedAt: Date;
+};
 
 const DEFAULT_PER_USER_MAX = 2;
 const MAX_PER_USER_MAX = 10;
@@ -13,11 +17,11 @@ export function getCaseGeneratePerUserMaxRunning() {
   return Math.min(Math.floor(parsed), MAX_PER_USER_MAX);
 }
 
-export function normalizeJobUser(job: CaseGenerateJobEntity) {
+export function normalizeJobUser(job: { createdBy?: string | null }) {
   return job.createdBy?.trim() || "system";
 }
 
-export function buildRunningCountByUser(jobs: CaseGenerateJobEntity[]) {
+export function buildRunningCountByUser<T extends FairScheduleJob>(jobs: T[]) {
   const counts = new Map<string, number>();
   for (const job of jobs) {
     const user = normalizeJobUser(job);
@@ -27,8 +31,8 @@ export function buildRunningCountByUser(jobs: CaseGenerateJobEntity[]) {
 }
 
 /** 每个用户队首任务（按 queuedAt 最早） */
-export function buildQueuedHeadByUser(queuedJobs: CaseGenerateJobEntity[]) {
-  const heads = new Map<string, CaseGenerateJobEntity>();
+export function buildQueuedHeadByUser<T extends FairScheduleJob>(queuedJobs: T[]) {
+  const heads = new Map<string, T>();
   for (const job of queuedJobs) {
     const user = normalizeJobUser(job);
     if (!heads.has(user)) {
@@ -42,17 +46,17 @@ export function buildQueuedHeadByUser(queuedJobs: CaseGenerateJobEntity[]) {
  * 公平挑选下一条任务：优先 running 更少、且未达 perUserMax 的用户队首任务。
  * 若因 perUserMax 导致全局槽位闲置，则回退为全局 FIFO。
  */
-export function pickFairQueuedJob(
-  queuedJobs: CaseGenerateJobEntity[],
+export function pickFairQueuedJob<T extends FairScheduleJob>(
+  queuedJobs: T[],
   runningByUser: Map<string, number>,
   perUserMax: number,
-): CaseGenerateJobEntity | null {
+): T | null {
   if (!queuedJobs.length) {
     return null;
   }
 
   const headsByUser = buildQueuedHeadByUser(queuedJobs);
-  let best: CaseGenerateJobEntity | null = null;
+  let best: T | null = null;
   let bestRunning = Infinity;
   let bestQueuedAt = Infinity;
 
@@ -80,9 +84,9 @@ export function pickFairQueuedJob(
   return queuedJobs[0] ?? null;
 }
 
-export function countUserQueuedAhead(
-  job: CaseGenerateJobEntity,
-  queuedJobs: CaseGenerateJobEntity[],
+export function countUserQueuedAhead<T extends FairScheduleJob>(
+  job: T,
+  queuedJobs: T[],
 ) {
   const user = normalizeJobUser(job);
   const jobTime = job.queuedAt.getTime();
@@ -92,7 +96,7 @@ export function countUserQueuedAhead(
   ).length;
 }
 
-export function countActiveUsers(jobs: CaseGenerateJobEntity[]) {
+export function countActiveUsers<T extends FairScheduleJob>(jobs: T[]) {
   return new Set(jobs.map((job) => normalizeJobUser(job))).size;
 }
 

@@ -72,46 +72,41 @@
         <div
           v-if="activeScenario"
           :key="editingScenarioId"
-          ref="promptTableWrapRef"
-          class="scenario-prompt-table-wrap"
+          class="scenario-prompt-list-wrap"
         >
-          <a-table
-            class="scenario-prompt-table"
-            size="small"
-            :pagination="false"
-            :scroll="{ y: promptTableScrollY }"
-            :data-source="activeScenarioPrompts"
-            :columns="promptColumns"
-            :row-key="(record: ScenarioLibraryItem['prompts'][number]) => getPromptRowKey(record.id)"
+          <article
+            v-for="record in activeScenarioPrompts"
+            :key="getPromptRowKey(record.id)"
+            class="scenario-prompt-card"
           >
-            <template #bodyCell="{ column, record }">
-              <template v-if="column.key === 'content'">
-                <a-textarea
-                  :value="record.content"
-                  :rows="3"
-                  :maxlength="FIELD_LIMITS.promptContent"
-                  show-count
-                  placeholder="请输入提示词内容"
-                  @update:value="(value: string) => handlePromptContentInput(record.id, value)"
-                  @focus="promptEditScenarioId = editingScenarioId"
-                  @blur="flushPromptSave(record, promptEditScenarioId, { notify: false })"
+            <a-textarea
+              :value="record.content"
+              class="scenario-prompt-textarea"
+              :auto-size="{ minRows: 3, maxRows: 32 }"
+              :maxlength="FIELD_LIMITS.promptContent"
+              show-count
+              placeholder="请输入提示词内容"
+              @update:value="(value: string) => handlePromptContentInput(record.id, value)"
+              @focus="promptEditScenarioId = editingScenarioId"
+              @blur="flushPromptSave(record, promptEditScenarioId, { notify: false })"
+            />
+            <div class="scenario-prompt-card-actions">
+              <div class="prompt-status-cell">
+                <a-switch
+                  size="small"
+                  :checked="record.isActive"
+                  @change="(checked: boolean) => togglePromptActive(record, checked)"
                 />
-              </template>
-              <template v-else-if="column.key === 'isActive'">
-                <div class="prompt-status-cell">
-                  <a-switch
-                    size="small"
-                    :checked="record.isActive"
-                    @change="(checked: boolean) => togglePromptActive(record, checked)"
-                  />
-                  <span>{{ record.isActive ? '启用' : '停用' }}</span>
-                </div>
-              </template>
-              <template v-else-if="column.key === 'actions'">
-                <a-button type="link" danger @click="confirmDeletePrompt(record.id)">删除</a-button>
-              </template>
-            </template>
-          </a-table>
+                <span>{{ record.isActive ? '启用' : '停用' }}</span>
+              </div>
+              <a-button type="link" danger @click="confirmDeletePrompt(record.id)">删除</a-button>
+            </div>
+          </article>
+          <a-empty
+            v-if="!activeScenarioPrompts.length"
+            class="scenario-prompt-inline-empty"
+            description="暂无提示词，点击右上角新增"
+          />
         </div>
         <a-empty v-else class="scenario-prompt-empty" description="请先在左侧新增或选择场景" />
       </section>
@@ -137,7 +132,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onActivated, onBeforeUnmount, ref, watch, withDefaults, defineProps } from 'vue';
 import { message, Modal } from 'ant-design-vue';
-import type { TableColumnsType } from 'ant-design-vue';
 import { SaveOutlined } from '@ant-design/icons-vue';
 import type { ScenarioLibraryItem } from '@/api/client';
 import { useScenarioLibrary } from '@/composables/useScenarioLibrary';
@@ -171,9 +165,6 @@ const {
   deleteScenario,
 } = useScenarioLibrary(props.scope);
 const editingScenarioId = ref('');
-const promptTableWrapRef = ref<HTMLElement | null>(null);
-const promptTableScrollY = ref(320);
-let promptTableResizeObserver: ResizeObserver | undefined;
 const scenarioNameSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const promptSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const scenarioNameLastSaved = new Map<string, string>();
@@ -184,28 +175,8 @@ const scenarioSaveUi = ref<ScenarioSaveUiState>('idle');
 let scenarioSavedFadeTimer: ReturnType<typeof setTimeout> | undefined;
 const promptEditScenarioId = ref('');
 
-const promptColumns: TableColumnsType = [
-  { title: '提示词内容', key: 'content', dataIndex: 'content' },
-  { title: '启用', key: 'isActive', width: 88 },
-  { title: '操作', key: 'actions', width: 72 },
-];
-
 function clipText(value: string, maxLength: number) {
   return value.slice(0, maxLength);
-}
-
-function syncPromptTableScrollY() {
-  const el = promptTableWrapRef.value;
-  if (!el) return;
-  promptTableScrollY.value = Math.max(120, Math.floor(el.getBoundingClientRect().height) - 2);
-}
-
-function bindPromptTableResizeObserver() {
-  promptTableResizeObserver?.disconnect();
-  const el = promptTableWrapRef.value;
-  if (!el) return;
-  promptTableResizeObserver = new ResizeObserver(() => syncPromptTableScrollY());
-  promptTableResizeObserver.observe(el);
 }
 
 const activeScenario = computed(() =>
@@ -236,8 +207,6 @@ const scenarioSaveStatusClass = computed(() => ({
 
 watch(open, async (isOpen) => {
   if (!isOpen) {
-    promptTableResizeObserver?.disconnect();
-    promptTableResizeObserver = undefined;
     await flushPendingScenarioSaves();
     scenarioSaveUi.value = 'idle';
     if (scenarioSavedFadeTimer) {
@@ -258,15 +227,6 @@ watch(open, async (isOpen) => {
     editingScenarioId.value = scenarios.value[0].id;
     promptEditScenarioId.value = scenarios.value[0].id;
   }
-  await nextTick();
-  syncPromptTableScrollY();
-  bindPromptTableResizeObserver();
-});
-
-watch(editingScenarioId, async () => {
-  if (!open.value) return;
-  await nextTick();
-  syncPromptTableScrollY();
 });
 
 watch(
@@ -304,7 +264,6 @@ onActivated(() => {
 });
 
 onBeforeUnmount(() => {
-  promptTableResizeObserver?.disconnect();
   clearScenarioAutoSaveTimers();
 });
 

@@ -25,6 +25,14 @@ export function collectSelectablePromptIds(scenarios: ScenarioLibraryItem[]) {
   );
 }
 
+export function collectDefaultPromptIds(scenarios: ScenarioLibraryItem[]) {
+  return buildEnabledScenarios(scenarios).flatMap((scenario) =>
+    scenario.prompts
+      .filter((prompt) => isEnabledFlag(prompt.isDefault))
+      .map((prompt) => prompt.id),
+  );
+}
+
 export function filterSelectablePromptIds(
   scenarios: ScenarioLibraryItem[],
   promptIds: string[],
@@ -46,6 +54,31 @@ export function promptLabel(
   }
   const singleLine = content.replace(/\s+/g, ' ');
   return singleLine.length > 120 ? `${singleLine.slice(0, 120)}…` : singleLine;
+}
+
+export function promptDisplayName(prompt: { content?: string; name?: string }) {
+  const name = prompt.name?.trim();
+  if (name) {
+    return name;
+  }
+  const content = prompt.content?.trim() || '';
+  if (!content) {
+    return '未命名提示词';
+  }
+  const firstLine = content.split('\n').find((line) => line.trim())?.trim() ?? content;
+  return firstLine.length > 40 ? `${firstLine.slice(0, 40)}…` : firstLine;
+}
+
+export function promptPreviewText(
+  prompt: { content?: string; name?: string },
+  maxLength = 100,
+) {
+  const content = prompt.content?.trim() || '';
+  if (!content) {
+    return '（未填写提示词内容）';
+  }
+  const singleLine = content.replace(/\s+/g, ' ');
+  return singleLine.length > maxLength ? `${singleLine.slice(0, maxLength)}…` : singleLine;
 }
 
 export function normalizeScenarioLibraryItem(

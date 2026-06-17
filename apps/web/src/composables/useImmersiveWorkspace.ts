@@ -1,5 +1,10 @@
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
-import { configureAppMessage, dismissAppMessages } from '@/utils/globalFeedback';
+import { computed, nextTick, onBeforeUnmount, ref } from "vue";
+import {
+  configureAppMessage,
+  dismissAppMessages,
+} from "@/utils/globalFeedback";
+
+const IMMERSIVE_BODY_CLASS = "cf-immersive-active";
 
 export function useImmersiveWorkspace(onViewportRefresh?: () => void) {
   const immersiveMode = ref(false);
@@ -23,8 +28,8 @@ export function useImmersiveWorkspace(onViewportRefresh?: () => void) {
   const immersiveOrbStyle = computed(() => ({
     left: `${orbPosition.value.x}px`,
     top: `${orbPosition.value.y}px`,
-    right: 'auto',
-    bottom: 'auto',
+    right: "auto",
+    bottom: "auto",
   }));
 
   const orbPanelRight = computed(() => orbPosition.value.x < 260);
@@ -33,7 +38,7 @@ export function useImmersiveWorkspace(onViewportRefresh?: () => void) {
   function scheduleViewportRefresh() {
     onViewportRefresh?.();
     window.requestAnimationFrame(() => {
-      window.dispatchEvent(new Event('resize'));
+      window.dispatchEvent(new Event("resize"));
     });
   }
 
@@ -48,6 +53,7 @@ export function useImmersiveWorkspace(onViewportRefresh?: () => void) {
     dismissAppMessages();
     immersiveMode.value = true;
     immersiveDockOpen.value = true;
+    document.body.classList.add(IMMERSIVE_BODY_CLASS);
     resetOrbPosition();
     await nextTick();
     configureAppMessage();
@@ -58,6 +64,7 @@ export function useImmersiveWorkspace(onViewportRefresh?: () => void) {
     dismissAppMessages();
     immersiveMode.value = false;
     immersiveDockOpen.value = false;
+    document.body.classList.remove(IMMERSIVE_BODY_CLASS);
     await nextTick();
     configureAppMessage();
     // 等顶栏/导航恢复后再触发 resize，避免退出全屏后 flex 高度链未重算
@@ -80,12 +87,13 @@ export function useImmersiveWorkspace(onViewportRefresh?: () => void) {
       moved: false,
     };
     (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
-    window.addEventListener('pointermove', moveOrbDrag);
-    window.addEventListener('pointerup', stopOrbDrag);
+    window.addEventListener("pointermove", moveOrbDrag);
+    window.addEventListener("pointerup", stopOrbDrag);
   }
 
   function moveOrbDrag(event: PointerEvent) {
-    if (!orbDragging.value || event.pointerId !== orbDragState.value.pointerId) return;
+    if (!orbDragging.value || event.pointerId !== orbDragState.value.pointerId)
+      return;
     const deltaX = event.clientX - orbDragState.value.startX;
     const deltaY = event.clientY - orbDragState.value.startY;
     if (Math.abs(deltaX) + Math.abs(deltaY) > 4) {
@@ -101,8 +109,8 @@ export function useImmersiveWorkspace(onViewportRefresh?: () => void) {
     if (event.pointerId !== orbDragState.value.pointerId) return;
     orbDragging.value = false;
     orbSuppressClick.value = orbDragState.value.moved;
-    window.removeEventListener('pointermove', moveOrbDrag);
-    window.removeEventListener('pointerup', stopOrbDrag);
+    window.removeEventListener("pointermove", moveOrbDrag);
+    window.removeEventListener("pointerup", stopOrbDrag);
   }
 
   function toggleImmersiveDock() {
@@ -135,28 +143,35 @@ export function useImmersiveWorkspace(onViewportRefresh?: () => void) {
 
   function clampOrbPosition(position: { x: number; y: number }) {
     return {
-      x: Math.min(Math.max(position.x, orbMargin), window.innerWidth - orbSize - orbMargin),
-      y: Math.min(Math.max(position.y, orbMargin), window.innerHeight - orbSize - orbMargin),
+      x: Math.min(
+        Math.max(position.x, orbMargin),
+        window.innerWidth - orbSize - orbMargin,
+      ),
+      y: Math.min(
+        Math.max(position.y, orbMargin),
+        window.innerHeight - orbSize - orbMargin,
+      ),
     };
   }
 
   function bindImmersiveListeners(onKeydown: (event: KeyboardEvent) => void) {
-    window.addEventListener('keydown', onKeydown);
-    window.addEventListener('resize', () => {
+    window.addEventListener("keydown", onKeydown);
+    window.addEventListener("resize", () => {
       orbPosition.value = clampOrbPosition(orbPosition.value);
     });
     resetOrbPosition();
   }
 
   function unbindImmersiveListeners(onKeydown: (event: KeyboardEvent) => void) {
-    window.removeEventListener('keydown', onKeydown);
-    window.removeEventListener('pointermove', moveOrbDrag);
-    window.removeEventListener('pointerup', stopOrbDrag);
+    window.removeEventListener("keydown", onKeydown);
+    window.removeEventListener("pointermove", moveOrbDrag);
+    window.removeEventListener("pointerup", stopOrbDrag);
     cancelOrbClose();
   }
 
   onBeforeUnmount(() => {
     cancelOrbClose();
+    document.body.classList.remove(IMMERSIVE_BODY_CLASS);
   });
 
   return {

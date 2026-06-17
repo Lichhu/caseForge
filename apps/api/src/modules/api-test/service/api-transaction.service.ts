@@ -56,12 +56,9 @@ export class ApiTransactionService {
   async createTransaction(projectId: string, payload: SaveApiTransactionDto) {
     await assertApiTestProject(this.projectRepo, projectId);
     const code = payload.code.trim();
-    const name = payload.name.trim();
+    const name = payload.name?.trim() || code;
     if (!code) {
       throw new BadRequestException("请输入交易码");
-    }
-    if (!name) {
-      throw new BadRequestException("请输入接口名称");
     }
     const duplicate = await this.transactionRepo.findOne({
       where: scopedWhere({ projectId, code }),
@@ -101,12 +98,9 @@ export class ApiTransactionService {
   ) {
     const transaction = await this.requireTransaction(projectId, transactionId);
     const code = payload.code.trim();
-    const name = payload.name.trim();
+    const name = payload.name?.trim() || code;
     if (!code) {
       throw new BadRequestException("请输入交易码");
-    }
-    if (!name) {
-      throw new BadRequestException("请输入接口名称");
     }
     if (code !== transaction.code) {
       const duplicate = await this.transactionRepo.findOne({
