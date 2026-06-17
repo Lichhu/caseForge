@@ -39,8 +39,49 @@ export function nextSixLevelChildKind(kind: CaseNodeKind): CaseNodeKind {
   return map[kind] || kind;
 }
 
-export function isCaseElementKind(kind: CaseNodeKind) {
+export function isCaseElementKind(kind: CaseNodeKind): kind is CaseElementKind {
   return CASE_ELEMENT_KINDS.includes(kind as CaseElementKind);
+}
+
+/**
+ * 案例下六级要素：始终包含「案例标题」节点；缺省时用 titleFallback 或案例节点推导文案补齐。
+ * 仅返回已存在的要素节点（除 case_title 外不自动补空节点）。
+ */
+export function ensureCaseElementChildren(
+  caseNode: CaseTreeNode,
+  titleFallback?: string,
+): CaseTreeNode[] {
+  const businessTitle =
+    titleFallback?.trim() || getCaseTitleOnly(caseNode) || '案例';
+  const byKind = new Map<CaseElementKind, CaseTreeNode>();
+  for (const child of caseNode.children ?? []) {
+    if (isCaseElementKind(child.kind)) {
+      byKind.set(child.kind, child);
+    }
+  }
+
+  const result: CaseTreeNode[] = [];
+  for (const kind of CASE_ELEMENT_KINDS) {
+    if (kind === 'case_title') {
+      const existing = byKind.get('case_title');
+      result.push(
+        existing
+          ? { ...existing, title: existing.title?.trim() || businessTitle }
+          : {
+              id: `${caseNode.id}-title`,
+              title: businessTitle,
+              kind: 'case_title',
+              children: [],
+            },
+      );
+      continue;
+    }
+    const existing = byKind.get(kind);
+    if (existing) {
+      result.push(existing);
+    }
+  }
+  return result;
 }
 
 const CASE_TAG_IN_BRACKETS =

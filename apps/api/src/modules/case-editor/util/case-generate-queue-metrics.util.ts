@@ -1,12 +1,12 @@
-import type { CaseGenerateJobEntity } from "../entity/case-generate-job.entity";
-
 /** 无历史样本时的默认单次生成耗时（秒） */
 export const DEFAULT_CASE_GENERATE_RUN_SECONDS = 120;
 
 const MIN_RUN_SECONDS = 30;
 const MAX_RUN_SECONDS = 600;
 
-export function resolveAverageRunSeconds(jobs: CaseGenerateJobEntity[]) {
+export function resolveAverageRunSeconds(
+  jobs: Array<{ startedAt?: Date | null; finishedAt?: Date | null }>,
+) {
   const durations = jobs
     .map((job) => {
       if (!job.startedAt || !job.finishedAt) {

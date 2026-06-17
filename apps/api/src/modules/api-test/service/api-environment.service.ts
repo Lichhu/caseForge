@@ -99,6 +99,10 @@ export class ApiEnvironmentService {
     let baseUrl = row.baseUrl.replace(/\/$/, "");
     let headers = row.headers ?? {};
     let variables = row.variables ?? {};
+    const services = await this.serviceRepo.find({
+      where: scopedWhere({ projectId, environmentId, enabled: true }),
+      order: { sortOrder: "ASC", createdAt: "ASC" },
+    });
 
     if (environmentServiceId) {
       const service = await this.serviceRepo.findOne({
@@ -131,6 +135,12 @@ export class ApiEnvironmentService {
       headers,
       variables,
       environmentServiceId,
+      services: services.map((service) => ({
+        ...service,
+        baseUrl: service.baseUrl?.replace(/\/$/, ""),
+        headers: { ...headers, ...(service.headers ?? {}) },
+        variables: { ...variables, ...(service.variables ?? {}) },
+      })),
     };
   }
 
@@ -156,8 +166,14 @@ export class ApiEnvironmentService {
       projectId,
       environmentId,
       name: payload.name.trim(),
+      transport: payload.transport ?? "http",
+      payloadFormat: payload.payloadFormat,
       baseUrl: payload.baseUrl?.replace(/\/$/, ""),
       pathPrefix: payload.pathPrefix?.trim(),
+      host: payload.host?.trim(),
+      port: payload.port,
+      encoding: payload.encoding?.trim(),
+      framing: payload.framing,
       headers: payload.headers ?? {},
       variables: payload.variables ?? {},
       sortOrder: count,
@@ -173,10 +189,20 @@ export class ApiEnvironmentService {
     serviceId: string,
     payload: SaveApiEnvironmentServiceDto,
   ) {
-    const existing = await this.requireService(projectId, environmentId, serviceId);
+    const existing = await this.requireService(
+      projectId,
+      environmentId,
+      serviceId,
+    );
     existing.name = payload.name.trim();
+    existing.transport = payload.transport ?? existing.transport ?? "http";
+    existing.payloadFormat = payload.payloadFormat;
     existing.baseUrl = payload.baseUrl?.replace(/\/$/, "");
     existing.pathPrefix = payload.pathPrefix?.trim();
+    existing.host = payload.host?.trim();
+    existing.port = payload.port;
+    existing.encoding = payload.encoding?.trim();
+    existing.framing = payload.framing;
     existing.headers = payload.headers ?? {};
     existing.variables = payload.variables ?? {};
     if (payload.enabled !== undefined) existing.enabled = payload.enabled;

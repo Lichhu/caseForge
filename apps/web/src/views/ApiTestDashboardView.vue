@@ -1,5 +1,5 @@
 <template>
-  <main class="app-frame app-frame--nested" :class="{ 'immersive-mode': immersiveMode, 'is-loading': apiStore.loading }">
+  <main class="app-frame app-frame--nested" :class="{ 'immersive-mode': immersiveMode, 'is-loading': apiStore.loading || apiStore.stageLoading }">
     <div class="app-shell">
       <ProjectSidebar platform="api-test" />
       <section class="main-workspace">
@@ -100,8 +100,8 @@ const {
 } = immersiveControls;
 
 const stages = [
-  { key: 'api-document' as const, index: '01', title: '接口文档', shortTitle: '文档', description: 'Excel 上传与结构化' },
-  { key: 'api-cases' as const, index: '02', title: '案例生成', shortTitle: '案例', description: 'AI 生成与手工维护' },
+  { key: 'api-document' as const, index: '01', title: '接口文档', shortTitle: '文档', description: '上传、结构化与 AI 生成' },
+  { key: 'api-cases' as const, index: '02', title: '案例编辑', shortTitle: '案例', description: '手工编辑与维护' },
   { key: 'api-runner' as const, index: '03', title: '执行平台', shortTitle: '执行', description: '环境中心、批量执行与比对' },
   { key: 'api-report' as const, index: '04', title: '结果报表', shortTitle: '报表', description: '统计图表、Excel/PDF 导出' },
 ];
@@ -118,7 +118,7 @@ const headerTitle = computed(() => {
 
 const headerSubtitle = computed(() => {
   if (apiStore.inTransactionWorkspace) {
-    return '接口文档 → 案例生成 → 执行平台 → 结果报表';
+    return '接口文档 → 案例编辑 → 执行平台 → 结果报表';
   }
   if (apiStore.activeProject) {
     const no = apiStore.activeProject.requirementNo;
@@ -132,7 +132,7 @@ function canOpenStage(stage: ApiWorkspaceStage | string) {
   if (stage === 'api-cases') return Boolean(apiStore.canEnterCases);
   if (stage === 'api-runner') return Boolean(apiStore.canEnterRunner);
   if (stage === 'api-report') {
-    return apiStore.transactionRuns.length > 0 || apiStore.cases.length > 0;
+    return Boolean(apiStore.canEnterCases) || apiStore.transactionRuns.length > 0;
   }
   return false;
 }
@@ -142,10 +142,9 @@ async function switchStage(stage: string) {
   const projectId = apiStore.activeProjectId;
   const transactionId = apiStore.activeTransactionId;
   if (projectId && transactionId) {
-    apiStore.setWorkspaceStage(projectId, transactionId, stage as ApiWorkspaceStage);
-    if (stage === 'api-cases') {
-      await apiStore.refreshCases(projectId, transactionId);
-    }
+    const nextStage = stage as ApiWorkspaceStage;
+    apiStore.setWorkspaceStage(projectId, transactionId, nextStage);
+    await apiStore.loadWorkspaceStage(projectId, transactionId, nextStage);
   }
   scheduleViewportRefresh();
 }

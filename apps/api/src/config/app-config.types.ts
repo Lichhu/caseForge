@@ -33,6 +33,7 @@ export interface AppConfig {
   aiWorkflow: {
     reqDocSkillUrl: string;
     caseDocPromoteUrl: string;
+    atCaseSkillUrl: string;
     aiChat: {
       url: string;
       model: string;

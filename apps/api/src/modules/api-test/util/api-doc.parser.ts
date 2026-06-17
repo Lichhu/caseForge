@@ -45,6 +45,17 @@ export function getApiDocFieldValue(sectionText: string, fieldName: string) {
   return "";
 }
 
+/** 从「技术信息」读取通讯方式（避免与 profile 模块循环依赖） */
+export function resolveDocTransport(text: string) {
+  const section = extractApiDocSection(text, "技术信息");
+  const value = getApiDocFieldValue(section, "通讯方式").trim().toUpperCase();
+  if (value.includes("TCP")) return "tcp" as const;
+  if (value.includes("HTTP")) return "http" as const;
+  if (value.includes("TUXEDO")) return "tuxedo" as const;
+  if (value) return "other" as const;
+  return "http" as const;
+}
+
 /** 从标准接口文档 Excel 结构化文本抽取端点 */
 export function parseEndpointsFromApiDocSections(
   text: string,
@@ -61,29 +72,37 @@ export function parseEndpointsFromApiDocSections(
     code;
   const serviceUrl = getApiDocFieldValue(basic, "服务URL").trim();
 
-  let path = code ? `/${code}` : "/";
-  if (serviceUrl) {
-    try {
-      const url = /^https?:\/\//i.test(serviceUrl)
-        ? serviceUrl
-        : `http://${serviceUrl}`;
-      path = new URL(url).pathname || path;
-    } catch {
-      path = normalizePath(serviceUrl);
-    }
-  }
-
   if (!code && !serviceUrl) {
     return [];
   }
 
-  const method = "POST";
+  const transport = resolveDocTransport(text);
+  let method: string;
+  let path: string;
+
+  if (transport === "tcp") {
+    method = "TCP";
+    path = serviceUrl || code || "/";
+  } else {
+    method = "POST";
+    path = code ? `/${code}` : "/";
+    if (serviceUrl) {
+      try {
+        const url = /^https?:\/\//i.test(serviceUrl)
+          ? serviceUrl
+          : `http://${serviceUrl}`;
+        path = new URL(url).pathname || path;
+      } catch {
+        path = normalizePath(serviceUrl);
+      }
+    }
+  }
 
   return [
     {
       name: name || code,
       method,
-      path: normalizePath(path),
+      path: transport === "tcp" ? path : normalizePath(path),
       summary: getApiDocFieldValue(service, "功能描述"),
       requestNotes: request,
       responseNotes: response,
@@ -184,7 +203,10 @@ export function ensureEndpointIds(endpoints: ApiEndpointPayload[]) {
     ...endpoint,
     id: endpoint.id ?? randomUUID(),
     method: normalizeMethod(endpoint.method),
-    path: normalizePath(endpoint.path),
+    path:
+      normalizeMethod(endpoint.method) === "TCP"
+        ? endpoint.path.trim()
+        : normalizePath(endpoint.path),
     sortOrder: index,
   }));
 }

@@ -14,11 +14,20 @@ const MAX_CONCURRENCY = 32;
 let activeCount = 0;
 /** 等待槽位的任务队列（FIFO） */
 const waitQueue: Array<() => void> = [];
-let slotReleaseHook: (() => void) | undefined;
+const slotReleaseHooks = new Set<() => void>();
 
 /** 注册槽位释放回调（用于立刻拉起队列中的下一个生成任务） */
+export function registerCaseGenerateSlotReleaseHook(hook: () => void) {
+  slotReleaseHooks.add(hook);
+  return () => slotReleaseHooks.delete(hook);
+}
+
+/** 单队列兼容：覆盖全部槽位释放回调 */
 export function setCaseGenerateSlotReleaseHook(hook: (() => void) | undefined) {
-  slotReleaseHook = hook;
+  slotReleaseHooks.clear();
+  if (hook) {
+    slotReleaseHooks.add(hook);
+  }
 }
 
 /** 当前占用的槽位数 */
@@ -47,7 +56,9 @@ function releaseSlot() {
   if (next) {
     next();
   }
-  slotReleaseHook?.();
+  for (const hook of slotReleaseHooks) {
+    hook();
+  }
 }
 
 function acquireSlot(limit: number) {

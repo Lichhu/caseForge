@@ -6,10 +6,10 @@ export class SaveApiTransactionDto {
   @MaxLength(128)
   code: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @MaxLength(256)
-  name: string;
+  name?: string;
 
   @IsOptional()
   @IsString()

@@ -63,6 +63,11 @@ export class ApiDocEntity {
   @Column({ type: "text", nullable: true })
   structuringError?: string;
 
+  @Column({ type: "json", nullable: true })
+  metadata?: {
+    promptIds?: string[];
+  };
+
   @OneToMany(() => ApiEndpointEntity, (endpoint) => endpoint.apiDoc)
   endpoints: ApiEndpointEntity[];
 

@@ -78,7 +78,11 @@ export class ApiTestCaseEntity {
   expected: ApiCaseExpected;
 
   @Column({ type: "json", nullable: true })
-  metadata?: { source?: ApiCaseSource; inferredFields?: string[] };
+  metadata?: {
+    source?: ApiCaseSource;
+    inferredFields?: string[];
+    promptIds?: string[];
+  };
 
   @Column({ nullable: true, default: "system" })
   createdBy: string;

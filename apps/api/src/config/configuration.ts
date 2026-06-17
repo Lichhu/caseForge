@@ -35,6 +35,7 @@ export default (): AppConfig => ({
   aiWorkflow: {
     reqDocSkillUrl: process.env.REQ_DOC_SKILL_URL ?? "",
     caseDocPromoteUrl: process.env.CASE_DOC_PROMOTE_URL ?? "",
+    atCaseSkillUrl: process.env.AT_CASE_SKILL_URL ?? "",
     aiChat: {
       url: process.env.AI_CHAT_URL ?? "",
       model: process.env.AI_CHAT_MODEL ?? "qwen-72b",

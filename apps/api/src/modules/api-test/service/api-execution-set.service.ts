@@ -8,6 +8,7 @@ import { In, Repository } from "typeorm";
 import {
   auditFieldsForCreate,
   auditFieldsForUpdate,
+  RequestContext,
 } from "../../../common/audit/request-context";
 import { scopedWhere } from "../../../common/audit/user-scope";
 import { ApiTestCaseEntity } from "../entity/api-test-case.entity";
@@ -17,7 +18,12 @@ import {
   ReplaceExecutionSetCasesDto,
   SaveApiExecutionSetDto,
 } from "../dto/execution-platform.dto";
+import type { ListApiExecutionSetsDto } from "../dto/list-api-execution-sets.dto";
 import { toPublicApiExecutionSet } from "../../../common/http/public-response.util";
+import {
+  DEFAULT_CASE_FORGE_PAGE_SIZE,
+  normalizeCaseForgePageSize,
+} from "@case-forge/shared";
 
 @Injectable()
 export class ApiExecutionSetService {
@@ -30,33 +36,67 @@ export class ApiExecutionSetService {
     private readonly caseRepo: Repository<ApiTestCaseEntity>,
   ) {}
 
-  async listSets(projectId: string, transactionId: string) {
-    const sets = await this.setRepo.find({
+  async listSets(
+    projectId: string,
+    transactionId: string,
+    query: ListApiExecutionSetsDto = {},
+  ) {
+    const page = Math.max(1, query.page ?? 1);
+    const pageSize = normalizeCaseForgePageSize(
+      query.pageSize ?? DEFAULT_CASE_FORGE_PAGE_SIZE,
+    );
+
+    const [sets, count] = await this.setRepo.findAndCount({
       where: scopedWhere({ projectId, transactionId }),
       order: { updatedAt: "DESC" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
     });
-    const setIds = sets.map((item) => item.id);
-    if (!setIds.length) return [];
+    if (!sets.length) {
+      return { rows: [], count, page, pageSize };
+    }
 
+    const setIds = sets.map((item) => item.id);
     const links = await this.setCaseRepo.find({
       where: { executionSetId: In(setIds) },
       order: { sortOrder: "ASC", createdAt: "ASC" },
     });
+    const validCaseIdSet = await this.findAccessibleCaseIdSet(
+      projectId,
+      transactionId,
+      links.map((item) => item.caseId),
+    );
+    const orphanLinkIds: string[] = [];
     const countMap = new Map<string, number>();
     const caseIdsMap = new Map<string, string[]>();
     for (const link of links) {
-      countMap.set(link.executionSetId, (countMap.get(link.executionSetId) ?? 0) + 1);
+      if (!validCaseIdSet.has(link.caseId)) {
+        orphanLinkIds.push(link.id);
+        continue;
+      }
+      countMap.set(
+        link.executionSetId,
+        (countMap.get(link.executionSetId) ?? 0) + 1,
+      );
       const ids = caseIdsMap.get(link.executionSetId) ?? [];
       ids.push(link.caseId);
       caseIdsMap.set(link.executionSetId, ids);
     }
+    if (orphanLinkIds.length) {
+      await this.setCaseRepo.delete(orphanLinkIds);
+    }
 
-    return sets.map((set) =>
-      toPublicApiExecutionSet(set, {
-        caseCount: countMap.get(set.id) ?? 0,
-        caseIds: caseIdsMap.get(set.id) ?? [],
-      }),
-    );
+    return {
+      rows: sets.map((set) =>
+        toPublicApiExecutionSet(set, {
+          caseCount: countMap.get(set.id) ?? 0,
+          caseIds: caseIdsMap.get(set.id) ?? [],
+        }),
+      ),
+      count,
+      page,
+      pageSize,
+    };
   }
 
   async createSet(
@@ -112,7 +152,7 @@ export class ApiExecutionSetService {
     );
     await this.setCaseRepo.delete({ executionSetId: setId });
     if (!uniqueCaseIds.length) {
-      return { caseIds: [] as string[] };
+      return { caseIds: [] as string[], caseCount: 0 };
     }
     const rows = uniqueCaseIds.map((caseId, index) =>
       this.setCaseRepo.create({
@@ -122,7 +162,7 @@ export class ApiExecutionSetService {
       }),
     );
     await this.setCaseRepo.save(rows);
-    return { caseIds: uniqueCaseIds };
+    return { caseIds: uniqueCaseIds, caseCount: uniqueCaseIds.length };
   }
 
   async getCaseIds(setId: string) {
@@ -167,19 +207,40 @@ export class ApiExecutionSetService {
     caseIds: string[],
   ) {
     if (!caseIds.length) return;
-    const cases = await this.caseRepo.find({
-      where: { projectId, id: In(caseIds) },
-      relations: ["endpoint"],
-    });
-    if (cases.length !== caseIds.length) {
-      throw new BadRequestException("部分案例不存在");
-    }
-    const invalid = cases.find(
-      (item) => item.endpoint?.transactionId !== transactionId,
+    const accessibleIdSet = await this.findAccessibleCaseIdSet(
+      projectId,
+      transactionId,
+      caseIds,
     );
-    if (invalid) {
-      throw new BadRequestException("案例须属于当前交易码");
+    if (accessibleIdSet.size !== caseIds.length) {
+      throw new BadRequestException(
+        "部分案例不存在、已删除或不属于当前交易码",
+      );
     }
+  }
+
+  /** 与案例列表一致：仅当前用户在本交易码下可见的案例 */
+  private async findAccessibleCaseIdSet(
+    projectId: string,
+    transactionId: string,
+    caseIds: string[],
+  ) {
+    const uniqueIds = [...new Set(caseIds.filter(Boolean))];
+    if (!uniqueIds.length) {
+      return new Set<string>();
+    }
+    const rows = await this.caseRepo
+      .createQueryBuilder("c")
+      .innerJoin("c.endpoint", "e")
+      .where("c.projectId = :projectId", { projectId })
+      .andWhere("c.createdBy = :userName", {
+        userName: RequestContext.getUserName(),
+      })
+      .andWhere("e.transactionId = :transactionId", { transactionId })
+      .andWhere("c.id IN (:...caseIds)", { caseIds: uniqueIds })
+      .select(["c.id"])
+      .getMany();
+    return new Set(rows.map((item) => item.id));
   }
 }
 

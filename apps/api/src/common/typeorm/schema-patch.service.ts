@@ -18,6 +18,7 @@ export class SchemaPatchService implements OnModuleInit {
     await this.ensureCaseNodeMetadataCaseNatureColumn();
     await this.ensureTestPointInstructGenerateErrorColumn();
     await this.ensureCaseGenerateJobTable();
+    await this.ensureApiCaseGenerateJobTable();
     await this.ensureStructRequirementJobTable();
     await this.ensureSummaryStructDocColumn();
     await ensureCaseEditorUtf8mb4TextColumns(this.dataSource, this.logger);
@@ -143,6 +144,43 @@ export class SchemaPatchService implements OnModuleInit {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
     this.logger.log("case_generate_job 表已创建");
+  }
+
+  private async ensureApiCaseGenerateJobTable() {
+    const rows: Array<{ Tables_in_db?: string }> = await this.dataSource.query(
+      "SHOW TABLES LIKE 'api_case_generate_job'",
+    );
+    if (rows.length > 0) {
+      return;
+    }
+
+    this.logger.warn(
+      "检测到缺少 api_case_generate_job 表，正在自动执行 schema 补丁…",
+    );
+    await this.dataSource.query(`
+      CREATE TABLE api_case_generate_job (
+        id CHAR(36) NOT NULL PRIMARY KEY,
+        projectId CHAR(36) NOT NULL,
+        transactionId CHAR(36) NOT NULL,
+        endpointIds JSON NULL,
+        promptIds JSON NULL,
+        status ENUM('queued','running','completed','failed','cancelled') NOT NULL DEFAULT 'queued',
+        resultCount INT NULL,
+        queuedAt DATETIME(3) NOT NULL,
+        startedAt DATETIME(3) NULL,
+        finishedAt DATETIME(3) NULL,
+        errorMessage TEXT NULL,
+        createdBy VARCHAR(255) NULL DEFAULT 'system',
+        createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+        updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+        INDEX idx_api_case_generate_job_status_queued (status, queuedAt),
+        INDEX idx_api_case_generate_job_project_transaction (projectId, transactionId),
+        INDEX idx_api_case_generate_job_project_status_queued (projectId, status, queuedAt),
+        INDEX idx_api_case_generate_job_transaction_status (transactionId, status),
+        INDEX idx_api_case_generate_job_status_finished (status, finishedAt)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    this.logger.log("api_case_generate_job 表已创建");
   }
 
   private async ensureStructRequirementJobTable() {

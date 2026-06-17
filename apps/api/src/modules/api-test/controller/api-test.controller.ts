@@ -32,6 +32,7 @@ import {
   AutoSaveApiDocDto,
   SaveApiDocDto,
 } from "../dto/save-api-doc.dto";
+import { SaveApiDocGenerationDto } from "../dto/save-api-doc-generation.dto";
 import {
   ExportApiReportDto,
   GenerateApiCasesDto,
@@ -48,6 +49,8 @@ import {
 import { SaveApiEnvironmentDto } from "../dto/save-environment.dto";
 import { SaveApiTransactionDto } from "../dto/save-transaction.dto";
 import { BatchDeleteTransactionsDto } from "../dto/batch-delete-transactions.dto";
+import { ListApiCasesDto } from "../dto/list-api-cases.dto";
+import { ListApiExecutionSetsDto } from "../dto/list-api-execution-sets.dto";
 
 const UPLOAD_EXTENSIONS = ["xls", "xlsx"];
 
@@ -214,6 +217,19 @@ export class ApiTestController {
     return this.apiDocService.saveDocument(projectId, transactionId, body);
   }
 
+  @Patch(":projectId/transactions/:transactionId/document/generation")
+  saveDocumentGeneration(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+    @Body() body: SaveApiDocGenerationDto,
+  ) {
+    return this.apiDocService.saveGenerationPrompts(
+      projectId,
+      transactionId,
+      body,
+    );
+  }
+
   @Get(":projectId/transactions/:transactionId/endpoints")
   async listEndpoints(
     @Param("projectId") projectId: string,
@@ -230,8 +246,9 @@ export class ApiTestController {
   listCases(
     @Param("projectId") projectId: string,
     @Param("transactionId") transactionId: string,
+    @Query() query: ListApiCasesDto,
   ) {
-    return this.apiCaseService.listCases(projectId, transactionId);
+    return this.apiCaseService.listCases(projectId, transactionId, query);
   }
 
   @Post(":projectId/transactions/:transactionId/cases")
@@ -263,6 +280,7 @@ export class ApiTestController {
   }
 
   @Post(":projectId/transactions/:transactionId/cases/generate")
+  @ApiOperation({ summary: "入队生成接口案例" })
   generateCases(
     @Param("projectId") projectId: string,
     @Param("transactionId") transactionId: string,
@@ -271,8 +289,29 @@ export class ApiTestController {
     return this.apiCaseService.generateCases(
       projectId,
       transactionId,
-      body.endpointIds,
+      {
+        endpointIds: body.endpointIds,
+        promptIds: body.promptIds,
+      },
     );
+  }
+
+  @Get(":projectId/transactions/:transactionId/cases/generate/status")
+  @ApiOperation({ summary: "查询接口案例生成队列状态" })
+  getGenerateStatus(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+  ) {
+    return this.apiCaseService.getGenerateStatus(projectId, transactionId);
+  }
+
+  @Post(":projectId/transactions/:transactionId/cases/generate/cancel")
+  @ApiOperation({ summary: "取消接口案例生成任务" })
+  cancelGenerate(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+  ) {
+    return this.apiCaseService.cancelGenerate(projectId, transactionId);
   }
 
   @Get(":projectId/environments")
@@ -368,8 +407,9 @@ export class ApiTestController {
   listExecutionSets(
     @Param("projectId") projectId: string,
     @Param("transactionId") transactionId: string,
+    @Query() query: ListApiExecutionSetsDto,
   ) {
-    return this.apiExecutionSetService.listSets(projectId, transactionId);
+    return this.apiExecutionSetService.listSets(projectId, transactionId, query);
   }
 
   @Post(":projectId/transactions/:transactionId/execution-sets")
@@ -442,6 +482,7 @@ export class ApiTestController {
       environmentId: body.environmentId,
       environmentServiceId: body.environmentServiceId,
       concurrency: body.concurrency,
+      encoding: body.encoding,
     });
   }
 

@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  forwardRef,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -12,18 +14,26 @@ import {
   auditFieldsForUpdate,
   RequestContext,
 } from "../../../common/audit/request-context";
-import { scopedWhere } from "../../../common/audit/user-scope";
+import {
+  scopedWhere,
+  scopedWhereWithSystem,
+} from "../../../common/audit/user-scope";
+import { PromptEntity } from "@scenario/entity/prompt.entity";
 import { ApiDocEntity } from "../entity/api-doc.entity";
 import { ApiEndpointEntity } from "../entity/api-endpoint.entity";
 import { ApiTestCaseEntity } from "../entity/api-test-case.entity";
+import { ApiTestExecutionSetCaseEntity } from "../entity/api-test-execution-set-case.entity";
 import { ApiTransactionEntity } from "../entity/api-transaction.entity";
 import { SaveApiCaseDto } from "../dto/save-api-case.dto";
-import {
-  generateCasesWithAi,
-  nextCaseNo,
-} from "../util/api-case-ai.util";
+import { ListApiCasesDto } from "../dto/list-api-cases.dto";
+import { generateCasesWithAi, nextCaseNo } from "../util/api-case-ai.util";
 import { buildFallbackCasesForEndpoint } from "../util/case-fallback.generator";
 import { toPublicApiCase } from "../../../common/http/public-response.util";
+import {
+  DEFAULT_CASE_FORGE_PAGE_SIZE,
+  normalizeCaseForgePageSize,
+} from "@case-forge/shared";
+import { ApiCaseGenerateQueueService } from "./api-case-generate-queue.service";
 
 @Injectable()
 export class ApiCaseService {
@@ -38,20 +48,26 @@ export class ApiCaseService {
     private readonly apiDocRepo: Repository<ApiDocEntity>,
     @InjectRepository(ApiTransactionEntity)
     private readonly transactionRepo: Repository<ApiTransactionEntity>,
+    @InjectRepository(ApiTestExecutionSetCaseEntity)
+    private readonly setCaseRepo: Repository<ApiTestExecutionSetCaseEntity>,
+    @InjectRepository(PromptEntity)
+    private readonly promptRepo: Repository<PromptEntity>,
     private readonly aiWorkflow: AiWorkflowService,
+    @Inject(forwardRef(() => ApiCaseGenerateQueueService))
+    private readonly generateQueueService: ApiCaseGenerateQueueService,
   ) {}
 
-  async listCases(projectId: string, transactionId?: string) {
-    if (!transactionId) {
-      const rows = await this.caseRepo.find({
-        where: scopedWhere({ projectId }),
-        relations: ["endpoint"],
-        order: { updatedAt: "DESC" },
-      });
-      return rows.map(toPublicApiCase);
-    }
+  async listCases(
+    projectId: string,
+    transactionId: string,
+    query: ListApiCasesDto = {},
+  ) {
+    const page = Math.max(1, query.page ?? 1);
+    const pageSize = normalizeCaseForgePageSize(
+      query.pageSize ?? DEFAULT_CASE_FORGE_PAGE_SIZE,
+    );
 
-    const rows = await this.caseRepo
+    const qb = this.caseRepo
       .createQueryBuilder("c")
       .innerJoinAndSelect("c.endpoint", "e")
       .where("c.projectId = :projectId", { projectId })
@@ -60,9 +76,16 @@ export class ApiCaseService {
       })
       .andWhere("e.transactionId = :transactionId", { transactionId })
       .orderBy("c.updatedAt", "DESC")
-      .getMany();
+      .skip((page - 1) * pageSize)
+      .take(pageSize);
 
-    return rows.map(toPublicApiCase);
+    const [rows, count] = await qb.getManyAndCount();
+    return {
+      rows: rows.map(toPublicApiCase),
+      count,
+      page,
+      pageSize,
+    };
   }
 
   async createCase(
@@ -102,7 +125,10 @@ export class ApiCaseService {
       preconditions: payload.preconditions ?? [],
       request: payload.request,
       expected: payload.expected,
-      metadata: { source: "manual" },
+      metadata: {
+        source: "manual",
+        promptIds: payload.promptIds ?? [],
+      },
       ...auditFieldsForCreate(),
     });
     const saved = await this.caseRepo.save(entity);
@@ -144,8 +170,15 @@ export class ApiCaseService {
     existing.metadata = {
       ...existing.metadata,
       source: existing.metadata?.source === "ai" ? "ai_edited" : "manual",
+      promptIds:
+        payload.promptIds !== undefined
+          ? payload.promptIds
+          : (existing.metadata?.promptIds ?? []),
     };
-    const saved = await this.caseRepo.save({ ...existing, ...auditFieldsForUpdate() });
+    const saved = await this.caseRepo.save({
+      ...existing,
+      ...auditFieldsForUpdate(),
+    });
     return toPublicApiCase(
       (await this.caseRepo.findOne({
         where: scopedWhere({ projectId, id: saved.id }),
@@ -155,6 +188,7 @@ export class ApiCaseService {
   }
 
   async deleteCase(projectId: string, caseId: string) {
+    await this.setCaseRepo.delete({ caseId });
     await this.caseRepo.delete(scopedWhere({ projectId, id: caseId }));
     return { ok: true };
   }
@@ -162,12 +196,83 @@ export class ApiCaseService {
   async generateCases(
     projectId: string,
     transactionId?: string,
-    endpointIds?: string[],
+    options?: { endpointIds?: string[]; promptIds?: string[] },
   ) {
     if (!transactionId) {
       throw new BadRequestException("请指定交易码后再生成案例");
     }
+    await this.validateGenerateRequest(projectId, transactionId, options);
+    const job = await this.generateQueueService.enqueue(
+      projectId,
+      transactionId,
+      options,
+    );
+    return {
+      jobId: job.id,
+      status: job.status,
+      phase: job.status,
+    };
+  }
+
+  async getGenerateStatus(projectId: string, transactionId: string) {
+    return this.generateQueueService.getStatus(projectId, transactionId);
+  }
+
+  async cancelGenerate(projectId: string, transactionId: string) {
+    return this.generateQueueService.cancel(projectId, transactionId);
+  }
+
+  async runQueuedGenerateJob(input: {
+    projectId: string;
+    transactionId: string;
+    endpointIds?: string[];
+    promptIds?: string[];
+  }) {
+    return this.generateCasesInternal(input.projectId, input.transactionId, {
+      endpointIds: input.endpointIds,
+      promptIds: input.promptIds,
+    });
+  }
+
+  private async validateGenerateRequest(
+    projectId: string,
+    transactionId: string,
+    options?: { endpointIds?: string[]; promptIds?: string[] },
+  ) {
+    await this.requireTransaction(projectId, transactionId);
+    const endpointIds = options?.endpointIds;
+    const baseWhere = { projectId, transactionId };
+    const endpoints = await this.endpointRepo.find({
+      where: endpointIds?.length
+        ? { projectId, id: In(endpointIds), transactionId }
+        : baseWhere,
+      order: { sortOrder: "ASC" },
+    });
+    if (!endpoints.length) {
+      throw new BadRequestException("没有可生成案例的接口端点");
+    }
+    const doc = await this.apiDocRepo.findOne({
+      where: scopedWhere({ projectId, transactionId }),
+    });
+    if (!doc) {
+      throw new BadRequestException("请先上传并结构化接口文档");
+    }
+    if (options?.promptIds !== undefined) {
+      doc.metadata = {
+        ...doc.metadata,
+        promptIds: options.promptIds,
+      };
+      await this.apiDocRepo.save(doc);
+    }
+  }
+
+  private async generateCasesInternal(
+    projectId: string,
+    transactionId: string,
+    options?: { endpointIds?: string[]; promptIds?: string[] },
+  ) {
     const transaction = await this.requireTransaction(projectId, transactionId);
+    const endpointIds = options?.endpointIds;
     const baseWhere = { projectId, transactionId };
     const endpoints = await this.endpointRepo.find({
       where: endpointIds?.length
@@ -182,10 +287,16 @@ export class ApiCaseService {
     const doc = await this.apiDocRepo.findOne({
       where: scopedWhere({ projectId, transactionId }),
     });
+    if (!doc) {
+      throw new BadRequestException("请先上传并结构化接口文档");
+    }
+
+    const promptIds = options?.promptIds ?? doc.metadata?.promptIds ?? [];
+    const scenarioPromptText = await this.resolveScenarioPromptText(promptIds);
     const structuredDoc =
-      doc?.tempStructuredMarkdown?.trim() ||
-      doc?.structuredMarkdown?.trim() ||
-      doc?.extractedRawText?.trim() ||
+      doc.tempStructuredMarkdown?.trim() ||
+      doc.structuredMarkdown?.trim() ||
+      doc.extractedRawText?.trim() ||
       "";
 
     const created: ApiTestCaseEntity[] = [];
@@ -195,11 +306,12 @@ export class ApiCaseService {
       }
       let payloads;
       try {
-        if (structuredDoc && this.aiWorkflow.canGenerateJsonCases()) {
+        if (structuredDoc && this.aiWorkflow.canGenerateApiCases()) {
           payloads = await generateCasesWithAi(this.aiWorkflow, {
             transactionCode: transaction.code,
             structuredDoc,
             endpoint,
+            scenarioPromptText,
           });
         } else {
           throw new Error("fallback");
@@ -208,7 +320,11 @@ export class ApiCaseService {
         this.logger.warn(
           `AI 案例生成失败，使用模板兜底（${endpoint.name}）：${error instanceof Error ? error.message : error}`,
         );
-        payloads = buildFallbackCasesForEndpoint(endpoint, transaction.code);
+        payloads = buildFallbackCasesForEndpoint(
+          endpoint,
+          transaction.code,
+          structuredDoc,
+        );
       }
 
       for (const payload of payloads) {
@@ -218,6 +334,10 @@ export class ApiCaseService {
           ...payload,
           transactionCode: payload.transactionCode ?? transaction.code,
           owner: payload.owner?.trim() || RequestContext.getUserName(),
+          metadata: {
+            source: "ai",
+            promptIds: [...promptIds],
+          },
           ...auditFieldsForCreate(),
         });
         created.push(await this.caseRepo.save(entity));
@@ -229,15 +349,61 @@ export class ApiCaseService {
     };
   }
 
-  private validateCasePayload(payload: SaveApiCaseDto) {
-    if (!payload.request?.method || !payload.request?.path) {
-      throw new BadRequestException("案例请求必须包含 method 与 path");
+  private async resolveScenarioPromptText(promptIds: string[]) {
+    if (!promptIds.length) {
+      return "";
     }
+    const prompts = await this.promptRepo.find({
+      where: scopedWhereWithSystem({ id: In(promptIds) }),
+      relations: ["scenario"],
+    });
+    const promptMap = new Map(prompts.map((prompt) => [prompt.id, prompt]));
+    return promptIds
+      .map((id) => {
+        const prompt = promptMap.get(id);
+        const content = prompt?.content?.trim();
+        if (!content) {
+          return null;
+        }
+        const scenarioName = prompt?.scenario?.name?.trim();
+        const promptName = prompt?.name?.trim();
+        const title =
+          scenarioName && promptName
+            ? `【${scenarioName} / ${promptName}】`
+            : promptName
+              ? `【${promptName}】`
+              : "";
+        return title ? `${title}\n${content}` : content;
+      })
+      .filter((content): content is string => Boolean(content))
+      .join("\n\n");
+  }
+
+  private validateCasePayload(payload: SaveApiCaseDto) {
+    const transport =
+      payload.request?.transport ??
+      (payload.request?.framing?.type === "length-prefix" ? "tcp" : "http");
+
+    if (transport === "http") {
+      if (!payload.request?.method?.trim() || !payload.request?.path?.trim()) {
+        throw new BadRequestException("HTTP 案例请求必须包含 method 与 path");
+      }
+      if (
+        !payload.expected?.skipStatusCheck &&
+        (payload.expected?.statusCode === undefined ||
+          payload.expected?.statusCode === null)
+      ) {
+        throw new BadRequestException("HTTP 案例必须配置预期状态码");
+      }
+      return;
+    }
+
     if (
-      payload.expected?.statusCode === undefined ||
-      payload.expected?.statusCode === null
+      payload.request?.body === undefined ||
+      payload.request?.body === null ||
+      (typeof payload.request.body === "string" && !payload.request.body.trim())
     ) {
-      throw new BadRequestException("案例必须配置预期状态码");
+      throw new BadRequestException("TCP 案例必须配置请求报文体");
     }
   }
 
@@ -275,4 +441,3 @@ export class ApiCaseService {
     return transaction;
   }
 }
-

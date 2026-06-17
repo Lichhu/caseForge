@@ -4,9 +4,17 @@
 import { Injectable } from "@nestjs/common";
 import {
   CASE_NODE_KIND_LABELS,
+  ensureCaseElementChildren,
   flattenCaseTreeToExcel,
+  getCaseTitleOnly,
+  isCaseLikeKind,
+  simplifyRequirementTitleForDisplay,
 } from "@case-forge/shared";
-import type { CaseTreeNode, MindMapExtras, MindMapSummary } from "@case-forge/shared";
+import type {
+  CaseTreeNode,
+  MindMapExtras,
+  MindMapSummary,
+} from "@case-forge/shared";
 import { randomUUID } from "node:crypto";
 import JSZip from "jszip";
 import {
@@ -45,7 +53,9 @@ export class ExportService {
 
   /** 导出为 XMind 工作簿（XMind 2020+ 兼容结构，含摘要） */
   async toXmind(tree: CaseTreeNode, mindMapExtras?: MindMapExtras) {
-    const summaryByParent = this.groupSummariesByParent(mindMapExtras?.summaries);
+    const summaryByParent = this.groupSummariesByParent(
+      mindMapExtras?.summaries,
+    );
     const sheetId = randomUUID();
     const sheet = {
       id: sheetId,
@@ -132,11 +142,12 @@ export class ExportService {
   private toXmindTopic(
     node: CaseTreeNode,
     summaryByParent: Map<string, MindMapSummary[]>,
+    requirementTitle?: string,
   ): Record<string, unknown> {
     const topic: Record<string, unknown> = {
       id: node.id,
       class: "topic",
-      title: node.title || "未命名节点",
+      title: this.resolveXmindTopicTitle(node, requirementTitle),
       structureClass: "org.xmind.ui.logic.right",
     };
     const kindLabel = this.resolveKindLabel(node.kind);
@@ -147,10 +158,20 @@ export class ExportService {
     if (notes) {
       topic.notes = notes;
     }
+    const nextRequirement =
+      node.kind === "requirement"
+        ? simplifyRequirementTitleForDisplay(node.title)
+        : requirementTitle;
     const children: Record<string, unknown[]> = {};
-    if (node.children?.length) {
-      children.attached = node.children.map((child) =>
-        this.toXmindTopic(child, summaryByParent),
+    const childNodes = isCaseLikeKind(node.kind)
+      ? ensureCaseElementChildren(
+          node,
+          this.resolveXmindTopicTitle(node, requirementTitle),
+        )
+      : node.children ?? [];
+    if (childNodes.length) {
+      children.attached = childNodes.map((child) =>
+        this.toXmindTopic(child, summaryByParent, nextRequirement),
       );
     }
     this.applyXmindSummariesToTopic(
@@ -163,6 +184,17 @@ export class ExportService {
       topic.children = children;
     }
     return topic;
+  }
+
+  /** 案例节点导出标题取「案例标题」子节点文案，不再使用「案例详情 [正/反]」 */
+  private resolveXmindTopicTitle(
+    node: CaseTreeNode,
+    requirementTitle?: string,
+  ): string {
+    if (isCaseLikeKind(node.kind)) {
+      return getCaseTitleOnly(node, requirementTitle) || "未命名案例";
+    }
+    return node.title || "未命名节点";
   }
 
   /**
@@ -257,14 +289,12 @@ export class ExportService {
     depth: number,
   ): string {
     const indent = " ".repeat(depth);
-    const attached = (
+    const attached =
       (topic.children as { attached?: Record<string, unknown>[] } | undefined)
-        ?.attached || []
-    );
-    const summary = (
+        ?.attached || [];
+    const summary =
       (topic.children as { summary?: Record<string, unknown>[] } | undefined)
-        ?.summary || []
-    );
+        ?.summary || [];
     const childTopics = [...attached, ...summary];
     if (!childTopics.length) {
       return "";

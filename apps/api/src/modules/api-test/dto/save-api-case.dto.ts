@@ -75,6 +75,12 @@ export class SaveApiCaseDto {
   @IsArray()
   preconditions?: string[];
 
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  promptIds?: string[];
+
   @ApiProperty()
   @IsObject()
   request!: ApiCaseRequest;
@@ -85,6 +91,12 @@ export class SaveApiCaseDto {
 }
 
 export class GenerateApiCasesDto {
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  promptIds?: string[];
+
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()
   @IsArray()

@@ -29,13 +29,27 @@ body,
   min-height: 100%;
 }
 
+#app > .ant-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 100%;
+}
+
 body {
   margin: 0;
   background: var(--cf-canvas);
   color: var(--cf-text);
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Microsoft YaHei", sans-serif;
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "PingFang SC",
+    "Microsoft YaHei",
+    sans-serif;
   overflow: hidden;
 }
 
@@ -92,9 +106,11 @@ textarea {
 }
 
 .platform-layout {
-  min-height: 100vh;
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
+  min-height: 100vh;
+  height: 100%;
   background: var(--cf-canvas);
 }
 
@@ -173,7 +189,9 @@ textarea {
   font-size: 13px;
   white-space: nowrap;
   cursor: pointer;
-  transition: color 0.15s, background 0.15s;
+  transition:
+    color 0.15s,
+    background 0.15s;
 }
 
 .platform-switch-item:hover {
@@ -271,9 +289,18 @@ textarea {
   overflow: hidden;
 }
 
+// 全屏时隐藏平台顶栏与侧栏，避免顶栏 z-index 盖住沉浸工作区
+// 用 body class 而非 :has()，以兼容旧版 Edge / Firefox ESR
+body.cf-immersive-active .platform-topbar {
+  display: none;
+}
+
 .app-frame.immersive-mode .app-shell {
-  display: block;
-  height: 100vh;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app-frame.immersive-mode .project-sidebar {
+  display: none;
 }
 
 .project-sidebar {
@@ -387,16 +414,27 @@ textarea {
   box-shadow: 0 0 0 3px rgb(182 15 45 / 8%);
 }
 
-.project-list {
+.project-list-shell {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: 6px;
   min-height: 0;
   margin-top: 4px;
+}
+
+.project-list {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   padding-right: 2px;
+}
+
+.project-list-pagination {
+  flex-shrink: 0;
 }
 
 .project-empty {
@@ -717,9 +755,7 @@ textarea {
 }
 
 .app-frame.immersive-mode .main-workspace {
-  height: 100vh;
   padding: 0;
-  overflow: hidden;
 }
 
 .immersive-orb {
@@ -743,6 +779,7 @@ textarea {
   border-radius: 6px;
   background: rgb(255 255 255 / 96%);
   box-shadow: 0 18px 42px rgb(16 24 40 / 18%);
+  -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
 
@@ -959,31 +996,23 @@ textarea {
 }
 
 .immersive-stage .workbench-grid,
-.immersive-stage .mind-workbench-grid {
+.immersive-stage .workbench-excel-grid {
   flex: 1 1 auto;
   min-height: 0;
 }
 
-.immersive-stage .mind-workbench-grid.excel-mode :deep(.excel-wrap) {
+.immersive-stage .workbench-excel-grid :deep(.excel-wrap) {
   flex: 1 1 auto;
   min-height: 0;
   height: 100%;
   max-height: 100%;
 }
 
-.immersive-stage .mind-canvas-wrap,
-.immersive-stage .mind-map {
-  height: 100%;
+.immersive-stage .workbench-excel-grid :deep(.xmind-wrap) {
+  flex: 1 1 auto;
   min-height: 0;
-}
-
-.immersive-stage .inspector {
-  overflow: hidden;
-}
-
-.immersive-stage .inspector-children-scroll {
-  overflow-x: hidden;
-  overflow-y: auto;
+  height: 100%;
+  max-height: 100%;
 }
 
 .panel {
@@ -1188,7 +1217,7 @@ textarea {
   margin-bottom: 0.45em;
 }
 
-.markdown-preview th, 
+.markdown-preview th,
 .markdown-preview td {
   border: 1px solid #dfe2e5;
   padding: 6px 13px;
@@ -1242,7 +1271,6 @@ textarea {
   font-weight: 800;
   box-shadow: 0 6px 16px rgb(182 15 45 / 22%);
 }
-
 
 .feature-instruction-panel {
   overflow: hidden;
@@ -1472,7 +1500,7 @@ textarea {
 .workbench-body
   > .ant-spin-nested-loading
   > .ant-spin-container
-  > .mind-workbench-grid {
+  > .workbench-excel-grid {
   flex: 1 1 auto;
   min-height: 0;
   height: 100%;
@@ -1491,56 +1519,7 @@ textarea {
   min-height: 0;
 }
 
-.mind-workbench-grid {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.mind-workbench-grid:not(.excel-mode) {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
-  grid-template-rows: minmax(0, 1fr);
-  flex: 1 1 0;
-  min-height: 0;
-  height: 100%;
-  overflow: hidden;
-}
-
-.mind-workbench-grid:not(.excel-mode) > .inspector {
-  height: 100%;
-  max-height: 100%;
-  overflow: hidden;
-}
-
-.mind-workbench-grid:not(.excel-mode) .mind-canvas-wrap {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.mind-workbench-grid:not(.excel-mode) .mind-map {
-  position: relative;
-  flex: 1 1 auto;
-  width: 100%;
-  min-height: 240px;
-  height: 100%;
-  overflow: hidden;
-}
-
-.mind-workbench-grid:not(.excel-mode) .mind-map > .map-container {
-  position: absolute;
-  inset: 0;
-  width: 100% !important;
-  height: 100% !important;
-  min-height: 0;
-}
-
-.mind-workbench-grid.excel-mode {
+.workbench-excel-grid {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
@@ -1548,7 +1527,7 @@ textarea {
   overflow: hidden;
 }
 
-.mind-workbench-grid.excel-mode :deep(.excel-wrap) {
+.workbench-excel-grid :deep(.excel-wrap) {
   flex: 1 1 auto;
   min-height: 0;
   height: 100%;
@@ -1556,176 +1535,19 @@ textarea {
   overflow: hidden;
 }
 
-.mind-workbench-grid.excel-mode :deep(.excel-scroll) {
+.workbench-excel-grid :deep(.xmind-wrap) {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.workbench-excel-grid :deep(.excel-scroll) {
   flex: 1 1 auto;
   min-height: 0;
   height: 0;
   overflow: auto;
-}
-
-.mind-canvas-wrap {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  background:
-    linear-gradient(#f2f4f7 23px, transparent 24px),
-    linear-gradient(90deg, #f2f4f7 23px, transparent 24px);
-  background-color: #fff;
-  background-size: 24px 24px;
-}
-
-.mind-toolbar {
-  position: absolute;
-  z-index: 8;
-  top: 14px;
-  left: 14px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px;
-  border: 1px solid #e4e7ec;
-  border-radius: 4px;
-  background: #fff;
-  box-shadow: 0 8px 18px rgb(16 24 40 / 10%);
-}
-
-.mind-tool-button {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: #344054;
-  cursor: pointer;
-}
-
-.mind-tool-button:hover {
-  background: #fff5f6;
-  color: #b60f2d;
-}
-
-.mind-tool-button.danger:hover {
-  background: #fff1f0;
-  color: #cf1322;
-}
-
-.mind-toolbar-divider {
-  width: 1px;
-  height: 22px;
-  margin: 0 4px;
-  background: #e4e7ec;
-}
-
-.mind-map {
-  flex: 1 1 auto;
-  width: 100%;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.mind-map > .map-container {
-  width: 100%;
-  height: 100%;
-}
-
-.mind-map .map-canvas {
-  background: transparent;
-}
-
-.mind-map tags {
-  align-items: center;
-  margin-left: 8px;
-}
-
-.mind-map tag {
-  border-radius: 4px;
-  background: rgb(15 23 42 / 8%);
-  color: #344054;
-  font-size: 11px;
-}
-
-.mind-map .context-menu {
-  z-index: 1200;
-  // 全屏遮罩不拦截指针，避免挡住右键拖动画布 / 左键拖节点
-  pointer-events: none;
-}
-
-.mind-map .context-menu .menu-list {
-  pointer-events: auto;
-}
-
-.mind-map > .map-container.mind-canvas-grab {
-  cursor: grab;
-}
-
-.mind-map > .map-container.mind-canvas-grabbing {
-  cursor: grabbing;
-}
-
-.inspector {
-  display: flex;
-  flex-direction: column;
-  align-self: stretch;
-  min-height: 0;
-  height: 100%;
-  max-height: 100%;
-  min-width: 0;
-  padding: 16px;
-  border-left: 1px solid #eaecf0;
-  background: #fff;
-  overflow: hidden;
-}
-
-.inspector-title,
-.inspector h3 {
-  flex-shrink: 0;
-  margin: 0 0 10px;
-  font-size: 15px;
-}
-
-.inspector-body {
-  display: flex;
-  flex: 1 1 0;
-  flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-  height: 0;
-  overflow: hidden;
-}
-
-.inspector-fields {
-  display: grid;
-  flex: 0 0 auto;
-  gap: 10px;
-  align-content: start;
-}
-
-.inspector-children-scroll {
-  display: flex;
-  flex: 1 1 0;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
-  height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-}
-
-.inspector-dirty-alert {
-  flex-shrink: 0;
-}
-
-.inspector label {
-  color: #475467;
-  font-size: 12px;
-  font-weight: 700;
 }
 
 .tree-node-wrap {
@@ -1883,11 +1705,6 @@ textarea {
 
   .stage-nav {
     grid-template-columns: 1fr;
-  }
-
-  .inspector {
-    border-top: 1px solid #eaecf0;
-    border-left: 0;
   }
 }
 
@@ -2213,7 +2030,8 @@ textarea {
   font-size: 12px;
 }
 
-.test-point-filter-dropdown.ant-select-dropdown .ant-select-item-option-content {
+.test-point-filter-dropdown.ant-select-dropdown
+  .ant-select-item-option-content {
   white-space: normal;
   word-break: break-word;
 }
@@ -2538,6 +2356,7 @@ textarea {
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   word-break: break-word;
 }
 
@@ -2670,7 +2489,7 @@ textarea {
 .field-label--required::after {
   margin-left: 4px;
   color: #d92d20;
-  content: '*';
+  content: "*";
 }
 
 .editor-textarea {
@@ -2773,6 +2592,19 @@ textarea {
   gap: 0;
 }
 
+.api-generate-modal .ant-modal-body {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 160px);
+  overflow: hidden;
+}
+
+.api-generate-modal .generate-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .scenario-maintain-modal .scenario-manager {
   flex: 1 1 auto;
   min-height: 0;
@@ -2845,18 +2677,22 @@ textarea {
   flex-direction: column;
   gap: 10px;
   min-height: 0;
-  overflow: auto;
+  overflow-y: auto;
   padding-right: 2px;
+  padding-bottom: 4px;
 }
 
 .scenario-card {
+  flex-shrink: 0;
   border: 1px solid var(--cf-border);
   border-radius: var(--cf-radius);
   background: var(--cf-surface);
   padding: 12px;
   cursor: pointer;
   user-select: none;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .scenario-card .scenario-name-input,
@@ -2883,11 +2719,6 @@ textarea {
 }
 
 .scenario-name-input .ant-input-show-count-suffix {
-  color: #98a2b3;
-  font-size: 11px;
-}
-
-.scenario-prompt-table .ant-input-textarea-show-count::after {
   color: #98a2b3;
   font-size: 11px;
 }
@@ -2925,22 +2756,59 @@ textarea {
   background: #fff;
 }
 
+.scenario-prompt-list-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 4px;
+}
+
+.scenario-prompt-card {
+  flex-shrink: 0;
+  border: 1px solid #e4e7ec;
+  border-radius: 10px;
+  padding: 12px 12px 10px;
+  background: #fff;
+}
+
+.scenario-prompt-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.scenario-prompt-textarea textarea {
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.scenario-prompt-list-wrap .ant-input-textarea-show-count::after {
+  display: block;
+  margin-top: 6px;
+  text-align: right;
+  color: #98a2b3;
+  font-size: 11px;
+}
+
+.scenario-prompt-inline-empty {
+  margin: 24px 0;
+}
+
 .scenario-prompt-table-wrap {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .scenario-prompt-table .ant-table {
   background: #fff;
-}
-
-.scenario-prompt-table .ant-table-body {
-  overflow-y: auto !important;
-}
-
-.scenario-prompt-table .ant-table-tbody > tr:last-child > td {
-  padding-bottom: 24px;
 }
 
 .scenario-prompt-empty {

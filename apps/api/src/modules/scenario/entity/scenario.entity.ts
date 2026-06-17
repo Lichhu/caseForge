@@ -10,6 +10,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from "typeorm";
+import type { ScenarioScope } from "@case-forge/shared";
 import { PromptEntity } from "./prompt.entity";
 
 /**
@@ -34,6 +35,10 @@ export class ScenarioEntity {
   // 场景类别
   @Column()
   category: string;
+
+  /** 场景归属：case=案例动态指令，api=接口测试 */
+  @Column({ length: 16, default: "case" })
+  scope: ScenarioScope;
 
   // 是否启用
   @Column({

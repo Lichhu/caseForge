@@ -23,11 +23,29 @@ export class ApiTestEnvironmentServiceEntity {
   @Column()
   name: string;
 
+  @Column({ type: "varchar", length: 16, default: "http" })
+  transport: "http" | "tcp";
+
+  @Column({ type: "varchar", length: 16, nullable: true })
+  payloadFormat?: "json" | "xml" | "text" | "soap" | "other";
+
   @Column({ type: "varchar", length: 512, nullable: true })
   baseUrl?: string;
 
   @Column({ type: "varchar", length: 256, nullable: true })
   pathPrefix?: string;
+
+  @Column({ type: "varchar", length: 255, nullable: true })
+  host?: string;
+
+  @Column({ type: "int", nullable: true })
+  port?: number;
+
+  @Column({ type: "varchar", length: 32, nullable: true })
+  encoding?: string;
+
+  @Column({ type: "json", nullable: true })
+  framing?: { type: "length-prefix"; width: number; encoding?: string };
 
   @Column({ type: "json", nullable: true })
   headers?: Record<string, string>;

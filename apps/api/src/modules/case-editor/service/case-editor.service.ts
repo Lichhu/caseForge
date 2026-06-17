@@ -2,7 +2,11 @@
  * 案例编辑运行持久化服务：负责案例树运行记录的创建、
  * 查询、更新及树形结构的读写。
  */
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 import type {
   CaseTreeNode,
@@ -260,24 +264,27 @@ export class CaseEditorService {
     const plan = buildCaseTreeDiffPlan(existing, incoming);
 
     if (isFullTreeReplace(plan, existing.length)) {
-      await manager.delete(CaseTreeEntity, { caseEditorId: context.caseEditorId });
+      await manager.delete(CaseTreeEntity, {
+        caseEditorId: context.caseEditorId,
+      });
       await this.insertTreeBatch(manager, incoming);
       return;
     }
 
-    await this.deleteByIds(
-      manager,
-      CaseTreeEntity,
-      plan.treeDeleteIds,
-      { caseEditorId: context.caseEditorId },
-    );
+    await this.deleteByIds(manager, CaseTreeEntity, plan.treeDeleteIds, {
+      caseEditorId: context.caseEditorId,
+    });
     await this.deleteByCaseTreeIds(manager, plan.metadataDeleteCaseTreeIds);
     await this.insertTreeBatch(manager, {
       treeRows: plan.treeInserts,
       metadataRows: plan.metadataInserts,
     });
     await this.saveInChunks(manager, CaseTreeEntity, plan.treeUpdates);
-    await this.saveInChunks(manager, CaseNodeMetadataEntity, plan.metadataUpdates);
+    await this.saveInChunks(
+      manager,
+      CaseNodeMetadataEntity,
+      plan.metadataUpdates,
+    );
   }
 
   private async deleteByIds(
@@ -297,7 +304,11 @@ export class CaseEditorService {
     manager: EntityManager,
     caseTreeIds: string[],
   ) {
-    for (let index = 0; index < caseTreeIds.length; index += TREE_BATCH_CHUNK_SIZE) {
+    for (
+      let index = 0;
+      index < caseTreeIds.length;
+      index += TREE_BATCH_CHUNK_SIZE
+    ) {
       const chunk = caseTreeIds.slice(index, index + TREE_BATCH_CHUNK_SIZE);
       if (!chunk.length) continue;
       await manager.delete(CaseNodeMetadataEntity, { caseTreeId: In(chunk) });
@@ -320,13 +331,21 @@ export class CaseEditorService {
     manager: EntityManager,
     flattened: ReturnType<typeof flattenCaseTreeForPersist>,
   ): Promise<void> {
-    for (let index = 0; index < flattened.treeRows.length; index += TREE_BATCH_CHUNK_SIZE) {
+    for (
+      let index = 0;
+      index < flattened.treeRows.length;
+      index += TREE_BATCH_CHUNK_SIZE
+    ) {
       await manager.insert(
         CaseTreeEntity,
         flattened.treeRows.slice(index, index + TREE_BATCH_CHUNK_SIZE),
       );
     }
-    for (let index = 0; index < flattened.metadataRows.length; index += TREE_BATCH_CHUNK_SIZE) {
+    for (
+      let index = 0;
+      index < flattened.metadataRows.length;
+      index += TREE_BATCH_CHUNK_SIZE
+    ) {
       await manager.insert(
         CaseNodeMetadataEntity,
         flattened.metadataRows.slice(index, index + TREE_BATCH_CHUNK_SIZE),

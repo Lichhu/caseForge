@@ -59,14 +59,27 @@ export class AiWorkflowService {
     return this.config.caseDocPromoteUrl;
   }
 
+  getAtCaseSkillUrl() {
+    return this.config.atCaseSkillUrl;
+  }
+
   /** 是否已配置 promote-skill + AI Chat（案例 JSON 生成路径） */
   canGenerateJsonCases() {
     return Boolean(this.config.aiChat.url && this.config.caseDocPromoteUrl);
   }
 
+  /** 是否已配置 at-case-skill + AI Chat（接口测试案例生成） */
+  canGenerateApiCases() {
+    return Boolean(this.config.aiChat.url?.trim() && this.config.atCaseSkillUrl?.trim());
+  }
+
   /** AI Chat 与 Skill 是否至少配置了一类能力 */
   isAiConfigured() {
-    return this.canStructRequirement() || this.canGenerateJsonCases();
+    return (
+      this.canStructRequirement()
+      || this.canGenerateJsonCases()
+      || this.canGenerateApiCases()
+    );
   }
 
   /**

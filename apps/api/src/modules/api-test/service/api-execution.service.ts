@@ -1,5 +1,7 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
+import iconv from "iconv-lite";
+import { Socket } from "node:net";
 import { In, Repository } from "typeorm";
 import { scopedWhere } from "../../../common/audit/user-scope";
 import { auditFieldsForUpdate } from "../../../common/audit/request-context";
@@ -12,15 +14,38 @@ import {
   buildRuntimeVariables,
   substituteDeep,
 } from "../util/variable-substitute.util";
-import {
-  isAllPassed,
-  runAssertions,
-} from "../util/assertion-runner.util";
-import type { ApiRunItemStatus } from "@case-forge/shared";
+import { isAllPassed, runAssertions } from "../util/assertion-runner.util";
+import type { ApiCaseRequest, ApiRunItemStatus } from "@case-forge/shared";
 import { toPublicApiRun } from "../../../common/http/public-response.util";
 
 const DEFAULT_CONCURRENCY = 5;
 const MAX_CONCURRENCY = 10;
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+type RuntimeService = {
+  id: string;
+  name: string;
+  transport?: "http" | "tcp";
+  payloadFormat?: string;
+  baseUrl?: string;
+  pathPrefix?: string;
+  host?: string;
+  port?: number;
+  encoding?: string;
+  framing?: { type: "length-prefix"; width: number; encoding?: string };
+  headers?: Record<string, string>;
+  variables?: Record<string, string>;
+};
+
+type RuntimeEnvironment = {
+  id: string;
+  baseUrl: string;
+  headers: Record<string, string>;
+  variables: Record<string, string>;
+  secrets: Record<string, string>;
+  environmentServiceId?: string;
+  services?: RuntimeService[];
+};
 
 @Injectable()
 export class ApiExecutionService {
@@ -43,6 +68,7 @@ export class ApiExecutionService {
     executionSetId?: string;
     transactionId?: string;
     concurrency?: number;
+    encoding?: string;
   }) {
     if (!input.caseIds.length) {
       throw new BadRequestException("请至少选择一条案例");
@@ -51,11 +77,11 @@ export class ApiExecutionService {
       MAX_CONCURRENCY,
       Math.max(1, input.concurrency ?? DEFAULT_CONCURRENCY),
     );
-    const env = await this.environmentService.getRuntimeEnvironment(
+    const env = (await this.environmentService.getRuntimeEnvironment(
       input.projectId,
       input.environmentId,
       input.environmentServiceId,
-    );
+    )) as RuntimeEnvironment;
     const cases = await this.caseRepo.find({
       where: {
         ...scopedWhere({ projectId: input.projectId }),
@@ -92,9 +118,9 @@ export class ApiExecutionService {
       const item = await this.executeSingleCase({
         runId: run.id,
         testCase,
-        baseUrl: env.baseUrl,
-        headers: env.headers,
+        env,
         vars,
+        encoding: input.encoding,
       });
       items.push(item);
       if (item.status === "passed") passed += 1;
@@ -120,6 +146,7 @@ export class ApiExecutionService {
     environmentId: string;
     environmentServiceId?: string;
     concurrency?: number;
+    encoding?: string;
   }) {
     await this.executionSetService.requireSet(
       input.projectId,
@@ -140,6 +167,7 @@ export class ApiExecutionService {
       executionSetId: input.executionSetId,
       transactionId: input.transactionId,
       concurrency: input.concurrency,
+      encoding: input.encoding,
     });
     await this.executionSetService.updateLastRun(input.executionSetId, {
       runId: detail.id,
@@ -179,36 +207,66 @@ export class ApiExecutionService {
   private async executeSingleCase(input: {
     runId: string;
     testCase: ApiTestCaseEntity;
-    baseUrl: string;
-    headers: Record<string, string>;
+    env: RuntimeEnvironment;
     vars: Record<string, string>;
+    encoding?: string;
   }) {
-    const request = substituteDeep(input.testCase.request, input.vars);
-    const path = substituteVariablesPath(request.path, input.vars);
-    const url = new URL(path.replace(/^\//, ""), `${input.baseUrl}/`);
-    if (request.query) {
-      for (const [key, value] of Object.entries(request.query)) {
+    const request = substituteDeep(
+      input.testCase.request,
+      input.vars,
+    ) as ApiCaseRequest;
+    const transport = request.transport ?? (request.framing ? "tcp" : "http");
+    if (transport === "tcp") {
+      return this.executeTcpCase({ ...input, request });
+    }
+    return this.executeHttpCase({ ...input, request });
+  }
+
+  private async executeHttpCase(input: {
+    runId: string;
+    testCase: ApiTestCaseEntity;
+    env: RuntimeEnvironment;
+    vars: Record<string, string>;
+    request: ApiCaseRequest;
+    encoding?: string;
+  }) {
+    const service = this.resolveRuntimeService(input.env, "http");
+    const baseUrl = this.resolveHttpBaseUrl(input.env, service);
+    const path = substituteVariablesPath(input.request.path, input.vars);
+    const url = new URL(path.replace(/^\//, ""), `${baseUrl}/`);
+    if (input.request.query) {
+      for (const [key, value] of Object.entries(input.request.query)) {
         url.searchParams.set(key, String(value));
       }
     }
-    const headers = {
-      ...input.headers,
-      ...(request.headers ?? {}),
-    };
+    const headers = applyTransportEncoding(
+      {
+        ...input.env.headers,
+        ...(service?.headers ?? {}),
+        ...(input.request.headers ?? {}),
+      },
+      input.encoding,
+    );
     const requestSnapshot = {
-      method: request.method,
+      method: input.request.method,
       url: url.toString(),
       headers: redactHeaders(headers),
-      body: request.body,
+      body: input.request.body,
+      encoding:
+        input.encoding ??
+        input.request.encoding ??
+        input.request.framing?.encoding,
+      transport: input.request.transport ?? "http",
+      service: service?.name,
     };
 
     const started = Date.now();
     try {
       const response = await fetch(url.toString(), {
-        method: request.method,
+        method: input.request.method,
         headers,
-        body: buildRequestBody(request),
-        signal: AbortSignal.timeout(30_000),
+        body: buildRequestBody(input.request),
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
       });
       const durationMs = Date.now() - started;
       const text = await response.text();
@@ -269,6 +327,142 @@ export class ApiExecutionService {
     }
   }
 
+  private async executeTcpCase(input: {
+    runId: string;
+    testCase: ApiTestCaseEntity;
+    env: RuntimeEnvironment;
+    vars: Record<string, string>;
+    request: ApiCaseRequest;
+    encoding?: string;
+  }) {
+    const service = this.resolveRuntimeService(input.env, "tcp");
+    const target = this.resolveTcpTarget(input.env, service);
+    const encoding =
+      input.encoding ??
+      input.request.encoding ??
+      service?.encoding ??
+      input.request.framing?.encoding ??
+      "GBK";
+    const framing = input.request.framing ?? service?.framing;
+    const payload = buildTcpPayload(input.request, encoding, framing);
+    const requestSnapshot = {
+      method: input.request.method,
+      target: `${target.host}:${target.port}`,
+      body: input.request.body,
+      encoding,
+      framing,
+      transport: "tcp",
+      service: service?.name,
+    };
+    const started = Date.now();
+    try {
+      const responseText = await sendTcpPayload(
+        target.host,
+        target.port,
+        payload,
+        encoding,
+      );
+      const durationMs = Date.now() - started;
+      const responseSnapshot = {
+        status: 200,
+        headers: {},
+        body: truncateBody(responseText),
+      };
+      const assertions = runAssertions({
+        expected: input.testCase.expected,
+        statusCode: 200,
+        body: responseText,
+        durationMs,
+      });
+      const status: ApiRunItemStatus = isAllPassed(assertions)
+        ? "passed"
+        : "failed";
+      return this.runItemRepo.create({
+        runId: input.runId,
+        caseId: input.testCase.id,
+        caseTitle: input.testCase.title,
+        status,
+        durationMs,
+        requestSnapshot,
+        responseSnapshot,
+        assertions,
+      });
+    } catch (err) {
+      const durationMs = Date.now() - started;
+      return this.runItemRepo.create({
+        runId: input.runId,
+        caseId: input.testCase.id,
+        caseTitle: input.testCase.title,
+        status: "error",
+        durationMs,
+        requestSnapshot,
+        responseSnapshot: {
+          status: 0,
+          headers: {},
+          body: null,
+          error: err instanceof Error ? err.message : "TCP 请求失败",
+        },
+        assertions: [
+          {
+            name: "请求执行",
+            passed: false,
+            expected: "成功发起 TCP 请求",
+            actual: err instanceof Error ? err.message : err,
+          },
+        ],
+      });
+    }
+  }
+
+  private resolveRuntimeService(
+    env: RuntimeEnvironment,
+    transport: "http" | "tcp",
+  ) {
+    const services = env.services ?? [];
+    if (env.environmentServiceId) {
+      const selected = services.find(
+        (service) => service.id === env.environmentServiceId,
+      );
+      if (selected?.transport === transport) return selected;
+    }
+    return services.find(
+      (service) => (service.transport ?? "http") === transport,
+    );
+  }
+
+  private resolveHttpBaseUrl(
+    env: RuntimeEnvironment,
+    service?: RuntimeService,
+  ) {
+    let baseUrl = service?.baseUrl?.trim() || env.baseUrl;
+    if (service?.pathPrefix?.trim() && !service.baseUrl?.trim()) {
+      const prefix = service.pathPrefix.startsWith("/")
+        ? service.pathPrefix
+        : `/${service.pathPrefix}`;
+      baseUrl = `${baseUrl.replace(/\/$/, "")}${prefix}`;
+    }
+    if (!/^https?:\/\//i.test(baseUrl)) {
+      throw new BadRequestException("HTTP 服务需要配置 http(s):// Base URL");
+    }
+    return baseUrl.replace(/\/$/, "");
+  }
+
+  private resolveTcpTarget(env: RuntimeEnvironment, service?: RuntimeService) {
+    const host = service?.host?.trim();
+    const port = service?.port;
+    if (host && port) return { host, port };
+    const raw = (service?.baseUrl || env.baseUrl || "").replace(
+      /^https?:\/\//i,
+      "",
+    );
+    const [rawHost, rawPort] = raw.split(":");
+    const parsedPort = Number(rawPort);
+    if (!rawHost || !Number.isFinite(parsedPort)) {
+      throw new BadRequestException("TCP 服务需要配置 host 和 port");
+    }
+    return { host: rawHost, port: parsedPort };
+  }
+
   private async runWithConcurrency<T>(
     items: T[],
     concurrency: number,
@@ -287,7 +481,10 @@ export class ApiExecutionService {
 }
 
 function substituteVariablesPath(path: string, vars: Record<string, string>) {
-  return path.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
+  return path.replace(
+    /\{(\w+)\}/g,
+    (_, key: string) => vars[key] ?? `{${key}}`,
+  );
 }
 
 function buildRequestBody(request: { method: string; body?: unknown }) {
@@ -296,6 +493,93 @@ function buildRequestBody(request: { method: string; body?: unknown }) {
   if (request.body === undefined || request.body === null) return undefined;
   if (typeof request.body === "string") return request.body;
   return JSON.stringify(request.body);
+}
+
+function buildTcpPayload(
+  request: ApiCaseRequest,
+  encoding: string,
+  framing?: { type: "length-prefix"; width: number; encoding?: string },
+) {
+  const body =
+    typeof request.body === "string"
+      ? request.body
+      : JSON.stringify(request.body ?? "");
+  const bodyBuffer = encodeText(body, encoding);
+  if (framing?.type !== "length-prefix") return bodyBuffer;
+  const width = framing.width ?? 8;
+  const prefix = String(bodyBuffer.length).padStart(width, "0");
+  return Buffer.concat([
+    encodeText(prefix, framing.encoding ?? encoding),
+    bodyBuffer,
+  ]);
+}
+
+function encodeText(value: string, encoding: string) {
+  const normalized = encoding.toLowerCase();
+  if (["utf8", "utf-8"].includes(normalized)) {
+    return Buffer.from(value, "utf8");
+  }
+  if (iconv.encodingExists(normalized)) {
+    return iconv.encode(value, normalized);
+  }
+  return Buffer.from(value, "utf8");
+}
+
+function sendTcpPayload(
+  host: string,
+  port: number,
+  payload: Buffer,
+  encoding: string,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const socket = new Socket();
+    const chunks: Buffer[] = [];
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("TCP 请求超时"));
+    }, DEFAULT_TIMEOUT_MS);
+    socket.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    socket.on("data", (chunk) => chunks.push(chunk));
+    socket.once("end", () => {
+      clearTimeout(timer);
+      resolve(decodeText(Buffer.concat(chunks), encoding));
+    });
+    socket.connect(port, host, () => {
+      socket.write(payload);
+    });
+  });
+}
+
+function decodeText(buffer: Buffer, encoding: string): string {
+  const normalized = encoding.toLowerCase();
+  if (["utf8", "utf-8"].includes(normalized)) {
+    return buffer.toString("utf8");
+  }
+  if (iconv.encodingExists(normalized)) {
+    return iconv.decode(buffer, normalized);
+  }
+  return buffer.toString("utf8");
+}
+
+function applyTransportEncoding(
+  headers: Record<string, string>,
+  encoding?: string,
+) {
+  if (!encoding?.trim()) return headers;
+  const charset = encoding.trim();
+  const next = { ...headers };
+  for (const [key, value] of Object.entries(next)) {
+    if (key.toLowerCase() !== "content-type") continue;
+    if (/charset\s*=/i.test(value)) {
+      next[key] = value.replace(/charset\s*=\s*[^;]+/i, `charset=${charset}`);
+    } else {
+      next[key] = `${value}; charset=${charset}`;
+    }
+  }
+  return next;
 }
 
 function redactHeaders(headers: Record<string, string>) {

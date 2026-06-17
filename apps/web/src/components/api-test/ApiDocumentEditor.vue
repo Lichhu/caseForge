@@ -3,6 +3,7 @@
     <div class="panel-header">
       <div>
         <h2>接口文档</h2>
+        <p class="document-panel-desc">上传并结构化接口文档，可 AI 生成测试案例</p>
         <div v-if="apiStore.apiDoc?.sourceDocName" class="doc-links">
           <a
             v-if="apiStore.apiDoc.sourceDocUrl"
@@ -26,14 +27,18 @@
             上传
           </a-button>
         </a-upload>
+        <a-button @click="openScenarioModal">
+          <template #icon><SettingOutlined /></template>
+          场景
+        </a-button>
         <a-button
           type="primary"
-          :loading="apiStore.loading"
-          :disabled="!apiStore.apiDoc?.sourceDocName || apiStore.loading"
-          @click="onStructure"
+          :disabled="!apiStore.canGenerateCases"
+          :loading="generatingCases"
+          @click="onGenerate"
         >
-          <template #icon><BranchesOutlined /></template>
-          结构化
+          <template #icon><ThunderboltOutlined /></template>
+          AI 生成案例
         </a-button>
         <a-button :disabled="!canSave" @click="onSave">
           <template #icon><SaveOutlined /></template>
@@ -43,6 +48,14 @@
     </div>
 
     <a-alert
+      v-if="generatingCases"
+      type="info"
+      show-icon
+      message="正在后台生成案例，完成后将自动进入案例编辑"
+      class="document-panel-alert"
+    />
+
+    <a-alert
       v-if="apiStore.apiDoc?.structuringStatus === 'failed'"
       type="error"
       show-icon
@@ -50,10 +63,10 @@
       class="document-panel-alert"
     />
 
-    <div class="document-table-scroll">
+    <div ref="tableScrollRef" class="document-table-scroll">
       <a-empty
         v-if="!sections.length"
-        description="上传 Excel 后点击结构化，将在此以表格展示并可编辑"
+        description="上传 Excel 后将自动结构化，可 AI 生成案例"
       />
       <div v-for="(section, sectionIndex) in sections" :key="section.title" class="doc-section-block">
         <h3 class="doc-section-title">{{ section.title }}</h3>
@@ -81,8 +94,9 @@
                   <textarea
                     v-model="record[colKey]"
                     class="doc-cell-input"
-                    rows="2"
-                    @input="onTableChange(sectionIndex)"
+                    rows="1"
+                    @input="onCellInput(sectionIndex, $event)"
+                    @blur="handleCellBlur(sectionIndex)"
                   />
                 </td>
               </tr>
@@ -92,14 +106,54 @@
       </div>
     </div>
   </section>
+
+  <ScenarioMaintainModal v-model:open="scenarioModalOpen" scope="api" />
+
+  <a-modal
+    v-model:open="generateModalOpen"
+    title="AI 生成案例"
+    :width="800"
+    ok-text="开始生成"
+    cancel-text="取消"
+    :confirm-loading="generatingCases"
+    destroy-on-close
+    wrap-class-name="api-generate-modal"
+    @ok="onConfirmGenerate"
+    @cancel="onCancelGenerate"
+  >
+    <div class="generate-modal-body">
+      <a-alert
+        v-if="apiStore.apiDoc?.caseCount"
+        type="warning"
+        show-icon
+        class="generate-modal-alert"
+        message="将基于当前接口文档与场景约束重新生成案例，不会自动删除已有案例。"
+      />
+      <p class="generate-modal-hint">场景提示词为可选项，不选择也可直接开始生成。</p>
+      <ScenarioPromptPicker
+        v-model:prompt-ids="generatePromptIds"
+        scope="api"
+        optional
+        embedded
+      />
+    </div>
+  </a-modal>
 </template>
 
 <script setup lang="ts">
-import { computed, onActivated, onDeactivated, ref, watch } from 'vue';
-import { BranchesOutlined, SaveOutlined, UploadOutlined } from '@ant-design/icons-vue';
+import { computed, nextTick, onActivated, onDeactivated, ref, watch } from 'vue';
+import {
+  SaveOutlined,
+  SettingOutlined,
+  ThunderboltOutlined,
+  UploadOutlined,
+} from '@ant-design/icons-vue';
 import { Modal, message } from 'ant-design-vue';
 import type { UploadProps } from 'ant-design-vue';
+import ScenarioMaintainModal from '@/components/ScenarioMaintainModal.vue';
+import ScenarioPromptPicker from '@/components/ScenarioPromptPicker.vue';
 import { useApiTestStore } from '@/stores/apiTest';
+import { filterSelectablePromptIds, collectDefaultPromptIds } from '@/utils/scenarioLibrary';
 import {
   parseApiDocTableText,
   sectionTableColumnKeys,
@@ -110,16 +164,35 @@ import {
   type ApiDocTableSection,
 } from '@/utils/api-doc-table.util';
 
+const tableScrollRef = ref<HTMLElement | null>(null);
 const apiStore = useApiTestStore();
 const sections = ref<ApiDocTableSection[]>([]);
-const sectionData = ref<Record<string, string>[]>([]);
+const sectionData = ref<Record<string, string>[][]>([]);
 const editorText = ref('');
 const autoSaveTimer = ref<number | null>(null);
 const syncingFromStore = ref(false);
 const panelActive = ref(true);
+const scenarioModalOpen = ref(false);
+const generateModalOpen = ref(false);
+const docPromptIds = ref<string[]>([]);
+const generatePromptIds = ref<string[]>([]);
+
+const projectId = computed(() => apiStore.activeProjectId ?? '');
+const transactionId = computed(() => apiStore.activeTransactionId ?? '');
+const generatingCases = computed(() =>
+  transactionId.value
+    ? apiStore.isGeneratingCases(transactionId.value)
+    : false,
+);
 
 onActivated(() => {
   panelActive.value = true;
+  void ensureScenarioLibrary();
+  const pid = projectId.value;
+  const tid = transactionId.value;
+  if (pid && tid) {
+    void apiStore.syncCaseGenerateLoading(pid, tid);
+  }
 });
 
 onDeactivated(() => {
@@ -132,6 +205,25 @@ function loadFromText(text: string) {
   sectionData.value = sections.value.map((section) => sectionTableData(section));
   editorText.value = text;
   syncingFromStore.value = false;
+  resizeAllDocCellInputs();
+}
+
+function autoResizeTextarea(el: HTMLTextAreaElement) {
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight}px`;
+}
+
+function resizeAllDocCellInputs() {
+  void nextTick(() => {
+    tableScrollRef.value
+      ?.querySelectorAll('textarea.doc-cell-input')
+      .forEach((el) => autoResizeTextarea(el as HTMLTextAreaElement));
+  });
+}
+
+function onCellInput(sectionIndex: number, event: Event) {
+  autoResizeTextarea(event.target as HTMLTextAreaElement);
+  onTableChange(sectionIndex);
 }
 
 function syncTextFromTables() {
@@ -142,6 +234,14 @@ function syncTextFromTables() {
   sections.value = nextSections;
   editorText.value = serializeApiDocTableText(nextSections);
 }
+
+watch(
+  () => [projectId.value, transactionId.value] as const,
+  ([pid, tid]) => {
+    if (!panelActive.value || !pid || !tid) return;
+    void apiStore.syncCaseGenerateLoading(pid, tid);
+  },
+);
 
 watch(
   () => apiStore.apiDoc?.tempStructuredMarkdown ?? apiStore.apiDoc?.structuredMarkdown,
@@ -159,33 +259,73 @@ watch(
 );
 
 watch(
+  () => apiStore.apiDoc?.generationPromptIds,
+  (next) => {
+    if (!panelActive.value) return;
+    docPromptIds.value = filterSelectablePromptIds(
+      apiStore.apiScenarios,
+      next ?? [],
+    );
+  },
+  { immediate: true },
+);
+
+watch(
   () => [apiStore.activeProjectId, apiStore.activeTransactionId] as const,
   () => {
     if (autoSaveTimer.value) {
       window.clearTimeout(autoSaveTimer.value);
       autoSaveTimer.value = null;
     }
+    void ensureScenarioLibrary();
   },
+);
+
+watch(
+  () => apiStore.apiScenarios,
+  () => {
+    docPromptIds.value = filterSelectablePromptIds(
+      apiStore.apiScenarios,
+      docPromptIds.value,
+    );
+  },
+  { deep: true },
 );
 
 function scheduleAutoSave() {
   if (syncingFromStore.value) return;
-  const projectId = apiStore.activeProjectId;
-  const transactionId = apiStore.activeTransactionId;
+  const pid = projectId.value;
+  const tid = transactionId.value;
   const saved =
     apiStore.apiDoc?.tempStructuredMarkdown ?? apiStore.apiDoc?.structuredMarkdown ?? '';
-  if (!projectId || !transactionId || editorText.value === saved) return;
+  if (!pid || !tid || editorText.value === saved) return;
 
   if (autoSaveTimer.value) window.clearTimeout(autoSaveTimer.value);
   autoSaveTimer.value = window.setTimeout(() => {
-    if (
-      apiStore.activeProjectId !== projectId ||
-      apiStore.activeTransactionId !== transactionId
-    ) {
-      return;
-    }
-    void apiStore.autoSave(projectId, transactionId, editorText.value);
+    autoSaveTimer.value = null;
+    void flushAutoSave();
   }, 1200);
+}
+
+async function flushAutoSave(options?: { notify?: boolean }) {
+  if (autoSaveTimer.value) {
+    window.clearTimeout(autoSaveTimer.value);
+    autoSaveTimer.value = null;
+  }
+  if (syncingFromStore.value) return;
+  const pid = projectId.value;
+  const tid = transactionId.value;
+  const saved =
+    apiStore.apiDoc?.tempStructuredMarkdown ?? apiStore.apiDoc?.structuredMarkdown ?? '';
+  if (!pid || !tid || editorText.value === saved) return;
+
+  try {
+    await apiStore.autoSave(pid, tid, editorText.value, {
+      successMessage: options?.notify ? '已自动保存' : undefined,
+    });
+  } catch (error) {
+    message.error((error as Error)?.message || '自动保存失败');
+  }
 }
 
 function onTableChange(sectionIndex: number) {
@@ -197,15 +337,36 @@ function onTableChange(sectionIndex: number) {
   scheduleAutoSave();
 }
 
+function handleCellBlur(sectionIndex: number) {
+  if (syncingFromStore.value) return;
+  const section = sections.value[sectionIndex];
+  if (!section) return;
+  section.rows = tableDataToRows(section, sectionData.value[sectionIndex] ?? []);
+  editorText.value = serializeApiDocTableText(sections.value);
+  void flushAutoSave({ notify: true });
+}
+
 const canSave = computed(() => Boolean(editorText.value.trim()));
 
+async function ensureScenarioLibrary() {
+  if (!apiStore.apiScenarios.length) {
+    await apiStore.loadApiScenarioLibrary();
+  }
+}
+
+function openScenarioModal() {
+  void ensureScenarioLibrary().then(() => {
+    scenarioModalOpen.value = true;
+  });
+}
+
 const onUpload: UploadProps['beforeUpload'] = (file) => {
-  const projectId = apiStore.activeProjectId;
-  const transactionId = apiStore.activeTransactionId;
-  if (!projectId || !transactionId) return false;
+  const pid = projectId.value;
+  const tid = transactionId.value;
+  if (!pid || !tid) return false;
 
   if (apiStore.loading) {
-    message.warning('结构化进行中，请稍后再上传');
+    message.warning('文档处理中，请稍后再上传');
     return false;
   }
 
@@ -218,53 +379,82 @@ const onUpload: UploadProps['beforeUpload'] = (file) => {
   if (apiStore.apiDoc?.sourceDocName) {
     Modal.confirm({
       title: '重新上传接口文档？',
-      content: '当前交易码已存在接口文档，继续上传将覆盖原文件，是否继续？',
+      content: '继续上传将覆盖原文件并重新结构化，已有案例需重新 AI 生成，是否继续？',
       okText: '覆盖上传',
       cancelText: '取消',
       centered: true,
-      onOk: () => apiStore.uploadDocument(projectId, transactionId, file as File, true),
+      onOk: () => apiStore.uploadDocument(pid, tid, file as File, true),
     });
     return false;
   }
 
-  void apiStore.uploadDocument(projectId, transactionId, file as File);
+  void apiStore.uploadDocument(pid, tid, file as File);
   return false;
 };
 
-function onStructure() {
-  const projectId = apiStore.activeProjectId;
-  const transactionId = apiStore.activeTransactionId;
-  if (!projectId || !transactionId) return;
+async function onGenerate() {
+  const pid = projectId.value;
+  const tid = transactionId.value;
+  if (!pid || !tid) return;
 
-  const hasStructured =
-    apiStore.apiDoc?.structuringStatus === 'completed' ||
-    Boolean(apiStore.apiDoc?.structuredMarkdown?.trim());
+  await ensureScenarioLibrary();
+  const saved = filterSelectablePromptIds(
+    apiStore.apiScenarios,
+    docPromptIds.value,
+  );
+  generatePromptIds.value = saved.length
+    ? saved
+    : collectDefaultPromptIds(apiStore.apiScenarios);
+  generateModalOpen.value = true;
+}
 
-  if (hasStructured) {
-    Modal.confirm({
-      title: '重新结构化？',
-      content: '当前交易码已有结构化结果，重新结构化会覆盖之前的结构化数据，是否继续？',
-      okText: '继续结构化',
-      cancelText: '取消',
-      centered: true,
-      onOk: () => apiStore.structureDocument(projectId, transactionId),
-    });
-    return;
-  }
+function onCancelGenerate() {
+  generateModalOpen.value = false;
+}
 
-  void apiStore.structureDocument(projectId, transactionId);
+function onConfirmGenerate() {
+  const pid = projectId.value;
+  const tid = transactionId.value;
+  if (!pid || !tid) return;
+
+  docPromptIds.value = [...generatePromptIds.value];
+  apiStore.markCaseGenerateStarted(tid);
+  generateModalOpen.value = false;
+
+  void (async () => {
+    try {
+      await apiStore.saveDocumentGenerationPrompts(pid, tid, docPromptIds.value);
+      await runGenerate(pid, tid);
+    } catch {
+      apiStore.markCaseGenerateEnded(tid);
+      message.error('启动案例生成失败，请稍后重试');
+    }
+  })();
+}
+
+async function runGenerate(pid: string, tid: string) {
+  await apiStore.generateCases(pid, tid, {
+    promptIds: [...docPromptIds.value],
+    navigateToCases: true,
+  });
 }
 
 async function onSave() {
   syncTextFromTables();
-  const projectId = apiStore.activeProjectId;
-  const transactionId = apiStore.activeTransactionId;
-  if (!projectId || !transactionId) return;
-  await apiStore.saveDocument(projectId, transactionId, editorText.value);
+  const pid = projectId.value;
+  const tid = transactionId.value;
+  if (!pid || !tid) return;
+  await apiStore.saveDocument(pid, tid, editorText.value);
 }
 </script>
 
 <style scoped>
+.document-panel-desc {
+  margin: 4px 0 0;
+  color: #667085;
+  font-size: 13px;
+}
+
 .doc-links {
   display: flex;
   flex-direction: column;
@@ -273,14 +463,42 @@ async function onSave() {
   font-size: 12px;
 }
 
+.generate-modal-alert {
+  margin-bottom: 12px;
+}
+
+.generate-modal-hint {
+  margin: 0 0 12px;
+  color: #667085;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.generate-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+}
+
+.generate-modal-body :deep(.scenario-prompt-picker--embedded) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.document-table-scroll {
+  padding: 0 12px 12px;
+}
+
 .doc-section-block {
-  margin-bottom: 24px;
+  margin-bottom: 12px;
 }
 
 .doc-section-title {
-  margin: 0 0 10px;
-  font-size: 16px;
+  margin: 0 0 6px;
+  font-size: 14px;
   font-weight: 600;
+  line-height: 1.3;
 }
 
 .api-doc-table-wrap {
@@ -297,16 +515,17 @@ async function onSave() {
 
 .api-doc-table th,
 .api-doc-table td {
-  border: 1px solid #f0f0f0;
+  border: 1px solid #eef2f6;
   vertical-align: top;
 }
 
 .api-doc-table th {
-  padding: 8px 12px;
+  padding: 6px 10px;
   background: #f9fafb;
   color: #667085;
   font-size: 13px;
   font-weight: 500;
+  line-height: 1.4;
   white-space: nowrap;
 }
 
@@ -319,18 +538,23 @@ async function onSave() {
   display: block;
   box-sizing: border-box;
   width: 100%;
-  min-width: 120px;
-  min-height: 52px;
-  max-height: 120px;
+  min-width: 100px;
+  min-height: 32px;
   padding: 6px 8px;
   border: none;
   background: transparent;
   color: #344054;
   font: inherit;
   font-size: 13px;
-  line-height: 1.5;
-  resize: vertical;
-  overflow-y: auto;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
+  resize: none;
+}
+
+.api-doc-table td:first-child .doc-cell-input {
+  min-width: 220px;
 }
 
 .doc-cell-input:focus {
