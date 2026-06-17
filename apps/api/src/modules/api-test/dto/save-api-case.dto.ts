@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import {
   IsArray,
   IsBoolean,
+  IsIn,
   IsObject,
   IsOptional,
   IsString,
@@ -123,9 +124,10 @@ export class RunApiCasesDto {
 }
 
 export class ExportApiReportDto {
-  @ApiProperty({ enum: ["xlsx", "pdf"] })
+  @ApiProperty({ enum: ["xlsx", "pdf", "html"] })
   @IsString()
-  format!: "xlsx" | "pdf";
+  @IsIn(["xlsx", "pdf", "html"])
+  format!: "xlsx" | "pdf" | "html";
 
   @ApiProperty()
   @IsUUID()

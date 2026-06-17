@@ -189,7 +189,13 @@
                 </template>
               </a-table>
               <div v-else class="exec-set-empty-detail">
-                <a-empty description="请先「管理案例」添加案例后再执行" />
+                <a-empty
+                  :description="
+                    (activeSet?.caseCount ?? 0) > 0
+                      ? '关联案例加载失败或案例已不可见，请刷新页面后重试'
+                      : '请先「管理案例」添加案例后再执行'
+                  "
+                />
               </div>
             </div>
 
@@ -449,6 +455,11 @@ const manageCasesPageSize = ref(normalizeCaseForgePageSize(10));
 const manageCasesTotal = ref(0);
 const manageCasesLoading = ref(false);
 const manageCasesSaving = ref(false);
+const detailTab = ref<'cases' | 'result'>('cases');
+const detailTabOptions = [
+  { label: '关联案例', value: 'cases' },
+  { label: '执行结果', value: 'result' },
+];
 
 const encodingOptions = [
   { label: 'GBK', value: 'GBK' },
@@ -648,7 +659,21 @@ function readCheckboxChecked(event: unknown) {
   return Boolean(target?.checked);
 }
 
+async function ensureLinkedCasesLoaded() {
+  const projectId = apiStore.activeProjectId;
+  const transactionId = apiStore.activeTransactionId;
+  const caseIds = activeSet.value?.caseIds ?? [];
+  if (!projectId || !transactionId || !caseIds.length) {
+    return;
+  }
+  const loadedIds = new Set(apiStore.runnerCases.map((item) => item.id));
+  if (!apiStore.runnerCases.length || caseIds.some((id) => !loadedIds.has(id))) {
+    await apiStore.refreshRunnerCases(projectId, transactionId);
+  }
+}
+
 function selectSet(setId: string) {
+  detailTab.value = 'cases';
   apiStore.selectExecutionSet(setId);
   const set = apiStore.activeExecutionSet;
   if (set?.lastRunId) {
@@ -656,6 +681,7 @@ function selectSet(setId: string) {
   } else {
     apiStore.activeRun = null;
   }
+  void ensureLinkedCasesLoaded();
 }
 
 function onExecutionSetPageChange(page: number, pageSize: number) {
@@ -791,6 +817,7 @@ async function onSaveCases() {
       setId,
       caseIds,
     );
+    detailTab.value = 'cases';
     manageCasesOpen.value = false;
   } catch (error) {
     const responseMessage = (error as { response?: { data?: { message?: string } } })
@@ -854,6 +881,7 @@ async function onConfirmRun() {
     environmentServiceId: runForm.environmentServiceId || undefined,
     encoding: runForm.encoding,
   });
+  detailTab.value = 'result';
   runModalOpen.value = false;
 }
 
@@ -918,8 +946,17 @@ function onBatchDeleteSets() {
 }
 
 async function selectRun(runId: string) {
+  detailTab.value = 'result';
   await loadRun(runId);
 }
+
+watch(
+  () => apiStore.activeExecutionSetId,
+  () => {
+    void ensureLinkedCasesLoaded();
+  },
+  { immediate: true },
+);
 
 async function loadRun(runId: string) {
   const projectId = apiStore.activeProjectId;

@@ -653,18 +653,68 @@ export async function getApiReportSummary(
   return data;
 }
 
+function parseContentDispositionFileName(header?: string): string | null {
+  if (!header) return null;
+  const utf8Match = /filename\*=UTF-8''([^;\n]+)/i.exec(header);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].trim());
+    } catch {
+      return utf8Match[1].trim();
+    }
+  }
+  const plainMatch = /filename="([^"]+)"|filename=([^;\n]+)/i.exec(header);
+  const name = (plainMatch?.[1] ?? plainMatch?.[2])?.trim();
+  return name || null;
+}
+
+async function readBlobPrefix(blob: Blob, length = 8) {
+  const buffer = await blob.slice(0, length).arrayBuffer();
+  return new TextDecoder().decode(buffer);
+}
+
+async function assertExportBlobFormat(
+  blob: Blob,
+  format: "xlsx" | "pdf" | "html",
+) {
+  const prefix = await readBlobPrefix(blob, 16);
+  if (prefix.trimStart().startsWith("{")) {
+    const payload = JSON.parse(await blob.text()) as { message?: string };
+    throw new Error(payload.message?.trim() || "导出失败");
+  }
+  if (format === "html" && !prefix.toLowerCase().includes("<!doctype") && !prefix.toLowerCase().includes("<html")) {
+    throw new Error("导出 HTML 失败：服务端返回了非 HTML 内容，请确认 API 已更新并重启");
+  }
+  if (format === "pdf" && !prefix.startsWith("%PDF")) {
+    throw new Error("导出 PDF 失败：服务端返回了非 PDF 内容");
+  }
+  if (format === "xlsx" && !prefix.startsWith("PK")) {
+    throw new Error("导出 Excel 失败：服务端返回了非 xlsx 内容");
+  }
+}
+
 export async function exportApiReport(
   projectId: string,
   transactionId: string,
   runId: string,
-  format: "xlsx" | "pdf",
+  format: "xlsx" | "pdf" | "html",
 ) {
   const response = await http.post(
     `${transactionBase(projectId, transactionId)}/reports/export`,
     { runId, format },
     { responseType: "blob" },
   );
-  return response.data as Blob;
+  const contentType = String(response.headers["content-type"] ?? "");
+  const blob = new Blob([response.data], {
+    type: contentType || undefined,
+  });
+  await assertExportBlobFormat(blob, format);
+  const headerDisposition = response.headers["content-disposition"];
+  const fileName =
+    parseContentDispositionFileName(
+      typeof headerDisposition === "string" ? headerDisposition : undefined,
+    ) ?? `api-test-${runId}.${format}`;
+  return { blob, fileName };
 }
 
 export function downloadBlob(blob: Blob, fileName: string) {

@@ -9,6 +9,10 @@
       {
         "include": "modules/case-editor/assets/**/*",
         "watchAssets": true
+      },
+      {
+        "include": "assets/fonts/**/*",
+        "watchAssets": true
       }
     ]
   }

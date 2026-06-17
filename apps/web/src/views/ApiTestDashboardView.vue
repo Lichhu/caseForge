@@ -103,7 +103,7 @@ const stages = [
   { key: 'api-document' as const, index: '01', title: '接口文档', shortTitle: '文档', description: '上传、结构化与 AI 生成' },
   { key: 'api-cases' as const, index: '02', title: '案例编辑', shortTitle: '案例', description: '手工编辑与维护' },
   { key: 'api-runner' as const, index: '03', title: '执行平台', shortTitle: '执行', description: '环境中心、批量执行与比对' },
-  { key: 'api-report' as const, index: '04', title: '结果报表', shortTitle: '报表', description: '统计图表、Excel/PDF 导出' },
+  { key: 'api-report' as const, index: '04', title: '结果报表', shortTitle: '报表', description: '统计图表、Excel/PDF/HTML 导出' },
 ];
 
 const headerTitle = computed(() => {

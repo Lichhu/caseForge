@@ -1243,18 +1243,15 @@ export const useApiTestStore = defineStore("apiTest", {
       projectId: string,
       transactionId: string,
       runId: string,
-      format: "xlsx" | "pdf",
+      format: "xlsx" | "pdf" | "html",
     ) {
-      const blob = await exportApiReport(
+      const { blob, fileName } = await exportApiReport(
         projectId,
         transactionId,
         runId,
         format,
       );
-      downloadBlob(
-        blob,
-        `api-test-${runId}.${format === "pdf" ? "pdf" : "xlsx"}`,
-      );
+      downloadBlob(blob, fileName);
     },
   },
 });
