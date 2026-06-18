@@ -2,6 +2,7 @@ import { ApiDocEntity } from "../../modules/api-test/entity/api-doc.entity";
 import { ApiEndpointEntity } from "../../modules/api-test/entity/api-endpoint.entity";
 import { ApiTestCaseEntity } from "../../modules/api-test/entity/api-test-case.entity";
 import { ApiTestEnvironmentServiceEntity } from "../../modules/api-test/entity/api-test-environment-service.entity";
+import { formatServerAddress } from "@case-forge/shared";
 import { ApiTestExecutionSetEntity } from "../../modules/api-test/entity/api-test-execution-set.entity";
 import { ApiTestRunEntity } from "../../modules/api-test/entity/api-test-run.entity";
 import { ApiTestRunItemEntity } from "../../modules/api-test/entity/api-test-run-item.entity";
@@ -203,6 +204,11 @@ export function toPublicApiEnvironmentService(
     projectId: row.projectId,
     environmentId: row.environmentId,
     name: row.name,
+    serverAddress: formatServerAddress(row),
+    jdbcUrl: row.jdbcUrl ?? "",
+    remoteConnection: row.remoteConnection ?? "",
+    objectStorage: row.objectStorage ?? "",
+    remark: row.remark ?? "",
     transport: row.transport ?? "http",
     payloadFormat: row.payloadFormat,
     baseUrl: row.baseUrl,

@@ -14,6 +14,33 @@ export class SaveApiEnvironmentServiceDto {
   @IsString()
   name!: string;
 
+  @ApiPropertyOptional({
+    description: "服务器地址，如 http://host:port/path 或 socket2://host:port",
+  })
+  @IsOptional()
+  @IsString()
+  serverAddress?: string;
+
+  @ApiPropertyOptional({ description: "数据库 JDBC 连接串" })
+  @IsOptional()
+  @IsString()
+  jdbcUrl?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  remoteConnection?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  objectStorage?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  remark?: string;
+
   @ApiPropertyOptional({ enum: ["http", "tcp"] })
   @IsOptional()
   @IsIn(["http", "tcp"])
@@ -68,6 +95,12 @@ export class SaveApiEnvironmentServiceDto {
   @IsOptional()
   @IsBoolean()
   enabled?: boolean;
+}
+
+export class ReorderEnvironmentServiceDto {
+  @ApiProperty({ enum: ["up", "down", "top"] })
+  @IsIn(["up", "down", "top"])
+  direction!: "up" | "down" | "top";
 }
 
 export class SaveApiExecutionSetDto {

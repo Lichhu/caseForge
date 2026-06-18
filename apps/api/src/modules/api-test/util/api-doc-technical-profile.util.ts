@@ -21,7 +21,8 @@ const DEFAULT_PROFILE: ApiTechnicalProfile = {
 function normalizeTransport(value: string): ApiTransport {
   const text = value.trim().toUpperCase();
   if (text.includes("HTTP")) return "http";
-  if (text.includes("TCP")) return "tcp";
+  if (text.includes("SOCKET") || text.includes("TCP")) return "tcp";
+  if (text.includes("MQ") || text.includes("消息队列")) return "mq";
   if (text.includes("TUXEDO")) return "tuxedo";
   if (text) return "other";
   return DEFAULT_PROFILE.transport;
@@ -93,10 +94,12 @@ export function buildProtocolGuidance(
     profile.transport === "http"
       ? "HTTP"
       : profile.transport === "tcp"
-        ? "TCP"
-        : profile.transport === "tuxedo"
-          ? "TUXEDO"
-          : "其它通讯方式";
+        ? "Socket"
+        : profile.transport === "mq"
+          ? "MQ"
+          : profile.transport === "tuxedo"
+            ? "TUXEDO"
+            : "其它通讯方式";
   const formatLabel =
     profile.messageFormat === "json"
       ? "JSON"
@@ -162,7 +165,7 @@ export function buildProtocolGuidance(
     }
   } else if (profile.transport === "tcp") {
     lines.push(
-      "- **不要写 HTTP 状态码**；`expectedResult` 描述 **TCP 响应报文**中的业务返回码、错误信息或关键 XML 节点。",
+      "- **不要写 HTTP 状态码**；`expectedResult` 描述 **Socket 响应报文**中的业务返回码、错误信息或关键 XML 节点。",
       "- 正向案例示例：`响应报文 bizResCode=000000，bizBody 含目标字段`；反向示例：`响应报文 bizResCode 非 000000，bizResText 提示参数非法`。",
     );
     if (profile.messageFormat === "xml") {
@@ -170,6 +173,10 @@ export function buildProtocolGuidance(
         "- 响应通常以 `</Transaction>` 结尾；断言中可引用响应 XML 节点路径。",
       );
     }
+  } else if (profile.transport === "mq") {
+    lines.push(
+      "- **不要写 HTTP 状态码**；`expectedResult` 描述 **MQ 响应报文**中的业务返回码、错误信息或关键节点。",
+    );
   } else {
     lines.push(
       "- `expectedResult` 描述业务返回码或响应报文关键字段，不要编造 HTTP 语义（除非文档明确为 HTTP）。",
@@ -237,10 +244,18 @@ export function buildEndpointContextForPrompt(
     const basic = extractApiDocSection(input.structuredDoc, "基础信息");
     const serviceUrl = getApiDocFieldValue(basic, "服务URL").trim();
     return [
-      `- 通讯方式：TCP`,
+      `- 通讯方式：Socket`,
       `- 报文类型：${formatLabel}`,
       `- 连接地址：${serviceUrl || "（由执行环境 host:port 配置，如 32.114.71.6:60030）"}`,
-      `- **禁止**生成 HTTP 方法、URL、HTTP 状态码；requestBody 仅输出 XML 报文体`,
+      `- **禁止**生成 HTTP 方法、URL、HTTP 状态码；requestBody 仅输出报文体`,
+    ].join("\n");
+  }
+
+  if (profile.transport === "mq") {
+    return [
+      `- 通讯方式：MQ`,
+      `- 报文类型：${formatLabel}`,
+      `- **禁止**生成 HTTP 方法、URL、HTTP 状态码；requestBody 仅输出消息体`,
     ].join("\n");
   }
 
@@ -291,6 +306,10 @@ export function buildCaseRequestFromProfile(
     };
   }
 
+  if (profile.transport === "mq") {
+    request.transport = "mq";
+  }
+
   return request;
 }
 
@@ -320,7 +339,6 @@ export function buildDefaultExpected(
             ],
     };
   }
-
   return {
     statusCode: polarity === "negative" ? [400, 422, 500] : [200, 201],
     statusOnly: true,

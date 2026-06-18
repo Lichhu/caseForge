@@ -43,6 +43,7 @@ import { ApiExecutionSetService } from "../service/api-execution-set.service";
 import {
   ReplaceExecutionSetCasesDto,
   RunExecutionSetDto,
+  ReorderEnvironmentServiceDto,
   SaveApiEnvironmentServiceDto,
   SaveApiExecutionSetDto,
 } from "../dto/execution-platform.dto";
@@ -387,6 +388,21 @@ export class ApiTestController {
       environmentId,
       serviceId,
       body,
+    );
+  }
+
+  @Patch(":projectId/environments/:environmentId/services/:serviceId/reorder")
+  reorderEnvironmentService(
+    @Param("projectId") projectId: string,
+    @Param("environmentId") environmentId: string,
+    @Param("serviceId") serviceId: string,
+    @Body() body: ReorderEnvironmentServiceDto,
+  ) {
+    return this.apiEnvironmentService.reorderEnvironmentService(
+      projectId,
+      environmentId,
+      serviceId,
+      body.direction,
     );
   }
 

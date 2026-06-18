@@ -1,10 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import {
   IsBoolean,
+  IsIn,
   IsObject,
   IsOptional,
   IsString,
-  IsUrl,
 } from "class-validator";
 
 export class SaveApiEnvironmentDto {
@@ -12,9 +12,15 @@ export class SaveApiEnvironmentDto {
   @IsString()
   name!: string;
 
-  @ApiProperty()
-  @IsUrl({ require_tld: false })
-  baseUrl!: string;
+  @ApiPropertyOptional({ enum: ["global", "system", "personal"] })
+  @IsOptional()
+  @IsIn(["global", "system", "personal"])
+  scope?: "global" | "system" | "personal";
+
+  @ApiPropertyOptional({ description: "连接地址由环境服务配置，环境层可留空" })
+  @IsOptional()
+  @IsString()
+  baseUrl?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

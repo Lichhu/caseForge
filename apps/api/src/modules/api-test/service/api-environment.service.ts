@@ -11,6 +11,10 @@ import { ApiTestEnvironmentServiceEntity } from "../entity/api-test-environment-
 import { SaveApiEnvironmentDto } from "../dto/save-environment.dto";
 import { SaveApiEnvironmentServiceDto } from "../dto/execution-platform.dto";
 import {
+  applyParsedServerAddress,
+  parseServerAddress,
+} from "@case-forge/shared";
+import {
   decryptSecrets,
   encryptSecrets,
   maskSecret,
@@ -41,7 +45,8 @@ export class ApiEnvironmentService {
     const entity = this.envRepo.create({
       projectId,
       name: payload.name,
-      baseUrl: payload.baseUrl.replace(/\/$/, ""),
+      scope: payload.scope ?? "system",
+      baseUrl: (payload.baseUrl ?? "").replace(/\/$/, ""),
       headers: payload.headers ?? {},
       variables: payload.variables ?? {},
       secretsEncrypted: payload.token
@@ -69,9 +74,12 @@ export class ApiEnvironmentService {
       await this.clearDefault(projectId);
     }
     existing.name = payload.name;
-    existing.baseUrl = payload.baseUrl.replace(/\/$/, "");
-    existing.headers = payload.headers ?? {};
-    existing.variables = payload.variables ?? {};
+    if (payload.scope !== undefined) existing.scope = payload.scope;
+    if (payload.baseUrl !== undefined) {
+      existing.baseUrl = payload.baseUrl.replace(/\/$/, "");
+    }
+    if (payload.headers !== undefined) existing.headers = payload.headers;
+    if (payload.variables !== undefined) existing.variables = payload.variables;
     if (payload.token) {
       existing.secretsEncrypted = encryptSecrets({ token: payload.token });
     }
@@ -116,13 +124,9 @@ export class ApiEnvironmentService {
       if (!service) {
         throw new NotFoundException("环境服务不存在或已禁用");
       }
-      if (service.baseUrl?.trim()) {
-        baseUrl = service.baseUrl.replace(/\/$/, "");
-      } else if (service.pathPrefix?.trim()) {
-        const prefix = service.pathPrefix.startsWith("/")
-          ? service.pathPrefix
-          : `/${service.pathPrefix}`;
-        baseUrl = `${baseUrl}${prefix}`.replace(/\/$/, "");
+      const resolved = resolveServiceRuntimeTarget(service);
+      if (resolved.baseUrl) {
+        baseUrl = resolved.baseUrl;
       }
       headers = { ...headers, ...(service.headers ?? {}) };
       variables = { ...variables, ...(service.variables ?? {}) };
@@ -137,7 +141,7 @@ export class ApiEnvironmentService {
       environmentServiceId,
       services: services.map((service) => ({
         ...service,
-        baseUrl: service.baseUrl?.replace(/\/$/, ""),
+        ...resolveServiceRuntimeTarget(service),
         headers: { ...headers, ...(service.headers ?? {}) },
         variables: { ...variables, ...(service.variables ?? {}) },
       })),
@@ -166,20 +170,21 @@ export class ApiEnvironmentService {
       projectId,
       environmentId,
       name: payload.name.trim(),
-      transport: payload.transport ?? "http",
+      jdbcUrl: payload.jdbcUrl?.trim() || undefined,
+      remoteConnection: payload.remoteConnection?.trim() || undefined,
+      objectStorage: payload.objectStorage?.trim() || undefined,
+      remark: payload.remark?.trim() || undefined,
       payloadFormat: payload.payloadFormat,
-      baseUrl: payload.baseUrl?.replace(/\/$/, ""),
-      pathPrefix: payload.pathPrefix?.trim(),
-      host: payload.host?.trim(),
-      port: payload.port,
       encoding: payload.encoding?.trim(),
       framing: payload.framing,
       headers: payload.headers ?? {},
       variables: payload.variables ?? {},
       sortOrder: count,
       enabled: payload.enabled ?? true,
+      transport: "http",
       ...auditFieldsForCreate(),
     });
+    this.applyServiceConnectionFields(entity, payload);
     return toPublicApiEnvironmentService(await this.serviceRepo.save(entity));
   }
 
@@ -195,20 +200,51 @@ export class ApiEnvironmentService {
       serviceId,
     );
     existing.name = payload.name.trim();
-    existing.transport = payload.transport ?? existing.transport ?? "http";
+    existing.jdbcUrl = payload.jdbcUrl?.trim() || undefined;
+    existing.remoteConnection = payload.remoteConnection?.trim() || undefined;
+    existing.objectStorage = payload.objectStorage?.trim() || undefined;
+    existing.remark = payload.remark?.trim() || undefined;
     existing.payloadFormat = payload.payloadFormat;
-    existing.baseUrl = payload.baseUrl?.replace(/\/$/, "");
-    existing.pathPrefix = payload.pathPrefix?.trim();
-    existing.host = payload.host?.trim();
-    existing.port = payload.port;
     existing.encoding = payload.encoding?.trim();
     existing.framing = payload.framing;
-    existing.headers = payload.headers ?? {};
-    existing.variables = payload.variables ?? {};
+    if (payload.headers !== undefined) existing.headers = payload.headers;
+    if (payload.variables !== undefined) existing.variables = payload.variables;
     if (payload.enabled !== undefined) existing.enabled = payload.enabled;
+    this.applyServiceConnectionFields(existing, payload);
     return toPublicApiEnvironmentService(
       await this.serviceRepo.save({ ...existing, ...auditFieldsForUpdate() }),
     );
+  }
+
+  async reorderEnvironmentService(
+    projectId: string,
+    environmentId: string,
+    serviceId: string,
+    direction: "up" | "down" | "top",
+  ) {
+    const rows = await this.serviceRepo.find({
+      where: scopedWhere({ projectId, environmentId }),
+      order: { sortOrder: "ASC", createdAt: "ASC" },
+    });
+    const index = rows.findIndex((row) => row.id === serviceId);
+    if (index < 0) {
+      throw new NotFoundException("环境服务不存在");
+    }
+
+    if (direction === "top" && index > 0) {
+      const [target] = rows.splice(index, 1);
+      rows.unshift(target);
+    } else if (direction === "up" && index > 0) {
+      [rows[index - 1], rows[index]] = [rows[index], rows[index - 1]];
+    } else if (direction === "down" && index < rows.length - 1) {
+      [rows[index], rows[index + 1]] = [rows[index + 1], rows[index]];
+    }
+
+    for (let i = 0; i < rows.length; i += 1) {
+      rows[i].sortOrder = i;
+      await this.serviceRepo.save({ ...rows[i], ...auditFieldsForUpdate() });
+    }
+    return { ok: true };
   }
 
   async deleteEnvironmentService(
@@ -267,6 +303,7 @@ export class ApiEnvironmentService {
       id: row.id,
       projectId: row.projectId,
       name: row.name,
+      scope: row.scope ?? "system",
       baseUrl: row.baseUrl,
       headers: row.headers ?? {},
       variables: row.variables ?? {},
@@ -276,4 +313,72 @@ export class ApiEnvironmentService {
       enabled: row.enabled,
     };
   }
+
+  private applyServiceConnectionFields(
+    entity: ApiTestEnvironmentServiceEntity,
+    payload: SaveApiEnvironmentServiceDto,
+  ) {
+    const address =
+      payload.serverAddress?.trim() ||
+      (payload.transport === "tcp" && payload.host && payload.port
+        ? `socket2://${payload.host}:${payload.port}`
+        : payload.baseUrl?.trim() || "");
+    if (address) {
+      applyParsedServerAddress(entity, address);
+      return;
+    }
+    if (payload.transport) entity.transport = payload.transport;
+    if (payload.baseUrl !== undefined) {
+      entity.baseUrl = payload.baseUrl.replace(/\/$/, "");
+    }
+    if (payload.pathPrefix !== undefined) {
+      entity.pathPrefix = payload.pathPrefix?.trim();
+    }
+    if (payload.host !== undefined) entity.host = payload.host?.trim();
+    if (payload.port !== undefined) entity.port = payload.port;
+  }
+}
+
+function resolveServiceRuntimeTarget(service: ApiTestEnvironmentServiceEntity) {
+  const address = service.serverAddress?.trim();
+  if (address) {
+    const parsed = parseServerAddress(address);
+    if (parsed.transport === "http" && parsed.baseUrl) {
+      return {
+        transport: "http" as const,
+        baseUrl: parsed.baseUrl.replace(/\/$/, ""),
+        host: undefined,
+        port: undefined,
+      };
+    }
+    if (parsed.transport === "tcp" && parsed.host && parsed.port) {
+      return {
+        transport: "tcp" as const,
+        baseUrl: undefined,
+        host: parsed.host,
+        port: parsed.port,
+      };
+    }
+  }
+  if (service.transport === "tcp" && service.host && service.port) {
+    return {
+      transport: "tcp" as const,
+      baseUrl: undefined,
+      host: service.host,
+      port: service.port,
+    };
+  }
+  let baseUrl = service.baseUrl?.replace(/\/$/, "");
+  if (service.pathPrefix?.trim() && baseUrl) {
+    const prefix = service.pathPrefix.startsWith("/")
+      ? service.pathPrefix
+      : `/${service.pathPrefix}`;
+    baseUrl = `${baseUrl}${prefix}`.replace(/\/$/, "");
+  }
+  return {
+    transport: (service.transport ?? "http") as "http" | "tcp",
+    baseUrl,
+    host: service.host,
+    port: service.port,
+  };
 }

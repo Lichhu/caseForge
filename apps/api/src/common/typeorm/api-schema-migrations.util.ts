@@ -261,4 +261,30 @@ async function ensureExecutionPlatformTables(runner: Queryable) {
       `);
     }
   }
+
+  if (await tableExists(runner, "api_test_environment")) {
+    if (!(await columnExists(runner, "api_test_environment", "scope"))) {
+      await runner.query(`
+        ALTER TABLE api_test_environment
+          ADD COLUMN scope VARCHAR(16) NOT NULL DEFAULT 'system' AFTER name
+      `);
+    }
+    await runner.query(`
+      ALTER TABLE api_test_environment
+        MODIFY COLUMN baseUrl VARCHAR(512) NOT NULL DEFAULT ''
+    `);
+  }
+
+  if (await tableExists(runner, "api_test_environment_service")) {
+    if (!(await columnExists(runner, "api_test_environment_service", "serverAddress"))) {
+      await runner.query(`
+        ALTER TABLE api_test_environment_service
+          ADD COLUMN serverAddress VARCHAR(1024) NULL AFTER name,
+          ADD COLUMN jdbcUrl VARCHAR(1024) NULL AFTER serverAddress,
+          ADD COLUMN remoteConnection VARCHAR(512) NULL AFTER jdbcUrl,
+          ADD COLUMN objectStorage VARCHAR(512) NULL AFTER remoteConnection,
+          ADD COLUMN remark TEXT NULL AFTER objectStorage
+      `);
+    }
+  }
 }

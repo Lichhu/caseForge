@@ -19,7 +19,10 @@ export class ApiTestEnvironmentEntity {
   @Column()
   name: string;
 
-  @Column({ type: "varchar", length: 512 })
+  @Column({ type: 'varchar', length: 16, default: 'system' })
+  scope: 'global' | 'system' | 'personal';
+
+  @Column({ type: 'varchar', length: 512, default: '' })
   baseUrl: string;
 
   @Column({ type: "json", nullable: true })

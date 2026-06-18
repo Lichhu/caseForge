@@ -23,6 +23,21 @@ export class ApiTestEnvironmentServiceEntity {
   @Column()
   name: string;
 
+  @Column({ type: "varchar", length: 1024, nullable: true })
+  serverAddress?: string;
+
+  @Column({ type: "varchar", length: 1024, nullable: true })
+  jdbcUrl?: string;
+
+  @Column({ type: "varchar", length: 512, nullable: true })
+  remoteConnection?: string;
+
+  @Column({ type: "varchar", length: 512, nullable: true })
+  objectStorage?: string;
+
+  @Column({ type: "text", nullable: true })
+  remark?: string;
+
   @Column({ type: "varchar", length: 16, default: "http" })
   transport: "http" | "tcp";
 
