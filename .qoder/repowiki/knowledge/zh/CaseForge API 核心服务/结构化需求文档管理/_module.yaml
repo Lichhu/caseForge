@@ -1,0 +1,18 @@
+schema_version: 1
+module_path: api/struct_doc
+title: 结构化需求文档管理
+scope:
+    - apps/api/src/modules/struct-doc/
+source_files: []
+depends_on: []
+related_to:
+    - path: api/case_editor
+    - path: api/project_manage
+    - path: api/dynamic_instruct
+    - path: api/scenario
+    - path: api/api_test
+    - path: shared
+    - path: web/case_forge
+    - path: web/web_core
+    - path: web/api_test
+    - path: web

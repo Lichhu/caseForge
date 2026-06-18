@@ -1,0 +1,18 @@
+schema_version: 1
+module_path: api/scenario
+title: 场景与提示词管理
+scope:
+    - apps/api/src/modules/scenario/
+source_files: []
+depends_on: []
+related_to:
+    - path: api/dynamic_instruct
+    - path: api/case_editor
+    - path: api/struct_doc
+    - path: api/project_manage
+    - path: api/api_test
+    - path: shared
+    - path: web/case_forge
+    - path: web/api_test
+    - path: web/web_core
+    - path: web

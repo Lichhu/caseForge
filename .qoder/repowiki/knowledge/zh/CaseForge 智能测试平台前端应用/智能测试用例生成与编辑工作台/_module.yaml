@@ -1,0 +1,26 @@
+schema_version: 1
+module_path: web/case_forge
+title: 智能测试用例生成与编辑工作台
+scope:
+    - apps/web/src/views/CaseForgeDashboardView.vue
+    - apps/web/src/components/CaseAddModal.vue
+    - apps/web/src/components/CaseSelectionModal.vue
+    - apps/web/src/components/CaseTreeExcel.vue
+    - apps/web/src/components/CaseTreeWorkbench.vue
+    - apps/web/src/components/ConstraintBuilder.vue
+    - apps/web/src/components/ProjectSidebar.vue
+    - apps/web/src/components/RequirementEditor.vue
+    - apps/web/src/components/TreeNode.vue
+source_files: []
+depends_on: []
+related_to:
+    - path: api/case_editor
+    - path: web/api_test
+    - path: web/web_core
+    - path: shared
+    - path: api/dynamic_instruct
+    - path: api/scenario
+    - path: api/struct_doc
+    - path: api/project_manage
+    - path: api
+    - path: api/api_test

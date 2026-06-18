@@ -1,0 +1,28 @@
+schema_version: 1
+module_path: web/web_core
+title: CaseForge Web 应用核心架构
+scope:
+    - apps/web/src/api/
+    - apps/web/src/composables/
+    - apps/web/src/constants/
+    - apps/web/src/layouts/
+    - apps/web/src/router/
+    - apps/web/src/stores/
+    - apps/web/src/theme/
+    - apps/web/src/types/
+    - apps/web/src/utils/
+    - apps/web/src/App.vue
+    - apps/web/src/main.ts
+source_files: []
+depends_on: []
+related_to:
+    - path: web/case_forge
+    - path: web/api_test
+    - path: api/case_editor
+    - path: api/api_test
+    - path: api/project_manage
+    - path: api/dynamic_instruct
+    - path: api/scenario
+    - path: api/struct_doc
+    - path: shared
+    - path: api

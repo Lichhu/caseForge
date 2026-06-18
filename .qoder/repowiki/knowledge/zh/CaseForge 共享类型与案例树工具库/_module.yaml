@@ -1,0 +1,19 @@
+schema_version: 1
+module_path: shared
+title: CaseForge 共享类型与案例树工具库
+scope:
+    - packages/shared/
+source_files: []
+depends_on: []
+related_to:
+    - path: api/case_editor
+    - path: web/case_forge
+    - path: web/api_test
+    - path: api/api_test
+    - path: api/project_manage
+    - path: api/scenario
+    - path: api/dynamic_instruct
+    - path: api/struct_doc
+    - path: web/web_core
+    - path: api
+    - path: web
