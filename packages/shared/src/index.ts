@@ -150,6 +150,8 @@ export interface CaseForgeProject {
 
 export * from './case-tree';
 export * from './pagination';
+export * from './api-environment-service.util';
+export * from './api-environment';
 export * from './api-test';
 export * from './api-execution-profile.util';
 export * from './xml-format.util';

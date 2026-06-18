@@ -58,10 +58,10 @@
                 <small>{{ item.caseNo || item.transactionCode || '待分配编号' }}</small>
                 <a-tag
                   class="case-transport-tag"
-                  :color="caseProfileColor(item.request)"
+                  :color="caseProfileColor(resolveListItemRequest(item))"
                   size="small"
                 >
-                  {{ caseProfileLabel(item.request) }}
+                  {{ caseProfileLabel(resolveListItemRequest(item)) }}
                 </a-tag>
               </div>
               <span class="polarity-pill" :class="item.polarity">
@@ -148,45 +148,133 @@
             </div>
 
             <div class="editor-block case-payload-block">
+              <div class="case-protocol-bar">
+                <div class="case-protocol-field">
+                  <span class="case-protocol-label">通讯协议</span>
+                  <a-select
+                    v-model:value="form.protocol"
+                    :options="protocolOptions"
+                    class="case-protocol-select"
+                  />
+                </div>
+                <template v-if="form.protocol === 'http'">
+                  <div class="case-protocol-field">
+                    <span class="case-protocol-label">请求方法</span>
+                    <a-select
+                      v-model:value="form.httpMethod"
+                      :options="httpMethodOptions"
+                      class="case-protocol-select"
+                    />
+                  </div>
+                  <div class="case-protocol-field case-protocol-field--grow">
+                    <span class="case-protocol-label">路径</span>
+                    <a-input
+                      v-model:value="form.httpPath"
+                      placeholder="请输入相对路径，系统根据环境和服务名进行 URL 拼接"
+                    />
+                  </div>
+                </template>
+                <div v-if="form.protocol === 'socket'" class="case-protocol-field">
+                  <span class="case-protocol-label">编码</span>
+                  <a-select
+                    v-model:value="form.socketEncoding"
+                    :options="encodingOptions"
+                    class="case-protocol-select"
+                  />
+                </div>
+              </div>
+
               <div class="case-payload-grid">
                 <div class="case-payload-item">
                   <div class="editor-block-title-row">
                     <div class="editor-block-title">请求报文</div>
-                    <a-button type="link" size="small" @click="beautifyRequestJson">
+                    <a-button
+                      v-if="requestTab === 'body' && canBeautifyBody"
+                      type="link"
+                      size="small"
+                      @click="beautifyRequestJson"
+                    >
                       <template #icon><FormatPainterOutlined /></template>
                       美化
                     </a-button>
                   </div>
-                  <p class="case-payload-hint">{{ requestPayloadHint }}</p>
+                  <div class="case-request-tabs">
+                    <button
+                      v-for="tab in requestTabs"
+                      :key="tab.key"
+                      type="button"
+                      class="case-request-tab"
+                      :class="{ active: requestTab === tab.key }"
+                      @click="requestTab = tab.key"
+                    >
+                      {{ tab.label }}
+                      <span v-if="tab.count" class="case-request-tab-badge">{{ tab.count }}</span>
+                    </button>
+                  </div>
                   <div class="case-payload-fields">
-                    <template v-if="requestEditorMode === 'tcp-xml'">
-                      <a-textarea
-                        v-model:value="form.requestBodyXml"
-                        class="editor-textarea case-xml-editor case-payload-textarea"
-                        placeholder="XML 报文"
-                      />
+                    <template v-if="requestTab === 'params'">
+                      <p class="case-payload-hint">Query 参数将拼接到请求 URL 后。</p>
+                      <KeyValueRowsEditor v-model:rows="form.queryRows" />
                     </template>
-                    <template v-else-if="requestEditorMode === 'http-xml'">
-                      <div class="request-split-label">HTTP 配置（JSON）</div>
-                      <a-textarea
-                        v-model:value="form.requestMetaJson"
-                        class="editor-textarea case-json-editor case-payload-textarea--meta"
-                        :rows="5"
-                        placeholder="method / path / headers ..."
-                      />
-                      <div class="request-split-label">报文体（XML）</div>
-                      <a-textarea
-                        v-model:value="form.requestBodyXml"
-                        class="editor-textarea case-xml-editor case-payload-textarea"
-                        placeholder="XML 报文"
-                      />
+                    <template v-else-if="requestTab === 'headers'">
+                      <p class="case-payload-hint">{{ headersTabHint }}</p>
+                      <KeyValueRowsEditor v-model:rows="form.headerRows" />
                     </template>
-                    <a-textarea
-                      v-else
-                      v-model:value="form.requestJson"
-                      class="editor-textarea case-json-editor case-payload-textarea"
-                      placeholder="JSON：method / path / headers / body"
-                    />
+                    <template v-else>
+                      <div v-if="form.protocol === 'http'" class="case-body-format-bar">
+                        <button
+                          v-for="item in bodyFormatOptions"
+                          :key="item.value"
+                          type="button"
+                          class="case-body-format-btn"
+                          :class="{
+                            active: form.bodyFormat === item.value,
+                            disabled: !httpMethodHasBody(form.httpMethod),
+                          }"
+                          :disabled="!httpMethodHasBody(form.httpMethod)"
+                          @click="form.bodyFormat = item.value"
+                        >
+                          {{ item.label }}
+                        </button>
+                      </div>
+                      <div v-else class="case-body-format-bar">
+                        <button
+                          v-for="item in bodyFormatOptions"
+                          :key="item.value"
+                          type="button"
+                          class="case-body-format-btn"
+                          :class="{ active: form.bodyFormat === item.value }"
+                          @click="form.bodyFormat = item.value"
+                        >
+                          {{ item.label }}
+                        </button>
+                      </div>
+                      <p class="case-payload-hint">{{ bodyTabHint }}</p>
+                      <template v-if="!httpMethodHasBody(form.httpMethod) && form.protocol === 'http'">
+                        <div class="case-body-empty">GET / HEAD 请求无 Body，请使用 Params 配置查询参数。</div>
+                      </template>
+                      <template v-else-if="form.bodyFormat === 'json'">
+                        <a-textarea
+                          v-model:value="form.requestBodyJson"
+                          class="editor-textarea case-json-editor case-payload-textarea"
+                          placeholder="{}"
+                        />
+                      </template>
+                      <template v-else-if="form.bodyFormat === 'xml'">
+                        <a-textarea
+                          v-model:value="form.requestBodyXml"
+                          class="editor-textarea case-xml-editor case-payload-textarea"
+                          placeholder="XML 报文"
+                        />
+                      </template>
+                      <template v-else>
+                        <a-textarea
+                          v-model:value="form.requestBodyText"
+                          class="editor-textarea case-payload-textarea"
+                          placeholder="纯文本报文"
+                        />
+                      </template>
+                    </template>
                   </div>
                 </div>
                 <div class="case-payload-item">
@@ -198,6 +286,67 @@
                     </a-button>
                   </div>
                   <p class="case-payload-hint">{{ expectedPayloadHint }}</p>
+                  <a-collapse :bordered="false" class="expected-guide-collapse">
+                    <a-collapse-panel key="guide" header="断言说明">
+                      <p class="expected-guide-lead">
+                        切换协议时会自动带出模板；一般只需改
+                        <code>expected</code> 里的具体值，或先执行一次再对照实际响应微调。
+                      </p>
+                      <div class="expected-guide-section">
+                        <div class="expected-guide-label">平台支持的检查项</div>
+                        <ul class="expected-guide-list">
+                          <li>
+                            <code>statusCode</code>：HTTP 状态码，可写单个数字或数组（如
+                            <code>200</code> 或 <code>[200, 201]</code>）
+                          </li>
+                          <li><code>statusOnly: true</code>：只检查状态码，不检查响应体</li>
+                          <li>
+                            <code>skipStatusCheck: true</code>：跳过状态码（Socket / MQ 用这个）
+                          </li>
+                          <li><code>maxDurationMs</code>：可选，响应时间上限（毫秒）</li>
+                          <li><code>bodyAssertions</code>：响应体断言列表，可写多条</li>
+                        </ul>
+                      </div>
+                      <div class="expected-guide-section">
+                        <div class="expected-guide-label">bodyAssertions 支持的类型</div>
+                        <ul class="expected-guide-list">
+                          <li>
+                            <code>contains</code>：响应里<strong>包含</strong>某段文字（XML / 文本最常用）
+                          </li>
+                          <li><code>equals</code>：与期望值<strong>完全相等</strong></li>
+                          <li>
+                            <code>jsonPath</code>：按路径取值后相等（JSON 响应，如
+                            <code>path: "$.code"</code>）
+                          </li>
+                          <li><code>matches</code>：符合正则表达式</li>
+                        </ul>
+                      </div>
+                      <div class="expected-guide-section">
+                        <div class="expected-guide-label">通过规则</div>
+                        <p class="expected-guide-text">
+                          配置了哪几条，就要<strong>全部通过</strong>才算案例成功；不是整包响应一一对比。
+                        </p>
+                      </div>
+                      <div class="expected-guide-section">
+                        <div class="expected-guide-label">推荐步骤</div>
+                        <ol class="expected-guide-steps">
+                          <li>保持自动带出的模板，或点击下方「填入示例」</li>
+                          <li>先执行一次，在执行报告里看实际响应</li>
+                          <li>从响应里挑 1～3 个稳定特征（如 <code>000000</code>、<code>&lt;/Transaction&gt;</code>）写进断言</li>
+                          <li>再执行，根据断言明细逐条调整</li>
+                        </ol>
+                      </div>
+                      <div class="expected-guide-section">
+                        <div class="expected-guide-label-row">
+                          <span class="expected-guide-label">当前协议示例（可直接用）</span>
+                          <a-button type="link" size="small" @click="applyExpectedExample">
+                            填入示例
+                          </a-button>
+                        </div>
+                        <pre class="expected-guide-example">{{ expectedExampleJson }}</pre>
+                      </div>
+                    </a-collapse-panel>
+                  </a-collapse>
                   <div class="case-payload-fields">
                     <a-textarea
                       v-model:value="form.expectedJson"
@@ -309,19 +458,33 @@ import {
 import type { ApiCaseRequest } from '@case-forge/shared';
 import type { ApiTestCaseRow } from '@/api/apiTestClient';
 import { useApiTestStore } from '@/stores/apiTest';
+import KeyValueRowsEditor from '@/components/api-test/KeyValueRowsEditor.vue';
 import {
   beautifyCasePayloadJson,
   beautifyRequestBodyXml,
+  buildDefaultExpectedJson,
+  buildDefaultHeaderRows,
+  createEmptyKeyValueRow,
+  defaultContentType,
+  defaultEditorState,
+  httpMethodHasBody,
+  HTTP_METHODS,
   mergeRequestFromEditor,
+  resolveEditorMode,
   splitRequestForEditor,
-  type RequestEditorMode,
-  type TcpRequestMeta,
+  type CaseBodyFormat,
+  type CaseProtocol,
+  type HttpMethod,
+  type KeyValueRow,
+  type SocketRequestMeta,
 } from '@/utils/casePayloadFormat.util';
 
 const apiStore = useApiTestStore();
 const batchMode = ref(false);
 const saving = ref(false);
 const isNewCase = ref(false);
+const syncingForm = ref(false);
+const requestTab = ref<'params' | 'body' | 'headers'>('body');
 const pageSizeOptions = caseForgePageSizeOptionLabels();
 
 const projectId = computed(() => apiStore.activeProjectId ?? '');
@@ -365,6 +528,44 @@ function caseProfileColor(request: ApiCaseRequest) {
   return executionProfileBadgeColor(resolveExecutionProfile(request).transport);
 }
 
+const editingPreviewRequest = computed((): ApiCaseRequest => {
+  try {
+    return mergeRequestFromEditor({
+      mode: requestEditorMode.value,
+      protocol: form.protocol,
+      bodyFormat: form.bodyFormat,
+      httpMethod: form.httpMethod,
+      httpPath: form.httpPath,
+      headerRows: form.headerRows,
+      queryRows: form.queryRows,
+      socketEncoding: form.socketEncoding,
+      requestBodyText: form.requestBodyText,
+      requestBodyJson: form.requestBodyJson,
+      requestJson: form.requestJson,
+      requestMetaJson: form.requestMetaJson,
+      requestTcpMeta: form.requestTcpMeta,
+      requestBodyXml: form.requestBodyXml,
+    });
+  } catch {
+    return {
+      method: form.protocol === 'http' ? form.httpMethod : '',
+      path: form.protocol === 'http' ? form.httpPath : '',
+      transport:
+        form.protocol === 'socket' ? 'tcp' : form.protocol === 'mq' ? 'mq' : 'http',
+    };
+  }
+});
+
+function resolveListItemRequest(item: ApiTestCaseRow): ApiCaseRequest {
+  if (batchMode.value || !showEditor.value || isNewCase.value) {
+    return item.request;
+  }
+  if (item.id === apiStore.activeCaseId) {
+    return editingPreviewRequest.value;
+  }
+  return item.request;
+}
+
 const form = reactive({
   endpointId: '',
   title: '',
@@ -377,35 +578,113 @@ const form = reactive({
   polarity: 'positive',
   status: 'ready',
   enabled: true,
-  requestEditorMode: 'json' as RequestEditorMode,
-  requestJson: '{}',
+  protocol: 'http' as CaseProtocol,
+  bodyFormat: 'json' as CaseBodyFormat,
+  httpMethod: 'POST' as HttpMethod,
+  httpPath: '',
+  headerRows: [createEmptyKeyValueRow()] as KeyValueRow[],
+  queryRows: [createEmptyKeyValueRow()] as KeyValueRow[],
+  socketEncoding: 'UTF-8',
+  requestBodyText: '',
+  requestBodyJson: '{}',
+  requestJson: '',
   requestMetaJson: '',
-  requestTcpMeta: null as TcpRequestMeta | null,
+  requestTcpMeta: null as SocketRequestMeta | null,
   requestBodyXml: '',
   expectedJson: '{}',
 });
 
-const requestEditorMode = computed(() => form.requestEditorMode);
+const requestEditorMode = computed(() =>
+  resolveEditorMode(form.protocol, form.bodyFormat),
+);
 
-const requestPayloadHint = computed(() => {
-  if (requestEditorMode.value === 'tcp-xml') {
-    return 'TCP 连接地址在环境中配置；此处编辑 XML 报文体（GBK 编码 + 8 位长度前缀）。';
+const protocolOptions = [
+  { label: 'HTTP', value: 'http' },
+  { label: 'Socket', value: 'socket' },
+  { label: 'MQ', value: 'mq' },
+];
+
+const httpMethodOptions = HTTP_METHODS.map((method) => ({
+  label: method,
+  value: method,
+}));
+
+const bodyFormatOptions = [
+  { label: 'JSON', value: 'json' as CaseBodyFormat },
+  { label: 'XML', value: 'xml' as CaseBodyFormat },
+  { label: 'Text', value: 'text' as CaseBodyFormat },
+];
+
+const encodingOptions = [
+  { label: 'UTF-8', value: 'UTF-8' },
+  { label: 'GBK', value: 'GBK' },
+];
+
+function countFilledRows(rows: KeyValueRow[]) {
+  return rows.filter((row) => row.key.trim()).length;
+}
+
+const requestTabs = computed(() => {
+  if (form.protocol === 'http') {
+    return [
+      { key: 'params' as const, label: 'Params', count: countFilledRows(form.queryRows) },
+      { key: 'body' as const, label: 'Body', count: httpMethodHasBody(form.httpMethod) ? 1 : 0 },
+      { key: 'headers' as const, label: 'Headers', count: countFilledRows(form.headerRows) },
+    ];
   }
-  if (requestEditorMode.value === 'http-xml') {
-    return 'HTTP 配置与 XML 报文体分开展示；Body 为实际上送的业务报文。';
+  return [
+    { key: 'headers' as const, label: 'Headers', count: countFilledRows(form.headerRows) },
+    { key: 'body' as const, label: 'Body', count: 1 },
+  ];
+});
+
+const canBeautifyBody = computed(
+  () =>
+    httpMethodHasBody(form.httpMethod) || form.protocol !== 'http',
+);
+
+const headersTabHint = computed(() => {
+  if (form.protocol === 'http') return '配置请求头，如 Content-Type、Authorization 等。';
+  if (form.protocol === 'socket') return '配置 Socket 通讯头信息（键值对）。';
+  return '配置 MQ 消息头信息（键值对）。';
+});
+
+const bodyTabHint = computed(() => {
+  if (form.protocol === 'http') {
+    return `${form.httpMethod} 请求 Body，格式选择 JSON / XML / Text。`;
   }
-  return 'JSON 格式，包含 method、path、headers 与 body 业务参数。';
+  if (form.protocol === 'socket') {
+    return form.bodyFormat === 'xml'
+      ? 'Socket 报文体；GBK 编码时自动附加 8 位长度前缀。'
+      : `Socket 报文体，格式为 ${form.bodyFormat.toUpperCase()}。`;
+  }
+  return `MQ 消息体，格式为 ${form.bodyFormat.toUpperCase()}。`;
 });
 
 const expectedPayloadHint = computed(() => {
-  if (requestEditorMode.value === 'tcp-xml') {
-    return '断言响应 XML 中的 bizResCode / bizResText 等节点，无需配置 HTTP 状态码。';
+  if (form.protocol === 'http') {
+    if (form.bodyFormat === 'xml') {
+      return '可配置 statusCode 与 bodyAssertions，断言响应 XML 节点或文本内容。';
+    }
+    return '可配置 statusCode 与 bodyAssertions，断言响应 JSON 字段或 HTTP 状态。';
   }
-  if (requestEditorMode.value === 'http-xml') {
-    return '可配置 statusCode 与 bodyAssertions，断言响应 XML 节点或文本内容。';
+  if (form.protocol === 'socket' || form.protocol === 'mq') {
+    if (form.bodyFormat === 'xml') {
+      return '断言响应 XML 中的 bizResCode / bizResText 等节点，无需配置 HTTP 状态码。';
+    }
+    return '断言响应报文业务码或关键字段，无需配置 HTTP 状态码。';
   }
-  return '可配置 statusCode 与 bodyAssertions，断言响应 JSON 字段或 HTTP 状态。';
+  return '可配置 statusCode 与 bodyAssertions。';
 });
+
+const expectedExampleJson = computed(() =>
+  buildDefaultExpectedJson(form.protocol, form.bodyFormat, form.polarity),
+);
+
+function applyExpectedExample() {
+  form.expectedJson = expectedExampleJson.value;
+  message.success('已填入当前协议的断言示例');
+}
 
 const polarityOptions = [
   { label: '正', value: 'positive' },
@@ -422,6 +701,61 @@ const endpointOptions = computed(() =>
     label: `${e.method} ${e.path}`,
     value: e.id,
   })),
+);
+
+watch(
+  () => form.protocol,
+  (protocol) => {
+    if (syncingForm.value) return;
+    requestTab.value = protocol === 'http' ? 'params' : 'headers';
+  },
+);
+
+watch(
+  () => [form.protocol, form.bodyFormat] as const,
+  ([protocol, bodyFormat], oldValue) => {
+    if (syncingForm.value || !oldValue) return;
+    const [oldProtocol, oldBodyFormat] = oldValue;
+    if (protocol === oldProtocol && protocol === 'http' && bodyFormat !== oldBodyFormat) {
+      const rows = [...form.headerRows];
+      const ctIndex = rows.findIndex(
+        (row) => row.key.trim().toLowerCase() === 'content-type',
+      );
+      if (ctIndex >= 0) {
+        rows[ctIndex] = {
+          ...rows[ctIndex],
+          value: defaultContentType(bodyFormat),
+        };
+        form.headerRows = rows;
+      }
+      form.expectedJson = buildDefaultExpectedJson(
+        protocol,
+        bodyFormat,
+        form.polarity,
+      );
+      return;
+    }
+    form.headerRows = buildDefaultHeaderRows(protocol, bodyFormat);
+    form.expectedJson = buildDefaultExpectedJson(
+      protocol,
+      bodyFormat,
+      form.polarity,
+    );
+    if (protocol === 'socket' && bodyFormat === 'xml') {
+      form.socketEncoding = 'GBK';
+    } else if (protocol === 'socket') {
+      form.socketEncoding = 'UTF-8';
+    }
+  },
+);
+
+watch(
+  () => form.httpMethod,
+  (method) => {
+    if (!httpMethodHasBody(method) && requestTab.value === 'body') {
+      requestTab.value = 'params';
+    }
+  },
 );
 
 watch(
@@ -469,14 +803,24 @@ function statusLabel(status: string) {
 
 function applyRequestToForm(request: ApiTestCaseRow['request']) {
   const split = splitRequestForEditor(request);
-  form.requestEditorMode = split.mode;
+  form.protocol = split.protocol;
+  form.bodyFormat = split.bodyFormat;
+  form.httpMethod = split.httpMethod;
+  form.httpPath = split.httpPath;
+  form.headerRows = split.headerRows;
+  form.queryRows = split.queryRows;
+  form.socketEncoding = split.socketEncoding;
+  form.requestBodyText = split.requestBodyText;
+  form.requestBodyJson = split.requestBodyJson;
   form.requestJson = split.requestJson;
   form.requestMetaJson = split.requestMetaJson;
   form.requestTcpMeta = split.requestTcpMeta;
   form.requestBodyXml = split.requestBodyXml;
+  requestTab.value = split.protocol === 'http' ? 'params' : 'headers';
 }
 
 function loadForm(row: ApiTestCaseRow) {
+  syncingForm.value = true;
   form.endpointId = row.endpointId;
   form.title = row.title;
   form.caseNo = row.caseNo ?? '';
@@ -491,6 +835,7 @@ function loadForm(row: ApiTestCaseRow) {
   form.enabled = row.enabled;
   applyRequestToForm(row.request);
   form.expectedJson = JSON.stringify(row.expected, null, 2);
+  syncingForm.value = false;
 }
 
 function syncFormFromActiveCase() {
@@ -563,22 +908,21 @@ function beautifyJsonField(field: 'requestJson' | 'expectedJson', label: string)
 }
 
 function beautifyRequestJson() {
-  if (requestEditorMode.value === 'tcp-xml') {
+  if (form.bodyFormat === 'xml') {
     form.requestBodyXml = beautifyRequestBodyXml(form.requestBodyXml);
     message.success('请求报文已美化');
     return;
   }
-  if (requestEditorMode.value === 'http-xml') {
+  if (form.bodyFormat === 'json') {
     try {
-      form.requestMetaJson = beautifyCasePayloadJson(form.requestMetaJson);
-      form.requestBodyXml = beautifyRequestBodyXml(form.requestBodyXml);
+      form.requestBodyJson = beautifyCasePayloadJson(form.requestBodyJson);
       message.success('请求报文已美化');
     } catch {
-      message.error('HTTP 配置不是合法 JSON，无法美化');
+      message.error('JSON 不是合法格式，无法美化');
     }
     return;
   }
-  beautifyJsonField('requestJson', '请求报文');
+  message.info('纯文本报文无需美化');
 }
 
 function beautifyExpectedJson() {
@@ -589,6 +933,7 @@ function onCreate() {
   batchMode.value = false;
   isNewCase.value = true;
   apiStore.activeCaseId = '';
+  syncingForm.value = true;
   const first = apiStore.apiDoc?.endpoints?.[0];
   form.endpointId = first?.id ?? '';
   form.title = '';
@@ -602,20 +947,43 @@ function onCreate() {
   form.status = 'ready';
   form.enabled = true;
   if (first) {
-    applyRequestToForm({
-      method: first.method,
-      path: first.path,
-      headers: { 'Content-Type': 'application/json' },
-      body: {},
-    });
+    const split = defaultEditorState('http', 'json', first);
+    form.protocol = split.protocol;
+    form.bodyFormat = split.bodyFormat;
+    form.httpMethod = 'POST';
+    form.httpPath = first.path || '';
+    form.headerRows = split.headerRows;
+    form.queryRows = split.queryRows;
+    form.socketEncoding = split.socketEncoding;
+    form.requestBodyText = split.requestBodyText;
+    form.requestBodyJson = split.requestBodyJson;
+    form.requestJson = split.requestJson;
+    form.requestMetaJson = split.requestMetaJson;
+    form.requestTcpMeta = split.requestTcpMeta;
+    form.requestBodyXml = split.requestBodyXml;
   } else {
-    form.requestEditorMode = 'json';
-    form.requestJson = '{}';
-    form.requestMetaJson = '';
-    form.requestTcpMeta = null;
-    form.requestBodyXml = '';
+    const split = defaultEditorState();
+    form.protocol = split.protocol;
+    form.bodyFormat = split.bodyFormat;
+    form.httpMethod = split.httpMethod;
+    form.httpPath = split.httpPath;
+    form.headerRows = split.headerRows;
+    form.queryRows = split.queryRows;
+    form.socketEncoding = split.socketEncoding;
+    form.requestBodyText = split.requestBodyText;
+    form.requestBodyJson = split.requestBodyJson;
+    form.requestJson = split.requestJson;
+    form.requestMetaJson = split.requestMetaJson;
+    form.requestTcpMeta = split.requestTcpMeta;
+    form.requestBodyXml = split.requestBodyXml;
   }
-  form.expectedJson = JSON.stringify({ statusCode: 200, statusOnly: true }, null, 2);
+  requestTab.value = 'params';
+  form.expectedJson = buildDefaultExpectedJson(
+    form.protocol,
+    form.bodyFormat,
+    form.polarity,
+  );
+  syncingForm.value = false;
 }
 
 async function onSave() {
@@ -638,7 +1006,16 @@ async function onSave() {
       status: form.status,
       enabled: form.status !== 'disabled',
       request: mergeRequestFromEditor({
-        mode: form.requestEditorMode,
+        mode: requestEditorMode.value,
+        protocol: form.protocol,
+        bodyFormat: form.bodyFormat,
+        httpMethod: form.httpMethod,
+        httpPath: form.httpPath,
+        headerRows: form.headerRows,
+        queryRows: form.queryRows,
+        socketEncoding: form.socketEncoding,
+        requestBodyText: form.requestBodyText,
+        requestBodyJson: form.requestBodyJson,
         requestJson: form.requestJson,
         requestMetaJson: form.requestMetaJson,
         requestTcpMeta: form.requestTcpMeta,
@@ -780,7 +1157,7 @@ function onBatchDelete() {
 
 .batch-case-summary-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 108px 132px;
+  grid-template-columns: minmax(0, 1fr) 140px 132px;
   align-items: center;
   gap: 12px;
   padding: 8px 0;
@@ -895,6 +1272,40 @@ function onBatchDelete() {
   padding-bottom: 18px;
 }
 
+.case-protocol-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid #eaecf0;
+  border-radius: 8px;
+  background: #f9fafb;
+}
+
+.case-protocol-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.case-protocol-field--grow {
+  flex: 1;
+  min-width: 220px;
+}
+
+.case-protocol-label {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #667085;
+  white-space: nowrap;
+}
+
+.case-protocol-select {
+  min-width: 108px;
+}
+
 .case-payload-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -910,10 +1321,185 @@ function onBatchDelete() {
 
 .case-payload-hint {
   margin: 0 0 8px;
-  min-height: 3em;
+  min-height: 1.5em;
   font-size: 12px;
   line-height: 1.5;
   color: #667085;
+}
+
+.expected-guide-collapse {
+  margin-bottom: 8px;
+  background: #f9fafb;
+  border-radius: 6px;
+}
+
+.expected-guide-collapse :deep(.ant-collapse-header) {
+  padding: 8px 12px !important;
+  font-size: 12px;
+  color: #475467;
+}
+
+.expected-guide-collapse :deep(.ant-collapse-content-box) {
+  padding: 0 12px 12px !important;
+}
+
+.expected-guide-lead {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #475467;
+}
+
+.expected-guide-section + .expected-guide-section {
+  margin-top: 10px;
+}
+
+.expected-guide-label,
+.expected-guide-label-row .expected-guide-label {
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #344054;
+}
+
+.expected-guide-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.expected-guide-list,
+.expected-guide-steps {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #475467;
+}
+
+.expected-guide-list li + li,
+.expected-guide-steps li + li {
+  margin-top: 4px;
+}
+
+.expected-guide-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #475467;
+}
+
+.expected-guide-example {
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #344054;
+  background: #fff;
+  border: 1px solid #eaecf0;
+  border-radius: 6px;
+}
+
+.expected-guide-lead code,
+.expected-guide-list code,
+.expected-guide-steps code {
+  padding: 1px 4px;
+  font-size: 11px;
+  background: #f2f4f7;
+  border-radius: 4px;
+}
+
+.case-request-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #eaecf0;
+}
+
+.case-request-tab {
+  position: relative;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: #667085;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.case-request-tab.active {
+  color: #7f1d1d;
+  font-weight: 600;
+}
+
+.case-request-tab.active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: #7f1d1d;
+  border-radius: 2px 2px 0 0;
+}
+
+.case-request-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #eaecf0;
+  color: #475467;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.case-body-format-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.case-body-format-btn {
+  padding: 4px 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  background: #fff;
+  color: #475467;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.case-body-format-btn.active {
+  border-color: #7f1d1d;
+  background: #7f1d1d;
+  color: #fff;
+}
+
+.case-body-format-btn.disabled,
+.case-body-format-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.case-body-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 240px;
+  border: 1px dashed #d0d5dd;
+  border-radius: 8px;
+  color: #667085;
+  font-size: 13px;
+  text-align: center;
+  padding: 16px;
 }
 
 .case-payload-fields {

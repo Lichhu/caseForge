@@ -84,6 +84,7 @@ export interface ApiEnvironmentRow {
   id: string;
   projectId: string;
   name: string;
+  scope?: 'global' | 'system' | 'personal';
   baseUrl: string;
   headers: Record<string, string>;
   variables: Record<string, string>;
@@ -114,6 +115,11 @@ export interface ApiEnvironmentServiceRow {
   projectId: string;
   environmentId: string;
   name: string;
+  serverAddress?: string;
+  jdbcUrl?: string;
+  remoteConnection?: string;
+  objectStorage?: string;
+  remark?: string;
   transport?: Extract<ApiTransport, "http" | "tcp">;
   payloadFormat?: ApiMessageFormat;
   baseUrl?: string;
@@ -515,6 +521,18 @@ export async function deleteApiEnvironmentService(
 ) {
   await http.delete(
     `/api-test/${projectId}/environments/${environmentId}/services/${serviceId}`,
+  );
+}
+
+export async function reorderApiEnvironmentService(
+  projectId: string,
+  environmentId: string,
+  serviceId: string,
+  direction: "up" | "down" | "top",
+) {
+  await http.patch(
+    `/api-test/${projectId}/environments/${environmentId}/services/${serviceId}/reorder`,
+    { direction },
   );
 }
 

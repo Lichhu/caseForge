@@ -30,6 +30,7 @@ import {
   deleteApiCase,
   deleteApiEnvironment,
   deleteApiEnvironmentService,
+  reorderApiEnvironmentService,
   deleteApiExecutionSet,
   batchDeleteApiTransactions,
   exportApiReport,
@@ -979,6 +980,20 @@ export const useApiTestStore = defineStore("apiTest", {
       serviceId: string,
     ) {
       await deleteApiEnvironmentService(projectId, environmentId, serviceId);
+      await this.refreshEnvironmentServices(projectId, environmentId);
+    },
+    async reorderEnvironmentService(
+      projectId: string,
+      environmentId: string,
+      serviceId: string,
+      direction: "up" | "down" | "top",
+    ) {
+      await reorderApiEnvironmentService(
+        projectId,
+        environmentId,
+        serviceId,
+        direction,
+      );
       await this.refreshEnvironmentServices(projectId, environmentId);
     },
     async refreshExecutionSets(

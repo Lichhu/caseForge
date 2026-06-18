@@ -42,7 +42,14 @@
       v-else-if="profile.transport === 'tcp'"
       type="info"
       show-icon
-      message="TCP 执行将按 GBK 编码 + 8 位长度前缀发送 XML，响应读到 </Transaction> 为止"
+      message="Socket 执行将按 GBK 编码 + 8 位长度前缀发送 XML，响应读到 </Transaction> 为止"
+      class="execution-profile-alert"
+    />
+    <a-alert
+      v-else-if="profile.transport === 'mq'"
+      type="info"
+      show-icon
+      message="MQ 案例可在编辑器中维护消息体，执行器接入后将自动发送"
       class="execution-profile-alert"
     />
   </div>

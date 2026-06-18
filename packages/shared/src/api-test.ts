@@ -4,7 +4,7 @@ export type ApiCaseSource = 'ai' | 'manual' | 'ai_edited';
 export type ApiCaseStatus = 'draft' | 'ready' | 'disabled';
 export type ApiRunItemStatus = 'passed' | 'failed' | 'error' | 'skipped';
 export type ApiStructuringStatus = 'idle' | 'processing' | 'completed' | 'failed';
-export type ApiTransport = 'http' | 'tcp' | 'tuxedo' | 'other';
+export type ApiTransport = 'http' | 'tcp' | 'mq' | 'tuxedo' | 'other';
 export type ApiMessageFormat = 'json' | 'xml' | 'text' | 'soap' | 'other';
 
 export interface ApiMessageFraming {

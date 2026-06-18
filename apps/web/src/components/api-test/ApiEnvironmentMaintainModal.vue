@@ -2,7 +2,7 @@
   <a-modal
     v-model:open="open"
     title="环境维护"
-    width="960px"
+    width="1280px"
     :footer="null"
     destroy-on-close
     @after-open="onOpen"
@@ -10,32 +10,39 @@
     <div class="env-maintain-layout">
       <aside class="env-maintain-envs">
         <div class="env-maintain-head">
-          <strong>环境</strong>
-          <a-button size="small" type="primary" @click="openEnvCreate">新建</a-button>
+          <strong>环境配置</strong>
+          <a-button size="small" type="primary" @click="openEnvCreate">新增环境</a-button>
         </div>
-        <div class="env-maintain-list">
-          <button
-            v-for="env in apiStore.environments"
-            :key="env.id"
-            type="button"
-            class="env-maintain-item"
-            :class="{ active: env.id === activeEnvId }"
-            @click="selectEnv(env.id)"
+        <div class="env-maintain-groups">
+          <section
+            v-for="group in envGroups"
+            :key="group.scope"
+            class="env-scope-group"
           >
-            <strong>{{ env.name }}</strong>
-            <small>{{ env.baseUrl }}</small>
-          </button>
-          <a-empty v-if="!apiStore.environments.length" description="暂无环境" />
+            <div class="env-scope-title">{{ group.label }}</div>
+            <div class="env-maintain-list">
+              <button
+                v-for="env in group.items"
+                :key="env.id"
+                type="button"
+                class="env-maintain-item"
+                :class="{ active: env.id === activeEnvId }"
+                @click="selectEnv(env.id)"
+              >
+                <strong>{{ env.name }}</strong>
+              </button>
+              <div v-if="!group.items.length" class="env-scope-empty">暂无环境</div>
+            </div>
+          </section>
         </div>
       </aside>
 
       <section v-if="activeEnvId" class="env-maintain-services">
         <div class="env-maintain-head">
-          <strong>环境服务</strong>
+          <strong>{{ activeEnvName }}</strong>
           <a-space>
             <a-button size="small" @click="openEnvEdit">编辑环境</a-button>
             <a-button size="small" danger @click="removeEnv">删除环境</a-button>
-            <a-button size="small" type="primary" @click="openServiceCreate">新建服务</a-button>
           </a-space>
         </div>
         <a-table
@@ -44,20 +51,78 @@
           :pagination="false"
           :data-source="services"
           :columns="serviceColumns"
+          :scroll="{ x: 1100 }"
         >
-          <template #bodyCell="{ column, record }">
-            <template v-if="column.key === 'transport'">
-              <a-tag :color="record.transport === 'tcp' ? 'orange' : 'blue'">
-                {{ record.transport === 'tcp' ? 'TCP' : 'HTTP' }}
-              </a-tag>
+          <template #headerCell="{ column }">
+            <template v-if="column.key === 'actions'">
+              <div class="service-actions-head">
+                <span>{{ column.title }}</span>
+                <a-button type="link" size="small" @click="openServiceCreate">+ 新增</a-button>
+              </div>
             </template>
-            <template v-else-if="column.key === 'target'">
-              {{ serviceTargetLabel(record) }}
+          </template>
+          <template #bodyCell="{ column, record, index }">
+            <template v-if="column.key === 'index'">
+              {{ index + 1 }}
+            </template>
+            <template v-else-if="column.key === 'name'">
+              <a-button type="link" class="service-name-link" @click="openServiceEdit(record)">
+                {{ record.name }}
+              </a-button>
+            </template>
+            <template v-else-if="column.key === 'serverAddress'">
+              <span class="service-cell-text" :title="record.serverAddress">{{ record.serverAddress || '—' }}</span>
+            </template>
+            <template v-else-if="column.key === 'jdbcUrl'">
+              <span class="service-cell-text" :title="record.jdbcUrl">{{ record.jdbcUrl || '—' }}</span>
+            </template>
+            <template v-else-if="column.key === 'remoteConnection'">
+              <span class="service-cell-text">{{ record.remoteConnection || '—' }}</span>
+            </template>
+            <template v-else-if="column.key === 'objectStorage'">
+              <span class="service-cell-text">{{ record.objectStorage || '—' }}</span>
+            </template>
+            <template v-else-if="column.key === 'remark'">
+              <span class="service-cell-text" :title="record.remark">{{ record.remark || '—' }}</span>
             </template>
             <template v-else-if="column.key === 'actions'">
-              <a-space>
-                <a-button type="link" size="small" @click="openServiceEdit(record)">编辑</a-button>
-                <a-button type="link" size="small" danger @click="removeService(record.id)">删除</a-button>
+              <a-space :size="4">
+                <a-button
+                  type="text"
+                  danger
+                  size="small"
+                  title="删除"
+                  @click="removeService(record.id)"
+                >
+                  <DeleteOutlined />
+                </a-button>
+                <a-button
+                  type="text"
+                  size="small"
+                  title="上移"
+                  :disabled="index === 0"
+                  @click="moveService(record.id, 'up')"
+                >
+                  <ArrowUpOutlined />
+                </a-button>
+                <a-button
+                  type="text"
+                  size="small"
+                  title="下移"
+                  :disabled="index === services.length - 1"
+                  @click="moveService(record.id, 'down')"
+                >
+                  <ArrowDownOutlined />
+                </a-button>
+                <a-button
+                  type="text"
+                  size="small"
+                  title="置顶"
+                  :disabled="index === 0"
+                  @click="moveService(record.id, 'top')"
+                >
+                  <VerticalAlignTopOutlined />
+                </a-button>
               </a-space>
             </template>
           </template>
@@ -68,72 +133,55 @@
 
     <a-modal
       v-model:open="envModalOpen"
-      :title="envEditingId ? '编辑环境' : '新建环境'"
+      :title="envEditingId ? '编辑环境' : '新增'"
       @ok="saveEnv"
     >
       <a-form layout="vertical">
-        <a-form-item label="环境名称" required><a-input v-model:value="envForm.name" /></a-form-item>
-        <a-form-item label="Base URL / 连接地址" required>
-          <a-input
-            v-model:value="envForm.baseUrl"
-            placeholder="HTTP: https://api.example.com · TCP: 32.114.71.6:60030"
+        <a-form-item label="环境类型" required>
+          <a-radio-group v-model:value="envForm.scope" :options="scopeOptions" />
+        </a-form-item>
+        <a-form-item label="环境名称" required>
+          <a-auto-complete
+            v-model:value="envForm.name"
+            :options="nameOptions"
+            placeholder="请输入或选择环境名称"
+            allow-clear
           />
         </a-form-item>
-        <a-alert
-          type="info"
-          show-icon
-          message="HTTP 案例填 http(s):// 地址；TCP 案例填 host:port（如 32.114.71.6:60030）"
-          style="margin-bottom: 12px"
-        />
-        <a-form-item label="Token"><a-input-password v-model:value="envForm.token" /></a-form-item>
-        <a-form-item label="默认 Headers (JSON)"><a-textarea v-model:value="envForm.headersJson" :rows="2" /></a-form-item>
-        <a-form-item label="变量 (JSON)"><a-textarea v-model:value="envForm.variablesJson" :rows="2" /></a-form-item>
-        <a-form-item label="设为默认"><a-switch v-model:checked="envForm.isDefault" /></a-form-item>
       </a-form>
     </a-modal>
 
     <a-modal
       v-model:open="serviceModalOpen"
-      :title="serviceEditingId ? '编辑环境服务' : '新建环境服务'"
+      :title="serviceEditingId ? '编辑服务' : '新增服务'"
+      width="720px"
       @ok="saveService"
     >
       <a-form layout="vertical">
-        <a-form-item label="服务名称" required><a-input v-model:value="serviceForm.name" /></a-form-item>
-        <a-form-item label="传输协议" required>
-          <a-segmented
-            v-model:value="serviceForm.transport"
-            :options="[
-              { label: 'HTTP', value: 'http' },
-              { label: 'TCP', value: 'tcp' },
-            ]"
+        <a-form-item label="服务名" required>
+          <a-input v-model:value="serviceForm.name" placeholder="如 default、ESBJSON" />
+        </a-form-item>
+        <a-form-item label="服务器地址" required>
+          <a-input
+            v-model:value="serviceForm.serverAddress"
+            placeholder="http://host:port/path 或 socket2://host:port"
           />
         </a-form-item>
-        <a-form-item label="报文格式">
-          <a-select
-            v-model:value="serviceForm.payloadFormat"
-            :options="[
-              { label: 'JSON', value: 'json' },
-              { label: 'XML', value: 'xml' },
-              { label: 'TEXT', value: 'text' },
-              { label: 'SOAP', value: 'soap' },
-              { label: 'OTHER', value: 'other' },
-            ]"
+        <a-form-item label="数据库连接">
+          <a-input
+            v-model:value="serviceForm.jdbcUrl"
+            placeholder="jdbc:oracle:thin:@host:port:sid"
           />
         </a-form-item>
-        <template v-if="serviceForm.transport === 'http'">
-          <a-form-item label="服务 Base URL">
-            <a-input v-model:value="serviceForm.baseUrl" placeholder="留空则继承环境 Base URL，如 http://localhost:8080" />
-          </a-form-item>
-          <a-form-item label="路径前缀"><a-input v-model:value="serviceForm.pathPrefix" placeholder="如 /gateway" /></a-form-item>
-          <a-form-item label="Headers (JSON)"><a-textarea v-model:value="serviceForm.headersJson" :rows="2" /></a-form-item>
-        </template>
-        <template v-else>
-          <a-form-item label="Host" required><a-input v-model:value="serviceForm.host" placeholder="如 32.114.71.6" /></a-form-item>
-          <a-form-item label="Port" required><a-input-number v-model:value="serviceForm.port" :min="1" :max="65535" style="width: 100%" /></a-form-item>
-          <a-form-item label="编码"><a-select v-model:value="serviceForm.encoding" :options="encodingOptions" /></a-form-item>
-          <a-form-item label="长度前缀位数"><a-input-number v-model:value="serviceForm.lengthPrefixWidth" :min="0" :max="16" style="width: 100%" /></a-form-item>
-        </template>
-        <a-form-item label="变量 (JSON)"><a-textarea v-model:value="serviceForm.variablesJson" :rows="2" /></a-form-item>
+        <a-form-item label="远程连接">
+          <a-input v-model:value="serviceForm.remoteConnection" />
+        </a-form-item>
+        <a-form-item label="对象存储">
+          <a-input v-model:value="serviceForm.objectStorage" />
+        </a-form-item>
+        <a-form-item label="备注">
+          <a-textarea v-model:value="serviceForm.remark" :rows="2" />
+        </a-form-item>
       </a-form>
     </a-modal>
   </a-modal>
@@ -141,8 +189,20 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue';
+import {
+  ArrowDownOutlined,
+  ArrowUpOutlined,
+  DeleteOutlined,
+  VerticalAlignTopOutlined,
+} from '@ant-design/icons-vue';
 import { Modal } from 'ant-design-vue';
-import type { ApiEnvironmentRow, ApiEnvironmentServiceRow } from '@/api/apiTestClient';
+import {
+  API_ENVIRONMENT_PRESET_NAMES,
+  API_ENVIRONMENT_SCOPE_LABEL,
+  API_ENVIRONMENT_SCOPES,
+  type ApiEnvironmentScope,
+} from '@case-forge/shared';
+import type { ApiEnvironmentServiceRow } from '@/api/apiTestClient';
 import { useApiTestStore } from '@/stores/apiTest';
 
 const open = defineModel<boolean>('open', { default: false });
@@ -154,52 +214,53 @@ const serviceModalOpen = ref(false);
 const serviceEditingId = ref('');
 
 const envForm = reactive({
+  scope: 'system' as ApiEnvironmentScope,
   name: '',
-  baseUrl: '',
-  token: '',
-  headersJson: '{}',
-  variablesJson: '{}',
-  isDefault: false,
 });
 
 const serviceForm = reactive({
   name: '',
-  transport: 'http' as 'http' | 'tcp',
-  payloadFormat: 'json',
-  baseUrl: '',
-  pathPrefix: '',
-  host: '',
-  port: undefined as number | undefined,
-  encoding: 'UTF-8',
-  lengthPrefixWidth: 0,
-  headersJson: '{}',
-  variablesJson: '{}',
+  serverAddress: '',
+  jdbcUrl: '',
+  remoteConnection: '',
+  objectStorage: '',
+  remark: '',
 });
 
-const encodingOptions = [
-  { label: 'UTF-8', value: 'UTF-8' },
-  { label: 'GBK', value: 'GBK' },
-];
+const scopeOptions = Object.entries(API_ENVIRONMENT_SCOPE_LABEL).map(([value, label]) => ({
+  label,
+  value,
+}));
+
+const nameOptions = API_ENVIRONMENT_PRESET_NAMES.map((name) => ({ value: name }));
 
 const serviceColumns = [
-  { title: '服务名', dataIndex: 'name', key: 'name' },
-  { title: '协议', key: 'transport', width: 84 },
-  { title: '格式', dataIndex: 'payloadFormat', key: 'payloadFormat', width: 84 },
-  { title: '目标地址', key: 'target', ellipsis: true },
-  { title: '操作', key: 'actions', width: 120 },
+  { title: '#', key: 'index', width: 44, align: 'center' as const },
+  { title: '服务名', key: 'name', width: 140, ellipsis: true },
+  { title: '服务器地址', key: 'serverAddress', width: 280, ellipsis: true },
+  { title: '数据库连接', key: 'jdbcUrl', width: 260, ellipsis: true },
+  { title: '远程连接', key: 'remoteConnection', width: 120, ellipsis: true },
+  { title: '对象存储', key: 'objectStorage', width: 120, ellipsis: true },
+  { title: '备注', key: 'remark', width: 160, ellipsis: true },
+  { title: '操作', key: 'actions', width: 140, fixed: 'right' as const },
 ];
 
 const services = computed(
   () => apiStore.environmentServices[activeEnvId.value] ?? [],
 );
 
-function serviceTargetLabel(row: ApiEnvironmentServiceRow) {
-  if ((row.transport ?? 'http') === 'tcp') {
-    return row.host && row.port ? `${row.host}:${row.port}` : '未配置 TCP 地址';
-  }
-  const base = row.baseUrl || '继承环境 Base URL';
-  return row.pathPrefix ? `${base}${row.pathPrefix.startsWith('/') ? row.pathPrefix : `/${row.pathPrefix}`}` : base;
-}
+const activeEnvName = computed(() => {
+  const env = apiStore.environments.find((item) => item.id === activeEnvId.value);
+  return env?.name ?? '环境服务';
+});
+
+const envGroups = computed(() =>
+  API_ENVIRONMENT_SCOPES.map((scope) => ({
+    scope,
+    label: API_ENVIRONMENT_SCOPE_LABEL[scope],
+    items: apiStore.environments.filter((env) => (env.scope ?? 'system') === scope),
+  })),
+);
 
 watch(
   () => apiStore.selectedEnvironmentId,
@@ -229,12 +290,8 @@ async function selectEnv(environmentId: string) {
 
 function openEnvCreate() {
   envEditingId.value = '';
-  envForm.name = 'DEV';
-  envForm.baseUrl = 'http://localhost:8080';
-  envForm.token = '';
-  envForm.headersJson = JSON.stringify({ 'Content-Type': 'application/json' }, null, 2);
-  envForm.variablesJson = '{}';
-  envForm.isDefault = apiStore.environments.length === 0;
+  envForm.scope = 'system';
+  envForm.name = '';
   envModalOpen.value = true;
 }
 
@@ -242,27 +299,22 @@ function openEnvEdit() {
   const env = apiStore.environments.find((item) => item.id === activeEnvId.value);
   if (!env) return;
   envEditingId.value = env.id;
+  envForm.scope = env.scope ?? 'system';
   envForm.name = env.name;
-  envForm.baseUrl = env.baseUrl;
-  envForm.token = '';
-  envForm.headersJson = JSON.stringify(env.headers ?? {}, null, 2);
-  envForm.variablesJson = JSON.stringify(env.variables ?? {}, null, 2);
-  envForm.isDefault = env.isDefault;
   envModalOpen.value = true;
 }
 
 async function saveEnv() {
   const projectId = apiStore.activeProjectId;
-  if (!projectId) return;
-  const payload: Record<string, unknown> = {
-    name: envForm.name,
-    baseUrl: envForm.baseUrl,
-    headers: JSON.parse(envForm.headersJson || '{}'),
-    variables: JSON.parse(envForm.variablesJson || '{}'),
-    isDefault: envForm.isDefault,
-  };
-  if (envForm.token) payload.token = envForm.token;
-  await apiStore.saveEnvironment(projectId, payload, envEditingId.value || undefined);
+  if (!projectId || !envForm.name.trim()) return;
+  await apiStore.saveEnvironment(
+    projectId,
+    {
+      name: envForm.name.trim(),
+      scope: envForm.scope,
+    },
+    envEditingId.value || undefined,
+  );
   envModalOpen.value = false;
   if (!activeEnvId.value) {
     activeEnvId.value = apiStore.selectedEnvironmentId;
@@ -291,53 +343,36 @@ function removeEnv() {
 function openServiceCreate() {
   serviceEditingId.value = '';
   serviceForm.name = '';
-  serviceForm.transport = 'http';
-  serviceForm.payloadFormat = 'json';
-  serviceForm.baseUrl = '';
-  serviceForm.pathPrefix = '';
-  serviceForm.host = '';
-  serviceForm.port = undefined;
-  serviceForm.encoding = 'UTF-8';
-  serviceForm.lengthPrefixWidth = 0;
-  serviceForm.headersJson = '{}';
-  serviceForm.variablesJson = '{}';
+  serviceForm.serverAddress = '';
+  serviceForm.jdbcUrl = '';
+  serviceForm.remoteConnection = '';
+  serviceForm.objectStorage = '';
+  serviceForm.remark = '';
   serviceModalOpen.value = true;
 }
 
 function openServiceEdit(row: ApiEnvironmentServiceRow) {
   serviceEditingId.value = row.id;
   serviceForm.name = row.name;
-  serviceForm.transport = row.transport ?? 'http';
-  serviceForm.payloadFormat = row.payloadFormat ?? (serviceForm.transport === 'tcp' ? 'xml' : 'json');
-  serviceForm.baseUrl = row.baseUrl ?? '';
-  serviceForm.pathPrefix = row.pathPrefix ?? '';
-  serviceForm.host = row.host ?? '';
-  serviceForm.port = row.port;
-  serviceForm.encoding = row.encoding ?? 'UTF-8';
-  serviceForm.lengthPrefixWidth = row.framing?.width ?? 0;
-  serviceForm.headersJson = JSON.stringify(row.headers ?? {}, null, 2);
-  serviceForm.variablesJson = JSON.stringify(row.variables ?? {}, null, 2);
+  serviceForm.serverAddress = row.serverAddress ?? '';
+  serviceForm.jdbcUrl = row.jdbcUrl ?? '';
+  serviceForm.remoteConnection = row.remoteConnection ?? '';
+  serviceForm.objectStorage = row.objectStorage ?? '';
+  serviceForm.remark = row.remark ?? '';
   serviceModalOpen.value = true;
 }
 
 async function saveService() {
   const projectId = apiStore.activeProjectId;
-  if (!projectId || !activeEnvId.value) return;
+  if (!projectId || !activeEnvId.value || !serviceForm.name.trim()) return;
+  if (!serviceForm.serverAddress.trim()) return;
   const payload = {
-    name: serviceForm.name,
-    transport: serviceForm.transport,
-    payloadFormat: serviceForm.payloadFormat,
-    baseUrl: serviceForm.transport === 'http' ? serviceForm.baseUrl || undefined : undefined,
-    pathPrefix: serviceForm.transport === 'http' ? serviceForm.pathPrefix || undefined : undefined,
-    host: serviceForm.transport === 'tcp' ? serviceForm.host || undefined : undefined,
-    port: serviceForm.transport === 'tcp' ? serviceForm.port : undefined,
-    encoding: serviceForm.transport === 'tcp' ? serviceForm.encoding : undefined,
-    framing:
-      serviceForm.transport === 'tcp' && serviceForm.lengthPrefixWidth > 0
-        ? { type: 'length-prefix', width: serviceForm.lengthPrefixWidth, encoding: serviceForm.encoding }
-        : undefined,
-    headers: serviceForm.transport === 'http' ? JSON.parse(serviceForm.headersJson || '{}') : {},
-    variables: JSON.parse(serviceForm.variablesJson || '{}'),
+    name: serviceForm.name.trim(),
+    serverAddress: serviceForm.serverAddress.trim(),
+    jdbcUrl: serviceForm.jdbcUrl.trim() || undefined,
+    remoteConnection: serviceForm.remoteConnection.trim() || undefined,
+    objectStorage: serviceForm.objectStorage.trim() || undefined,
+    remark: serviceForm.remark.trim() || undefined,
   };
   await apiStore.saveEnvironmentService(
     projectId,
@@ -353,6 +388,17 @@ async function removeService(serviceId: string) {
   if (!projectId || !activeEnvId.value) return;
   await apiStore.removeEnvironmentService(projectId, activeEnvId.value, serviceId);
 }
+
+async function moveService(serviceId: string, direction: 'up' | 'down' | 'top') {
+  const projectId = apiStore.activeProjectId;
+  if (!projectId || !activeEnvId.value) return;
+  await apiStore.reorderEnvironmentService(
+    projectId,
+    activeEnvId.value,
+    serviceId,
+    direction,
+  );
+}
 </script>
 
 <style scoped>
@@ -360,13 +406,33 @@ async function removeService(serviceId: string) {
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
   gap: 16px;
-  min-height: 360px;
+  min-height: 420px;
 }
 .env-maintain-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
+}
+.env-maintain-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.env-scope-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.env-scope-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #344054;
+}
+.env-scope-empty {
+  padding: 8px 0;
+  font-size: 12px;
+  color: #98a2b3;
 }
 .env-maintain-list {
   display: flex;
@@ -390,9 +456,22 @@ async function removeService(serviceId: string) {
   border-color: #f04438;
   background: #fff5f6;
 }
-.env-maintain-item small {
-  color: #64748b;
-  word-break: break-all;
+.service-actions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.service-name-link {
+  padding: 0;
+  height: auto;
+}
+.service-cell-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
 }
 .env-maintain-empty {
   display: flex;

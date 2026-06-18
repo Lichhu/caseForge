@@ -7,7 +7,7 @@
     <a-radio-group v-model:value="apiStore.selectedEnvironmentId" class="env-list">
       <a-radio v-for="env in apiStore.environments" :key="env.id" :value="env.id" class="env-item">
         <span>{{ env.name }}</span>
-        <small>{{ env.baseUrl }}</small>
+        <a-tag size="small">{{ scopeLabel(env.scope) }}</a-tag>
         <a-tag v-if="env.isDefault" color="blue">默认</a-tag>
         <a-button type="link" size="small" @click.stop="openEdit(env)">编辑</a-button>
       </a-radio>
@@ -16,12 +16,17 @@
 
     <a-modal v-model:open="modalOpen" :title="editingId ? '编辑环境' : '新建环境'" @ok="onSave">
       <a-form layout="vertical">
-        <a-form-item label="环境名称" required><a-input v-model:value="form.name" /></a-form-item>
-        <a-form-item label="Base URL" required><a-input v-model:value="form.baseUrl" placeholder="https://api.example.com" /></a-form-item>
-        <a-form-item label="Token（保存后脱敏）"><a-input-password v-model:value="form.token" placeholder="Bearer token" /></a-form-item>
-        <a-form-item label="默认 Headers (JSON)"><a-textarea v-model:value="form.headersJson" :rows="3" /></a-form-item>
-        <a-form-item label="变量 (JSON)"><a-textarea v-model:value="form.variablesJson" :rows="2" /></a-form-item>
-        <a-form-item label="设为默认"><a-switch v-model:checked="form.isDefault" /></a-form-item>
+        <a-form-item label="环境类型" required>
+          <a-radio-group v-model:value="form.scope" :options="scopeOptions" />
+        </a-form-item>
+        <a-form-item label="环境名称" required>
+          <a-auto-complete
+            v-model:value="form.name"
+            :options="nameOptions"
+            placeholder="请输入或选择环境名称"
+            allow-clear
+          />
+        </a-form-item>
       </a-form>
     </a-modal>
   </div>
@@ -29,6 +34,11 @@
 
 <script setup lang="ts">
 import { reactive, ref } from 'vue';
+import {
+  API_ENVIRONMENT_PRESET_NAMES,
+  API_ENVIRONMENT_SCOPE_LABEL,
+  type ApiEnvironmentScope,
+} from '@case-forge/shared';
 import { useApiTestStore } from '@/stores/apiTest';
 import type { ApiEnvironmentRow } from '@/api/apiTestClient';
 
@@ -37,48 +47,47 @@ const modalOpen = ref(false);
 const editingId = ref('');
 
 const form = reactive({
+  scope: 'system' as ApiEnvironmentScope,
   name: '',
-  baseUrl: '',
-  token: '',
-  headersJson: '{}',
-  variablesJson: '{}',
-  isDefault: false,
 });
+
+const scopeOptions = Object.entries(API_ENVIRONMENT_SCOPE_LABEL).map(([value, label]) => ({
+  label,
+  value,
+}));
+
+const nameOptions = API_ENVIRONMENT_PRESET_NAMES.map((name) => ({ value: name }));
+
+function scopeLabel(scope?: ApiEnvironmentScope) {
+  if (!scope) return API_ENVIRONMENT_SCOPE_LABEL.system;
+  return API_ENVIRONMENT_SCOPE_LABEL[scope];
+}
 
 function openCreate() {
   editingId.value = '';
-  form.name = 'DEV';
-  form.baseUrl = 'http://localhost:8080';
-  form.token = '';
-  form.headersJson = JSON.stringify({ 'Content-Type': 'application/json' }, null, 2);
-  form.variablesJson = '{}';
-  form.isDefault = apiStore.environments.length === 0;
+  form.scope = 'system';
+  form.name = '';
   modalOpen.value = true;
 }
 
 function openEdit(env: ApiEnvironmentRow) {
   editingId.value = env.id;
+  form.scope = env.scope ?? 'system';
   form.name = env.name;
-  form.baseUrl = env.baseUrl;
-  form.token = '';
-  form.headersJson = JSON.stringify(env.headers ?? {}, null, 2);
-  form.variablesJson = JSON.stringify(env.variables ?? {}, null, 2);
-  form.isDefault = env.isDefault;
   modalOpen.value = true;
 }
 
 async function onSave() {
   const projectId = apiStore.activeProjectId;
-  if (!projectId) return;
-  const payload: Record<string, unknown> = {
-    name: form.name,
-    baseUrl: form.baseUrl,
-    headers: JSON.parse(form.headersJson || '{}'),
-    variables: JSON.parse(form.variablesJson || '{}'),
-    isDefault: form.isDefault,
-  };
-  if (form.token) payload.token = form.token;
-  await apiStore.saveEnvironment(projectId, payload, editingId.value || undefined);
+  if (!projectId || !form.name.trim()) return;
+  await apiStore.saveEnvironment(
+    projectId,
+    {
+      name: form.name.trim(),
+      scope: form.scope,
+    },
+    editingId.value || undefined,
+  );
   modalOpen.value = false;
 }
 </script>
@@ -88,5 +97,4 @@ async function onSave() {
 .env-center-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .env-list { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .env-item { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.env-item small { color: #64748b; }
 </style>

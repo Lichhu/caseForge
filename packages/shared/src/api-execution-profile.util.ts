@@ -22,7 +22,8 @@ export interface ApiExecutionProfile {
 
 const TRANSPORT_LABEL: Record<ApiTransport, string> = {
   http: "HTTP",
-  tcp: "TCP",
+  tcp: "Socket",
+  mq: "MQ",
   tuxedo: "TUXEDO",
   other: "其它",
 };
@@ -31,7 +32,7 @@ const FORMAT_LABEL: Record<ApiMessageFormat, string> = {
   json: "JSON",
   xml: "XML",
   soap: "SOAP",
-  text: "文本",
+  text: "Text",
   other: "其它",
 };
 
@@ -57,6 +58,19 @@ function inferTransport(request: ApiCaseRequest): ApiTransport {
   if (request.transport) return request.transport;
   if (request.framing?.type === "length-prefix") return "tcp";
   return "http";
+}
+
+function buildListLabel(
+  transport: ApiTransport,
+  messageFormat: ApiMessageFormat,
+  httpMethod?: string,
+): string {
+  const format = FORMAT_LABEL[messageFormat];
+  if (transport === "http") {
+    const method = (httpMethod ?? "POST").toUpperCase();
+    return `HTTP ${method} + ${format}`;
+  }
+  return `${TRANSPORT_LABEL[transport]} + ${format}`;
 }
 
 function resolveContentType(
@@ -97,9 +111,12 @@ function buildSummary(
   }
   if (transport === "tcp") {
     if (messageFormat === "xml") {
-      return "TCP 连接，GBK 编码 + 8 位长度前缀 + XML 报文";
+      return "Socket 连接，GBK 编码 + 8 位长度前缀 + XML 报文";
     }
-    return `TCP 裸连接，报文格式 ${FORMAT_LABEL[messageFormat]}`;
+    return `Socket 裸连接，报文格式 ${FORMAT_LABEL[messageFormat]}`;
+  }
+  if (transport === "mq") {
+    return `MQ 消息，报文格式 ${FORMAT_LABEL[messageFormat]}`;
   }
   return `${TRANSPORT_LABEL[transport]} + ${FORMAT_LABEL[messageFormat]}`;
 }
@@ -120,10 +137,19 @@ function buildTargetHint(
       ? address.replace(/^https?:\/\//i, "")
       : address;
   }
+  if (transport === "mq") {
+    return address || "（请在环境中配置 MQ 连接）";
+  }
   return address;
 }
 
-function buildAssertionHint(expected?: ApiCaseExpected): string {
+function buildAssertionHint(
+  transport: ApiTransport,
+  expected?: ApiCaseExpected,
+): string {
+  if (transport === "mq") {
+    return "断言 MQ 响应报文业务码或关键节点";
+  }
   if (expected?.skipStatusCheck) {
     return "断言响应报文业务码（bizResCode / resCode），不校验 HTTP 状态码";
   }
@@ -153,14 +179,17 @@ function detectEnvMismatch(
   const addr = envAddress.trim();
   if (transport === "tcp") {
     if (/^https?:\/\//i.test(addr)) {
-      return "TCP 案例建议使用 host:port 地址（如 32.114.71.6:60030），当前环境为 HTTP URL";
+      return "Socket 案例建议使用 host:port 地址（如 32.114.71.6:60030），当前环境为 HTTP URL";
     }
     if (!/:\d+/.test(addr)) {
-      return "TCP 案例的环境地址建议包含端口号（host:port）";
+      return "Socket 案例的环境地址建议包含端口号（host:port）";
     }
   }
   if (transport === "http" && !/^https?:\/\//i.test(addr)) {
     return "HTTP 案例的环境 Base URL 建议以 http:// 或 https:// 开头";
+  }
+  if (transport === "mq" && !addr) {
+    return "MQ 案例需要在环境中配置消息队列连接";
   }
   return undefined;
 }
@@ -189,28 +218,31 @@ export function resolveExecutionProfile(
   return {
     transport,
     messageFormat,
-    label: `${TRANSPORT_LABEL[transport]} + ${FORMAT_LABEL[messageFormat]}`,
+    label: buildListLabel(transport, messageFormat, httpMethod),
     summary: buildSummary(transport, messageFormat, httpMethod),
     httpMethod,
     contentType,
     encoding,
     framing,
     targetHint: buildTargetHint(transport, request, options?.envAddress),
-    assertionHint: buildAssertionHint(options?.expected),
+    assertionHint: buildAssertionHint(transport, options?.expected),
     supported,
     unsupportedReason:
-      transport === "tuxedo"
-        ? "TUXEDO 执行器尚未实现"
-        : transport === "other"
-          ? "暂不支持该通讯方式执行"
-          : envMismatch,
+      transport === "mq"
+        ? "MQ 执行器尚未实现"
+        : transport === "tuxedo"
+          ? "TUXEDO 执行器尚未实现"
+          : transport === "other"
+            ? "暂不支持该通讯方式执行"
+            : envMismatch,
   };
 }
 
 export function executionProfileBadgeColor(
   transport: ApiTransport,
-): "blue" | "orange" | "purple" | "default" {
+): "blue" | "orange" | "purple" | "green" | "default" {
   if (transport === "tcp") return "orange";
+  if (transport === "mq") return "green";
   if (transport === "tuxedo") return "purple";
   if (transport === "http") return "blue";
   return "default";
