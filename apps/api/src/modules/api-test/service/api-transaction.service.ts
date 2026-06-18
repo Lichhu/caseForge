@@ -6,7 +6,10 @@ import {
 import { InjectRepository } from "@nestjs/typeorm";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { Repository } from "typeorm";
-import { auditFieldsForUpdate } from "../../../common/audit/request-context";
+import {
+  auditFieldsForCreate,
+  auditFieldsForUpdate,
+} from "../../../common/audit/request-context";
 import { scopedWhere } from "../../../common/audit/user-scope";
 import { assertApiTestProject } from "../util/assert-api-project.util";
 import { touchProjectUpdatedAt } from "../../../common/project/touch-project.util";
@@ -76,7 +79,7 @@ export class ApiTransactionService {
         name,
         description: payload.description?.trim() || undefined,
         sortOrder: count,
-        ...auditFieldsForUpdate(),
+        ...auditFieldsForCreate(),
       }),
     );
     await this.apiDocRepo.save(
@@ -84,7 +87,7 @@ export class ApiTransactionService {
         projectId,
         transactionId: transaction.id,
         structuringStatus: "idle",
-        ...auditFieldsForUpdate(),
+        ...auditFieldsForCreate(),
       }),
     );
     await touchProjectUpdatedAt(this.projectRepo, projectId);

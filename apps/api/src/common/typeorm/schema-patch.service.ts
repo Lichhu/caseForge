@@ -24,6 +24,7 @@ export class SchemaPatchService implements OnModuleInit {
     await ensureCaseEditorUtf8mb4TextColumns(this.dataSource, this.logger);
     await applyApiTestSchemaMigrations(this.dataSource);
     await ensureDatabaseIndexes(this.dataSource);
+    await this.repairCreatedByForApiTestEnvironments();
   }
 
   private async ensureProjectPlatformColumn() {
@@ -231,6 +232,37 @@ export class SchemaPatchService implements OnModuleInit {
         AFTER tempStructDoc
     `);
     this.logger.log("case_struct_doc.summaryStructDoc 列已补齐");
+  }
+
+  /**
+   * 修复历史数据：createEnvironment 等方法曾误用 auditFieldsForUpdate()，
+   * 导致 createdBy 回退为 'system' 而非实际用户。用 modifiedBy 修复 createdBy。
+   */
+  private async repairCreatedByForApiTestEnvironments() {
+    const tables = [
+      "api_test_environment",
+      "api_transaction",
+      "api_doc",
+      "api_test_run",
+    ];
+    for (const table of tables) {
+      try {
+        const result: Array<{ count: number }> = await this.dataSource.query(
+          `SELECT COUNT(*) AS count FROM ${table} WHERE createdBy = 'system' AND modifiedBy IS NOT NULL AND modifiedBy != '' AND modifiedBy != 'system'`,
+        );
+        const count = result[0]?.count ?? 0;
+        if (count === 0) continue;
+        this.logger.warn(
+          `检测到 ${table} 有 ${count} 条记录 createdBy='system' 但 modifiedBy 为实际用户，正在修复…`,
+        );
+        await this.dataSource.query(
+          `UPDATE ${table} SET createdBy = modifiedBy WHERE createdBy = 'system' AND modifiedBy IS NOT NULL AND modifiedBy != '' AND modifiedBy != 'system'`,
+        );
+        this.logger.log(`${table} 的 createdBy 已修复`);
+      } catch {
+        // 表不存在或无 createdBy/modifiedBy 列时跳过
+      }
+    }
   }
 
 }

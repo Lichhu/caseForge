@@ -4,7 +4,10 @@ import iconv from "iconv-lite";
 import { Socket } from "node:net";
 import { In, Repository } from "typeorm";
 import { scopedWhere } from "../../../common/audit/user-scope";
-import { auditFieldsForUpdate } from "../../../common/audit/request-context";
+import {
+  auditFieldsForCreate,
+  auditFieldsForUpdate,
+} from "../../../common/audit/request-context";
 import { ApiTestCaseEntity } from "../entity/api-test-case.entity";
 import { ApiTestRunEntity } from "../entity/api-test-run.entity";
 import { ApiTestRunItemEntity } from "../entity/api-test-run-item.entity";
@@ -104,7 +107,7 @@ export class ApiExecutionService {
         status: "running",
         totalCount: cases.length,
         concurrency,
-        ...auditFieldsForUpdate(),
+        ...auditFieldsForCreate(),
       }),
     );
 
@@ -442,7 +445,15 @@ export class ApiExecutionService {
       baseUrl = `${baseUrl.replace(/\/$/, "")}${prefix}`;
     }
     if (!/^https?:\/\//i.test(baseUrl)) {
-      throw new BadRequestException("HTTP 服务需要配置 http(s):// Base URL");
+      const hasHttpService = (env.services ?? []).some(
+        (s) => (s.transport ?? "http") === "http",
+      );
+      const hint = hasHttpService
+        ? "请检查环境下的 HTTP 服务是否配置了有效的 http(s):// 服务器地址"
+        : "当前环境下没有 HTTP 服务，请在「环境维护」中新增一个服务，服务器地址填写 http://host:port";
+      throw new BadRequestException(
+        `HTTP 服务需要配置 http(s):// Base URL。${hint}`,
+      );
     }
     return baseUrl.replace(/\/$/, "");
   }

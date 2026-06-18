@@ -5,7 +5,6 @@ import {
   auditFieldsForCreate,
   auditFieldsForUpdate,
 } from "../../../common/audit/request-context";
-import { scopedWhere } from "../../../common/audit/user-scope";
 import { ApiTestEnvironmentEntity } from "../entity/api-test-environment.entity";
 import { ApiTestEnvironmentServiceEntity } from "../entity/api-test-environment-service.entity";
 import { SaveApiEnvironmentDto } from "../dto/save-environment.dto";
@@ -32,7 +31,6 @@ export class ApiEnvironmentService {
 
   async listEnvironments(projectId: string) {
     const rows = await this.envRepo.find({
-      where: scopedWhere({ projectId }),
       order: { isDefault: "DESC", updatedAt: "DESC" },
     });
     return rows.map((row) => this.toPublic(row));
@@ -54,7 +52,7 @@ export class ApiEnvironmentService {
         : undefined,
       isDefault: payload.isDefault ?? false,
       enabled: payload.enabled ?? true,
-      ...auditFieldsForUpdate(),
+      ...auditFieldsForCreate(),
     });
     const saved = await this.envRepo.save(entity);
     if (!(await this.hasDefault(projectId))) {
@@ -93,7 +91,7 @@ export class ApiEnvironmentService {
   }
 
   async deleteEnvironment(projectId: string, environmentId: string) {
-    await this.envRepo.delete(scopedWhere({ projectId, id: environmentId }));
+    await this.envRepo.delete({ id: environmentId });
     return { ok: true };
   }
 
@@ -108,18 +106,13 @@ export class ApiEnvironmentService {
     let headers = row.headers ?? {};
     let variables = row.variables ?? {};
     const services = await this.serviceRepo.find({
-      where: scopedWhere({ projectId, environmentId, enabled: true }),
+      where: { environmentId, enabled: true },
       order: { sortOrder: "ASC", createdAt: "ASC" },
     });
 
     if (environmentServiceId) {
       const service = await this.serviceRepo.findOne({
-        where: scopedWhere({
-          projectId,
-          environmentId,
-          id: environmentServiceId,
-          enabled: true,
-        }),
+        where: { environmentId, id: environmentServiceId, enabled: true },
       });
       if (!service) {
         throw new NotFoundException("环境服务不存在或已禁用");
@@ -151,7 +144,7 @@ export class ApiEnvironmentService {
   async listEnvironmentServices(projectId: string, environmentId: string) {
     await this.requireEnv(projectId, environmentId);
     const rows = await this.serviceRepo.find({
-      where: scopedWhere({ projectId, environmentId }),
+      where: { environmentId },
       order: { sortOrder: "ASC", createdAt: "ASC" },
     });
     return rows.map((row) => toPublicApiEnvironmentService(row));
@@ -164,7 +157,7 @@ export class ApiEnvironmentService {
   ) {
     await this.requireEnv(projectId, environmentId);
     const count = await this.serviceRepo.count({
-      where: scopedWhere({ projectId, environmentId }),
+      where: { environmentId },
     });
     const entity = this.serviceRepo.create({
       projectId,
@@ -222,8 +215,9 @@ export class ApiEnvironmentService {
     serviceId: string,
     direction: "up" | "down" | "top",
   ) {
+    await this.requireEnv(projectId, environmentId);
     const rows = await this.serviceRepo.find({
-      where: scopedWhere({ projectId, environmentId }),
+      where: { environmentId },
       order: { sortOrder: "ASC", createdAt: "ASC" },
     });
     const index = rows.findIndex((row) => row.id === serviceId);
@@ -262,12 +256,9 @@ export class ApiEnvironmentService {
     environmentId: string,
     serviceId: string,
   ) {
+    await this.requireEnv(projectId, environmentId);
     const row = await this.serviceRepo.findOne({
-      where: scopedWhere({
-        projectId,
-        environmentId,
-        id: serviceId,
-      }),
+      where: { environmentId, id: serviceId },
     });
     if (!row) {
       throw new NotFoundException("环境服务不存在");
@@ -277,7 +268,7 @@ export class ApiEnvironmentService {
 
   private async requireEnv(projectId: string, environmentId: string) {
     const row = await this.envRepo.findOne({
-      where: scopedWhere({ projectId, id: environmentId, enabled: true }),
+      where: { id: environmentId, enabled: true },
     });
     if (!row) {
       throw new NotFoundException("执行环境不存在或已禁用");
@@ -286,12 +277,12 @@ export class ApiEnvironmentService {
   }
 
   private async clearDefault(projectId: string) {
-    await this.envRepo.update(scopedWhere({ projectId }), { isDefault: false });
+    await this.envRepo.update({}, { isDefault: false });
   }
 
   private async hasDefault(projectId: string) {
     const count = await this.envRepo.count({
-      where: scopedWhere({ projectId, isDefault: true }),
+      where: { isDefault: true },
     });
     return count > 0;
   }

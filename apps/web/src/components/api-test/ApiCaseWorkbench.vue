@@ -56,13 +56,12 @@
               <div class="test-point-card-title case-card-title">
                 <strong :title="item.title">{{ item.title || '未命名案例' }}</strong>
                 <small>{{ item.caseNo || item.transactionCode || '待分配编号' }}</small>
-                <a-tag
-                  class="case-transport-tag"
-                  :color="caseProfileColor(resolveListItemRequest(item))"
-                  size="small"
+                <span
+                  class="case-profile-badge case-transport-badge"
+                  :class="`profile-${caseProfileColor(resolveListItemRequest(item))}`"
                 >
                   {{ caseProfileLabel(resolveListItemRequest(item)) }}
-                </a-tag>
+                </span>
               </div>
               <span class="polarity-pill" :class="item.polarity">
                 {{ item.polarity === 'negative' ? '反' : '正' }}
@@ -102,13 +101,12 @@
                   <strong class="batch-case-summary-title" :title="row.title">
                     {{ row.title || '未命名案例' }}
                   </strong>
-                  <a-tag
-                    class="batch-case-summary-tag"
-                    size="small"
-                    :color="caseProfileColor(row.request)"
+                  <span
+                    class="case-profile-badge batch-case-summary-tag"
+                    :class="`profile-${caseProfileColor(row.request)}`"
                   >
                     {{ caseProfileLabel(row.request) }}
-                  </a-tag>
+                  </span>
                   <span class="batch-case-summary-no">
                     {{ row.caseNo || row.transactionCode || '待分配编号' }}
                   </span>
@@ -137,9 +135,12 @@
               <div class="editor-hero-main">
                 <h3>{{ isNewCase ? '新建案例' : form.title || '未命名案例' }}</h3>
                 <p>
-                  {{ form.caseNo || form.transactionCode || '待分配编号' }}
+                  <span class="hero-case-no">{{ form.caseNo || form.transactionCode || '待分配编号' }}</span>
                   <span v-if="!isNewCase" class="hero-divider">·</span>
-                  <span v-if="!isNewCase">{{ statusLabel(form.status) }}</span>
+                  <span v-if="!isNewCase" class="hero-status-badge" :class="`status-${form.status}`">
+                    <span class="hero-status-dot" />
+                    {{ statusLabel(form.status) }}
+                  </span>
                 </p>
               </div>
               <span class="polarity-pill polarity-pill--lg" :class="form.polarity">
@@ -408,26 +409,27 @@
             </div>
           </div>
 
-          <div class="instruction-editor-footer dynamic-editor-footer action-toolbar">
-            <a-button v-if="!isNewCase" danger @click="onDelete">
+          <div class="instruction-editor-footer dynamic-editor-footer action-toolbar case-editor-footer">
+            <a-button v-if="!isNewCase" danger type="text" @click="onDelete">
               <template #icon><DeleteOutlined /></template>
               删除
             </a-button>
-            <a-button type="primary" :loading="saving" @click="onSave">
-              <template #icon><SaveOutlined /></template>
-              保存
-            </a-button>
+            <div class="case-editor-footer-right">
+              <a-button :loading="saving" type="primary" @click="onSave">
+                <template #icon><SaveOutlined /></template>
+                保存
+              </a-button>
+            </div>
           </div>
         </div>
 
-        <div v-else class="instruction-editor-placeholder">
-          <a-empty
-            :description="
-              batchMode
-                ? '请从左侧勾选要删除的案例'
-                : '请从左侧选择一条案例，或点击「新建案例」'
-            "
-          />
+        <div v-else class="instruction-editor-placeholder case-editor-placeholder">
+          <InboxOutlined class="case-editor-placeholder-icon" />
+          <p class="case-editor-placeholder-text">
+            {{ batchMode
+              ? '请从左侧勾选要删除的案例'
+              : '请从左侧选择一条案例，或点击「新建案例」' }}
+          </p>
         </div>
       </div>
     </div>
@@ -445,6 +447,7 @@ import { computed, reactive, ref, watch } from 'vue';
 import {
   DeleteOutlined,
   FormatPainterOutlined,
+  InboxOutlined,
   PlusOutlined,
   SaveOutlined,
 } from '@ant-design/icons-vue';
@@ -1207,9 +1210,57 @@ function onBatchDelete() {
   font-size: 12px;
 }
 
-.case-transport-tag {
+.case-transport-badge {
   margin-top: 4px;
+  align-self: flex-start;
 }
+
+/* ===== 执行协议徽标 ===== */
+.case-profile-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+.case-profile-badge::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.case-profile-badge.profile-blue {
+  background: #eff6ff;
+  color: #2563eb;
+}
+.case-profile-badge.profile-blue::before { background: #3b82f6; }
+.case-profile-badge.profile-orange {
+  background: #fff7ed;
+  color: #c2410c;
+}
+.case-profile-badge.profile-orange::before { background: #f97316; }
+.case-profile-badge.profile-purple {
+  background: #faf5ff;
+  color: #7c3aed;
+}
+.case-profile-badge.profile-purple::before { background: #a855f7; }
+.case-profile-badge.profile-green {
+  background: #f0fdf4;
+  color: #16a34a;
+}
+.case-profile-badge.profile-green::before { background: #22c55e; }
+.case-profile-badge.profile-default {
+  background: #f4f4f5;
+  color: #52525b;
+}
+.case-profile-badge.profile-default::before { background: #a1a1aa; }
 
 .polarity-pill {
   display: inline-flex;
@@ -1231,9 +1282,9 @@ function onBatchDelete() {
 }
 
 .polarity-pill.negative {
-  border: 1px solid #fedf89;
-  background: #fffaeb;
-  color: #b54708;
+  border: 1px solid #fca5a5;
+  background: #fef2f2;
+  color: #b91c1c;
 }
 
 .polarity-pill--lg {
@@ -1244,7 +1295,77 @@ function onBatchDelete() {
 
 .hero-divider {
   margin: 0 6px;
-  color: #d0d5dd;
+  color: var(--cf-text-muted, #d0d5dd);
+}
+
+.hero-case-no {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--cf-text-secondary, #667085);
+}
+
+/* ===== 状态徽标 ===== */
+.hero-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.hero-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.hero-status-badge.status-draft {
+  background: #f4f4f5;
+  color: #71717a;
+}
+.hero-status-badge.status-draft .hero-status-dot { background: #a1a1aa; }
+.hero-status-badge.status-ready {
+  background: #f0fdf4;
+  color: #16a34a;
+}
+.hero-status-badge.status-ready .hero-status-dot { background: #22c55e; }
+.hero-status-badge.status-disabled {
+  background: #fef2f2;
+  color: #dc2626;
+}
+.hero-status-badge.status-disabled .hero-status-dot { background: #ef4444; }
+
+/* ===== 底部操作栏 ===== */
+.case-editor-footer {
+  justify-content: space-between;
+}
+.case-editor-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* ===== 空状态 ===== */
+.case-editor-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+.case-editor-placeholder-icon {
+  font-size: 48px;
+  color: var(--cf-text-muted, #98a2b3);
+  opacity: 0.25;
+}
+.case-editor-placeholder-text {
+  margin: 0;
+  font-size: 14px;
+  color: var(--cf-text-muted, #98a2b3);
 }
 
 .editor-form-grid--wide {

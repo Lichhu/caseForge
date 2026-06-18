@@ -139,9 +139,12 @@
               <div class="exec-set-detail-intro">
                 <h3>{{ activeSet.name }}</h3>
                 <p>
-                  {{ activeSet.caseCount ?? 0 }} 条案例
+                  <span class="exec-set-case-count">{{ activeSet.caseCount ?? 0 }} 条案例</span>
                   <span class="exec-set-detail-divider">·</span>
-                  {{ runStatusLabel(activeSet) }}
+                  <span class="exec-set-status-badge" :class="runStatusClass(activeSet)">
+                    <span class="exec-set-status-dot" />
+                    {{ runStatusLabel(activeSet) }}
+                  </span>
                 </p>
               </div>
               <div class="exec-set-actions action-toolbar">
@@ -150,9 +153,13 @@
                   :disabled="!activeSet.caseCount"
                   @click="openRunModal"
                 >
+                  <template #icon><PlayCircleOutlined /></template>
                   执行
                 </a-button>
-                <a-button @click="openManageCases">管理案例</a-button>
+                <a-button @click="openManageCases">
+                  <template #icon><SettingOutlined /></template>
+                  管理案例
+                </a-button>
               </div>
             </div>
 
@@ -163,7 +170,7 @@
             <div v-if="detailTab === 'cases'" class="exec-linked-case-detail">
               <a-table
                 v-if="linkedSetCases.length"
-                class="run-detail-table"
+                class="run-detail-table exec-linked-table"
                 size="small"
                 row-key="id"
                 :data-source="linkedSetCases"
@@ -171,10 +178,16 @@
                 :pagination="false"
               >
                 <template #bodyCell="{ column, record }">
+                  <template v-if="column.key === 'title'">
+                    <span class="linked-case-title" :title="record.title">{{ record.title || '未命名案例' }}</span>
+                  </template>
+                  <template v-if="column.key === 'caseNo'">
+                    <span class="linked-case-no">{{ record.caseNo || record.transactionCode || '—' }}</span>
+                  </template>
                   <template v-if="column.key === 'profile'">
-                    <a-tag size="small" :color="caseProfileColor(record.request)">
+                    <span class="case-profile-badge" :class="`profile-${caseProfileColor(record.request)}`">
                       {{ caseProfileLabel(record.request) }}
-                    </a-tag>
+                    </span>
                   </template>
                   <template v-else-if="column.key === 'polarity'">
                     <span class="polarity-pill polarity-pill--sm" :class="record.polarity">
@@ -189,13 +202,12 @@
                 </template>
               </a-table>
               <div v-else class="exec-set-empty-detail">
-                <a-empty
-                  :description="
-                    (activeSet?.caseCount ?? 0) > 0
-                      ? '关联案例加载失败或案例已不可见，请刷新页面后重试'
-                      : '请先「管理案例」添加案例后再执行'
-                  "
-                />
+                <InboxOutlined class="exec-set-empty-icon" />
+                <p class="exec-set-empty-text">
+                  {{ (activeSet?.caseCount ?? 0) > 0
+                    ? '关联案例加载失败或案例已不可见，请刷新页面后重试'
+                    : '请先「管理案例」添加案例后再执行' }}
+                </p>
               </div>
             </div>
 
@@ -328,11 +340,14 @@
     <a-modal
       v-model:open="manageCasesOpen"
       title="管理执行集案例"
-      width="760px"
+      width="800px"
       :confirm-loading="manageCasesSaving"
       @ok="onSaveCases"
     >
-      <p class="manage-hint">同一执行集内案例不可重复；同一案例可被多个执行集引用。</p>
+      <div class="manage-hint">
+        <InfoCircleOutlined />
+        <span>同一执行集内案例不可重复；同一案例可被多个执行集引用。</span>
+      </div>
       <div class="manage-cases-toolbar">
         <a-checkbox
           :checked="allManageCasesSelected"
@@ -341,7 +356,9 @@
         >
           全选当前页
         </a-checkbox>
-        <span class="manage-cases-selection">已选 {{ selectedCaseIds.length }} 条</span>
+        <span class="manage-cases-selection">
+          已选 <strong>{{ selectedCaseIds.length }}</strong> 条
+        </span>
       </div>
       <a-spin :spinning="manageCasesLoading">
         <div v-if="manageCasesList.length" class="manage-case-list">
@@ -349,6 +366,7 @@
             v-for="item in manageCasesList"
             :key="item.id"
             class="manage-case-row"
+            :class="{ 'manage-case-row--selected': selectedCaseIds.includes(item.id) }"
           >
             <a-checkbox
               :checked="selectedCaseIds.includes(item.id)"
@@ -358,15 +376,18 @@
               <strong :title="item.title">{{ item.title || '未命名案例' }}</strong>
               <small>{{ item.caseNo || item.transactionCode || '待分配编号' }}</small>
             </div>
-            <a-tag size="small" :color="caseProfileColor(item.request)">
+            <span class="case-profile-badge" :class="`profile-${caseProfileColor(item.request)}`">
               {{ caseProfileLabel(item.request) }}
-            </a-tag>
+            </span>
             <span class="polarity-pill polarity-pill--sm" :class="item.polarity">
               {{ item.polarity === 'negative' ? '反' : '正' }}
             </span>
           </label>
         </div>
-        <a-empty v-else class="manage-case-empty" description="暂无案例，请先在案例编辑中创建" />
+        <div v-else class="manage-case-empty">
+          <InboxOutlined class="manage-case-empty-icon" />
+          <p>暂无案例，请先在案例编辑中创建</p>
+        </div>
       </a-spin>
       <div v-if="manageCasesTotal > 0" class="manage-cases-pagination">
         <a-pagination
@@ -425,7 +446,14 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue';
 import { message, Modal } from 'ant-design-vue';
-import { DeleteOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons-vue';
+import {
+  DeleteOutlined,
+  InboxOutlined,
+  InfoCircleOutlined,
+  PlayCircleOutlined,
+  PlusOutlined,
+  SettingOutlined,
+} from '@ant-design/icons-vue';
 import {
   caseForgePageSizeOptionLabels,
   executionProfileBadgeColor,
@@ -564,7 +592,7 @@ const itemColumns = [
 const linkedCaseColumns = [
   { title: '案例', dataIndex: 'title', key: 'title', ellipsis: true },
   { title: '编号', dataIndex: 'caseNo', key: 'caseNo', width: 220 },
-  { title: '协议', key: 'profile', width: 110 },
+  { title: '协议', key: 'profile', width: 150 },
   { title: '方向', key: 'polarity', width: 72 },
   { title: '操作', key: 'actions', width: 72 },
 ];
@@ -600,6 +628,15 @@ function runStatusLabel(set: ApiExecutionSetRow) {
   if (!set.lastRunStatus) return '未执行';
   if (set.lastRunStatus === 'running') return '执行中';
   return `通过 ${set.lastPassedCount ?? 0}/${set.lastTotalCount ?? 0}`;
+}
+
+function runStatusClass(set: ApiExecutionSetRow) {
+  if (!set.lastRunStatus) return 'status-idle';
+  if (set.lastRunStatus === 'running') return 'status-running';
+  const passed = set.lastPassedCount ?? 0;
+  const total = set.lastTotalCount ?? 0;
+  if (passed === total) return 'status-passed';
+  return 'status-failed';
 }
 
 function formatTime(value: string) {
@@ -981,23 +1018,123 @@ function onExpand(expanded: boolean, record: { id: string }) {
   gap: 16px;
   margin-bottom: 16px;
   padding-bottom: 16px;
-  border-bottom: 1px solid #eaecf0;
+  border-bottom: 1px solid var(--cf-border, #eaecf0);
 }
 
 .exec-set-detail-intro h3 {
-  margin: 0 0 4px;
+  margin: 0 0 6px;
   font-size: 16px;
+  font-weight: 600;
   line-height: 1.4;
+  color: var(--cf-text, #1d2939);
 }
 
 .exec-set-detail-intro p {
   margin: 0;
-  color: #667085;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--cf-text-secondary, #667085);
   font-size: 13px;
+}
+
+.exec-set-case-count {
+  color: var(--cf-text-body, #344054);
 }
 
 .exec-set-detail-divider {
   margin: 0 4px;
+  color: var(--cf-text-muted, #98a2b3);
+}
+
+/* ===== 状态徽标 ===== */
+.exec-set-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.exec-set-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.exec-set-status-badge.status-idle {
+  background: #f4f4f5;
+  color: #71717a;
+}
+.exec-set-status-badge.status-idle .exec-set-status-dot { background: #a1a1aa; }
+.exec-set-status-badge.status-running {
+  background: #eff6ff;
+  color: #2563eb;
+}
+.exec-set-status-badge.status-running .exec-set-status-dot {
+  background: #3b82f6;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+.exec-set-status-badge.status-passed {
+  background: #f0fdf4;
+  color: #16a34a;
+}
+.exec-set-status-badge.status-passed .exec-set-status-dot { background: #22c55e; }
+.exec-set-status-badge.status-failed {
+  background: #fef2f2;
+  color: #dc2626;
+}
+.exec-set-status-badge.status-failed .exec-set-status-dot { background: #ef4444; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ===== 关联案例表格 ===== */
+.exec-linked-table :deep(.ant-table-thead > tr > th) {
+  background: #f7f8fa;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cf-text-body, #344054);
+}
+.exec-linked-table :deep(.ant-table-tbody > tr > td) {
+  font-size: 13px;
+}
+.exec-linked-table :deep(.ant-table-tbody > tr:hover > td) {
+  background: #fafbfc;
+}
+.linked-case-title {
+  font-weight: 500;
+  color: var(--cf-text, #1d2939);
+}
+.linked-case-no {
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  color: var(--cf-text-secondary, #667085);
+  letter-spacing: 0.02em;
+}
+
+/* ===== 空状态 ===== */
+.exec-set-empty-detail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 280px;
+}
+.exec-set-empty-icon {
+  font-size: 44px;
+  color: var(--cf-text-muted, #98a2b3);
+  opacity: 0.3;
+}
+.exec-set-empty-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--cf-text-muted, #98a2b3);
 }
 
 .exec-set-actions {
@@ -1154,9 +1291,21 @@ function onExpand(expanded: boolean, record: { id: string }) {
   margin-top: 12px;
 }
 .manage-hint {
-  margin-bottom: 12px;
-  color: #64748b;
-  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #f0f5ff;
+  color: #1d2939;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.manage-hint :deep(.anticon) {
+  color: #3b82f6;
+  font-size: 14px;
+  flex-shrink: 0;
 }
 
 .manage-cases-toolbar {
@@ -1164,37 +1313,51 @@ function onExpand(expanded: boolean, record: { id: string }) {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  padding: 8px 4px;
   font-size: 12px;
 }
 
 .manage-cases-selection {
-  color: #667085;
+  color: var(--cf-text-secondary, #667085);
+  font-size: 12px;
+}
+.manage-cases-selection strong {
+  color: var(--cf-brand, #b60f2d);
+  font-weight: 600;
 }
 
 .manage-case-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-height: 360px;
+  gap: 6px;
+  max-height: 380px;
   overflow: auto;
+  padding: 2px;
 }
 
 .manage-case-row {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) 108px 40px;
+  grid-template-columns: 20px minmax(0, 1fr) auto 36px;
   align-items: center;
   gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid #eaecf0;
+  padding: 10px 14px;
+  border: 1px solid var(--cf-border, #eaecf0);
   border-radius: 8px;
-  background: #fff;
+  background: var(--cf-surface, #fff);
   cursor: pointer;
+  transition: all 0.15s ease;
 }
 
 .manage-case-row:hover {
-  border-color: #d0d5dd;
-  background: #fcfcfd;
+  border-color: var(--cf-border-input, #d0d5dd);
+  background: #fafbfc;
+  box-shadow: 0 1px 3px rgb(16 24 40 / 6%);
+}
+
+.manage-case-row--selected {
+  border-color: var(--cf-brand-border, #e7b8c0);
+  background: var(--cf-brand-soft, #fff5f6);
 }
 
 .manage-case-main {
@@ -1207,15 +1370,66 @@ function onExpand(expanded: boolean, record: { id: string }) {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
+  font-weight: 500;
   line-height: 1.45;
+  color: var(--cf-text, #1d2939);
 }
 
 .manage-case-main small {
   display: block;
   margin-top: 2px;
-  color: #667085;
-  font-size: 12px;
+  color: var(--cf-text-muted, #98a2b3);
+  font-size: 11px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  letter-spacing: 0.02em;
 }
+
+/* ===== 执行协议徽标 ===== */
+.case-profile-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+.case-profile-badge::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.case-profile-badge.profile-blue {
+  background: #eff6ff;
+  color: #2563eb;
+}
+.case-profile-badge.profile-blue::before { background: #3b82f6; }
+.case-profile-badge.profile-orange {
+  background: #fff7ed;
+  color: #c2410c;
+}
+.case-profile-badge.profile-orange::before { background: #f97316; }
+.case-profile-badge.profile-purple {
+  background: #faf5ff;
+  color: #7c3aed;
+}
+.case-profile-badge.profile-purple::before { background: #a855f7; }
+.case-profile-badge.profile-green {
+  background: #f0fdf4;
+  color: #16a34a;
+}
+.case-profile-badge.profile-green::before { background: #22c55e; }
+.case-profile-badge.profile-default {
+  background: #f4f4f5;
+  color: #52525b;
+}
+.case-profile-badge.profile-default::before { background: #a1a1aa; }
 
 .polarity-pill--sm {
   min-width: 28px;
@@ -1230,9 +1444,9 @@ function onExpand(expanded: boolean, record: { id: string }) {
 }
 
 .polarity-pill.negative {
-  border: 1px solid #fedf89;
-  background: #fffaeb;
-  color: #b54708;
+  border: 1px solid #fca5a5;
+  background: #fef2f2;
+  color: #b91c1c;
 }
 
 .polarity-pill {
@@ -1245,15 +1459,29 @@ function onExpand(expanded: boolean, record: { id: string }) {
 }
 
 .manage-case-empty {
-  margin: 24px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 48px 0;
+}
+.manage-case-empty-icon {
+  font-size: 40px;
+  color: var(--cf-text-muted, #98a2b3);
+  opacity: 0.35;
+}
+.manage-case-empty p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--cf-text-muted, #98a2b3);
 }
 
 .manage-cases-pagination {
   display: flex;
   justify-content: center;
   margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #eaecf0;
+  padding-top: 14px;
+  border-top: 1px solid var(--cf-border, #eaecf0);
 }
 
 .manage-cases-pagination :deep(.ant-pagination) {
