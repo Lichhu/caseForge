@@ -13,8 +13,9 @@ export class ListDynamicTestPointsDto {
   projectId: string;
 
   @ApiPropertyOptional({ example: "struct-doc-uuid" })
+  @IsOptional()
   @IsString()
-  structDocId: string;
+  structDocId?: string;
 
   @ApiPropertyOptional({ description: "按系统精确筛选" })
   @IsOptional()

@@ -51,9 +51,15 @@
       v-if="generatingCases"
       type="info"
       show-icon
-      message="正在后台生成案例，完成后将自动进入案例编辑"
       class="document-panel-alert"
-    />
+    >
+      <template #message>
+        <span>正在后台生成案例，完成后将自动进入案例编辑</span>
+        <a-button type="link" size="small" @click="onCancelGenerate">
+          取消
+        </a-button>
+      </template>
+    </a-alert>
 
     <a-alert
       v-if="apiStore.apiDoc?.structuringStatus === 'failed'"
@@ -119,7 +125,7 @@
     destroy-on-close
     wrap-class-name="api-generate-modal"
     @ok="onConfirmGenerate"
-    @cancel="onCancelGenerate"
+    @cancel="onCloseGenerateModal"
   >
     <div class="generate-modal-body">
       <a-alert
@@ -408,8 +414,15 @@ async function onGenerate() {
   generateModalOpen.value = true;
 }
 
-function onCancelGenerate() {
+function onCloseGenerateModal() {
   generateModalOpen.value = false;
+}
+
+function onCancelGenerate() {
+  const pid = projectId.value;
+  const tid = transactionId.value;
+  if (!pid || !tid) return;
+  void apiStore.cancelCaseGenerate(pid, tid);
 }
 
 function onConfirmGenerate() {
@@ -472,6 +485,16 @@ async function onSave() {
   color: #667085;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.document-panel-alert {
+  margin: 12px 12px 0;
+}
+
+.document-panel-alert :deep(.ant-alert-message) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .generate-modal-body {

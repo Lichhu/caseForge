@@ -20,14 +20,14 @@
           <template #icon><SaveOutlined /></template>
           保存
         </a-button>
-        <a-button
+        <!-- <a-button
           :disabled="!store.activeRun"
           :loading="caseSelectConfirmLoading"
           @click="handleSyncToTestPlatform"
         >
           <template #icon><CloudUploadOutlined /></template>
           同步测管
-        </a-button>
+        </a-button> -->
         <a-dropdown :disabled="!store.activeRun">
           <a-button>
             <template #icon><DownloadOutlined /></template>
@@ -78,7 +78,7 @@
             </p>
           </template>
           <div
-            v-if="store.structDoc?.canEnterDynamicInstruct"
+            v-if="store.activeStructDoc?.canEnterDynamicInstruct"
             class="action-toolbar"
           >
             <a-button type="primary" @click="goToConstraints">

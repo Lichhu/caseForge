@@ -7,6 +7,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Inject,
@@ -23,11 +24,15 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { AutoSaveStructDocDto } from "@struct-doc/dto/auto-save-struct-doc.dto";
 import { SaveStructDocDto } from "@struct-doc/dto/save-struct-doc.dto";
+import {
+  assertReadableText,
+  extractTextFromBuffer,
+} from "../../../common/document/document-text.util";
 import { findOwnedProject } from "../../../common/audit/user-scope";
 import { touchProjectUpdatedAt } from "../../../common/project/touch-project.util";
 import { StructDocService } from "@struct-doc/service/struct-doc.service";
-import { stripDocumentExtension } from "@struct-doc/util/struct-doc.parser";
 import {
+  MAX_REQUIREMENT_DOC_CHINESE_CHARS,
   MAX_REQUIREMENT_DOC_SIZE_BYTES,
   MAX_REQUIREMENT_DOC_SIZE_MB,
 } from "@case-forge/shared";
@@ -45,21 +50,16 @@ export class StructDocController {
     private readonly projectRepo: Repository<CaseProjectEntity>,
   ) {}
 
-  /** 查询项目是否已上传需求文档。 */
+  /** 查询项目需求文档上传状态。 */
   @Get(":projectId/upload-status")
-  @ApiOperation({ summary: "查询项目是否已上传需求文档" })
+  @ApiOperation({ summary: "查询项目需求文档上传状态" })
   getUploadStatus(@Param("projectId") projectId: string) {
     return this.structDocService.getUploadStatus(projectId);
   }
 
-  /** 上传 doc/docx 需求文档至 MinIO 并记录元数据。 */
+  /** 上传 doc/docx 需求文档至 MinIO 并记录元数据（每次上传创建新记录）。 */
   @ApiOperation({ summary: "上传 doc/docx 需求文档" })
   @ApiConsumes("multipart/form-data")
-  @ApiQuery({
-    name: "force",
-    required: false,
-    description: "已存在需求文档时，传 true 强制重新上传",
-  })
   @UseInterceptors(
     FileInterceptor("file", {
       limits: { fileSize: MAX_REQUIREMENT_DOC_SIZE_BYTES },
@@ -69,21 +69,34 @@ export class StructDocController {
   async uploadRequirement(
     @Param("projectId") projectId: string,
     @UploadedFile() file: Express.Multer.File,
-    @Query("force") force?: string,
   ) {
     if (!file) {
-      throw new BadRequestException("请选择 doc 或 docx 需求文档");
+      throw new BadRequestException("请选择 doc、docx 或 md 需求文档");
     }
 
     if (file.size > MAX_REQUIREMENT_DOC_SIZE_BYTES) {
       throw new BadRequestException(
-        `需求文档大小不能超过 ${MAX_REQUIREMENT_DOC_SIZE_MB}MB`,
+        `需求文档大小不能超过 ${MAX_REQUIREMENT_DOC_SIZE_MB}MB，请将文档拆分后分批上传，每个拆分部分作为单独的结构化文档处理。`,
       );
     }
 
     const extension = file.originalname.split(".").pop()?.toLowerCase();
-    if (!extension || !["doc", "docx"].includes(extension)) {
-      throw new BadRequestException("仅支持上传 doc 或 docx 格式的需求文档");
+    if (!extension || !["doc", "docx", "md"].includes(extension)) {
+      throw new BadRequestException(
+        "仅支持上传 doc、docx 或 md 格式的需求文档",
+      );
+    }
+
+    const extractedText = await extractTextFromBuffer(file.buffer, {
+      fileName: file.originalname,
+      contentType: file.mimetype,
+    });
+    assertReadableText(extractedText, "需求文档");
+    const chineseChars = (extractedText.match(/[\u4e00-\u9fa5]/g) || []).length;
+    if (chineseChars > MAX_REQUIREMENT_DOC_CHINESE_CHARS) {
+      throw new BadRequestException(
+        `超过单次文本内容最大限制，请拆分后上传，每个拆分部分单独结构化处理。`,
+      );
     }
 
     await findOwnedProject(this.projectRepo, projectId);
@@ -95,70 +108,104 @@ export class StructDocController {
     );
 
     await this.minioService.uploadFile(objectPath, file.buffer);
-    await touchProjectUpdatedAt(this.projectRepo, projectId, {
-      title: stripDocumentExtension(fileName),
-    });
+    await touchProjectUpdatedAt(this.projectRepo, projectId);
 
     return this.structDocService.saveUploadedRequirement(projectId, {
       reqDocName: fileName,
       reqDocPath: objectPath,
-      force: force === "true",
     });
   }
 
   /** 异步触发 AI Chat 结构化需求文档。 */
-  @Post(":projectId/document/structure")
+  @Post(":projectId/struct-doc/:structDocId/structure")
   @HttpCode(202)
   @ApiOperation({ summary: "异步调用 AI Chat 结构化需求文档" })
-  startStructRequirement(@Param("projectId") projectId: string) {
-    return this.structDocService.startStructRequirement(projectId);
+  startStructRequirement(
+    @Param("projectId") projectId: string,
+    @Param("structDocId") structDocId: string,
+  ) {
+    return this.structDocService.startStructRequirement(projectId, structDocId);
   }
 
   /** 取消进行中的结构化任务（如服务重启后仍显示「结构化中」） */
-  @Post(":projectId/document/structure/cancel")
+  @Post(":projectId/struct-doc/:structDocId/structure/cancel")
   @ApiOperation({ summary: "取消结构化任务" })
-  cancelStructRequirement(@Param("projectId") projectId: string) {
-    return this.structDocService.cancelStructuring(projectId);
+  cancelStructRequirement(
+    @Param("projectId") projectId: string,
+    @Param("structDocId") structDocId: string,
+  ) {
+    return this.structDocService.cancelStructuring(projectId, structDocId);
   }
 
-  /** 查询项目结构化文档详情及测试要点列表。 */
+  /** 查询项目下所有结构化文档列表及测试要点。 */
   @Get(":projectId")
-  @ApiOperation({ summary: "查询项目结构化文档和测试要点" })
+  @ApiOperation({ summary: "查询项目所有结构化文档和测试要点" })
   @ApiQuery({
     name: "includeTestPoints",
     required: false,
     description: "设为 false 时仅返回文档元数据与状态，不下发测试要点列表",
   })
-  async getProjectStructDoc(
+  async getProjectStructDocs(
     @Param("projectId") projectId: string,
     @Query("includeTestPoints") includeTestPoints?: string,
   ) {
-    return this.structDocService.getByProjectId(projectId, {
+    return this.structDocService.listByProjectId(projectId, {
+      includeTestPoints: includeTestPoints !== "false",
+    });
+  }
+
+  /** 查询单个结构化文档详情及测试要点。 */
+  @Get(":projectId/struct-doc/:structDocId")
+  @ApiOperation({ summary: "查询单个结构化文档和测试要点" })
+  @ApiQuery({
+    name: "includeTestPoints",
+    required: false,
+    description: "设为 false 时仅返回文档元数据与状态，不下发测试要点列表",
+  })
+  async getStructDoc(
+    @Param("projectId") projectId: string,
+    @Param("structDocId") structDocId: string,
+    @Query("includeTestPoints") includeTestPoints?: string,
+  ) {
+    return this.structDocService.getByStructDocId(projectId, structDocId, {
       includeTestPoints: includeTestPoints !== "false",
     });
   }
 
   /** 自动保存在线编辑中的临时结构化 Markdown。 */
-  @Patch(":projectId/auto-save")
+  @Patch(":projectId/struct-doc/:structDocId/auto-save")
   @ApiOperation({ summary: "自动保存在线编辑中的结构化文档" })
   autoSaveStructDoc(
     @Param("projectId") projectId: string,
+    @Param("structDocId") structDocId: string,
     @Body() dto: AutoSaveStructDocDto,
   ) {
     return this.structDocService.autoSaveTempStructDoc(
       projectId,
+      structDocId,
       dto.tempStructDoc,
     );
   }
 
   /** 将结构化文档保存至 MinIO 并同步测试要点。 */
-  @Patch(":projectId")
+  @Patch(":projectId/struct-doc/:structDocId")
   @ApiOperation({ summary: "保存结构化文档到 MinIO 并同步测试要点" })
   async saveStructDoc(
     @Param("projectId") projectId: string,
+    @Param("structDocId") structDocId: string,
     @Body() dto: SaveStructDocDto,
   ) {
-    return this.structDocService.saveStructDoc(projectId, dto);
+    return this.structDocService.saveStructDoc(projectId, structDocId, dto);
+  }
+
+  /** 删除单个结构化文档及其关联数据。 */
+  @Delete(":projectId/struct-doc/:structDocId")
+  @ApiOperation({ summary: "删除结构化文档" })
+  async deleteStructDoc(
+    @Param("projectId") projectId: string,
+    @Param("structDocId") structDocId: string,
+  ) {
+    return this.structDocService.deleteStructDoc(projectId, structDocId);
   }
 
   /**

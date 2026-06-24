@@ -410,11 +410,11 @@
           </div>
 
           <div class="instruction-editor-footer dynamic-editor-footer action-toolbar case-editor-footer">
-            <a-button v-if="!isNewCase" danger type="text" @click="onDelete">
-              <template #icon><DeleteOutlined /></template>
-              删除
-            </a-button>
             <div class="case-editor-footer-right">
+              <a-button v-if="!isNewCase" danger @click="onDelete">
+                <template #icon><DeleteOutlined /></template>
+                删除
+              </a-button>
               <a-button :loading="saving" type="primary" @click="onSave">
                 <template #icon><SaveOutlined /></template>
                 保存
@@ -710,7 +710,7 @@ watch(
   () => form.protocol,
   (protocol) => {
     if (syncingForm.value) return;
-    requestTab.value = protocol === 'http' ? 'params' : 'headers';
+    requestTab.value = 'body';
   },
 );
 
@@ -819,7 +819,7 @@ function applyRequestToForm(request: ApiTestCaseRow['request']) {
   form.requestMetaJson = split.requestMetaJson;
   form.requestTcpMeta = split.requestTcpMeta;
   form.requestBodyXml = split.requestBodyXml;
-  requestTab.value = split.protocol === 'http' ? 'params' : 'headers';
+  requestTab.value = 'body';
 }
 
 function loadForm(row: ApiTestCaseRow) {
@@ -980,7 +980,7 @@ function onCreate() {
     form.requestTcpMeta = split.requestTcpMeta;
     form.requestBodyXml = split.requestBodyXml;
   }
-  requestTab.value = 'params';
+  requestTab.value = 'body';
   form.expectedJson = buildDefaultExpectedJson(
     form.protocol,
     form.bodyFormat,
@@ -1046,6 +1046,7 @@ function onDelete() {
   Modal.confirm({
     title: '删除案例？',
     content: `确定删除「${label}」？删除后不可恢复，执行集关联也会一并移除。`,
+    centered: true,
     okType: 'danger',
     okText: '删除',
     cancelText: '取消',
@@ -1066,6 +1067,7 @@ function onBatchDelete() {
   Modal.confirm({
     title: `删除选中的 ${count} 条案例？`,
     content: '删除后不可恢复',
+    centered: true,
     okType: 'danger',
     okText: '删除',
     onOk: async () => {
@@ -1340,7 +1342,7 @@ function onBatchDelete() {
 
 /* ===== 底部操作栏 ===== */
 .case-editor-footer {
-  justify-content: space-between;
+  justify-content: flex-end;
 }
 .case-editor-footer-right {
   display: flex;
@@ -1429,7 +1431,7 @@ function onBatchDelete() {
 
 .case-payload-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 16px;
   align-items: stretch;
 }

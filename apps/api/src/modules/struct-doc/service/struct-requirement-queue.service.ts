@@ -43,10 +43,11 @@ export class StructRequirementQueueService implements OnModuleInit {
       .then(() => this.pump());
   }
 
-  async findActiveJob(projectId: string) {
+  async findActiveJob(projectId: string, structDocId?: string) {
     return this.jobRepo.findOne({
       where: {
         projectId,
+        ...(structDocId ? { structDocId } : {}),
         status: In(["queued", "running"]),
       },
       order: { queuedAt: "DESC" },
@@ -88,7 +89,7 @@ export class StructRequirementQueueService implements OnModuleInit {
   }
 
   async enqueue(projectId: string, structDocId: string, userName: string) {
-    const existing = await this.findActiveJob(projectId);
+    const existing = await this.findActiveJob(projectId, structDocId);
     if (existing) {
       return existing;
     }
@@ -112,10 +113,11 @@ export class StructRequirementQueueService implements OnModuleInit {
     return job;
   }
 
-  async cancelJobs(projectId: string) {
+  async cancelJobs(projectId: string, structDocId?: string) {
     const jobs = await this.jobRepo.find({
       where: {
         projectId,
+        ...(structDocId ? { structDocId } : {}),
         status: In(["queued", "running"]),
       },
     });
@@ -161,7 +163,7 @@ export class StructRequirementQueueService implements OnModuleInit {
 
     let requeued = 0;
     for (const doc of processingDocs) {
-      const active = await this.findActiveJob(doc.projectId);
+      const active = await this.findActiveJob(doc.projectId, doc.id);
       if (active) {
         continue;
       }
@@ -262,7 +264,9 @@ export class StructRequirementQueueService implements OnModuleInit {
         latest.status = "failed";
         latest.finishedAt = new Date();
         latest.errorMessage =
-          doc.structuringError || latest.errorMessage || "结构化失败，请稍后重试";
+          doc.structuringError ||
+          latest.errorMessage ||
+          "结构化失败，请稍后重试";
         await this.jobRepo.save(latest);
       }
     } catch (error) {
@@ -277,9 +281,7 @@ export class StructRequirementQueueService implements OnModuleInit {
         refreshed.errorMessage = message;
         await this.jobRepo.save(refreshed);
       }
-      this.logger.warn(
-        `结构化任务失败 projectId=${job.projectId}: ${message}`,
-      );
+      this.logger.warn(`结构化任务失败 projectId=${job.projectId}: ${message}`);
     } finally {
       void this.pump();
     }

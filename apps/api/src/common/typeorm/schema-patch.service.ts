@@ -21,6 +21,7 @@ export class SchemaPatchService implements OnModuleInit {
     await this.ensureApiCaseGenerateJobTable();
     await this.ensureStructRequirementJobTable();
     await this.ensureSummaryStructDocColumn();
+    await this.migrateStructDocProjectIndex();
     await ensureCaseEditorUtf8mb4TextColumns(this.dataSource, this.logger);
     await applyApiTestSchemaMigrations(this.dataSource);
     await ensureDatabaseIndexes(this.dataSource);
@@ -235,6 +236,47 @@ export class SchemaPatchService implements OnModuleInit {
   }
 
   /**
+   * 迁移 case_struct_doc 表的项目索引：从唯一索引（单文档）改为普通索引（多文档）。
+   * 历史数据直接保留，无需迁移内容；只需去掉 projectId 唯一约束。
+   */
+  private async migrateStructDocProjectIndex() {
+    try {
+      const uniqueRows: Array<{ Key_name: string }> =
+        await this.dataSource.query(
+          `SHOW INDEX FROM case_struct_doc WHERE Key_name = 'uk_case_struct_doc_project'`,
+        );
+      if (uniqueRows.length > 0) {
+        this.logger.warn(
+          "检测到 case_struct_doc 存在 projectId 唯一索引，正在删除…",
+        );
+        await this.dataSource.query(
+          `ALTER TABLE case_struct_doc DROP INDEX uk_case_struct_doc_project`,
+        );
+        this.logger.log("uk_case_struct_doc_project 已删除");
+      }
+
+      const nonUniqueRows: Array<{ Key_name: string }> =
+        await this.dataSource.query(
+          `SHOW INDEX FROM case_struct_doc WHERE Key_name = 'idx_case_struct_doc_project'`,
+        );
+      if (nonUniqueRows.length === 0) {
+        this.logger.warn(
+          "检测到 case_struct_doc 缺少 projectId 普通索引，正在创建…",
+        );
+        await this.dataSource.query(
+          `CREATE INDEX idx_case_struct_doc_project ON case_struct_doc (projectId)`,
+        );
+        this.logger.log("idx_case_struct_doc_project 已创建");
+      }
+    } catch (error) {
+      this.logger.error(
+        `case_struct_doc 索引迁移失败: ${(error as Error).message}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
    * 修复历史数据：createEnvironment 等方法曾误用 auditFieldsForUpdate()，
    * 导致 createdBy 回退为 'system' 而非实际用户。用 modifiedBy 修复 createdBy。
    */
@@ -264,5 +306,4 @@ export class SchemaPatchService implements OnModuleInit {
       }
     }
   }
-
 }

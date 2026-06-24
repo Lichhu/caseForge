@@ -39,6 +39,8 @@ export interface AppConfig {
       model: string;
       apiKey: string;
       retryTime: number;
+      /** 单次 AI Chat 请求超时（毫秒），默认 600000（10 分钟） */
+      requestTimeoutMs: number;
     };
   };
 }

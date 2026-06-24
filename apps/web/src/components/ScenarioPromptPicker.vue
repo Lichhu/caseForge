@@ -46,6 +46,13 @@
             >
               <template #header>
                 <div class="scenario-collapse-header">
+                  <input
+                    :checked="scenarioAllSelected(scenario)"
+                    :indeterminate="scenarioPartialSelected(scenario)"
+                    type="checkbox"
+                    :disabled="disabled || !scenario.prompts.length"
+                    @click.stop="toggleScenario(scenario)"
+                  />
                   <span class="scenario-collapse-name">{{ scenario.name }}</span>
                   <span
                     v-if="scenarioSelectedCount(scenario)"
@@ -98,7 +105,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, withDefaults, defineProps } from 'vue';
+import { computed, ref } from 'vue';
 import type { ScenarioScope } from '@case-forge/shared';
 import { SCENARIO_SCOPE_CASE } from '@case-forge/shared';
 import type { ScenarioLibraryItem } from '@/api/client';
@@ -155,6 +162,28 @@ function scenarioSelectedCount(scenario: ScenarioLibraryItem) {
 
 function clearSelection() {
   promptIds.value = [];
+}
+
+function scenarioAllSelected(scenario: ScenarioLibraryItem) {
+  if (!scenario.prompts.length) return false;
+  return scenario.prompts.every((prompt) => promptIds.value.includes(prompt.id));
+}
+
+function scenarioPartialSelected(scenario: ScenarioLibraryItem) {
+  const selectedCount = scenarioSelectedCount(scenario);
+  return selectedCount > 0 && selectedCount < scenario.prompts.length;
+}
+
+function toggleScenario(scenario: ScenarioLibraryItem) {
+  const ids = scenario.prompts.map((prompt) => prompt.id);
+  const allSelected = scenarioAllSelected(scenario);
+  if (allSelected) {
+    promptIds.value = promptIds.value.filter((id) => !ids.includes(id));
+  } else {
+    const existing = new Set(promptIds.value);
+    ids.forEach((id) => existing.add(id));
+    promptIds.value = Array.from(existing);
+  }
 }
 </script>
 
@@ -270,6 +299,15 @@ function clearSelection() {
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+.scenario-collapse-header input[type="checkbox"] {
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.scenario-collapse-header input[type="checkbox"]:disabled {
+  cursor: not-allowed;
 }
 
 .scenario-collapse-name {

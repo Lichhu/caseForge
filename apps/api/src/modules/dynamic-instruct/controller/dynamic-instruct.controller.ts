@@ -33,7 +33,7 @@ export class DynamicInstructController {
   @Get("test-points/meta")
   async getTestPointWorkspaceMeta(
     @Query("projectId") projectId: string,
-    @Query("structDocId") structDocId: string,
+    @Query("structDocId") structDocId?: string,
   ) {
     return this.dynamicInstructService.getWorkspaceMeta(projectId, structDocId);
   }
@@ -42,7 +42,7 @@ export class DynamicInstructController {
   @Get("test-points/generating")
   async listGeneratingTestPoints(
     @Query("projectId") projectId: string,
-    @Query("structDocId") structDocId: string,
+    @Query("structDocId") structDocId?: string,
   ) {
     return this.dynamicInstructService.listGeneratingTestPoints(
       projectId,

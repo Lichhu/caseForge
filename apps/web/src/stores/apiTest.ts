@@ -36,6 +36,7 @@ import {
   exportApiReport,
   generateApiCases,
   getApiCaseGenerateStatus,
+  cancelApiCaseGenerate,
   type ApiCaseGenerateQueueStatus,
   getApiDocument,
   getApiReportSummary,
@@ -799,6 +800,14 @@ export const useApiTestStore = defineStore("apiTest", {
     markCaseGenerateEnded(transactionId: string) {
       this.generatingCaseTransactionIds =
         this.generatingCaseTransactionIds.filter((id) => id !== transactionId);
+    },
+    async cancelCaseGenerate(projectId: string, transactionId: string) {
+      try {
+        await cancelApiCaseGenerate(projectId, transactionId);
+        message.info("已取消案例生成");
+      } catch {
+        message.error("取消案例生成失败，请稍后重试");
+      }
     },
     async syncCaseGenerateLoading(projectId: string, transactionId: string) {
       try {

@@ -3,26 +3,30 @@
     <div class="panel-header">
       <div>
         <h2>结构化需求文档</h2>
-        <div v-if="store.structDoc?.reqDocName" class="doc-links">
-          <a v-if="store.structDoc.reqDocUrl" :href="store.structDoc.reqDocUrl" target="_blank" rel="noopener">
-            需求文档：{{ store.structDoc.reqDocName }}
+        <div v-if="store.activeStructDoc?.reqDocName" class="doc-links">
+          <a v-if="store.activeStructDoc.reqDocUrl" :href="store.activeStructDoc.reqDocUrl" target="_blank" rel="noopener">
+            需求文档：{{ store.activeStructDoc.reqDocName }}
           </a>
           <a
-            v-if="store.structDoc.structDocUrl && store.structDoc.structuredDocName"
-            :href="store.structDoc.structDocUrl"
+            v-if="store.activeStructDoc.structDocUrl && store.activeStructDoc.structuredDocName"
+            :href="store.activeStructDoc.structDocUrl"
             target="_blank"
             rel="noopener"
           >
-            结构化文档：{{ store.structDoc.structuredDocName }}
+            结构化文档：{{ store.activeStructDoc.structuredDocName }}
           </a>
         </div>
       </div>
       <div class="toolbar action-toolbar">
+        <a-button @click="store.backToDocList()">
+          <template #icon><ArrowLeftOutlined /></template>
+          返回
+        </a-button>
         <a-upload
           :show-upload-list="false"
           :before-upload="handleUpload"
           :disabled="store.isStructuring"
-          accept=".doc,.docx"
+          accept=".doc,.docx,.md"
         >
           <a-button :disabled="store.isStructuring">
             <template #icon><UploadOutlined /></template>
@@ -31,8 +35,8 @@
         </a-upload>
         <a-button
           type="primary"
-          :loading="store.isStructuring"
-          :disabled="!store.structDoc?.canStructure && !store.isStructuring"
+          :loading="store.activeStructDoc?.structuringStatus === 'processing'"
+          :disabled="!store.activeStructDoc?.canStructure"
           @click="handleStructure"
         >
           <template #icon><BranchesOutlined /></template>
@@ -46,7 +50,7 @@
     </div>
 
     <a-alert
-      v-if="store.isStructuring"
+      v-if="store.activeStructDoc?.structuringStatus === 'processing'"
       class="document-panel-alert"
       type="info"
       show-icon
@@ -82,7 +86,12 @@
 import { computed, ref, watch } from 'vue';
 import MarkdownIt from 'markdown-it';
 import { message, Modal } from 'ant-design-vue';
-import { BranchesOutlined, SaveOutlined, UploadOutlined } from '@ant-design/icons-vue';
+import {
+  ArrowLeftOutlined,
+  BranchesOutlined,
+  SaveOutlined,
+  UploadOutlined,
+} from '@ant-design/icons-vue';
 import {
   MAX_REQUIREMENT_DOC_SIZE_BYTES,
   MAX_REQUIREMENT_DOC_SIZE_MB,
@@ -96,7 +105,7 @@ const editorText = ref('');
 const autoSaveTimer = ref<number | null>(null);
 
 watch(
-  () => store.structDoc?.tempStructDoc,
+  () => store.activeStructDoc?.tempStructDoc,
   (value) => {
     const next = value || '';
     if (next === editorText.value) {
@@ -127,7 +136,7 @@ watch(editorText, () => {
 
 function scheduleAutoSave() {
   const projectId = store.activeProject?.id;
-  if (!projectId || editorText.value === store.structDoc?.tempStructDoc) {
+  if (!projectId || editorText.value === store.activeStructDoc?.tempStructDoc) {
     return;
   }
   if (autoSaveTimer.value) {
@@ -150,7 +159,7 @@ async function flushAutoSave(options?: { notify?: boolean }) {
   }
   const projectId = store.activeProject?.id;
   const value = editorText.value;
-  if (!projectId || value === store.structDoc?.tempStructDoc) {
+  if (!projectId || value === store.activeStructDoc?.tempStructDoc) {
     return;
   }
   try {
@@ -191,13 +200,15 @@ watch(editorText, () => {
 const canSave = computed(() => Boolean(editorText.value.trim()));
 
 function handleStructure() {
+  const doc = store.activeStructDoc;
+  if (!doc) return;
   const hasStructured =
-    Boolean(store.structDoc?.canEnterDynamicInstruct) ||
-    store.structDoc?.structuringStatus === 'completed';
+    doc.structuringStatus === 'completed' ||
+    (doc.structuringStatus !== 'failed' && Boolean(doc.canEnterDynamicInstruct));
   if (hasStructured) {
     Modal.confirm({
       title: '重新结构化？',
-      content: '当前项目已有结构化结果，重新结构化会覆盖之前的结构化数据，是否继续？',
+      content: '当前文档已有结构化结果，重新结构化会覆盖之前的结构化数据，是否继续？',
       okText: '继续结构化',
       cancelText: '取消',
       centered: true,
@@ -215,23 +226,15 @@ function handleUpload(file: File) {
   }
 
   const extension = file.name.split('.').pop()?.toLowerCase();
-  if (!extension || !['doc', 'docx'].includes(extension)) {
+  if (!extension || !['doc', 'docx', 'md'].includes(extension)) {
+    message.error('仅支持上传 doc、docx 或 md 格式的需求文档');
     return false;
   }
 
   if (file.size > MAX_REQUIREMENT_DOC_SIZE_BYTES) {
-    message.error(`需求文档大小不能超过 ${MAX_REQUIREMENT_DOC_SIZE_MB}MB`);
-    return false;
-  }
-
-  if (store.structDoc?.reqDocName) {
-    Modal.confirm({
-      title: '重新上传需求文档？',
-      content: '当前项目已存在需求文档，重新上传需要重新结构化并重新保存，建议新建项目操作。是否继续？',
-      okText: '继续上传',
-      cancelText: '取消',
-      onOk: () => store.uploadRequirementFile(file, true),
-    });
+    message.error(
+      `需求文档大小不能超过 ${MAX_REQUIREMENT_DOC_SIZE_MB}MB，请将文档拆分后分批上传，每个拆分部分作为单独的结构化文档处理。`,
+    );
     return false;
   }
 
@@ -255,4 +258,5 @@ function handleUpload(file: File) {
   padding: 0;
   height: auto;
 }
+
 </style>

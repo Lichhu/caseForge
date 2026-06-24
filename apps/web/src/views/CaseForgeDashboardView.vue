@@ -6,7 +6,12 @@
         <header v-if="!immersiveMode" class="topbar">
           <div>
             <h1>{{ cleanProjectTitle(store.activeProject?.title || '智能生成案例平台') }}</h1>
-            <p>{{ store.activeProject?.description || '需求文档输入，动态约束生成，案例树编辑导出' }}</p>
+            <p>
+              <span v-if="store.activeProject?.requirementNo" class="project-header-no">
+                {{ store.activeProject.requirementNo }}
+              </span>
+              <span>{{ store.activeProject?.description || '需求文档输入，动态约束生成，案例树编辑导出' }}</span>
+            </p>
           </div>
           <div class="topbar-actions action-toolbar action-toolbar--compact">
             <a-button :disabled="!store.activeProject" @click="enterImmersiveMode">
@@ -44,8 +49,14 @@
         />
 
         <div class="stage-workspace" :class="{ 'immersive-stage': immersiveMode }">
-          <keep-alive>
-            <RequirementEditor v-if="store.workspaceStage === 'document'" />
+          <a-empty
+            v-if="!store.activeProject"
+            class="empty-state workbench-empty"
+            description="请先在左侧新建项目（需填写需求编号 XQxxxx-xxxx-xx）"
+          />
+          <keep-alive v-else>
+            <StructDocList v-if="store.workspaceStage === 'document' && !store.activeStructDoc" />
+            <RequirementEditor v-else-if="store.workspaceStage === 'document'" />
             <ConstraintBuilder
               v-else-if="store.workspaceStage === 'constraints'"
               ref="constraintBuilderRef"
@@ -66,6 +77,7 @@ import CaseTreeWorkbench from '@/components/CaseTreeWorkbench.vue';
 import ConstraintBuilder from '@/components/ConstraintBuilder.vue';
 import ProjectSidebar from '@/components/ProjectSidebar.vue';
 import RequirementEditor from '@/components/RequirementEditor.vue';
+import StructDocList from '@/components/StructDocList.vue';
 import { useImmersiveWorkspace } from '@/composables/useImmersiveWorkspace';
 import { useCaseForgeStore, type WorkspaceStage } from '@/stores/caseForge';
 
@@ -89,11 +101,17 @@ const stages = [
 
 function canOpenStage(stage: WorkspaceStage) {
   if (stage === 'document') return true;
-  return Boolean(store.structDoc?.canEnterDynamicInstruct);
+  return store.structDocs.some((d) => d.canEnterDynamicInstruct);
 }
 
 async function switchStage(stage: WorkspaceStage) {
   if (!canOpenStage(stage)) return;
+  if (stage !== 'document' && !store.activeStructDoc) {
+    const first = store.structDocs.find((d) => d.canEnterDynamicInstruct);
+    if (first) {
+      store.selectStructDoc(first.id);
+    }
+  }
   await store.setWorkspaceStage(stage, { refresh: true });
   scheduleViewportRefresh();
 }
@@ -137,5 +155,17 @@ onBeforeUnmount(() => {
 .app-frame.is-loading .stage-workspace {
   opacity: 0.96;
   pointer-events: none;
+}
+
+.project-header-no {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: #fff5f6;
+  color: var(--cf-brand);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
 }
 </style>

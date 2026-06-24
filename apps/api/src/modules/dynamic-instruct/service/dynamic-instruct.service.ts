@@ -18,7 +18,7 @@ import {
 import { TestPointPromptEntity } from "@dynamic-instruct/entity/test-point-prompt.entity";
 import { PromptEntity } from "@scenario/entity/prompt.entity";
 import { TestPointEntity } from "@struct-doc/entity/test-point.entity";
-import { In, Repository } from "typeorm";
+import { FindOptionsWhere, In, Repository } from "typeorm";
 import {
   assertOwned,
   findOwnedProject,
@@ -125,7 +125,9 @@ export class DynamicInstructService {
     const instructs = await this.instructRepo.find({
       where: { testPointId: In(ids) },
     });
-    const instructMap = new Map(instructs.map((item) => [item.testPointId, item]));
+    const instructMap = new Map(
+      instructs.map((item) => [item.testPointId, item]),
+    );
 
     return {
       items: orderedTestPoints.map((testPoint) =>
@@ -139,24 +141,27 @@ export class DynamicInstructService {
     };
   }
 
-  /** 列出结构化文档下全部系统（筛选用） */
-  async listSystems(projectId: string, structDocId: string) {
+  /** 列出项目下全部系统（筛选用） */
+  async listSystems(projectId: string, structDocId?: string) {
     await findOwnedProject(this.projectRepo, projectId);
-    const rows = await this.testPointRepo
+    const qb = this.testPointRepo
       .createQueryBuilder("tp")
       .select("DISTINCT tp.system", "system")
       .where("tp.projectId = :projectId", { projectId })
-      .andWhere("tp.structDocId = :structDocId", { structDocId })
-      .andWhere("TRIM(tp.system) != ''")
+      .andWhere("TRIM(tp.system) != ''");
+    if (structDocId) {
+      qb.andWhere("tp.structDocId = :structDocId", { structDocId });
+    }
+    const rows = await qb
       .orderBy("tp.system", "ASC")
       .getRawMany<{ system: string }>();
     return rows.map((row) => row.system).filter(Boolean);
   }
 
-  /** 列出结构化文档下功能模块（筛选用，可按系统收窄） */
+  /** 列出项目下功能模块（筛选用，可按系统收窄） */
   async listFeatureModules(
     projectId: string,
-    structDocId: string,
+    structDocId?: string,
     system?: string,
   ) {
     await findOwnedProject(this.projectRepo, projectId);
@@ -164,8 +169,10 @@ export class DynamicInstructService {
       .createQueryBuilder("tp")
       .select("DISTINCT tp.featureModule", "featureModule")
       .where("tp.projectId = :projectId", { projectId })
-      .andWhere("tp.structDocId = :structDocId", { structDocId })
       .andWhere("TRIM(tp.featureModule) != ''");
+    if (structDocId) {
+      qb.andWhere("tp.structDocId = :structDocId", { structDocId });
+    }
     if (system) {
       qb.andWhere("tp.system = :system", { system });
     }
@@ -175,14 +182,18 @@ export class DynamicInstructService {
     return rows.map((row) => row.featureModule).filter(Boolean);
   }
 
-  /** 编辑区自动完成：返回全部要点的定义字段（不含动态指令正文） */
-  async getWorkspaceMeta(projectId: string, structDocId: string) {
+  /** 编辑区自动完成：返回项目下全部要点的定义字段（不含动态指令正文） */
+  async getWorkspaceMeta(projectId: string, structDocId?: string) {
     await findOwnedProject(this.projectRepo, projectId);
     const [systems, featureModules, rows] = await Promise.all([
       this.listSystems(projectId, structDocId),
       this.listFeatureModules(projectId, structDocId),
       this.testPointRepo.find({
-        where: scopedWhere({ projectId, structDocId }),
+        where: scopedWhere(
+          (structDocId
+            ? { projectId, structDocId }
+            : { projectId }) as FindOptionsWhere<TestPointEntity>,
+        ),
         select: [
           "id",
           "system",
@@ -207,9 +218,9 @@ export class DynamicInstructService {
   }
 
   /** 列出服务端仍为「生成中」的测试要点（用于进入项目时恢复轮询） */
-  async listGeneratingTestPoints(projectId: string, structDocId: string) {
+  async listGeneratingTestPoints(projectId: string, structDocId?: string) {
     await findOwnedProject(this.projectRepo, projectId);
-    const rows = await this.testPointRepo
+    const qb = this.testPointRepo
       .createQueryBuilder("tp")
       .innerJoin(
         TestPointInstructEntity,
@@ -218,10 +229,11 @@ export class DynamicInstructService {
       )
       .select(["tp.id", "tp.testPoint"])
       .where("tp.projectId = :projectId", { projectId })
-      .andWhere("tp.structDocId = :structDocId", { structDocId })
-      .andWhere("instruct.status = :status", { status: "生成中" })
-      .orderBy("tp.createdAt", "ASC")
-      .getMany();
+      .andWhere("instruct.status = :status", { status: "生成中" });
+    if (structDocId) {
+      qb.andWhere("tp.structDocId = :structDocId", { structDocId });
+    }
+    const rows = await qb.orderBy("tp.createdAt", "ASC").getMany();
     return rows.map((item) => ({
       id: item.id,
       testPoint: item.testPoint,
@@ -356,7 +368,7 @@ export class DynamicInstructService {
         naturalText: dto.naturalText ?? "",
         generateError:
           status === "生成失败"
-            ? existingInstruct?.generateError ?? null
+            ? (existingInstruct?.generateError ?? null)
             : null,
         isFull: dto.isFull ?? true,
         isAppend: dto.isAppend ?? false,
@@ -418,7 +430,7 @@ export class DynamicInstructService {
 
   private buildListQuery(
     projectId: string,
-    structDocId: string,
+    structDocId?: string,
     system?: string,
     featureModule?: string,
   ) {
@@ -429,8 +441,10 @@ export class DynamicInstructService {
         "instruct",
         "instruct.testPointId = tp.id",
       )
-      .where("tp.projectId = :projectId", { projectId })
-      .andWhere("tp.structDocId = :structDocId", { structDocId });
+      .where("tp.projectId = :projectId", { projectId });
+    if (structDocId) {
+      qb.andWhere("tp.structDocId = :structDocId", { structDocId });
+    }
     if (system) {
       qb.andWhere("tp.system = :system", { system });
     }

@@ -2,7 +2,7 @@
   <aside class="project-sidebar">
     <div class="project-section-title">
       <strong>项目管理</strong>
-      <span>{{ isApiPlatform ? '以需求为维度，手动新建项目' : '按需求编号或名称检索' }}</span>
+      <span>以需求为维度，手动新建项目</span>
     </div>
 
     <div class="project-action-row action-toolbar action-toolbar--block">
@@ -19,7 +19,7 @@
       v-model:value="keyword"
       class="project-search"
       allow-clear
-      :placeholder="isApiPlatform ? '输入需求编号或需求名称' : '输入需求编号/项目名称'"
+      placeholder="输入需求编号或需求名称"
     >
       <template #prefix><SearchOutlined /></template>
     </a-input>
@@ -72,7 +72,7 @@
                 :ellipsis="{ tooltip: cleanProjectTitle(project.title) }"
                 :content="cleanProjectTitle(project.title)"
               />
-              <span v-if="isApiPlatform && project.requirementNo" class="project-requirement">
+              <span v-if="project.requirementNo" class="project-requirement">
                 {{ project.requirementNo }}
               </span>
             </div>
@@ -134,9 +134,8 @@
     </div>
 
     <a-modal
-      v-if="isApiPlatform"
       v-model:open="createModalOpen"
-      title="新建项目"
+      :title="isApiPlatform ? '新建项目' : '新建需求项目'"
       ok-text="创建"
       cancel-text="取消"
       :confirm-loading="creating"
@@ -166,25 +165,25 @@
 
     <a-modal
       v-model:open="editModalOpen"
-      :title="isApiPlatform ? '编辑需求项目' : '编辑项目'"
+      title="编辑需求项目"
       ok-text="保存"
       cancel-text="取消"
       :confirm-loading="saving"
       @ok="submitEditProject"
     >
       <a-form layout="vertical">
-        <a-form-item v-if="isApiPlatform" label="需求编号" required>
+        <a-form-item label="需求编号" required>
           <a-input
             v-model:value="editForm.requirementNo"
             maxlength="64"
             placeholder="XQ2026-0818-01"
           />
         </a-form-item>
-        <a-form-item :label="isApiPlatform ? '需求名称' : '项目名称'" required>
+        <a-form-item label="需求名称" required>
           <a-input
             v-model:value="editForm.title"
             maxlength="120"
-            :placeholder="isApiPlatform ? '请输入需求名称' : '请输入项目名称'"
+            placeholder="请输入需求名称"
           />
         </a-form-item>
         <a-form-item label="项目描述">
@@ -344,16 +343,12 @@ watch(
 );
 
 function onNewProject() {
-  if (isApiPlatform.value) {
-    createForm.value = {
-      requirementNo: '',
-      title: '',
-      description: '',
-    };
-    createModalOpen.value = true;
-    return;
-  }
-  void caseStore.newProject();
+  createForm.value = {
+    requirementNo: '',
+    title: '',
+    description: '',
+  };
+  createModalOpen.value = true;
 }
 
 function isValidRequirementNo(value: string) {
@@ -380,11 +375,19 @@ async function submitCreateProject() {
   }
   creating.value = true;
   try {
-    await apiStore.newProject({
-      requirementNo,
-      title,
-      description: createForm.value.description.trim(),
-    });
+    if (isApiPlatform.value) {
+      await apiStore.newProject({
+        requirementNo,
+        title,
+        description: createForm.value.description.trim(),
+      });
+    } else {
+      await caseStore.newProject({
+        requirementNo,
+        title,
+        description: createForm.value.description.trim(),
+      });
+    }
     createModalOpen.value = false;
   } catch {
     return Promise.reject();
@@ -498,19 +501,17 @@ function openEditProject(project: ProjectListItem) {
 async function submitEditProject() {
   const title = editForm.value.title.trim();
   if (!title) {
-    message.warning(isApiPlatform.value ? '请输入需求名称' : '请输入项目名称');
+    message.warning('请输入需求名称');
     return Promise.reject();
   }
-  if (isApiPlatform.value) {
-    const requirementNo = editForm.value.requirementNo.trim();
-    if (!requirementNo) {
-      message.warning('请输入需求编号');
-      return Promise.reject();
-    }
-    if (!isValidRequirementNo(requirementNo)) {
-      message.warning('需求编号格式须为 XQxxxx-xxxx-xx');
-      return Promise.reject();
-    }
+  const requirementNo = editForm.value.requirementNo.trim();
+  if (!requirementNo) {
+    message.warning('请输入需求编号');
+    return Promise.reject();
+  }
+  if (!isValidRequirementNo(requirementNo)) {
+    message.warning('需求编号格式须为 XQxxxx-xxxx-xx');
+    return Promise.reject();
   }
   if (saving.value || !editingProjectId.value) {
     return Promise.reject();
@@ -520,12 +521,13 @@ async function submitEditProject() {
     if (isApiPlatform.value) {
       await apiStore.updateProjectInfo(editingProjectId.value, {
         title,
-        requirementNo: editForm.value.requirementNo.trim(),
+        requirementNo,
         description: editForm.value.description.trim(),
       });
     } else {
       await caseStore.updateProjectInfo(editingProjectId.value, {
         title,
+        requirementNo,
         description: editForm.value.description.trim(),
       });
     }

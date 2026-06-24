@@ -6,7 +6,6 @@ import { AiWorkflowService } from "../../../common/ai-workflow/service/ai-workfl
 import { MinioStorageService } from "@minio/service/minio.service";
 import {
   BadRequestException,
-  ConflictException,
   Inject,
   Injectable,
   Logger,
@@ -25,9 +24,7 @@ import { TestPointEntity } from "@struct-doc/entity/test-point.entity";
 import { StructRequirementQueueService } from "@struct-doc/service/struct-requirement-queue.service";
 import {
   buildStructuredDocName,
-  extractRequirementNo,
   parseStructuredDoc,
-  stripDocumentExtension,
 } from "@struct-doc/util/struct-doc.parser";
 import {
   isStructuringSlotActive,
@@ -73,24 +70,46 @@ export class StructDocService {
   /**
    * 取消进行中的结构化任务（用于服务重启后状态未恢复等场景）
    */
-  async cancelStructuring(projectId: string) {
+  async cancelStructuring(projectId: string, structDocId: string) {
     await this.ensureProject(projectId);
-    const existing = await this.structDocRepo.findOne({
-      where: scopedWhere({ projectId }),
-    });
-    if (!existing) {
-      throw new NotFoundException(
-        `Project ${projectId} has no struct doc record`,
-      );
-    }
+    const existing = await this.requireStructDoc(projectId, structDocId);
     if (existing.structuringStatus === "processing") {
-      await this.structRequirementQueue.cancelJobs(projectId);
+      await this.structRequirementQueue.cancelJobs(projectId, structDocId);
       await this.markStructuringFailed(
         existing.id,
         buildStructuringCancelledMessage(),
       );
     }
-    return this.getByProjectId(projectId);
+    return this.getByStructDocId(projectId, structDocId);
+  }
+
+  /**
+   * 删除结构化文档及其关联数据（测试要点、MinIO 文件等）。
+   */
+  async deleteStructDoc(projectId: string, structDocId: string) {
+    await this.ensureProject(projectId);
+    const doc = await this.requireStructDoc(projectId, structDocId);
+
+    if (doc.structuringStatus === "processing") {
+      await this.structRequirementQueue.cancelJobs(projectId, structDocId);
+    }
+
+    // 删除 MinIO 上关联文件
+    const pathsToDelete = [doc.reqDocPath, doc.structDocPath].filter(
+      (p): p is string => Boolean(p),
+    );
+    for (const objectPath of pathsToDelete) {
+      try {
+        await this.minioService.deleteObject(objectPath);
+      } catch (error) {
+        this.logger.warn(
+          `删除 MinIO 文件失败: ${objectPath}, ${(error as Error).message}`,
+        );
+      }
+    }
+
+    await this.structDocRepo.delete({ id: structDocId });
+    return { id: structDocId, deleted: true };
   }
 
   /**
@@ -100,32 +119,68 @@ export class StructDocService {
    */
   async getUploadStatus(projectId: string) {
     await this.ensureProject(projectId);
-    const structDoc = await this.structDocRepo.findOne({
+    const docs = await this.structDocRepo.find({
       where: scopedWhere({ projectId }),
+      order: { createdAt: "ASC" },
     });
     return {
-      hasExisting: Boolean(structDoc?.reqDocPath),
-      reqDocName: structDoc?.reqDocName,
+      hasExisting: docs.some((d) => Boolean(d.reqDocPath)),
+      docs: docs.map((d) => ({
+        id: d.id,
+        reqDocName: d.reqDocName,
+        structuringStatus: d.structuringStatus,
+      })),
     };
   }
 
   /**
-   * 按项目 ID 查询结构化文档详情及关联测试要点。
+   * 按项目 ID 查询所有结构化文档列表（含测试要点）。
    *
    * @param projectId 项目 ID
-   * @returns 含访问 URL 与操作权限标志的详情，无记录时返回 null
+   * @returns 文档详情列表，无记录时返回空数组
    */
-  async getByProjectId(
+  async listByProjectId(
     projectId: string,
     options?: { includeTestPoints?: boolean },
   ) {
     await this.ensureProject(projectId);
-    const structDoc = await this.structDocRepo.findOne({
+    const docs = await this.structDocRepo.find({
       where: scopedWhere({ projectId }),
+      order: { createdAt: "ASC" },
     });
-    if (!structDoc) {
-      return null;
+    if (!docs.length) {
+      return [];
     }
+
+    const results = await Promise.all(
+      docs.map(async (doc) => {
+        const activeDoc = await this.expireStaleStructuring(doc);
+        const testPoints =
+          options?.includeTestPoints === false
+            ? []
+            : await this.testPointRepo.find({
+                where: scopedWhere({
+                  projectId,
+                  structDocId: activeDoc.id,
+                }),
+                order: { createdAt: "ASC" },
+              });
+        return this.toDetail(activeDoc, testPoints);
+      }),
+    );
+    return results;
+  }
+
+  /**
+   * 按结构化文档 ID 查询单条详情及关联测试要点。
+   */
+  async getByStructDocId(
+    projectId: string,
+    structDocId: string,
+    options?: { includeTestPoints?: boolean },
+  ) {
+    await this.ensureProject(projectId);
+    const structDoc = await this.requireStructDoc(projectId, structDocId);
 
     const activeDoc = await this.expireStaleStructuring(structDoc);
 
@@ -134,99 +189,48 @@ export class StructDocService {
         ? []
         : await this.testPointRepo.find({
             where: scopedWhere({ projectId, structDocId: activeDoc.id }),
-            order: {
-              createdAt: "ASC",
-            },
+            order: { createdAt: "ASC" },
           });
 
     return await this.toDetail(activeDoc, testPoints);
   }
 
+  /** 查找并校验结构化文档归属 */
+  private async requireStructDoc(projectId: string, structDocId: string) {
+    const existing = await this.structDocRepo.findOne({
+      where: scopedWhere({ id: structDocId, projectId }),
+    });
+    if (!existing) {
+      throw new NotFoundException(
+        `Project ${projectId} has no struct doc ${structDocId}`,
+      );
+    }
+    return existing;
+  }
+
   /**
-   * 保存已上传的需求文档元数据。
-   * 若项目已有需求文档且未传 force，则抛出冲突异常。
+   * 保存已上传的需求文档元数据（每次上传创建新记录）。
    *
    * @param projectId 项目 ID
-   * @param payload 需求文档名称、MinIO 路径及是否强制覆盖
+   * @param payload 需求文档名称、MinIO 路径
    */
   async saveUploadedRequirement(
     projectId: string,
-    payload: { reqDocName: string; reqDocPath: string; force?: boolean },
+    payload: { reqDocName: string; reqDocPath: string },
   ) {
     const project = await this.ensureProject(projectId);
-    const existing = await this.structDocRepo.findOne({
-      where: scopedWhere({ projectId }),
-    });
 
-    if (existing) {
-      const activeDoc = await this.expireStaleStructuring(existing);
-      if (activeDoc.structuringStatus === "processing") {
-        throw new ConflictException("结构化进行中，请稍后再上传需求文档");
-      }
-    }
-
-    if (existing?.reqDocPath && !payload.force) {
-      throw new ConflictException({
-        message:
-          "当前项目已存在需求文档，重新上传需要重新结构化并重新保存，建议新建项目操作",
-        code: "REQ_DOC_EXISTS",
-        reqDocName: existing.reqDocName,
-      });
-    }
-
-    if (existing?.reqDocPath && payload.force) {
-      await this.testPointRepo.delete({
+    const saved = await this.structDocRepo.save(
+      this.structDocRepo.create({
         projectId,
-        structDocId: existing.id,
-      });
-    }
+        reqDocName: payload.reqDocName,
+        reqDocPath: payload.reqDocPath,
+        structuringStatus: "idle",
+      }),
+    );
 
-    const nextTitle =
-      stripDocumentExtension(payload.reqDocName) || project.title;
-
-    if (existing) {
-      if (payload.force) {
-        await this.testPointRepo.delete({
-          projectId,
-          structDocId: existing.id,
-        });
-      }
-
-      await this.structDocRepo.update(existing.id, {
-        ...(payload.force
-          ? {
-              reqDocName: payload.reqDocName,
-              reqDocPath: payload.reqDocPath,
-              aiResponse: null,
-              tempStructDoc: null,
-              summaryStructDoc: null,
-              structuredDocName: null,
-              structDocPath: null,
-              structuringStatus: "idle" as const,
-              structuringError: null,
-              structuringStartedAt: null,
-            }
-          : {
-              reqDocName: payload.reqDocName,
-              reqDocPath: payload.reqDocPath,
-            }),
-        ...auditFieldsForUpdate(),
-      } as never);
-    } else {
-      await this.structDocRepo.save(
-        this.structDocRepo.create({
-          projectId,
-          reqDocName: payload.reqDocName,
-          reqDocPath: payload.reqDocPath,
-          structuringStatus: "idle",
-        }),
-      );
-    }
-
-    await touchProjectUpdatedAt(this.projectRepo, project.id, {
-      title: nextTitle,
-    });
-    return this.getByProjectId(projectId);
+    await touchProjectUpdatedAt(this.projectRepo, project.id);
+    return this.getByStructDocId(projectId, saved.id);
   }
 
   /**
@@ -234,12 +238,11 @@ export class StructDocService {
    * 若已在处理中则直接返回当前详情，否则后台调用 AI Chat 结构化。
    *
    * @param projectId 项目 ID
+   * @param structDocId 结构化文档 ID
    */
-  async startStructRequirement(projectId: string) {
+  async startStructRequirement(projectId: string, structDocId: string) {
     await this.ensureProject(projectId);
-    const existing = await this.structDocRepo.findOne({
-      where: scopedWhere({ projectId }),
-    });
+    const existing = await this.requireStructDoc(projectId, structDocId);
     if (!existing?.reqDocPath) {
       throw new BadRequestException("请先上传需求文档后再进行结构化");
     }
@@ -247,22 +250,24 @@ export class StructDocService {
     if (existing.structuringStatus === "processing") {
       const afterExpire = await this.expireStaleStructuring(existing);
       if (afterExpire.structuringStatus === "processing") {
-        const activeJob =
-          await this.structRequirementQueue.findActiveJob(projectId);
+        const activeJob = await this.structRequirementQueue.findActiveJob(
+          projectId,
+          structDocId,
+        );
         if (activeJob) {
-          return this.getByProjectId(projectId);
+          return this.getByStructDocId(projectId, structDocId);
         }
       }
     }
 
     await this.structRequirementQueue.enqueue(
       projectId,
-      existing.id,
+      structDocId,
       getScopedUserName(),
     );
     await touchProjectUpdatedAt(this.projectRepo, projectId);
 
-    return this.getByProjectId(projectId);
+    return this.getByStructDocId(projectId, structDocId);
   }
 
   /** 队列 worker：执行单次结构化任务 */
@@ -307,26 +312,16 @@ export class StructDocService {
         skillFileUrl,
         existing.reqDocName,
       );
-      const plannedChunkCount =
-        this.aiWorkflowService.estimateStructRequirementChunks(requireText);
-      if (plannedChunkCount > 1) {
-        this.logger.log(
-          `项目 ${projectId} 需求文档 ${requireText.length} 字符，计划分 ${plannedChunkCount} 段结构化`,
-        );
-      }
-
       try {
-        const { markdown, rawResponse, chunkCount } =
-          await this.withStructuringDeadline(
-            startedAt,
-            () =>
-              this.aiWorkflowService.structRequirementFromText(
-                requireText,
-                skillText,
-                existing.reqDocName,
-              ),
-            plannedChunkCount,
-          );
+        const { markdown, rawResponse } = await this.withStructuringDeadline(
+          startedAt,
+          () =>
+            this.aiWorkflowService.structRequirementFromText(
+              requireText,
+              skillText,
+              existing.reqDocName,
+            ),
+        );
 
         if (!(await this.isJobActive(job.id))) {
           this.logger.log(
@@ -369,30 +364,7 @@ export class StructDocService {
           );
         }
 
-        if (chunkCount > 1) {
-          this.logger.log(
-            `分段结构化完成 projectId=${projectId} chunks=${chunkCount} testPoints=${parsedTestPoints.length}`,
-          );
-        }
-
-        try {
-          await this.generateAndSaveSummaryStructDoc(
-            projectId,
-            latest.id,
-            markdown,
-          );
-        } catch (error) {
-          this.logger.warn(
-            `结构化完成后生成案例用需求总结失败 projectId=${projectId}: ${(error as Error).message}`,
-          );
-        }
-
-        const requirementNo = extractRequirementNo(markdown);
-        await touchProjectUpdatedAt(
-          this.projectRepo,
-          projectId,
-          requirementNo ? { requirementNo } : undefined,
-        );
+        await touchProjectUpdatedAt(this.projectRepo, projectId);
       } catch (error) {
         if (await this.isJobActive(job.id)) {
           await this.markStructuringFailed(
@@ -468,13 +440,11 @@ export class StructDocService {
   private async withStructuringDeadline<T>(
     structuringStartedAt: Date,
     run: () => Promise<T>,
-    chunkCount = 1,
   ): Promise<T> {
     const remaining =
-      getStructuringTimeoutMs(chunkCount) -
-      (Date.now() - structuringStartedAt.getTime());
+      getStructuringTimeoutMs() - (Date.now() - structuringStartedAt.getTime());
     if (remaining <= 0) {
-      throw new Error(buildStructuringTimeoutMessage(chunkCount));
+      throw new Error(buildStructuringTimeoutMessage());
     }
 
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -483,7 +453,7 @@ export class StructDocService {
         run(),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
-            () => reject(new Error(buildStructuringTimeoutMessage(chunkCount))),
+            () => reject(new Error(buildStructuringTimeoutMessage())),
             remaining,
           );
         }),
@@ -496,74 +466,66 @@ export class StructDocService {
   }
 
   /**
-   * 获取案例生成用的需求上下文：优先返回已缓存的总结，缺失时按需生成。
-   * 生成失败时回退为完整结构化 Markdown。
+   * 获取案例生成用的需求上下文：聚合项目下所有已保存的结构化文档，优先返回已缓存的总结，缺失时按需生成。
+   * 生成失败时回退为完整结构化 Markdown 拼接。
    */
   async ensureSummaryStructDoc(projectId: string): Promise<string> {
-    const existing = await this.structDocRepo.findOne({
+    const docs = await this.structDocRepo.find({
       where: scopedWhere({ projectId }),
+      order: { createdAt: "ASC" },
     });
-    const sourceMarkdown = existing?.tempStructDoc?.trim();
-    if (!existing || !sourceMarkdown) {
+    const savedDocs = docs.filter((d) => d.tempStructDoc?.trim());
+    if (!savedDocs.length) {
       throw new BadRequestException(
         "需求前景为空，请先在「结构化需求文档」完成结构化并保存",
       );
     }
-    if (existing.summaryStructDoc?.trim()) {
-      return existing.summaryStructDoc.trim();
+
+    const cachedSummaries = savedDocs
+      .filter((d) => d.summaryStructDoc?.trim())
+      .map((d) => d.summaryStructDoc!.trim());
+    if (cachedSummaries.length === savedDocs.length) {
+      return cachedSummaries.join("\n\n---\n\n");
     }
 
+    const fullMarkdown = savedDocs
+      .map((d) => d.tempStructDoc!.trim())
+      .join("\n\n---\n\n");
+
     try {
-      return await this.generateAndSaveSummaryStructDoc(
-        projectId,
-        existing.id,
-        sourceMarkdown,
-      );
+      const { text } =
+        await this.aiWorkflowService.summarizeForCaseGenerate(fullMarkdown);
+      const summary = text.trim();
+      if (summary) {
+        await this.structDocRepo.update({ projectId }, {
+          summaryStructDoc: summary,
+          ...auditFieldsForUpdate(),
+        } as never);
+        await touchProjectUpdatedAt(this.projectRepo, projectId);
+        return summary;
+      }
     } catch (error) {
       this.logger.warn(
         `生成案例用需求总结失败，回退全文 projectId=${projectId}: ${(error as Error).message}`,
       );
-      return sourceMarkdown;
     }
-  }
-
-  private async generateAndSaveSummaryStructDoc(
-    projectId: string,
-    structDocId: string,
-    sourceMarkdown: string,
-  ) {
-    const { text } = await this.aiWorkflowService.summarizeForCaseGenerate(
-      sourceMarkdown,
-    );
-    const summary = text.trim();
-    if (!summary) {
-      throw new Error("AI 未返回有效需求总结");
-    }
-
-    await this.structDocRepo.update(structDocId, {
-      summaryStructDoc: summary,
-      ...auditFieldsForUpdate(),
-    });
-    await touchProjectUpdatedAt(this.projectRepo, projectId);
-    return summary;
+    return fullMarkdown;
   }
 
   /**
    * 自动保存在线编辑中的临时结构化 Markdown。
    *
    * @param projectId 项目 ID
+   * @param structDocId 结构化文档 ID
    * @param tempStructDoc 临时 Markdown，未传则保留原值
    */
-  async autoSaveTempStructDoc(projectId: string, tempStructDoc?: string) {
+  async autoSaveTempStructDoc(
+    projectId: string,
+    structDocId: string,
+    tempStructDoc?: string,
+  ) {
     await this.ensureProject(projectId);
-    const existing = await this.structDocRepo.findOne({
-      where: scopedWhere({ projectId }),
-    });
-    if (!existing) {
-      throw new NotFoundException(
-        `Project ${projectId} has no struct doc record`,
-      );
-    }
+    const existing = await this.requireStructDoc(projectId, structDocId);
 
     const nextTempStructDoc = tempStructDoc ?? existing.tempStructDoc;
     const shouldClearSummary =
@@ -576,21 +538,24 @@ export class StructDocService {
     } as never);
     await touchProjectUpdatedAt(this.projectRepo, projectId);
 
-    return this.getByProjectId(projectId);
+    return this.getByStructDocId(projectId, structDocId);
   }
 
   /**
    * 将结构化文档正式保存到 MinIO，并同步测试要点与项目需求编号。
    *
    * @param projectId 项目 ID
+   * @param structDocId 结构化文档 ID
    * @param dto 结构化文档内容与可选测试要点
    */
-  async saveStructDoc(projectId: string, dto: SaveStructDocDto) {
+  async saveStructDoc(
+    projectId: string,
+    structDocId: string,
+    dto: SaveStructDocDto,
+  ) {
     await this.ensureProject(projectId);
-    const existing = await this.structDocRepo.findOne({
-      where: scopedWhere({ projectId }),
-    });
-    const tempStructDoc = dto.tempStructDoc ?? existing?.tempStructDoc;
+    const existing = await this.requireStructDoc(projectId, structDocId);
+    const tempStructDoc = dto.tempStructDoc ?? existing.tempStructDoc;
 
     if (!existing?.reqDocPath) {
       throw new BadRequestException("请先上传需求文档");
@@ -613,38 +578,28 @@ export class StructDocService {
       Buffer.from(tempStructDoc, "utf8"),
     );
 
-    const structDoc = await this.structDocRepo.save(
-      this.structDocRepo.create({
-        ...existing,
-        projectId,
-        structuredDocName,
-        tempStructDoc,
-        structDocPath: objectPath,
-      }),
-    );
-    await this.structDocRepo.update(structDoc.id, {
+    await this.structDocRepo.update(existing.id, {
+      structuredDocName,
+      tempStructDoc,
+      structDocPath: objectPath,
       summaryStructDoc: null,
+      ...auditFieldsForUpdate(),
     } as never);
 
     if (dto.testPoints !== undefined) {
-      await this.replaceTestPoints(projectId, structDoc.id, dto.testPoints);
+      await this.replaceTestPoints(projectId, structDocId, dto.testPoints);
     } else {
       await this.syncTestPointsFromMarkdown(
         projectId,
-        structDoc.id,
+        structDocId,
         tempStructDoc,
         "保存结构化文档时未解析到测试要点",
       );
     }
 
-    const requirementNo = extractRequirementNo(tempStructDoc);
-    await touchProjectUpdatedAt(
-      this.projectRepo,
-      projectId,
-      requirementNo ? { requirementNo } : undefined,
-    );
+    await touchProjectUpdatedAt(this.projectRepo, projectId);
 
-    return this.getByProjectId(projectId);
+    return this.getByStructDocId(projectId, structDocId);
   }
 
   /**

@@ -5,7 +5,11 @@ type Queryable = {
   query(sql: string, params?: unknown[]): Promise<unknown>;
 };
 
-async function queryRows<T>(runner: Queryable, sql: string, params?: unknown[]) {
+async function queryRows<T>(
+  runner: Queryable,
+  sql: string,
+  params?: unknown[],
+) {
   const result = await runner.query(sql, params);
   if (Array.isArray(result) && Array.isArray(result[0])) {
     return result[0] as T[];
@@ -22,7 +26,11 @@ async function tableExists(runner: Queryable, tableName: string) {
   return rows.length > 0;
 }
 
-async function indexExists(runner: Queryable, tableName: string, indexName: string) {
+async function indexExists(
+  runner: Queryable,
+  tableName: string,
+  indexName: string,
+) {
   const rows = await queryRows<{ Key_name: string }>(
     runner,
     `SHOW INDEX FROM ${tableName} WHERE Key_name = ?`,
@@ -44,7 +52,9 @@ async function ensureIndex(
     return;
   }
   try {
-    await runner.query(`CREATE INDEX ${indexName} ON ${tableName} (${columns})`);
+    await runner.query(
+      `CREATE INDEX ${indexName} ON ${tableName} (${columns})`,
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (!message.includes("Duplicate key name")) {
@@ -68,10 +78,49 @@ async function dropIndexIfExists(
     await runner.query(`ALTER TABLE ${tableName} DROP INDEX ${indexName}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("needed in a foreign key constraint")) {
-      return;
+    if (!message.includes("needed in a foreign key constraint")) {
+      throw error;
     }
-    throw error;
+    // The index is used by a FK constraint. Drop the FK first, then the index,
+    // then recreate the FK so it uses the replacement non-unique index.
+    const fkRows = await queryRows<{ CONSTRAINT_NAME: string }>(
+      runner,
+      `SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME IN
+         (SELECT COLUMN_NAME FROM information_schema.STATISTICS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?)
+       AND REFERENCED_TABLE_NAME IS NOT NULL`,
+      [tableName, tableName, indexName],
+    );
+    for (const fk of fkRows) {
+      await runner.query(
+        `ALTER TABLE ${tableName} DROP FOREIGN KEY ${fk.CONSTRAINT_NAME}`,
+      );
+    }
+    await runner.query(`ALTER TABLE ${tableName} DROP INDEX ${indexName}`);
+    // Recreate each FK with CASCADE rules matching TypeORM entity definitions
+    for (const fk of fkRows) {
+      const colRows = await queryRows<{
+        COLUMN_NAME: string;
+        REFERENCED_TABLE_NAME: string;
+        REFERENCED_COLUMN_NAME: string;
+      }>(
+        runner,
+        `SELECT COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME
+         FROM information_schema.KEY_COLUMN_USAGE
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+           AND CONSTRAINT_NAME = ? AND REFERENCED_TABLE_NAME IS NOT NULL`,
+        [tableName, fk.CONSTRAINT_NAME],
+      );
+      for (const col of colRows) {
+        await runner.query(
+          `ALTER TABLE ${tableName} ADD CONSTRAINT ${fk.CONSTRAINT_NAME}
+           FOREIGN KEY (${col.COLUMN_NAME})
+           REFERENCES ${col.REFERENCED_TABLE_NAME} (${col.REFERENCED_COLUMN_NAME})
+           ON DELETE CASCADE ON UPDATE CASCADE`,
+        );
+      }
+    }
   }
 }
 
@@ -85,6 +134,11 @@ const INDEX_SPECS: Array<{ table: string; name: string; columns: string }> = [
     table: "case_project",
     name: "idx_case_project_platform_requirement",
     columns: "platform, requirementNo",
+  },
+  {
+    table: "case_struct_doc",
+    name: "idx_case_struct_doc_project",
+    columns: "projectId",
   },
   {
     table: "case_struct_doc",
@@ -189,14 +243,21 @@ const INDEX_SPECS: Array<{ table: string; name: string; columns: string }> = [
 ];
 
 const REDUNDANT_INDEXES: Array<{ table: string; name: string }> = [
+  { table: "case_struct_doc", name: "uk_case_struct_doc_project" },
   { table: "case_project", name: "idx_case_project_updated_at" },
   { table: "case_project", name: "idx_case_project_requirement_no" },
-  { table: "struct_requirement_job", name: "idx_struct_requirement_job_project" },
+  {
+    table: "struct_requirement_job",
+    name: "idx_struct_requirement_job_project",
+  },
   { table: "api_transaction", name: "idx_api_transaction_project" },
   { table: "api_test_run", name: "idx_api_test_run_project" },
   { table: "api_test_environment", name: "idx_api_test_env_project" },
   { table: "api_test_execution_set", name: "idx_api_test_exec_set_project" },
-  { table: "api_test_execution_set", name: "idx_api_test_exec_set_transaction" },
+  {
+    table: "api_test_execution_set",
+    name: "idx_api_test_exec_set_transaction",
+  },
 ];
 
 export async function ensureDatabaseIndexes(runner: Queryable) {
@@ -215,10 +276,11 @@ async function dropUnnamedTestPointPromptIndex(runner: Queryable) {
   if (!(await tableExists(runner, "case_test_point_prompt"))) {
     return;
   }
-  const rows = await queryRows<{ Key_name: string; Column_name: string; Seq_in_index: number }>(
-    runner,
-    "SHOW INDEX FROM case_test_point_prompt",
-  );
+  const rows = await queryRows<{
+    Key_name: string;
+    Column_name: string;
+    Seq_in_index: number;
+  }>(runner, "SHOW INDEX FROM case_test_point_prompt");
   for (const row of rows) {
     if (
       row.Key_name === "uk_case_test_point_prompt" ||

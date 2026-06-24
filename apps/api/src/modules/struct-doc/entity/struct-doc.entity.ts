@@ -27,9 +27,9 @@ export const STRUCTURING_STATUS = [
 /** 结构化任务状态类型 */
 export type StructuringStatus = (typeof STRUCTURING_STATUS)[number];
 
-/** 项目级结构化需求文档记录，每个项目唯一一条。 */
+/** 项目级结构化需求文档记录，一个项目可有多条（拆分文档）。 */
 @Entity("case_struct_doc")
-@Index("uk_case_struct_doc_project", ["projectId"], { unique: true })
+@Index("idx_case_struct_doc_project", ["projectId"])
 @Index("idx_case_struct_doc_structuring_status", ["structuringStatus"])
 export class StructDocEntity {
   @PrimaryGeneratedColumn("uuid")
@@ -39,7 +39,10 @@ export class StructDocEntity {
   @Column()
   projectId: string;
 
-  @ManyToOne(() => CaseProjectEntity, { onDelete: "CASCADE", onUpdate: "CASCADE" })
+  @ManyToOne(() => CaseProjectEntity, {
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  })
   @JoinColumn({ name: "projectId" })
   project: CaseProjectEntity;
 

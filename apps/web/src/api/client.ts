@@ -1,6 +1,6 @@
-import axios from 'axios';
-import { getUserApiBaseUrl } from '@/utils/apiPath';
-import { getUserName } from '@/utils/userContext';
+import axios from "axios";
+import { getUserApiBaseUrl } from "@/utils/apiPath";
+import { getUserName } from "@/utils/userContext";
 import type {
   CaseExcelRow,
   CaseExcelRowListPage,
@@ -13,13 +13,13 @@ import type {
   MindMapExtras,
   ProjectPlatform,
   RunNodeChildrenResponse,
-  type ScenarioScope,
-} from '@case-forge/shared';
+  ScenarioScope,
+} from "@case-forge/shared";
 import {
   DEFAULT_PROJECT_PAGE_SIZE,
   normalizeProjectPageSize,
   SCENARIO_SCOPE_CASE,
-} from '@case-forge/shared';
+} from "@case-forge/shared";
 
 export const http = axios.create({
   timeout: 60000,
@@ -27,10 +27,27 @@ export const http = axios.create({
 
 http.interceptors.request.use((config) => {
   config.headers = config.headers ?? {};
-  config.headers['X-User-Name'] = getUserName();
+  config.headers["X-User-Name"] = getUserName();
   config.baseURL = getUserApiBaseUrl();
   return config;
 });
+
+http.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const data = error?.response?.data;
+    const backendMessage =
+      typeof data?.message === "string"
+        ? data.message
+        : Array.isArray(data?.message)
+          ? data.message.join("；")
+          : undefined;
+    if (backendMessage) {
+      return Promise.reject(new Error(backendMessage));
+    }
+    return Promise.reject(error);
+  },
+);
 
 export interface ProjectListItem extends CaseForgeProject {
   runCount: number;
@@ -60,10 +77,16 @@ function mapProjectListRow(raw: {
   return {
     id: raw.id,
     title: raw.title,
-    description: raw.description ?? '',
+    description: raw.description ?? "",
     requirementNo: raw.requirementNo ?? undefined,
-    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : raw.createdAt.toISOString(),
-    updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : raw.updatedAt.toISOString(),
+    createdAt:
+      typeof raw.createdAt === "string"
+        ? raw.createdAt
+        : raw.createdAt.toISOString(),
+    updatedAt:
+      typeof raw.updatedAt === "string"
+        ? raw.updatedAt
+        : raw.updatedAt.toISOString(),
     runCount: raw.generationCount ?? 0,
   };
 }
@@ -80,10 +103,16 @@ function mapProjectDetail(raw: {
   return {
     id: raw.id,
     title: raw.title,
-    description: raw.description ?? '',
+    description: raw.description ?? "",
     requirementNo: raw.requirementNo,
-    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : raw.createdAt.toISOString(),
-    updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : raw.updatedAt.toISOString(),
+    createdAt:
+      typeof raw.createdAt === "string"
+        ? raw.createdAt
+        : raw.createdAt.toISOString(),
+    updatedAt:
+      typeof raw.updatedAt === "string"
+        ? raw.updatedAt
+        : raw.updatedAt.toISOString(),
     runCount: raw.generationCount,
   };
 }
@@ -141,7 +170,7 @@ export interface TestPointSummaryItem {
   featureDesc: string;
   testPoint: string;
   testPointDesc: string;
-  status: '待编辑' | '已编辑' | '再编辑' | '生成中' | '生成失败' | '生成完成';
+  status: "待编辑" | "已编辑" | "再编辑" | "生成中" | "生成失败" | "生成完成";
   generateError?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -183,7 +212,7 @@ export interface StructDocDetail {
   structuredDocName?: string;
   structDocUrl?: string;
   tempStructDoc?: string;
-  structuringStatus?: 'idle' | 'processing' | 'completed' | 'failed';
+  structuringStatus?: "idle" | "processing" | "completed" | "failed";
   structuringError?: string;
   structuringStartedAt?: string;
   canStructure?: boolean;
@@ -203,15 +232,21 @@ export interface StructDocDetail {
 
 export interface StructDocUploadStatus {
   hasExisting: boolean;
-  reqDocName?: string;
+  docs: Array<{
+    id: string;
+    reqDocName?: string;
+    structuringStatus?: "idle" | "processing" | "completed" | "failed";
+  }>;
 }
 
 export async function listProjects(
   query: ProjectListQuery = {},
 ): Promise<ProjectListResult> {
-  const platform = query.platform ?? 'case-forge';
+  const platform = query.platform ?? "case-forge";
   const page = query.page ?? 1;
-  const size = normalizeProjectPageSize(query.size ?? DEFAULT_PROJECT_PAGE_SIZE);
+  const size = normalizeProjectPageSize(
+    query.size ?? DEFAULT_PROJECT_PAGE_SIZE,
+  );
   const input = query.input?.trim();
   const { data } = await http.get<{
     rows: Array<{
@@ -224,7 +259,7 @@ export async function listProjects(
       generationCount?: number;
     }>;
     count: number;
-  }>('/project-manage/projects', {
+  }>("/project-manage/projects", {
     params: {
       platform,
       page,
@@ -244,12 +279,15 @@ export async function createProject(payload: {
   requirementNo?: string;
   platform?: ProjectPlatform;
 }) {
-  const { data: created } = await http.post<{ id: string }>('/project-manage/project', payload);
-  if ((payload.platform ?? 'case-forge') === 'api-test') {
+  const { data: created } = await http.post<{ id: string }>(
+    "/project-manage/project",
+    payload,
+  );
+  if ((payload.platform ?? "case-forge") === "api-test") {
     return {
       id: created.id,
-      title: payload.title ?? '',
-      description: payload.description ?? '',
+      title: payload.title ?? "",
+      description: payload.description ?? "",
       requirementNo: payload.requirementNo,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -289,7 +327,7 @@ export async function getRun(projectId: string, runId: string) {
     `/case-editor/projects/${projectId}/runs/${runId}`,
     {
       params: { _ts: Date.now() },
-      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+      headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
     },
   );
   return data;
@@ -297,7 +335,7 @@ export async function getRun(projectId: string, runId: string) {
 
 export async function batchDeleteProjects(projectIds: string[]) {
   const { data } = await http.post<{ ids: string[]; deleted: boolean }>(
-    '/project-manage/projects/batch-delete',
+    "/project-manage/projects/batch-delete",
     { ids: projectIds },
   );
   return data;
@@ -314,54 +352,108 @@ export async function updateProject(
   projectId: string,
   payload: { title?: string; description?: string; requirementNo?: string },
 ) {
-  const { data } = await http.patch(`/project-manage/projects/${projectId}`, payload);
+  const { data } = await http.patch(
+    `/project-manage/projects/${projectId}`,
+    payload,
+  );
   return data;
 }
 
 export async function getStructDocUploadStatus(projectId: string) {
-  const { data } = await http.get<StructDocUploadStatus>(`/struct-doc/${projectId}/upload-status`);
+  const { data } = await http.get<StructDocUploadStatus>(
+    `/struct-doc/${projectId}/upload-status`,
+  );
   return data;
 }
 
-export async function uploadStructDocRequirement(projectId: string, file: File, force = false) {
+export async function uploadStructDocRequirement(
+  projectId: string,
+  file: File,
+) {
   const form = new FormData();
-  form.append('file', file);
-  const { data } = await http.post<StructDocDetail>(`/struct-doc/${projectId}/document/upload`, form, {
-    params: force ? { force: 'true' } : undefined,
-  });
+  form.append("file", file);
+  const { data } = await http.post<StructDocDetail>(
+    `/struct-doc/${projectId}/document/upload`,
+    form,
+  );
   return data;
 }
 
-export async function structureRequirement(projectId: string) {
-  const { data } = await http.post<StructDocDetail>(`/struct-doc/${projectId}/document/structure`);
+export async function structureRequirement(
+  projectId: string,
+  structDocId: string,
+) {
+  const { data } = await http.post<StructDocDetail>(
+    `/struct-doc/${projectId}/struct-doc/${structDocId}/structure`,
+  );
   return data;
 }
 
-export async function cancelStructureRequirement(projectId: string) {
-  const { data } = await http.post<StructDocDetail>(`/struct-doc/${projectId}/document/structure/cancel`);
+export async function cancelStructureRequirement(
+  projectId: string,
+  structDocId: string,
+) {
+  const { data } = await http.post<StructDocDetail>(
+    `/struct-doc/${projectId}/struct-doc/${structDocId}/structure/cancel`,
+  );
   return data;
 }
 
-export async function autoSaveStructDoc(projectId: string, payload: { tempStructDoc?: string }) {
-  const { data } = await http.patch<StructDocDetail>(`/struct-doc/${projectId}/auto-save`, payload);
+export async function autoSaveStructDoc(
+  projectId: string,
+  structDocId: string,
+  payload: { tempStructDoc?: string },
+) {
+  const { data } = await http.patch<StructDocDetail>(
+    `/struct-doc/${projectId}/struct-doc/${structDocId}/auto-save`,
+    payload,
+  );
   return data;
 }
 
-export async function getProjectStructDoc(
+export async function getProjectStructDocs(
   projectId: string,
   options?: { includeTestPoints?: boolean },
 ) {
-  const { data } = await http.get<StructDocDetail | null>(`/struct-doc/${projectId}`, {
-    params:
-      options?.includeTestPoints === false
-        ? { includeTestPoints: 'false' }
-        : undefined,
-  });
+  const { data } = await http.get<StructDocDetail[]>(
+    `/struct-doc/${projectId}`,
+    {
+      params:
+        options?.includeTestPoints === false
+          ? { includeTestPoints: "false" }
+          : undefined,
+    },
+  );
+  return data;
+}
+
+export async function getStructDoc(
+  projectId: string,
+  structDocId: string,
+  options?: { includeTestPoints?: boolean },
+) {
+  const { data } = await http.get<StructDocDetail>(
+    `/struct-doc/${projectId}/struct-doc/${structDocId}`,
+    {
+      params:
+        options?.includeTestPoints === false
+          ? { includeTestPoints: "false" }
+          : undefined,
+    },
+  );
+  return data;
+}
+
+export async function deleteStructDoc(projectId: string, structDocId: string) {
+  const { data } = await http.delete<{ id: string; deleted: boolean }>(
+    `/struct-doc/${projectId}/struct-doc/${structDocId}`,
+  );
   return data;
 }
 
 export async function saveStructDocTestPoints(
   projectId: string,
+  structDocId: string,
   payload: {
     structuredDocName?: string;
     tempStructDoc?: string;
@@ -376,7 +468,10 @@ export async function saveStructDocTestPoints(
     }>;
   },
 ) {
-  const { data } = await http.patch<StructDocDetail>(`/struct-doc/${projectId}`, payload);
+  const { data } = await http.patch<StructDocDetail>(
+    `/struct-doc/${projectId}/struct-doc/${structDocId}`,
+    payload,
+  );
   return data;
 }
 
@@ -398,7 +493,7 @@ export async function generateCases(
 export interface CaseGenerateQueueItemStatus {
   testPointId: string;
   jobId: string;
-  phase: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'none';
+  phase: "queued" | "running" | "completed" | "failed" | "cancelled" | "none";
   queuePosition: number;
   queuedAhead: number;
   runningAhead: number;
@@ -430,13 +525,18 @@ export async function getGenerateQueueStatus(
   const { data } = await http.get<CaseGenerateQueueStatusResponse>(
     `/case-editor/projects/${projectId}/generate/queue`,
     {
-      params: testPointIds?.length ? { testPointIds: testPointIds.join(',') } : undefined,
+      params: testPointIds?.length
+        ? { testPointIds: testPointIds.join(",") }
+        : undefined,
     },
   );
   return data;
 }
 
-export async function cancelCaseGenerate(projectId: string, testPointIds: string[]) {
+export async function cancelCaseGenerate(
+  projectId: string,
+  testPointIds: string[],
+) {
   const { data } = await http.post<CaseForgeProject>(
     `/case-editor/projects/${projectId}/generate/cancel`,
     { testPointIds },
@@ -446,9 +546,17 @@ export async function cancelCaseGenerate(projectId: string, testPointIds: string
 
 export async function regenerateNode(
   projectId: string,
-  payload: { runId: string; nodeId: string; instruction: string; mode: 'append' | 'replace' | 'complete' },
+  payload: {
+    runId: string;
+    nodeId: string;
+    instruction: string;
+    mode: "append" | "replace" | "complete";
+  },
 ) {
-  const { data } = await http.post<GenerationRun>(`/case-editor/projects/${projectId}/regenerate-node`, payload);
+  const { data } = await http.post<GenerationRun>(
+    `/case-editor/projects/${projectId}/regenerate-node`,
+    payload,
+  );
   return data;
 }
 
@@ -458,13 +566,12 @@ export async function saveRunTree(
   tree: CaseTreeNode,
   mindMapExtras?: MindMapExtras,
 ) {
-  const { data } = await http.patch<Omit<GenerationRun, 'tree'> & { tree?: CaseTreeNode }>(
-    `/case-editor/projects/${projectId}/runs/${runId}/tree`,
-    {
-      tree,
-      mindMapExtras,
-    },
-  );
+  const { data } = await http.patch<
+    Omit<GenerationRun, "tree"> & { tree?: CaseTreeNode }
+  >(`/case-editor/projects/${projectId}/runs/${runId}/tree`, {
+    tree,
+    mindMapExtras,
+  });
   return data;
 }
 
@@ -501,7 +608,7 @@ export async function listRunNodeChildren(
     `/case-editor/projects/${projectId}/runs/${runId}/nodes/${nodeId}/children`,
     {
       params: { _ts: Date.now() },
-      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+      headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
     },
   );
   return data;
@@ -525,21 +632,25 @@ export async function listRunCaseRows(
     `/case-editor/projects/${projectId}/runs/${runId}/case-rows`,
     {
       params: { ...params, _ts: Date.now() },
-      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+      headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
     },
   );
   return data;
 }
 
-export async function listScenarioLibrary(scope: ScenarioScope = SCENARIO_SCOPE_CASE) {
-  const { data } = await http.get<ScenarioLibraryItem[]>('/scenario/list', {
+export async function listScenarioLibrary(
+  scope: ScenarioScope = SCENARIO_SCOPE_CASE,
+) {
+  const { data } = await http.get<ScenarioLibraryItem[]>("/scenario/list", {
     params: { scope },
   });
   return data;
 }
 
-export async function createScenarioLibraryItem(payload: ScenarioLibraryPayload) {
-  const { data } = await http.post<ScenarioLibraryItem>('/scenario', {
+export async function createScenarioLibraryItem(
+  payload: ScenarioLibraryPayload,
+) {
+  const { data } = await http.post<ScenarioLibraryItem>("/scenario", {
     ...payload,
     scope: payload.scope ?? SCENARIO_SCOPE_CASE,
   });
@@ -548,50 +659,74 @@ export async function createScenarioLibraryItem(payload: ScenarioLibraryPayload)
 
 export async function updateScenarioLibraryItem(
   id: string,
-  payload: Omit<ScenarioLibraryPayload, 'prompts'> & { prompts?: ScenarioLibraryPayload['prompts'] },
+  payload: Omit<ScenarioLibraryPayload, "prompts"> & {
+    prompts?: ScenarioLibraryPayload["prompts"];
+  },
 ) {
-  const { data } = await http.patch<ScenarioLibraryItem>(`/scenario/${id}`, payload);
+  const { data } = await http.patch<ScenarioLibraryItem>(
+    `/scenario/${id}`,
+    payload,
+  );
   return data;
 }
 
 export async function deleteScenarioLibraryItem(id: string) {
-  const { data } = await http.delete<{ id: string; deleted: boolean }>(`/scenario/${id}`);
+  const { data } = await http.delete<{ id: string; deleted: boolean }>(
+    `/scenario/${id}`,
+  );
   return data;
 }
 
 export async function listDynamicTestPoints(params: {
   projectId: string;
-  structDocId: string;
+  structDocId?: string;
   system?: string;
   featureModule?: string;
   page?: number;
   pageSize?: number;
 }) {
-  const { data } = await http.get<TestPointListPage>('/dynamic-instruct/test-points', {
-    params: { ...params, _ts: Date.now() },
-    headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
-  });
+  const { data } = await http.get<TestPointListPage>(
+    "/dynamic-instruct/test-points",
+    {
+      params: { ...params, _ts: Date.now() },
+      headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+    },
+  );
   return data;
 }
 
-export async function getDynamicTestPointMeta(projectId: string, structDocId: string) {
-  const { data } = await http.get<TestPointWorkspaceMeta>('/dynamic-instruct/test-points/meta', {
-    params: { projectId, structDocId, _ts: Date.now() },
-    headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
-  });
+export async function getDynamicTestPointMeta(
+  projectId: string,
+  structDocId?: string,
+) {
+  const { data } = await http.get<TestPointWorkspaceMeta>(
+    "/dynamic-instruct/test-points/meta",
+    {
+      params: { projectId, structDocId, _ts: Date.now() },
+      headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+    },
+  );
   return data;
 }
 
-export async function listGeneratingDynamicTestPoints(projectId: string, structDocId: string) {
-  const { data } = await http.get<GeneratingTestPointRef[]>('/dynamic-instruct/test-points/generating', {
-    params: { projectId, structDocId, _ts: Date.now() },
-    headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
-  });
+export async function listGeneratingDynamicTestPoints(
+  projectId: string,
+  structDocId?: string,
+) {
+  const { data } = await http.get<GeneratingTestPointRef[]>(
+    "/dynamic-instruct/test-points/generating",
+    {
+      params: { projectId, structDocId, _ts: Date.now() },
+      headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+    },
+  );
   return data;
 }
 
 export async function getDynamicTestPointInstruction(testPointId: string) {
-  const { data } = await http.get<TestPointInstructionItem>(`/dynamic-instruct/test-points/${testPointId}`);
+  const { data } = await http.get<TestPointInstructionItem>(
+    `/dynamic-instruct/test-points/${testPointId}`,
+  );
   return data;
 }
 
@@ -605,15 +740,18 @@ export async function createDynamicTestPoint(payload: {
   testPoint?: string;
   testPointDesc?: string;
 }) {
-  const { data } = await http.post<TestPointSummaryItem>('/dynamic-instruct/test-points', payload);
+  const { data } = await http.post<TestPointSummaryItem>(
+    "/dynamic-instruct/test-points",
+    payload,
+  );
   return data;
 }
 
 export async function deleteDynamicTestPoints(testPointIds: string[]) {
-  const { data } = await http.delete<{ deleted: number; testPointIds: string[] }>(
-    '/dynamic-instruct/test-points',
-    { data: { testPointIds } },
-  );
+  const { data } = await http.delete<{
+    deleted: number;
+    testPointIds: string[];
+  }>("/dynamic-instruct/test-points", { data: { testPointIds } });
   return data;
 }
 
@@ -622,7 +760,12 @@ export async function updateDynamicTestPointDefinition(
   payload: Partial<
     Pick<
       TestPointSummaryItem,
-      'system' | 'systemDesc' | 'featureModule' | 'featureDesc' | 'testPoint' | 'testPointDesc'
+      | "system"
+      | "systemDesc"
+      | "featureModule"
+      | "featureDesc"
+      | "testPoint"
+      | "testPointDesc"
     >
   >,
 ) {
@@ -635,43 +778,52 @@ export async function updateDynamicTestPointDefinition(
 
 export async function saveDynamicTestPointInstruction(
   testPointId: string,
-  payload: Partial<Pick<TestPointInstructionItem, 'promptIds' | 'naturalText' | 'status' | 'isFull' | 'isAppend'>>,
+  payload: Partial<
+    Pick<
+      TestPointInstructionItem,
+      "promptIds" | "naturalText" | "status" | "isFull" | "isAppend"
+    >
+  >,
 ) {
-  const { data } = await http.patch<TestPointInstructionItem>(`/dynamic-instruct/test-points/${testPointId}`, payload);
+  const { data } = await http.patch<TestPointInstructionItem>(
+    `/dynamic-instruct/test-points/${testPointId}`,
+    payload,
+  );
   return data;
 }
 
-export async function batchSaveDynamicTestPointInstruction(
-  payload: {
-    testPointIds: string[];
-    promptIds?: string[];
-    naturalText?: string;
-    status?: TestPointInstructionItem['status'];
-    isFull?: boolean;
-    isAppend?: boolean;
-  },
-) {
-  const { data } = await http.patch<TestPointInstructionItem[]>('/dynamic-instruct/test-points', payload);
+export async function batchSaveDynamicTestPointInstruction(payload: {
+  testPointIds: string[];
+  promptIds?: string[];
+  naturalText?: string;
+  status?: TestPointInstructionItem["status"];
+  isFull?: boolean;
+  isAppend?: boolean;
+}) {
+  const { data } = await http.patch<TestPointInstructionItem[]>(
+    "/dynamic-instruct/test-points",
+    payload,
+  );
   return data;
 }
 
 export function exportUrl(
   projectId: string,
   runId: string,
-  format: 'excel' | 'xmind',
+  format: "excel" | "xmind",
   caseNodeIds?: string[],
 ) {
   const params = new URLSearchParams({ format });
   if (caseNodeIds?.length) {
-    params.set('caseNodeIds', caseNodeIds.join(','));
+    params.set("caseNodeIds", caseNodeIds.join(","));
   }
   return `${getUserApiBaseUrl()}/case-editor/projects/${projectId}/runs/${runId}/export?${params.toString()}`;
 }
 
 export function exportExcelTemplateUrl(projectId: string, runId: string) {
   const params = new URLSearchParams({
-    format: 'excel',
-    template: '1',
+    format: "excel",
+    template: "1",
   });
   return `${getUserApiBaseUrl()}/case-editor/projects/${projectId}/runs/${runId}/export?${params.toString()}`;
 }

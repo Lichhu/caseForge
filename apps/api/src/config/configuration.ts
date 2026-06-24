@@ -15,10 +15,15 @@ export default (): AppConfig => ({
     database: process.env.TYPEORM_DATABASE ?? "case_forge",
   },
   typeOrmTest: {
-    host: process.env.TYPEORM_TEST_HOST ?? process.env.TYPEORM_HOST ?? "localhost",
-    port: Number(process.env.TYPEORM_TEST_PORT ?? process.env.TYPEORM_PORT ?? 3306),
+    host:
+      process.env.TYPEORM_TEST_HOST ?? process.env.TYPEORM_HOST ?? "localhost",
+    port: Number(
+      process.env.TYPEORM_TEST_PORT ?? process.env.TYPEORM_PORT ?? 3306,
+    ),
     username:
-      process.env.TYPEORM_TEST_USERNAME ?? process.env.TYPEORM_USERNAME ?? "root",
+      process.env.TYPEORM_TEST_USERNAME ??
+      process.env.TYPEORM_USERNAME ??
+      "root",
     password:
       process.env.TYPEORM_TEST_PASSWORD ?? process.env.TYPEORM_PASSWORD ?? "",
     database: process.env.TYPEORM_TEST_DATABASE ?? "jnyh_test",
@@ -42,6 +47,9 @@ export default (): AppConfig => ({
       apiKey: process.env.AI_CHAT_API_KEY ?? "",
       retryTime: Number(
         process.env.AI_CHAT_RETRY_TIME ?? process.env.AI_CHAT_RETRY ?? 2,
+      ),
+      requestTimeoutMs: Number(
+        process.env.AI_CHAT_REQUEST_TIMEOUT_MS ?? 600000,
       ),
     },
   },

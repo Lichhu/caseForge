@@ -10,15 +10,8 @@ import {
   buildCaseGenerateSummaryPrompt,
   fetchWorkflowFileContents,
   buildStructRequirementPrompt,
-  buildStructRequirementChunkPrompt,
 } from "../util/workflow-input.util";
 import { sanitizeStructuredMarkdown } from "@struct-doc/util/struct-doc.parser";
-import {
-  estimateRequirementChunkCount,
-  extractRequirementStructMeta,
-  mergeStructuredMarkdownParts,
-  splitRequirementForStructuring,
-} from "@struct-doc/util/struct-doc-chunk.util";
 
 /** AI Chat 调用结果 */
 export interface AiChatResult {
@@ -30,8 +23,6 @@ export interface AiChatResult {
 export interface StructRequirementResult {
   markdown: string;
   rawResponse: unknown;
-  /** 实际使用的分段数（1 表示单次调用） */
-  chunkCount: number;
 }
 
 /** AI Chat + Skill 文件能力封装 */
@@ -70,15 +61,17 @@ export class AiWorkflowService {
 
   /** 是否已配置 at-case-skill + AI Chat（接口测试案例生成） */
   canGenerateApiCases() {
-    return Boolean(this.config.aiChat.url?.trim() && this.config.atCaseSkillUrl?.trim());
+    return Boolean(
+      this.config.aiChat.url?.trim() && this.config.atCaseSkillUrl?.trim(),
+    );
   }
 
   /** AI Chat 与 Skill 是否至少配置了一类能力 */
   isAiConfigured() {
     return (
-      this.canStructRequirement()
-      || this.canGenerateJsonCases()
-      || this.canGenerateApiCases()
+      this.canStructRequirement() ||
+      this.canGenerateJsonCases() ||
+      this.canGenerateApiCases()
     );
   }
 
@@ -112,7 +105,7 @@ export class AiWorkflowService {
   }
 
   /**
-   * 对已提取的需求正文做结构化（支持长文档分段）
+   * 对已提取的需求正文做结构化
    */
   async structRequirementFromText(
     requireText: string,
@@ -126,74 +119,19 @@ export class AiWorkflowService {
       throw new Error("技能文档内容为空");
     }
 
-    const chunks = splitRequirementForStructuring(requireText);
-    const meta = extractRequirementStructMeta(requireText);
-
-    if (!chunks?.length) {
-      const prompt = buildStructRequirementPrompt(
-        skillText,
-        requireText,
-        requireFileName,
-      );
-      const { text, rawResponse } = await this.runWithAiChat(prompt);
-      if (!text.trim()) {
-        throw new Error("AI Chat 未返回结构化 Markdown 内容");
-      }
-      return {
-        markdown: sanitizeStructuredMarkdown(text),
-        rawResponse,
-        chunkCount: 1,
-      };
-    }
-
-    this.logger.log(
-      `需求文档启用分段结构化：${requireText.length} 字符 → ${chunks.length} 段（按系统章节切分或体积分段）`,
+    const prompt = buildStructRequirementPrompt(
+      skillText,
+      requireText,
+      requireFileName,
     );
-
-    const parts: string[] = [];
-    const partResponses: unknown[] = [];
-
-    for (const chunk of chunks) {
-      const prompt = buildStructRequirementChunkPrompt(
-        skillText,
-        chunk,
-        meta,
-        requireFileName,
-      );
-      const { text, rawResponse } = await this.runWithAiChat(prompt);
-      if (!text.trim()) {
-        throw new Error(
-          `AI Chat 未返回第 ${chunk.index + 1}/${chunk.total} 段结构化内容`,
-        );
-      }
-      parts.push(sanitizeStructuredMarkdown(text));
-      partResponses.push(rawResponse);
-      this.logger.log(
-        `分段结构化完成 ${chunk.index + 1}/${chunk.total}，输出 ${text.length} 字符`,
-      );
+    const { text, rawResponse } = await this.runWithAiChat(prompt);
+    if (!text.trim()) {
+      throw new Error("AI Chat 未返回结构化 Markdown 内容");
     }
-
-    const markdown = sanitizeStructuredMarkdown(
-      mergeStructuredMarkdownParts(parts, meta),
-    );
-    if (!markdown.trim()) {
-      throw new Error("分段结构化合并结果为空");
-    }
-
     return {
-      markdown,
-      rawResponse: {
-        chunked: true,
-        chunkCount: chunks.length,
-        parts: partResponses,
-      },
-      chunkCount: chunks.length,
+      markdown: sanitizeStructuredMarkdown(text),
+      rawResponse,
     };
-  }
-
-  /** 预估结构化分段数（用于超时计算） */
-  estimateStructRequirementChunks(requireText: string) {
-    return estimateRequirementChunkCount(requireText);
   }
 
   /** 将结构化 Markdown 压缩为案例生成共用的需求总结 */
@@ -260,10 +198,12 @@ export class AiWorkflowService {
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
+        const timeoutMs = this.config.aiChat.requestTimeoutMs || 600000;
         const response = await fetch(url, {
           method: "POST",
           headers,
           body: JSON.stringify(requestBody),
+          signal: AbortSignal.timeout(timeoutMs),
         });
 
         if (!response.ok) {
@@ -281,8 +221,10 @@ export class AiWorkflowService {
         return { text, rawResponse: result };
       } catch (error) {
         lastError = error as Error;
+        const isTimeout =
+          lastError.name === "TimeoutError" || lastError.name === "AbortError";
         this.logger.warn(
-          `AI Chat 第 ${attempt + 1} 次调用失败: ${lastError.message}`,
+          `AI Chat 第 ${attempt + 1} 次调用${isTimeout ? "超时" : "失败"}: ${lastError.message}`,
         );
       }
     }
@@ -298,32 +240,61 @@ export class AiWorkflowService {
     }
 
     const candidates = [normalized];
-    const fencedJson = normalized.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-    if (fencedJson?.[1]) {
-      candidates.unshift(fencedJson[1].trim());
+    const tripleFenced = normalized.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    if (tripleFenced?.[1]) {
+      candidates.unshift(tripleFenced[1].trim());
+    }
+    const singleFenced = normalized.match(/`(?:json)?\s*([\s\S]*?)\s*`/i);
+    if (singleFenced?.[1]) {
+      candidates.unshift(singleFenced[1].trim());
     }
 
     for (const candidate of candidates) {
+      const result = this.tryParseJsonArray<T>(candidate);
+      if (result) {
+        return result;
+      }
+    }
+
+    return null;
+  }
+
+  private tryParseJsonArray<T>(candidate: string): T[] | null {
+    // 1. Direct parse
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed as T[];
+      }
+    } catch {
+      // continue to fallbacks
+    }
+
+    // 2. Extract JSON array between first [ and last ]
+    const start = candidate.indexOf("[");
+    const end = candidate.lastIndexOf("]");
+    if (start >= 0 && end > start) {
+      const slice = candidate.slice(start, end + 1);
       try {
-        const parsed = JSON.parse(candidate) as unknown;
+        const parsed = JSON.parse(slice) as unknown;
         if (Array.isArray(parsed)) {
           return parsed as T[];
         }
       } catch {
-        const start = candidate.indexOf("[");
-        const end = candidate.lastIndexOf("]");
-        if (start >= 0 && end > start) {
-          try {
-            const parsed = JSON.parse(
-              candidate.slice(start, end + 1),
-            ) as unknown;
-            if (Array.isArray(parsed)) {
-              return parsed as T[];
-            }
-          } catch {
-            // try next candidate
-          }
+        // continue to next fallback
+      }
+
+      // 3. Handle doubly-escaped JSON: AI sometimes returns literal \n and \"
+      //    instead of actual newlines/quotes. Wrapping in quotes and parsing
+      //    as a JSON string unescapes them, yielding valid JSON.
+      try {
+        const unescaped = JSON.parse(`"${slice}"`) as string;
+        const parsed = JSON.parse(unescaped) as unknown;
+        if (Array.isArray(parsed)) {
+          return parsed as T[];
         }
+      } catch {
+        // not doubly-escaped, give up on this candidate
       }
     }
 
@@ -353,7 +324,16 @@ export class AiWorkflowService {
   }
 
   private stripMarkdownFence(text: string) {
-    const fenced = text.match(/^```(?:markdown|md|json)?\s*([\s\S]*?)\s*```$/i);
-    return fenced ? fenced[1].trim() : text.trim();
+    const tripleFenced = text.match(
+      /^```(?:markdown|md|json)?\s*([\s\S]*?)\s*```$/i,
+    );
+    if (tripleFenced) {
+      return tripleFenced[1].trim();
+    }
+    const singleFenced = text.match(/^`(?:json)?\s*([\s\S]*?)\s*`$/i);
+    if (singleFenced) {
+      return singleFenced[1].trim();
+    }
+    return text.trim();
   }
 }

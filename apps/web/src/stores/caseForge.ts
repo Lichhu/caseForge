@@ -1,18 +1,18 @@
-import { defineStore } from 'pinia';
-import { message } from 'ant-design-vue';
+import { defineStore } from "pinia";
+import { message } from "ant-design-vue";
 import type {
   CaseForgeProject,
   CaseTreeNode,
   GenerationRun,
   GenerationRunSummary,
-} from '@case-forge/shared';
+} from "@case-forge/shared";
 import {
   cloneCaseTree,
   DEFAULT_CASE_FORGE_PAGE_SIZE,
   DEFAULT_PROJECT_PAGE_SIZE,
   normalizeCaseForgePageSize,
   normalizeProjectPageSize,
-} from '@case-forge/shared';
+} from "@case-forge/shared";
 import {
   autoSaveStructDoc,
   batchSaveDynamicTestPointInstruction,
@@ -23,16 +23,17 @@ import {
   createDynamicTestPoint,
   deleteDynamicTestPoints,
   deleteProject,
+  deleteStructDoc,
   deleteScenarioLibraryItem,
   generateCases,
   getDynamicTestPointInstruction,
   getDynamicTestPointMeta,
   getGenerateQueueStatus,
   fetchProjectDetail,
-  getProjectStructDoc,
+  getProjectStructDocs,
+  getStructDoc,
   getRun,
   listRunSummaries,
-  getStructDocUploadStatus,
   listDynamicTestPoints,
   listGeneratingDynamicTestPoints,
   listProjects,
@@ -55,25 +56,30 @@ import {
   type TestPointInstructionItem,
   type TestPointSummaryItem,
   type CaseGenerateQueueItemStatus,
-} from '@/api/client';
+} from "@/api/client";
 import {
   DEFAULT_TEST_POINT_PAGE_SIZE,
   mergeTestPointInstruction,
   toTestPointSummary,
-} from '@/utils/testPointMerge';
-import { isTestPointDefinitionComplete, testPointDefinitionLabel } from '@/utils/testPointDefinition';
+} from "@/utils/testPointMerge";
+import {
+  isTestPointDefinitionComplete,
+  testPointDefinitionLabel,
+} from "@/utils/testPointDefinition";
 import {
   getRecentWorkspaceEntry,
   removeRecentWorkspaceEntry,
   setRecentWorkspaceEntry,
   syncLegacyWorkspaceRegistry,
   WORKSPACE_STAGE_REGISTRY,
-} from '@/utils/workspaceStageStorage';
+} from "@/utils/workspaceStageStorage";
 
-export type WorkspaceStage = 'document' | 'constraints' | 'workbench';
+export type WorkspaceStage = "document" | "constraints" | "workbench";
 
 /** 前端报错后轮询服务端真实状态（AI 生成可能仍在进行） */
-const GENERATE_POLL_DELAYS_MS = [2000, 3000, 5000, 8000, 10000, 15000, 20000, 30000];
+const GENERATE_POLL_DELAYS_MS = [
+  2000, 3000, 5000, 8000, 10000, 15000, 20000, 30000,
+];
 /** 长任务追加轮询：避免尚未完成却被误标为失败 */
 const GENERATE_POLL_EXTENDED_DELAYS_MS = [
   30000, 30000, 45000, 60000, 60000, 90000, 90000, 120000,
@@ -106,7 +112,9 @@ interface State {
   activeProject: CaseForgeProject | null;
   /** 案例运行摘要（不含案例树），编辑台按需 GET .../runs/:runId 拉整树 */
   runSummaries: GenerationRunSummary[];
-  structDoc: StructDocDetail | null;
+  structDocs: StructDocDetail[];
+  activeStructDocId: string | null;
+  activeStructDoc: StructDocDetail | null;
   activeRun: GenerationRun | null;
   /** 已加载完整案例树的 runId */
   activeRunTreeLoadedForId: string | null;
@@ -141,23 +149,25 @@ interface State {
   generateQueueByTestPointId: Record<string, CaseGenerateQueueItemStatus>;
 }
 
-const stageStoragePrefix = 'case-forge:workspace-stage:';
+const stageStoragePrefix = "case-forge:workspace-stage:";
 
-export const useCaseForgeStore = defineStore('caseForge', {
+export const useCaseForgeStore = defineStore("caseForge", {
   state: (): State => ({
     projects: [],
     projectListPage: 1,
     projectListPageSize: DEFAULT_PROJECT_PAGE_SIZE,
     projectListTotal: 0,
-    projectListKeyword: '',
+    projectListKeyword: "",
     activeProject: null,
     runSummaries: [],
-    structDoc: null,
+    structDocs: [],
+    activeStructDocId: null,
+    activeStructDoc: null,
     activeRun: null,
     activeRunTreeLoadedForId: null,
     activeRunLoading: false,
-    selectedNodeId: '',
-    workspaceStage: 'document',
+    selectedNodeId: "",
+    workspaceStage: "document",
     loading: false,
     structuringPollTimer: null,
     structuringPollProjectId: null,
@@ -166,9 +176,9 @@ export const useCaseForgeStore = defineStore('caseForge', {
     testPointTotal: 0,
     testPointListPage: 1,
     testPointListPageSize: DEFAULT_TEST_POINT_PAGE_SIZE,
-    testPointSystemFilter: '',
+    testPointSystemFilter: "",
     testPointSystems: [],
-    testPointFeatureModuleFilter: '',
+    testPointFeatureModuleFilter: "",
     testPointFeatureModules: [],
     testPointDefinitionSamples: [],
     testPointDetails: {},
@@ -182,7 +192,13 @@ export const useCaseForgeStore = defineStore('caseForge', {
   }),
   getters: {
     isStructuring(state): boolean {
-      return state.structDoc?.structuringStatus === 'processing';
+      return state.structDocs.some((d) => d.structuringStatus === "processing");
+    },
+    activeStructDoc(state): StructDocDetail | null {
+      if (!state.activeStructDocId) return null;
+      return (
+        state.structDocs.find((d) => d.id === state.activeStructDocId) ?? null
+      );
     },
     selectedNode(state): CaseTreeNode | null {
       if (!state.activeRun || !state.selectedNodeId) {
@@ -194,9 +210,14 @@ export const useCaseForgeStore = defineStore('caseForge', {
       return (testPointId: string): TestPointInstructionItem | null => {
         const summary =
           state.testPoints.find((item) => item.id === testPointId) ||
-          state.testPointDefinitionSamples.find((item) => item.id === testPointId) ||
+          state.testPointDefinitionSamples.find(
+            (item) => item.id === testPointId,
+          ) ||
           null;
-        return mergeTestPointInstruction(summary, state.testPointDetails[testPointId]);
+        return mergeTestPointInstruction(
+          summary,
+          state.testPointDetails[testPointId],
+        );
       };
     },
     hasTestPointsInProject(state): boolean {
@@ -210,9 +231,9 @@ export const useCaseForgeStore = defineStore('caseForge', {
     },
     workbenchTitle(state): string {
       return (
-        state.activeRun?.tree.title
-        ?? state.runSummaries[0]?.title
-        ?? '在线编辑案例树并导出'
+        state.activeRun?.tree.title ??
+        state.runSummaries[0]?.title ??
+        "在线编辑案例树并导出"
       );
     },
   },
@@ -227,8 +248,6 @@ export const useCaseForgeStore = defineStore('caseForge', {
         await this.refreshProjects();
         if (this.projects.length) {
           await this.selectProject(this.projects[0].id);
-        } else {
-          await this.newProject();
         }
       } finally {
         this.loading = false;
@@ -254,7 +273,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
 
       const fetchPage = async (page: number) =>
         listProjects({
-          platform: 'case-forge',
+          platform: "case-forge",
           page,
           size: this.projectListPageSize,
           input: this.projectListKeyword,
@@ -262,7 +281,10 @@ export const useCaseForgeStore = defineStore('caseForge', {
 
       let result = await fetchPage(this.projectListPage);
       this.projectListTotal = result.count;
-      const maxPage = Math.max(1, Math.ceil(result.count / this.projectListPageSize) || 1);
+      const maxPage = Math.max(
+        1,
+        Math.ceil(result.count / this.projectListPageSize) || 1,
+      );
       if (this.projectListPage > maxPage) {
         this.projectListPage = maxPage;
         result = await fetchPage(maxPage);
@@ -277,37 +299,48 @@ export const useCaseForgeStore = defineStore('caseForge', {
       }
       await this.refreshProjects();
     },
-    async newProject() {
+    async newProject(payload?: {
+      title?: string;
+      description?: string;
+      requirementNo?: string;
+    }) {
       this.stopStructuringPoll();
       const project = await createProject({
-        title: `案例生成项目 ${this.projects.length + 1}`,
-        platform: 'case-forge',
+        ...payload,
+        platform: "case-forge",
       });
       this.activeProject = project;
       this.runSummaries = [];
-      this.structDoc = null;
+      this.structDocs = [];
+      this.activeStructDocId = null;
+      this.activeStructDoc = null;
       this.activeRun = null;
       this.activeRunTreeLoadedForId = null;
-      this.selectedNodeId = '';
+      this.selectedNodeId = "";
       this.scenarios = [];
       this.resetTestPointWorkspaceState();
-      this.setWorkspaceStage('document');
-      await this.refreshProjects({ resetPage: true, keyword: '' });
+      this.setWorkspaceStage("document");
+      await this.refreshProjects({ resetPage: true, keyword: "" });
     },
     async selectProject(projectId: string) {
       this.stopStructuringPoll();
       if (this.activeProject?.id !== projectId) {
-        this.structDoc = null;
+        this.structDocs = [];
         this.runSummaries = [];
         this.activeRun = null;
         this.activeRunTreeLoadedForId = null;
-        this.selectedNodeId = '';
+        this.selectedNodeId = "";
         this.resetTestPointWorkspaceState();
       }
-      this.workspaceStage = loadProjectStage(projectId);
+      this.activeStructDocId = null;
+      this.activeStructDoc = null;
+      this.workspaceStage = "document";
+      saveProjectStage(projectId, "document");
       await this.fetchActiveProject(projectId);
       await this.ensureStructDocGate(projectId);
-      await this.refreshWorkspaceStageData(this.workspaceStage, { recoverOrphans: true });
+      await this.refreshWorkspaceStageData(this.workspaceStage, {
+        recoverOrphans: true,
+      });
     },
     applyActiveProject(project: CaseForgeProject) {
       this.activeProject = project;
@@ -320,15 +353,17 @@ export const useCaseForgeStore = defineStore('caseForge', {
     /** 阶段切换门槛：轻量 struct-doc（不含测试要点列表） */
     async ensureStructDocGate(projectId: string) {
       if (
-        this.activeProject?.id === projectId
-        && this.structDoc
-        && this.structDoc.canEnterDynamicInstruct !== undefined
+        this.activeProject?.id === projectId &&
+        this.structDocs.length &&
+        this.structDocs.every((d) => d.canEnterDynamicInstruct !== undefined)
       ) {
         return;
       }
-      const doc = await getProjectStructDoc(projectId, { includeTestPoints: false });
+      const docs = await getProjectStructDocs(projectId, {
+        includeTestPoints: false,
+      });
       if (this.activeProject?.id === projectId) {
-        this.structDoc = doc;
+        this.structDocs = docs;
       }
     },
     syncActiveRunWithSummaries() {
@@ -336,13 +371,13 @@ export const useCaseForgeStore = defineStore('caseForge', {
       if (!summary) {
         this.activeRun = null;
         this.activeRunTreeLoadedForId = null;
-        this.selectedNodeId = '';
+        this.selectedNodeId = "";
         return;
       }
       if (this.activeRunTreeLoadedForId !== summary.id) {
         this.activeRun = null;
         this.activeRunTreeLoadedForId = null;
-        this.selectedNodeId = '';
+        this.selectedNodeId = "";
       }
     },
     async refreshRunSummaries(projectId?: string) {
@@ -369,14 +404,14 @@ export const useCaseForgeStore = defineStore('caseForge', {
       if (!summary) {
         this.activeRun = null;
         this.activeRunTreeLoadedForId = null;
-        this.selectedNodeId = '';
+        this.selectedNodeId = "";
         return null;
       }
       const needsLoad =
-        options?.force
-        || !this.activeRun
-        || this.activeRun.id !== summary.id
-        || this.activeRunTreeLoadedForId !== summary.id;
+        options?.force ||
+        !this.activeRun ||
+        this.activeRun.id !== summary.id ||
+        this.activeRunTreeLoadedForId !== summary.id;
       if (!needsLoad) {
         return this.activeRun;
       }
@@ -384,7 +419,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
       try {
         const run = await getRun(projectId, summary.id);
         if (!run?.tree?.id) {
-          throw new Error('案例树数据无效，请稍后重试');
+          throw new Error("案例树数据无效，请稍后重试");
         }
         const prevSelectedNodeId = this.selectedNodeId;
         this.activeRun = run;
@@ -404,15 +439,19 @@ export const useCaseForgeStore = defineStore('caseForge', {
       }
     },
     async loadScenarioLibrary() {
-      const scenarios = await listScenarioLibrary('case');
-      this.scenarios = scenarios.map((scenario) => normalizeScenarioLibraryItem(scenario));
+      const scenarios = await listScenarioLibrary("case");
+      this.scenarios = scenarios.map((scenario) =>
+        normalizeScenarioLibraryItem(scenario),
+      );
     },
     /** 仅刷新测试要点列表（轻量，不拉场景库、不触发 orphan 恢复） */
     async refreshTestPoints(options?: { force?: boolean; page?: number }) {
       if (inFlightTestPointsRefresh && !options?.force) {
         return inFlightTestPointsRefresh;
       }
-      const task = this.applyTestPointsFromServer({ page: options?.page }).finally(() => {
+      const task = this.applyTestPointsFromServer({
+        page: options?.page,
+      }).finally(() => {
         if (inFlightTestPointsRefresh === task) {
           inFlightTestPointsRefresh = null;
         }
@@ -424,9 +463,9 @@ export const useCaseForgeStore = defineStore('caseForge', {
       this.testPoints = [];
       this.testPointTotal = 0;
       this.testPointListPage = 1;
-      this.testPointSystemFilter = '';
+      this.testPointSystemFilter = "";
       this.testPointSystems = [];
-      this.testPointFeatureModuleFilter = '';
+      this.testPointFeatureModuleFilter = "";
       this.testPointFeatureModules = [];
       this.testPointDefinitionSamples = [];
       this.testPointDetails = {};
@@ -434,14 +473,13 @@ export const useCaseForgeStore = defineStore('caseForge', {
       this.selectedTestPointIds = [];
     },
     async loadTestPointWorkspaceMeta() {
-      const structDocId = this.structDoc?.id || '';
-      if (!structDocId || !this.activeProject) {
+      if (!this.activeProject) {
         this.testPointSystems = [];
         this.testPointFeatureModules = [];
         this.testPointDefinitionSamples = [];
         return;
       }
-      const meta = await getDynamicTestPointMeta(this.activeProject.id, structDocId);
+      const meta = await getDynamicTestPointMeta(this.activeProject.id);
       this.testPointSystems = meta.systems;
       this.testPointFeatureModules = meta.featureModules;
       this.testPointDefinitionSamples = meta.definitionSamples;
@@ -451,11 +489,11 @@ export const useCaseForgeStore = defineStore('caseForge', {
       if (system && this.testPointFeatureModuleFilter) {
         const valid = this.testPointDefinitionSamples.some(
           (item) =>
-            item.system.trim() === system
-            && item.featureModule === this.testPointFeatureModuleFilter,
+            item.system.trim() === system &&
+            item.featureModule === this.testPointFeatureModuleFilter,
         );
         if (!valid) {
-          this.testPointFeatureModuleFilter = '';
+          this.testPointFeatureModuleFilter = "";
         }
       }
       await this.refreshTestPoints({ force: true, page: 1 });
@@ -465,13 +503,16 @@ export const useCaseForgeStore = defineStore('caseForge', {
       await this.refreshTestPoints({ force: true, page: 1 });
     },
     async clearTestPointListFilters() {
-      this.testPointSystemFilter = '';
-      this.testPointFeatureModuleFilter = '';
+      this.testPointSystemFilter = "";
+      this.testPointFeatureModuleFilter = "";
       await this.refreshTestPoints({ force: true, page: 1 });
     },
     async setTestPointListPage(page: number) {
       this.testPointListPage = Math.max(1, page);
-      await this.refreshTestPoints({ force: true, page: this.testPointListPage });
+      await this.refreshTestPoints({
+        force: true,
+        page: this.testPointListPage,
+      });
     },
     async setTestPointListPageSize(pageSize: number) {
       this.testPointListPageSize = normalizeCaseForgePageSize(pageSize);
@@ -488,21 +529,30 @@ export const useCaseForgeStore = defineStore('caseForge', {
       }
 
       if (this.testPointSystemFilter || this.testPointFeatureModuleFilter) {
-        await this.refreshTestPoints({ force: true, page: this.testPointListPage });
+        await this.refreshTestPoints({
+          force: true,
+          page: this.testPointListPage,
+        });
         if (!this.testPointTotal) {
-          this.testPointSystemFilter = '';
-          this.testPointFeatureModuleFilter = '';
+          this.testPointSystemFilter = "";
+          this.testPointFeatureModuleFilter = "";
           await this.refreshTestPoints({ force: true, page: 1 });
         }
       } else {
-        await this.refreshTestPoints({ force: true, page: this.testPointListPage });
+        await this.refreshTestPoints({
+          force: true,
+          page: this.testPointListPage,
+        });
       }
 
       if (this.testPointTotal <= 0) {
         return;
       }
 
-      const maxPage = Math.max(1, Math.ceil(this.testPointTotal / this.testPointListPageSize));
+      const maxPage = Math.max(
+        1,
+        Math.ceil(this.testPointTotal / this.testPointListPageSize),
+      );
       if (this.testPointListPage > maxPage || !this.testPoints.length) {
         await this.refreshTestPoints({ force: true, page: maxPage });
       }
@@ -514,7 +564,10 @@ export const useCaseForgeStore = defineStore('caseForge', {
       if (this.testPointDetailLoadingIds.includes(testPointId)) {
         return this.mergedTestPoint(testPointId);
       }
-      this.testPointDetailLoadingIds = [...this.testPointDetailLoadingIds, testPointId];
+      this.testPointDetailLoadingIds = [
+        ...this.testPointDetailLoadingIds,
+        testPointId,
+      ];
       try {
         const detail = await getDynamicTestPointInstruction(testPointId);
         this.testPointDetails[testPointId] = detail;
@@ -526,7 +579,9 @@ export const useCaseForgeStore = defineStore('caseForge', {
         );
       }
     },
-    patchTestPointSummary(partial: Partial<TestPointSummaryItem> & { id: string }) {
+    patchTestPointSummary(
+      partial: Partial<TestPointSummaryItem> & { id: string },
+    ) {
       if (this.testPointDetails[partial.id]) {
         this.testPointDetails[partial.id] = {
           ...this.testPointDetails[partial.id],
@@ -535,7 +590,9 @@ export const useCaseForgeStore = defineStore('caseForge', {
       }
       const merged = mergeTestPointInstruction(
         this.testPoints.find((item) => item.id === partial.id) ||
-          this.testPointDefinitionSamples.find((item) => item.id === partial.id),
+          this.testPointDefinitionSamples.find(
+            (item) => item.id === partial.id,
+          ),
         this.testPointDetails[partial.id],
       );
       if (!merged) {
@@ -545,7 +602,9 @@ export const useCaseForgeStore = defineStore('caseForge', {
         ...merged,
         ...partial,
       });
-      const pageIndex = this.testPoints.findIndex((item) => item.id === partial.id);
+      const pageIndex = this.testPoints.findIndex(
+        (item) => item.id === partial.id,
+      );
       if (pageIndex >= 0) {
         this.testPoints.splice(pageIndex, 1, {
           ...this.testPoints[pageIndex],
@@ -581,7 +640,9 @@ export const useCaseForgeStore = defineStore('caseForge', {
     ) {
       const defById = new Map(
         definitions
-          .filter((item): item is typeof item & { id: string } => Boolean(item.id))
+          .filter((item): item is typeof item & { id: string } =>
+            Boolean(item.id),
+          )
           .map((item) => [item.id, item]),
       );
       this.testPoints = this.testPoints
@@ -603,15 +664,13 @@ export const useCaseForgeStore = defineStore('caseForge', {
       );
     },
     async applyTestPointsFromServer(options?: { page?: number }) {
-      const structDocId = this.structDoc?.id || '';
-      if (!structDocId || !this.activeProject) {
+      if (!this.activeProject) {
         this.resetTestPointWorkspaceState();
         return;
       }
       const page = options?.page ?? this.testPointListPage;
       const result = await listDynamicTestPoints({
         projectId: this.activeProject.id,
-        structDocId,
         page,
         pageSize: this.testPointListPageSize,
         system: this.testPointSystemFilter || undefined,
@@ -646,10 +705,16 @@ export const useCaseForgeStore = defineStore('caseForge', {
       });
       return inFlightDynamicWorkspaceLoad;
     },
-    async setWorkspaceStage(stage: WorkspaceStage, options?: { refresh?: boolean }) {
-      if (stage === 'constraints' && !this.structDoc?.canEnterDynamicInstruct) {
-        message.warning('请先保存结构化需求文档后再进入动态指令');
-        stage = 'document';
+    async setWorkspaceStage(
+      stage: WorkspaceStage,
+      options?: { refresh?: boolean },
+    ) {
+      if (
+        stage === "constraints" &&
+        !this.structDocs.some((d) => d.canEnterDynamicInstruct)
+      ) {
+        message.warning("请先保存结构化需求文档后再进入动态指令");
+        stage = "document";
       }
       this.workspaceStage = stage;
       if (this.activeProject) {
@@ -661,7 +726,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
       }
       if (options?.refresh) {
         await this.refreshWorkspaceStageData(stage, { recoverOrphans: false });
-      } else if (stage === 'workbench') {
+      } else if (stage === "workbench") {
         await this.loadActiveRun({ force: true });
       }
     },
@@ -676,17 +741,19 @@ export const useCaseForgeStore = defineStore('caseForge', {
       const projectId = this.activeProject.id;
       try {
         switch (stage) {
-          case 'document': {
-            this.structDoc = await getProjectStructDoc(projectId);
-            if (this.structDoc?.structuringStatus === 'processing') {
+          case "document": {
+            this.structDocs = await getProjectStructDocs(projectId);
+            if (
+              this.structDocs.some((d) => d.structuringStatus === "processing")
+            ) {
               this.startStructuringPoll(projectId);
             } else if (this.structuringPollProjectId === projectId) {
               this.stopStructuringPoll();
             }
             break;
           }
-          case 'constraints': {
-            this.structDoc = await getProjectStructDoc(projectId, {
+          case "constraints": {
+            this.structDocs = await getProjectStructDocs(projectId, {
               includeTestPoints: false,
             });
             await this.loadDynamicWorkspace({
@@ -695,17 +762,17 @@ export const useCaseForgeStore = defineStore('caseForge', {
             this.syncGenerateQueuePolling();
             break;
           }
-          case 'workbench': {
+          case "workbench": {
             const prevRunId = this.activeRun?.id;
             const prevSelectedNodeId = this.selectedNodeId;
             await this.refreshRunSummaries(projectId);
             this.syncActiveRunWithSummaries();
             await this.loadActiveRun({ force: true });
             if (
-              this.activeRun
-              && prevRunId === this.activeRun.id
-              && prevSelectedNodeId
-              && findNode(this.activeRun.tree, prevSelectedNodeId)
+              this.activeRun &&
+              prevRunId === this.activeRun.id &&
+              prevSelectedNodeId &&
+              findNode(this.activeRun.tree, prevSelectedNodeId)
             ) {
               this.selectedNodeId = prevSelectedNodeId;
             }
@@ -713,7 +780,9 @@ export const useCaseForgeStore = defineStore('caseForge', {
           }
         }
       } catch (error) {
-        message.warning((error as Error)?.message || '刷新页面数据失败，请稍后重试');
+        message.warning(
+          (error as Error)?.message || "刷新页面数据失败，请稍后重试",
+        );
       }
     },
     async removeProject(projectId: string) {
@@ -734,11 +803,11 @@ export const useCaseForgeStore = defineStore('caseForge', {
           this.activeRunTreeLoadedForId = null;
           this.scenarios = [];
           this.resetTestPointWorkspaceState();
-          this.selectedNodeId = '';
-          this.workspaceStage = 'document';
+          this.selectedNodeId = "";
+          this.workspaceStage = "document";
         }
       }
-      message.success('项目已删除');
+      message.success("项目已删除");
     },
     async updateProjectInfo(
       projectId: string,
@@ -753,7 +822,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
           description: payload.description ?? this.activeProject.description,
         };
       }
-      message.success('项目已更新');
+      message.success("项目已更新");
     },
     async removeProjects(projectIds: string[]) {
       const ids = [...new Set(projectIds)];
@@ -761,8 +830,12 @@ export const useCaseForgeStore = defineStore('caseForge', {
       try {
         await batchDeleteProjects(ids);
       } catch {
-        const results = await Promise.allSettled(ids.map((projectId) => deleteProject(projectId)));
-        const failedCount = results.filter((result) => result.status === 'rejected').length;
+        const results = await Promise.allSettled(
+          ids.map((projectId) => deleteProject(projectId)),
+        );
+        const failedCount = results.filter(
+          (result) => result.status === "rejected",
+        ).length;
         if (failedCount) {
           message.warning(`${failedCount} 个项目删除失败，请稍后重试`);
         }
@@ -785,40 +858,51 @@ export const useCaseForgeStore = defineStore('caseForge', {
           this.activeRunTreeLoadedForId = null;
           this.scenarios = [];
           this.resetTestPointWorkspaceState();
-          this.selectedNodeId = '';
-          this.workspaceStage = 'document';
+          this.selectedNodeId = "";
+          this.workspaceStage = "document";
         }
       }
       message.success(`已删除 ${ids.length} 个项目`);
     },
     async submitRequirement() {
       if (!this.activeProject) return;
-      if (!this.structDoc?.canStructure) {
-        if (this.structDoc?.structuringStatus === 'processing') {
-          message.info('结构化任务进行中，请稍候');
+      const doc = this.activeStructDoc;
+      if (!doc?.canStructure) {
+        if (doc?.structuringStatus === "processing") {
+          message.info("结构化任务进行中，请稍候");
           return;
         }
-        message.warning('请先上传需求文档后再进行结构化');
+        message.warning("请先上传需求文档后再进行结构化");
         return;
       }
       try {
-        this.structDoc = await structureRequirement(this.activeProject.id);
+        const updated = await structureRequirement(
+          this.activeProject.id,
+          doc.id,
+        );
+        this.patchActiveStructDoc(updated);
         this.startStructuringPoll(this.activeProject.id);
-        message.info('已开始结构化，完成后将自动更新文档');
+        message.info("已开始结构化，完成后将自动更新文档");
       } catch (error) {
-        message.error((error as Error)?.message || '启动结构化失败');
+        message.error((error as Error)?.message || "启动结构化失败");
       }
     },
     async cancelStructuring() {
       if (!this.activeProject) return;
+      const doc = this.activeStructDoc;
+      if (!doc) return;
       try {
-        this.structDoc = await cancelStructureRequirement(this.activeProject.id);
+        const updated = await cancelStructureRequirement(
+          this.activeProject.id,
+          doc.id,
+        );
+        this.patchActiveStructDoc(updated);
         this.stopStructuringPoll();
-        if (this.structDoc?.structuringStatus === 'failed') {
-          message.warning(this.structDoc.structuringError || '已取消结构化');
+        if (updated.structuringStatus === "failed") {
+          message.warning(updated.structuringError || "已取消结构化");
         }
       } catch (error) {
-        message.error((error as Error)?.message || '取消结构化失败');
+        message.error((error as Error)?.message || "取消结构化失败");
       }
     },
     stopStructuringPoll() {
@@ -833,7 +917,10 @@ export const useCaseForgeStore = defineStore('caseForge', {
       this.structuringPollProjectId = projectId;
       void this.pollStructDocStatus(projectId);
       this.structuringPollTimer = setInterval(() => {
-        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        if (
+          typeof document !== "undefined" &&
+          document.visibilityState === "hidden"
+        ) {
           return;
         }
         void this.pollStructDocStatus(projectId);
@@ -843,81 +930,105 @@ export const useCaseForgeStore = defineStore('caseForge', {
       if (this.structuringPollProjectId !== projectId) {
         return;
       }
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
         return;
       }
       try {
-        const doc = await getProjectStructDoc(projectId);
+        const docs = await getProjectStructDocs(projectId);
         if (this.activeProject?.id === projectId) {
-          this.patchStructDocFromPoll(doc);
+          this.structDocs = docs;
+          const active =
+            docs.find((d) => d.id === this.activeStructDocId) ?? null;
+          this.activeStructDoc = active;
         }
-        if (!doc || doc.structuringStatus !== 'processing') {
+        const anyProcessing = docs.some(
+          (d) => d.structuringStatus === "processing",
+        );
+        if (!anyProcessing) {
           this.stopStructuringPoll();
           if (this.activeProject?.id !== projectId) {
             return;
           }
-          if (doc?.structuringStatus === 'completed') {
+          const completed = docs.some(
+            (d) => d.structuringStatus === "completed",
+          );
+          const failed = docs.find((d) => d.structuringStatus === "failed");
+          if (completed) {
             await this.loadDynamicWorkspace();
             await this.bumpSidebarProjectOrder(projectId);
-            message.success('需求文档已结构化');
-          } else if (doc?.structuringStatus === 'failed') {
-            message.error(doc.structuringError || '结构化失败，请稍后重试');
+            message.success("需求文档已结构化");
+          } else if (failed) {
+            message.error(failed.structuringError || "结构化失败，请稍后重试");
           }
         }
       } catch {
         // 轮询失败时保持 processing 状态，下次继续
       }
     },
-    async uploadRequirementFile(file: File, force = false) {
+    async uploadRequirementFile(file: File) {
       if (!this.activeProject) return;
-      if (!force) {
-        const status = await getStructDocUploadStatus(this.activeProject.id);
-        if (status.hasExisting) {
-          message.warning('当前项目已存在需求文档，重新上传需要重新结构化并重新保存，建议新建项目操作');
-          return;
-        }
-      }
       this.loading = true;
       try {
         const projectId = this.activeProject.id;
-        await uploadStructDocRequirement(projectId, file, force);
+        const uploaded = await uploadStructDocRequirement(projectId, file);
         await this.refreshProjects();
         if (this.activeProject?.id === projectId) {
-          await Promise.all([
-            this.fetchActiveProject(projectId),
-            getProjectStructDoc(projectId).then((structDoc) => {
-              if (this.activeProject?.id === projectId) {
-                this.structDoc = structDoc;
-              }
-            }),
-          ]);
-          if (this.workspaceStage === 'constraints') {
+          await this.fetchActiveProject(projectId);
+          this.structDocs = [...this.structDocs, uploaded];
+          this.activeStructDocId = uploaded.id;
+          this.activeStructDoc = uploaded;
+          if (this.workspaceStage === "constraints") {
             await this.loadDynamicWorkspace();
           }
         }
-        message.success('需求文档已上传');
+        message.success("需求文档已上传");
+      } catch (error) {
+        message.error((error as Error)?.message || "上传需求文档失败");
+        throw error;
       } finally {
         this.loading = false;
       }
     },
-    patchStructDocFromPoll(doc: StructDocDetail | null) {
+    selectStructDoc(structDocId: string) {
+      const doc = this.structDocs.find((d) => d.id === structDocId);
+      if (!doc) return;
+      this.activeStructDocId = structDocId;
+      this.activeStructDoc = doc;
+    },
+    backToDocList() {
+      this.activeStructDocId = null;
+      this.activeStructDoc = null;
+      this.stopStructuringPoll();
+    },
+    async deleteStructDoc(structDocId: string) {
+      if (!this.activeProject) return;
+      await deleteStructDoc(this.activeProject.id, structDocId);
+      this.structDocs = this.structDocs.filter((d) => d.id !== structDocId);
+      if (this.activeStructDocId === structDocId) {
+        this.activeStructDocId = null;
+        this.activeStructDoc = null;
+      }
+      if (this.activeStructDoc?.id) {
+        await this.loadTestPointWorkspaceMeta();
+        await this.refreshTestPoints({ force: true });
+      } else {
+        this.resetTestPointWorkspaceState();
+      }
+      await this.refreshProjects();
+    },
+    patchActiveStructDoc(doc: StructDocDetail | null) {
       if (!doc) {
-        this.structDoc = doc;
+        this.activeStructDoc = null;
         return;
       }
-      const prev = this.structDoc;
-      if (
-        prev &&
-        doc.structuringStatus === 'processing' &&
-        prev.structuringStatus === 'processing' &&
-        prev.structuringStartedAt === doc.structuringStartedAt &&
-        prev.tempStructDoc === doc.tempStructDoc &&
-        prev.canStructure === doc.canStructure &&
-        prev.canSave === doc.canSave
-      ) {
-        return;
-      }
-      this.structDoc = doc;
+      this.activeStructDoc = doc;
+      this.structDocs = this.structDocs.map((d) => (d.id === doc.id ? doc : d));
+    },
+    patchStructDocFromPoll(doc: StructDocDetail | null) {
+      this.patchActiveStructDoc(doc);
     },
     async autoSaveDocument(
       markdown: string,
@@ -928,20 +1039,13 @@ export const useCaseForgeStore = defineStore('caseForge', {
       if (!targetProjectId || this.activeProject?.id !== targetProjectId) {
         return;
       }
-      const structDoc = await autoSaveStructDoc(targetProjectId, { tempStructDoc: markdown });
-      if (this.activeProject?.id === targetProjectId && this.structDoc) {
-        this.structDoc = {
-          ...this.structDoc,
-          tempStructDoc: structDoc.tempStructDoc,
-          canSave: structDoc.canSave,
-          canStructure: structDoc.canStructure,
-          canEnterDynamicInstruct: structDoc.canEnterDynamicInstruct,
-          isStructuring: structDoc.isStructuring,
-          structuringStatus: structDoc.structuringStatus,
-          structuringError: structDoc.structuringError,
-        };
-      } else if (this.activeProject?.id === targetProjectId) {
-        this.structDoc = structDoc;
+      const structDocId = this.activeStructDoc?.id;
+      if (!structDocId) return;
+      const structDoc = await autoSaveStructDoc(targetProjectId, structDocId, {
+        tempStructDoc: markdown,
+      });
+      if (this.activeProject?.id === targetProjectId) {
+        this.patchActiveStructDoc(structDoc);
       }
       if (options?.successMessage) {
         message.success(options.successMessage);
@@ -950,20 +1054,30 @@ export const useCaseForgeStore = defineStore('caseForge', {
     },
     async saveDocument(markdown: string) {
       if (!this.activeProject) return;
-      if (!this.structDoc?.canSave && !markdown.trim()) {
-        message.warning('请先结构化需求文档后再保存');
+      const doc = this.activeStructDoc;
+      if (!doc?.canSave && !markdown.trim()) {
+        message.warning("请先结构化需求文档后再保存");
+        return;
+      }
+      if (!doc) {
+        message.warning("请先上传需求文档");
         return;
       }
       // 不传 testPoints，由后端从 Markdown 解析；已存在的测试要点（按项目 + 内容）保留，仅新增缺失项
-      this.structDoc = await saveStructDocTestPoints(this.activeProject.id, {
-        tempStructDoc: markdown,
-      });
+      const saved = await saveStructDocTestPoints(
+        this.activeProject.id,
+        doc.id,
+        {
+          tempStructDoc: markdown,
+        },
+      );
+      this.patchActiveStructDoc(saved);
       await this.loadDynamicWorkspace();
-      this.setWorkspaceStage('constraints');
+      this.setWorkspaceStage("constraints");
       if (this.testPointTotal > 0 && this.testPoints[0]) {
         this.selectedTestPointIds = [this.testPoints[0].id];
       }
-      message.success('结构化文档已保存');
+      message.success("结构化文档已保存");
       await this.bumpSidebarProjectOrder();
     },
     markGeneratingTestPoints(testPointIds: string[]) {
@@ -973,7 +1087,9 @@ export const useCaseForgeStore = defineStore('caseForge', {
     },
     unmarkGeneratingTestPoints(testPointIds: string[]) {
       const remove = new Set(testPointIds);
-      this.generatingTestPointIds = this.generatingTestPointIds.filter((id) => !remove.has(id));
+      this.generatingTestPointIds = this.generatingTestPointIds.filter(
+        (id) => !remove.has(id),
+      );
     },
     /** 取消单条测试要点的案例生成 */
     async cancelTestPointGenerate(testPointId: string) {
@@ -981,21 +1097,20 @@ export const useCaseForgeStore = defineStore('caseForge', {
         return;
       }
       const row = this.mergedTestPoint(testPointId);
-      const label = row?.testPoint || '测试要点';
+      const label = row?.testPoint || "测试要点";
       const projectId = this.activeProject.id;
 
       this.unmarkGeneratingTestPoints([testPointId]);
-      this.pollingGenerateTestPointIds = this.pollingGenerateTestPointIds.filter(
-        (id) => id !== testPointId,
-      );
+      this.pollingGenerateTestPointIds =
+        this.pollingGenerateTestPointIds.filter((id) => id !== testPointId);
 
       try {
         await cancelCaseGenerate(projectId, [testPointId]);
         await this.refreshRunSummaries(projectId);
         this.syncActiveRunWithSummaries();
         if (
-          this.primaryRunSummary
-          && this.activeRunTreeLoadedForId === this.primaryRunSummary.id
+          this.primaryRunSummary &&
+          this.activeRunTreeLoadedForId === this.primaryRunSummary.id
         ) {
           await this.loadActiveRun({ force: true });
         }
@@ -1006,10 +1121,10 @@ export const useCaseForgeStore = defineStore('caseForge', {
         if (row) {
           this.replaceTestPoint({
             ...row,
-            status: row.status === '生成完成' ? '再编辑' : '已编辑',
+            status: row.status === "生成完成" ? "再编辑" : "已编辑",
           });
         }
-        message.error((error as Error)?.message || '取消生成失败');
+        message.error((error as Error)?.message || "取消生成失败");
       }
     },
     /** 从服务端拉取测试要点生成状态（单条详情，不刷新整表） */
@@ -1017,21 +1132,25 @@ export const useCaseForgeStore = defineStore('caseForge', {
       try {
         const row = await getDynamicTestPointInstruction(testPointId);
         this.replaceTestPoint(row);
-        if (row.status === '生成完成') {
-          return 'completed' as const;
+        if (row.status === "生成完成") {
+          return "completed" as const;
         }
-        if (row.status === '生成中') {
-          return 'pending' as const;
+        if (row.status === "生成中") {
+          return "pending" as const;
         }
-        if (row.status === '生成失败') {
-          return 'failed' as const;
+        if (row.status === "生成失败") {
+          return "failed" as const;
         }
-        return 'unknown' as const;
+        return "unknown" as const;
       } catch {
-        return 'unknown' as const;
+        return "unknown" as const;
       }
     },
-    scheduleGeneratePoll(testPointId: string, testPointLabel: string, projectId: string) {
+    scheduleGeneratePoll(
+      testPointId: string,
+      testPointLabel: string,
+      projectId: string,
+    ) {
       if (this.pollingGenerateTestPointIds.includes(testPointId)) {
         return;
       }
@@ -1040,26 +1159,28 @@ export const useCaseForgeStore = defineStore('caseForge', {
         testPointId,
       ];
       this.startGenerateQueuePolling([testPointId]);
-      void this.pollGenerateOutcome(testPointId, testPointLabel, projectId).finally(() => {
-        this.pollingGenerateTestPointIds = this.pollingGenerateTestPointIds.filter(
-          (id) => id !== testPointId,
-        );
+      void this.pollGenerateOutcome(
+        testPointId,
+        testPointLabel,
+        projectId,
+      ).finally(() => {
+        this.pollingGenerateTestPointIds =
+          this.pollingGenerateTestPointIds.filter((id) => id !== testPointId);
         this.syncGenerateQueuePolling();
       });
     },
     startGenerateQueuePolling(testPointIds?: string[]) {
-      const ids =
-        testPointIds?.length
-          ? [...new Set(testPointIds)]
-          : [
-              ...new Set([
-                ...this.generatingTestPointIds,
-                ...this.pollingGenerateTestPointIds,
-                ...this.testPoints
-                  .filter((item) => item.status === '生成中')
-                  .map((item) => item.id),
-              ]),
-            ];
+      const ids = testPointIds?.length
+        ? [...new Set(testPointIds)]
+        : [
+            ...new Set([
+              ...this.generatingTestPointIds,
+              ...this.pollingGenerateTestPointIds,
+              ...this.testPoints
+                .filter((item) => item.status === "生成中")
+                .map((item) => item.id),
+            ]),
+          ];
       if (!ids.length) {
         this.stopGenerateQueuePolling();
         return;
@@ -1078,7 +1199,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
           ...this.generatingTestPointIds,
           ...this.pollingGenerateTestPointIds,
           ...this.testPoints
-            .filter((item) => item.status === '生成中')
+            .filter((item) => item.status === "生成中")
             .map((item) => item.id),
         ]),
       ];
@@ -1100,7 +1221,10 @@ export const useCaseForgeStore = defineStore('caseForge', {
         return;
       }
       try {
-        const status = await getGenerateQueueStatus(this.activeProject.id, testPointIds);
+        const status = await getGenerateQueueStatus(
+          this.activeProject.id,
+          testPointIds,
+        );
         const next: Record<string, CaseGenerateQueueItemStatus> = {
           ...this.generateQueueByTestPointId,
         };
@@ -1116,7 +1240,11 @@ export const useCaseForgeStore = defineStore('caseForge', {
       }
     },
     async markGenerateFailed(testPointId: string) {
-      await this.saveTestPointInstruction(testPointId, { status: '生成失败' }, { silent: true });
+      await this.saveTestPointInstruction(
+        testPointId,
+        { status: "生成失败" },
+        { silent: true },
+      );
     },
     async applyGenerateCompletion(
       testPointId: string,
@@ -1129,21 +1257,21 @@ export const useCaseForgeStore = defineStore('caseForge', {
         await this.refreshRunSummaries(projectId);
         this.syncActiveRunWithSummaries();
         await this.loadActiveRun({ force: true });
-        this.selectedNodeId = this.activeRun?.tree.id || '';
+        this.selectedNodeId = this.activeRun?.tree.id || "";
         await this.fetchActiveProject(projectId);
       } catch {
         // 刷新项目失败时仍以列表状态为准
       }
       message.success(`「${testPointLabel}」案例已生成`);
       if (this.hasProjectRuns) {
-        await this.setWorkspaceStage('workbench');
+        await this.setWorkspaceStage("workbench");
       }
     },
     async applyGenerateFailure(testPointId: string, testPointLabel: string) {
       const updated = await getDynamicTestPointInstruction(testPointId);
       this.replaceTestPoint(updated);
       message.error(
-        `「${testPointLabel}」生成失败：${updated.generateError?.trim() || '请稍后重试'}`,
+        `「${testPointLabel}」生成失败：${updated.generateError?.trim() || "请稍后重试"}`,
       );
     },
     async pollGenerateOutcome(
@@ -1151,24 +1279,31 @@ export const useCaseForgeStore = defineStore('caseForge', {
       testPointLabel: string,
       projectId: string,
     ) {
-      const delays = [...GENERATE_POLL_DELAYS_MS, ...GENERATE_POLL_EXTENDED_DELAYS_MS];
+      const delays = [
+        ...GENERATE_POLL_DELAYS_MS,
+        ...GENERATE_POLL_EXTENDED_DELAYS_MS,
+      ];
       for (const delay of delays) {
         await sleep(delay);
         if (this.activeProject?.id !== projectId) {
           return;
         }
         const outcome = await this.fetchGenerateOutcome(testPointId);
-        if (outcome === 'completed') {
+        if (outcome === "completed") {
           this.unmarkGeneratingTestPoints([testPointId]);
-          await this.applyGenerateCompletion(testPointId, testPointLabel, projectId);
+          await this.applyGenerateCompletion(
+            testPointId,
+            testPointLabel,
+            projectId,
+          );
           return;
         }
-        if (outcome === 'failed') {
+        if (outcome === "failed") {
           this.unmarkGeneratingTestPoints([testPointId]);
           await this.applyGenerateFailure(testPointId, testPointLabel);
           return;
         }
-        if (outcome === 'unknown') {
+        if (outcome === "unknown") {
           this.unmarkGeneratingTestPoints([testPointId]);
           return;
         }
@@ -1177,29 +1312,31 @@ export const useCaseForgeStore = defineStore('caseForge', {
         return;
       }
       const outcome = await this.fetchGenerateOutcome(testPointId);
-      if (outcome === 'completed') {
+      if (outcome === "completed") {
         this.unmarkGeneratingTestPoints([testPointId]);
-        await this.applyGenerateCompletion(testPointId, testPointLabel, projectId);
+        await this.applyGenerateCompletion(
+          testPointId,
+          testPointLabel,
+          projectId,
+        );
         return;
       }
-      if (outcome === 'failed') {
+      if (outcome === "failed") {
         this.unmarkGeneratingTestPoints([testPointId]);
         await this.applyGenerateFailure(testPointId, testPointLabel);
         return;
       }
-      if (outcome === 'unknown') {
+      if (outcome === "unknown") {
         this.unmarkGeneratingTestPoints([testPointId]);
       }
     },
     /** 进入项目时：对无前端请求的「生成中」启动轮询等待服务端完成 */
     async recoverOrphanedGeneratingStatus() {
-      const structDocId = this.structDoc?.id || '';
-      if (!structDocId || !this.activeProject) {
+      if (!this.activeProject) {
         return;
       }
       const generating = await listGeneratingDynamicTestPoints(
         this.activeProject.id,
-        structDocId,
       );
       const orphans = generating.filter(
         (item) =>
@@ -1211,7 +1348,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
       }
       const projectId = this.activeProject.id;
       orphans.forEach((item) => {
-        this.patchTestPointSummary({ id: item.id, status: '生成中' });
+        this.patchTestPointSummary({ id: item.id, status: "生成中" });
       });
       this.startGenerateQueuePolling(orphans.map((item) => item.id));
       for (const item of orphans) {
@@ -1225,14 +1362,16 @@ export const useCaseForgeStore = defineStore('caseForge', {
       const projectId = this.activeProject.id;
       for (const id of testPointIds) {
         const row = this.mergedTestPoint(id);
-        if (row?.status === '生成中') {
+        if (row?.status === "生成中") {
           this.scheduleGeneratePoll(id, row.testPoint, projectId);
         }
       }
     },
     async generate(testPointIds?: string[]) {
       if (!this.activeProject) return;
-      const explicitIds = testPointIds?.length ? [...new Set(testPointIds)] : undefined;
+      const explicitIds = testPointIds?.length
+        ? [...new Set(testPointIds)]
+        : undefined;
       const candidateIds = explicitIds?.length
         ? explicitIds
         : this.selectedTestPointIds.length
@@ -1242,10 +1381,10 @@ export const useCaseForgeStore = defineStore('caseForge', {
         ? candidateIds
         : candidateIds.filter((id) => {
             const row = this.mergedTestPoint(id);
-            return row && row.status !== '生成中';
+            return row && row.status !== "生成中";
           });
       if (!selectedIds.length) {
-        message.warning('请先选择可生成的测试要点');
+        message.warning("请先选择可生成的测试要点");
         return;
       }
       const incomplete = selectedIds
@@ -1253,7 +1392,10 @@ export const useCaseForgeStore = defineStore('caseForge', {
         .filter((row): row is TestPointInstructionItem => Boolean(row))
         .filter((row) => !isTestPointDefinitionComplete(row));
       if (incomplete.length) {
-        const sample = incomplete.map((row) => testPointDefinitionLabel(row)).slice(0, 3).join('、');
+        const sample = incomplete
+          .map((row) => testPointDefinitionLabel(row))
+          .slice(0, 3)
+          .join("、");
         message.warning(
           incomplete.length === 1
             ? `「${sample}」的系统、功能模块、测试要点未填写完整，无法生成`
@@ -1272,7 +1414,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
       try {
         await generateCases(projectId, { testPointIds: selectedIds });
         selectedIds.forEach((id) => {
-          this.patchTestPointSummary({ id, status: '生成中' });
+          this.patchTestPointSummary({ id, status: "生成中" });
         });
         this.startGenerateQueuePolling(selectedIds);
         this.schedulePollForGenerating(selectedIds);
@@ -1280,7 +1422,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
           `已为 ${selectedIds.length} 条测试要点提交生成任务，可在列表中查看排队与预计耗时`,
         );
       } catch (error) {
-        message.error((error as Error)?.message || '批量生成提交失败');
+        message.error((error as Error)?.message || "批量生成提交失败");
       } finally {
         this.unmarkGeneratingTestPoints(selectedIds);
       }
@@ -1294,8 +1436,15 @@ export const useCaseForgeStore = defineStore('caseForge', {
       if (!current) {
         return;
       }
-      if (current.status === '生成中' && !this.generatingTestPointIds.includes(testPointId)) {
-        this.scheduleGeneratePoll(testPointId, current.testPoint, this.activeProject.id);
+      if (
+        current.status === "生成中" &&
+        !this.generatingTestPointIds.includes(testPointId)
+      ) {
+        this.scheduleGeneratePoll(
+          testPointId,
+          current.testPoint,
+          this.activeProject.id,
+        );
         return;
       }
       this.markGeneratingTestPoints([testPointId]);
@@ -1304,13 +1453,15 @@ export const useCaseForgeStore = defineStore('caseForge', {
         await generateCases(projectId, {
           testPointIds: [testPointId],
         });
-        this.patchTestPointSummary({ id: testPointId, status: '生成中' });
+        this.patchTestPointSummary({ id: testPointId, status: "生成中" });
         this.scheduleGeneratePoll(testPointId, current.testPoint, projectId);
         if (!options?.quiet) {
-          message.info(`「${current.testPoint}」已提交生成，可在列表中查看排队与预计耗时`);
+          message.info(
+            `「${current.testPoint}」已提交生成，可在列表中查看排队与预计耗时`,
+          );
         }
       } catch (error) {
-        message.error((error as Error)?.message || '提交生成失败');
+        message.error((error as Error)?.message || "提交生成失败");
       } finally {
         this.unmarkGeneratingTestPoints([testPointId]);
       }
@@ -1329,7 +1480,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
         instruction: {
           promptIds: string[];
           naturalText: string;
-          status: TestPointInstructionItem['status'];
+          status: TestPointInstructionItem["status"];
           isFull: boolean;
           isAppend: boolean;
         };
@@ -1339,16 +1490,23 @@ export const useCaseForgeStore = defineStore('caseForge', {
       if (payload.definition) {
         const { system, featureModule, testPoint } = payload.definition;
         if (!system.trim() || !featureModule.trim() || !testPoint.trim()) {
-          message.warning('系统、功能模块、测试要点均不能为空');
+          message.warning("系统、功能模块、测试要点均不能为空");
           return;
         }
       }
       if (payload.definition && testPointIds.length === 1) {
-        await updateDynamicTestPointDefinition(testPointIds[0], payload.definition);
+        await updateDynamicTestPointDefinition(
+          testPointIds[0],
+          payload.definition,
+        );
         await this.loadTestPointWorkspaceMeta();
       }
       if (testPointIds.length === 1) {
-        await this.saveTestPointInstruction(testPointIds[0], payload.instruction, { silent: true });
+        await this.saveTestPointInstruction(
+          testPointIds[0],
+          payload.instruction,
+          { silent: true },
+        );
       } else {
         const rows = await this.batchSaveTestPointInstruction(
           {
@@ -1361,7 +1519,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
           return;
         }
       }
-      message.success('测试要点已保存');
+      message.success("测试要点已保存");
     },
     async saveTree(options?: { successMessage?: string }) {
       if (!this.activeProject || !this.activeRun) return;
@@ -1382,24 +1540,30 @@ export const useCaseForgeStore = defineStore('caseForge', {
           ...saved,
           tree: latestTree,
         };
-        const index = this.runSummaries.findIndex((run) => run.id === this.activeRun?.id);
+        const index = this.runSummaries.findIndex(
+          (run) => run.id === this.activeRun?.id,
+        );
         if (index >= 0) {
           this.runSummaries[index] = {
             ...this.runSummaries[index],
             title: latestTree.title || this.runSummaries[index].title,
           };
         }
-        message.success(options?.successMessage ?? '案例树已保存');
+        message.success(options?.successMessage ?? "案例树已保存");
         await this.bumpSidebarProjectOrder();
       } catch (error) {
-        message.error((error as Error)?.message || '保存案例树失败');
+        message.error((error as Error)?.message || "保存案例树失败");
         throw error;
       } finally {
         this.treeSaving = false;
       }
     },
-    async regenerateSelected(instruction: string, mode: 'append' | 'replace' | 'complete') {
-      if (!this.activeProject || !this.activeRun || !this.selectedNodeId) return;
+    async regenerateSelected(
+      instruction: string,
+      mode: "append" | "replace" | "complete",
+    ) {
+      if (!this.activeProject || !this.activeRun || !this.selectedNodeId)
+        return;
       await regenerateNode(this.activeProject.id, {
         runId: this.activeRun.id,
         nodeId: this.selectedNodeId,
@@ -1409,18 +1573,26 @@ export const useCaseForgeStore = defineStore('caseForge', {
       await this.refreshRunSummaries(this.activeProject.id);
       this.syncActiveRunWithSummaries();
       await this.loadActiveRun({ force: true });
-      message.success('局部生成完成');
+      message.success("局部生成完成");
       await this.bumpSidebarProjectOrder();
     },
     async saveTestPointInstruction(
       testPointId: string,
-      payload: Partial<Pick<TestPointInstructionItem, 'promptIds' | 'naturalText' | 'status' | 'isFull' | 'isAppend'>>,
+      payload: Partial<
+        Pick<
+          TestPointInstructionItem,
+          "promptIds" | "naturalText" | "status" | "isFull" | "isAppend"
+        >
+      >,
       options?: { silent?: boolean },
     ) {
-      const updated = await saveDynamicTestPointInstruction(testPointId, payload);
+      const updated = await saveDynamicTestPointInstruction(
+        testPointId,
+        payload,
+      );
       this.replaceTestPoint(updated);
       if (!options?.silent) {
-        message.success('测试要点约束已保存');
+        message.success("测试要点约束已保存");
       }
       await this.bumpSidebarProjectOrder();
       return updated;
@@ -1430,7 +1602,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
         testPointIds: string[];
         promptIds?: string[];
         naturalText?: string;
-        status?: TestPointInstructionItem['status'];
+        status?: TestPointInstructionItem["status"];
         isFull?: boolean;
         isAppend?: boolean;
       },
@@ -1441,7 +1613,10 @@ export const useCaseForgeStore = defineStore('caseForge', {
         .filter((row): row is TestPointInstructionItem => Boolean(row))
         .filter((row) => !isTestPointDefinitionComplete(row));
       if (incomplete.length) {
-        const sample = incomplete.map((row) => testPointDefinitionLabel(row)).slice(0, 3).join('、');
+        const sample = incomplete
+          .map((row) => testPointDefinitionLabel(row))
+          .slice(0, 3)
+          .join("、");
         message.warning(
           incomplete.length === 1
             ? `「${sample}」的系统、功能模块、测试要点未填写完整，无法保存`
@@ -1465,12 +1640,12 @@ export const useCaseForgeStore = defineStore('caseForge', {
       testPoint?: string;
       testPointDesc?: string;
     }) {
-      if (!this.activeProject || !this.structDoc?.id) {
+      if (!this.activeProject || !this.activeStructDoc?.id) {
         return null;
       }
       const created = await createDynamicTestPoint({
         projectId: this.activeProject.id,
-        structDocId: this.structDoc.id,
+        structDocId: this.activeStructDoc.id,
         system: payload?.system,
         systemDesc: payload?.systemDesc,
         featureModule: payload?.featureModule,
@@ -1482,7 +1657,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
       await this.refreshTestPoints({ force: true, page: 1 });
       this.testPointDetails[created.id] = {
         ...created,
-        naturalText: '',
+        naturalText: "",
         isFull: true,
         isAppend: false,
         promptIds: [],
@@ -1490,17 +1665,21 @@ export const useCaseForgeStore = defineStore('caseForge', {
       };
       return created;
     },
-    async deleteTestPoints(testPointIds: string[], options?: { successMessage?: string }) {
+    async deleteTestPoints(
+      testPointIds: string[],
+      options?: { successMessage?: string },
+    ) {
       if (!testPointIds.length) {
         return;
       }
       await deleteDynamicTestPoints(testPointIds);
       testPointIds.forEach((id) => {
         delete this.testPointDetails[id];
-        this.generatingTestPointIds = this.generatingTestPointIds.filter((item) => item !== id);
-        this.pollingGenerateTestPointIds = this.pollingGenerateTestPointIds.filter(
+        this.generatingTestPointIds = this.generatingTestPointIds.filter(
           (item) => item !== id,
         );
+        this.pollingGenerateTestPointIds =
+          this.pollingGenerateTestPointIds.filter((item) => item !== id);
       });
       this.selectedTestPointIds = this.selectedTestPointIds.filter(
         (id) => !testPointIds.includes(id),
@@ -1510,7 +1689,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
         options?.successMessage ??
           (testPointIds.length > 1
             ? `已删除 ${testPointIds.length} 条测试要点`
-            : '已删除测试要点'),
+            : "已删除测试要点"),
       );
       await this.bumpSidebarProjectOrder();
     },
@@ -1533,13 +1712,21 @@ export const useCaseForgeStore = defineStore('caseForge', {
           .map((item) => item.id),
       );
       removedIds.forEach((id) => {
-        this.generatingTestPointIds = this.generatingTestPointIds.filter((item) => item !== id);
-        this.pollingGenerateTestPointIds = this.pollingGenerateTestPointIds.filter(
+        this.generatingTestPointIds = this.generatingTestPointIds.filter(
           (item) => item !== id,
         );
+        this.pollingGenerateTestPointIds =
+          this.pollingGenerateTestPointIds.filter((item) => item !== id);
       });
       const hasNewWithoutId = testPoints.some((item) => !item.id);
-      await saveStructDocTestPoints(this.activeProject.id, { testPoints });
+      const structDocId = this.activeStructDoc?.id;
+      if (!structDocId) {
+        message.warning("请先选择结构化文档");
+        return;
+      }
+      await saveStructDocTestPoints(this.activeProject.id, structDocId, {
+        testPoints,
+      });
       if (hasNewWithoutId) {
         await this.loadTestPointWorkspaceMeta();
         await this.refreshTestPoints({ force: true, page: 1 });
@@ -1548,7 +1735,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
         await this.loadTestPointWorkspaceMeta();
         await this.refreshTestPoints({ force: true });
       }
-      message.success(options?.successMessage ?? '测试要点已保存');
+      message.success(options?.successMessage ?? "测试要点已保存");
       await this.bumpSidebarProjectOrder();
     },
     async saveScenario(
@@ -1570,7 +1757,7 @@ export const useCaseForgeStore = defineStore('caseForge', {
             ...(item.prompts !== undefined ? { prompts: item.prompts } : {}),
           })
         : await createScenarioLibraryItem({
-            scope: 'case',
+            scope: "case",
             name: item.name,
             description: item.description,
             category: item.category,
@@ -1578,21 +1765,23 @@ export const useCaseForgeStore = defineStore('caseForge', {
             prompts: item.prompts ?? [],
           });
       const normalized = normalizeScenarioLibraryItem(saved);
-      const index = this.scenarios.findIndex((scenario) => scenario.id === normalized.id);
+      const index = this.scenarios.findIndex(
+        (scenario) => scenario.id === normalized.id,
+      );
       if (index >= 0) {
         applyScenarioLibraryItemInPlace(this.scenarios[index], normalized);
       } else {
         this.scenarios.unshift(normalized);
       }
       if (!options?.silent) {
-        message.success(options?.successMessage ?? '已保存');
+        message.success(options?.successMessage ?? "已保存");
       }
       return normalized;
     },
     async deleteScenario(id: string) {
       await deleteScenarioLibraryItem(id);
       this.scenarios = this.scenarios.filter((item) => item.id !== id);
-      message.success('场景库已删除');
+      message.success("场景库已删除");
     },
     toggleTestPointSelection(testPointId: string, selected?: boolean) {
       const has = this.selectedTestPointIds.includes(testPointId);
@@ -1600,7 +1789,9 @@ export const useCaseForgeStore = defineStore('caseForge', {
       if (next && !has) {
         this.selectedTestPointIds = [...this.selectedTestPointIds, testPointId];
       } else if (!next && has) {
-        this.selectedTestPointIds = this.selectedTestPointIds.filter((id) => id !== testPointId);
+        this.selectedTestPointIds = this.selectedTestPointIds.filter(
+          (id) => id !== testPointId,
+        );
       }
     },
     setSelectedTestPointIds(ids: string[]) {
@@ -1615,15 +1806,19 @@ export const useCaseForgeStore = defineStore('caseForge', {
 
 function isEnabledFlag(value: unknown) {
   if (value === true || value === 1) return true;
-  if (value === false || value === 0 || value === null || value === undefined) return false;
-  if (typeof value === 'string') {
+  if (value === false || value === 0 || value === null || value === undefined)
+    return false;
+  if (typeof value === "string") {
     const normalized = value.trim().toLowerCase();
-    return normalized === '1' || normalized === 'true';
+    return normalized === "1" || normalized === "true";
   }
   return Boolean(value);
 }
 
-function applyPromptListInPlace(local: PromptLibraryItem[], saved: PromptLibraryItem[]) {
+function applyPromptListInPlace(
+  local: PromptLibraryItem[],
+  saved: PromptLibraryItem[],
+) {
   saved.forEach((savedPrompt, index) => {
     if (local[index]) {
       Object.assign(local[index], savedPrompt);
@@ -1649,7 +1844,9 @@ function applyScenarioLibraryItemInPlace(
   }
 }
 
-function normalizeScenarioLibraryItem(scenario: ScenarioLibraryItem): ScenarioLibraryItem {
+function normalizeScenarioLibraryItem(
+  scenario: ScenarioLibraryItem,
+): ScenarioLibraryItem {
   return {
     ...scenario,
     isActive: isEnabledFlag(scenario.isActive),
@@ -1665,9 +1862,19 @@ function loadProjectStage(projectId: string): WorkspaceStage {
     WORKSPACE_STAGE_REGISTRY.caseForgeProject,
     `${stageStoragePrefix}${projectId}`,
   );
-  return stage === 'constraints' || stage === 'workbench' || stage === 'document'
+  return stage === "constraints" ||
+    stage === "workbench" ||
+    stage === "document"
     ? stage
-    : 'document';
+    : "document";
+}
+
+function saveProjectStage(projectId: string, stage: WorkspaceStage) {
+  setRecentWorkspaceEntry(
+    WORKSPACE_STAGE_REGISTRY.caseForgeProject,
+    `${stageStoragePrefix}${projectId}`,
+    stage,
+  );
 }
 
 function findNode(node: CaseTreeNode, nodeId: string): CaseTreeNode | null {
