@@ -12,6 +12,7 @@
  */
 import { config } from "dotenv";
 import { DataSource } from "typeorm";
+import { migrateStructDocProjectIndex } from "../src/common/typeorm/database-indexes.util";
 
 // 默认加载 apps/api/env/.local.env，可按需调整路径
 config({ path: "env/.local.env" });
@@ -31,31 +32,8 @@ async function migrate() {
 
   await dataSource.initialize();
   try {
-    const uniqueRows: Array<{ Key_name: string }> = await dataSource.query(
-      `SHOW INDEX FROM case_struct_doc WHERE Key_name = 'uk_case_struct_doc_project'`,
-    );
-    if (uniqueRows.length > 0) {
-      console.log("检测到 uk_case_struct_doc_project 唯一索引，准备删除…");
-      await dataSource.query(
-        `ALTER TABLE case_struct_doc DROP INDEX uk_case_struct_doc_project`,
-      );
-      console.log("已删除 uk_case_struct_doc_project");
-    } else {
-      console.log("uk_case_struct_doc_project 不存在，无需删除");
-    }
-
-    const nonUniqueRows: Array<{ Key_name: string }> = await dataSource.query(
-      `SHOW INDEX FROM case_struct_doc WHERE Key_name = 'idx_case_struct_doc_project'`,
-    );
-    if (nonUniqueRows.length === 0) {
-      console.log("检测到缺少 idx_case_struct_doc_project 普通索引，准备创建…");
-      await dataSource.query(
-        `CREATE INDEX idx_case_struct_doc_project ON case_struct_doc (projectId)`,
-      );
-      console.log("已创建 idx_case_struct_doc_project");
-    } else {
-      console.log("idx_case_struct_doc_project 已存在，无需创建");
-    }
+    await migrateStructDocProjectIndex(dataSource);
+    console.log("迁移完成");
   } finally {
     await dataSource.destroy();
   }
@@ -63,7 +41,6 @@ async function migrate() {
 
 migrate()
   .then(() => {
-    console.log("迁移完成");
     process.exit(0);
   })
   .catch((error) => {

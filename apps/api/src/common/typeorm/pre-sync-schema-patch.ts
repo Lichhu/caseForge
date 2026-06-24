@@ -1,8 +1,9 @@
 import mysql from "mysql2/promise";
 import { applyApiTestSchemaMigrations } from "./api-schema-migrations.util";
+import { migrateStructDocProjectIndex } from "./database-indexes.util";
 
 /**
- * 在 TypeORM synchronize 之前执行，避免删除 uk_api_doc_project 时触发外键错误。
+ * 在 TypeORM synchronize 之前执行，避免删除唯一索引时因外键依赖导致启动失败。
  */
 export async function runPreSyncSchemaPatch() {
   const nodeEnv = process.env.NODE_ENV ?? "development";
@@ -18,13 +19,16 @@ export async function runPreSyncSchemaPatch() {
     database: process.env.TYPEORM_DATABASE ?? "case_forge",
   });
 
+  const queryable = {
+    query: async (sql: string, params?: unknown[]) => {
+      const [rows] = await connection.query(sql, params);
+      return rows;
+    },
+  };
+
   try {
-    await applyApiTestSchemaMigrations({
-      query: async (sql, params) => {
-        const [rows] = await connection.query(sql, params);
-        return rows;
-      },
-    });
+    await applyApiTestSchemaMigrations(queryable);
+    await migrateStructDocProjectIndex(queryable);
   } finally {
     await connection.end();
   }

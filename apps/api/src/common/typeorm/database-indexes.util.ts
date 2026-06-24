@@ -260,6 +260,27 @@ const REDUNDANT_INDEXES: Array<{ table: string; name: string }> = [
   },
 ];
 
+/**
+ * 迁移 case_struct_doc.projectId 索引：先建普通索引，再删唯一索引（外键依赖）。
+ * 须在 TypeORM synchronize 之前调用，否则 synchronize 会先删 uk 再建 idx 导致启动失败。
+ */
+export async function migrateStructDocProjectIndex(runner: Queryable) {
+  if (!(await tableExists(runner, "case_struct_doc"))) {
+    return;
+  }
+  await ensureIndex(
+    runner,
+    "case_struct_doc",
+    "idx_case_struct_doc_project",
+    "projectId",
+  );
+  await dropIndexIfExists(
+    runner,
+    "case_struct_doc",
+    "uk_case_struct_doc_project",
+  );
+}
+
 export async function ensureDatabaseIndexes(runner: Queryable) {
   for (const spec of INDEX_SPECS) {
     await ensureIndex(runner, spec.table, spec.name, spec.columns);
