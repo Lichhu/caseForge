@@ -509,11 +509,12 @@ export const useApiTestStore = defineStore("apiTest", {
     async loadWorkspaceStage(
       projectId: string,
       transactionId: string,
-      stage: ApiWorkspaceStage = this.workspaceStage,
+      stage?: ApiWorkspaceStage,
     ) {
+      const targetStage = stage ?? this.workspaceStage;
       this.stageLoading = true;
       try {
-        switch (stage) {
+        switch (targetStage) {
           case "api-document":
             await this.loadDocumentStage(projectId, transactionId);
             break;

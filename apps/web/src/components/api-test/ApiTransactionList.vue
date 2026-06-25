@@ -265,7 +265,7 @@ async function onSave() {
   try {
     const payload = {
       code,
-      name: name || undefined,
+      name,
       description: form.description.trim() || undefined,
     };
     if (editingId.value) {

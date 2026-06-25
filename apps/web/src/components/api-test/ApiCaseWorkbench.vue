@@ -51,7 +51,7 @@
                 v-if="batchMode"
                 :checked="selectedIds.includes(item.id)"
                 @click.stop
-                @change="(e) => onToggleSelect(item.id, readCheckboxChecked(e))"
+                @change="(e: Event) => onToggleSelect(item.id, readCheckboxChecked(e))"
               />
               <div class="test-point-card-title case-card-title">
                 <strong :title="item.title">{{ item.title || '未命名案例' }}</strong>
@@ -578,7 +578,7 @@ const form = reactive({
   transactionCode: '',
   owner: '',
   createdBy: '',
-  polarity: 'positive',
+  polarity: 'positive' as 'positive' | 'negative',
   status: 'ready',
   enabled: true,
   protocol: 'http' as CaseProtocol,

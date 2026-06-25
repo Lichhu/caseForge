@@ -12,13 +12,13 @@
         :value="row.key"
         class="kv-col kv-col--key"
         placeholder="名称"
-        @update:value="(v) => updateRow(index, 'key', v)"
+        @update:value="(v: string) => updateRow(index, 'key', v)"
       />
       <a-input
         :value="row.value"
         class="kv-col kv-col--value"
         placeholder="值"
-        @update:value="(v) => updateRow(index, 'value', v)"
+        @update:value="(v: string) => updateRow(index, 'value', v)"
       />
       <a-button
         type="text"

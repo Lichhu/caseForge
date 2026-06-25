@@ -1,29 +1,31 @@
-import { createRouter, createWebHistory } from 'vue-router';
-import ApiTestDashboardView from '@/views/ApiTestDashboardView.vue';
-import CaseForgeDashboardView from '@/views/CaseForgeDashboardView.vue';
-import { getUserName, syncUserNameFromQuery } from '@/utils/userContext';
+import { createRouter, createWebHistory } from "vue-router";
+import { getUserName, syncUserNameFromQuery } from "@/utils/userContext";
+
+const CaseForgeDashboardView = () =>
+  import("@/views/CaseForgeDashboardView.vue");
+const ApiTestDashboardView = () => import("@/views/ApiTestDashboardView.vue");
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
-      path: '/',
+      path: "/",
       redirect: () => ({
-        path: '/case-forge',
+        path: "/case-forge",
         query: { userName: getUserName() },
       }),
     },
     {
-      path: '/case-forge',
-      name: 'case-forge',
+      path: "/case-forge",
+      name: "case-forge",
       component: CaseForgeDashboardView,
-      meta: { platform: 'case-forge', title: '智能生成案例平台' },
+      meta: { platform: "case-forge", title: "智能生成案例平台" },
     },
     {
-      path: '/api-test',
-      name: 'api-test',
+      path: "/api-test",
+      name: "api-test",
       component: ApiTestDashboardView,
-      meta: { platform: 'api-test', title: '智能接口测试平台' },
+      meta: { platform: "api-test", title: "智能接口测试平台" },
     },
   ],
 });
@@ -44,7 +46,7 @@ router.beforeEach((to) => {
 });
 
 router.afterEach((to) => {
-  const title = (to.meta.title as string) || 'CaseForge';
+  const title = (to.meta.title as string) || "CaseForge";
   document.title = title;
 });
 

@@ -51,6 +51,21 @@ export default defineConfig({
     // 避免改 vite.config 热重启时 deps_temp 未写完就被清理（ENOENT）
     holdUntilCrawlEnd: true,
   },
+  build: {
+    // antd 全量注册体积较大但可缓存，内网工具无需进一步拆分，调高阈值避免警告
+    chunkSizeWarningLimit: 1600,
+    rollupOptions: {
+      output: {
+        // 把大体积依赖拆成独立 chunk，减小主包、提升缓存命中
+        manualChunks: {
+          "vendor-vue": ["vue", "vue-router", "pinia"],
+          "vendor-antd": ["ant-design-vue", "@ant-design/icons-vue"],
+          "vendor-mind": ["mind-elixir"],
+          "vendor-markdown": ["markdown-it"],
+        },
+      },
+    },
+  },
   server: {
     host: "0.0.0.0",
     port: 33550,
@@ -66,5 +81,5 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
-  }
+  },
 });

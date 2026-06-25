@@ -183,10 +183,9 @@ function resolveKind(
   }
   // 兼容旧版脑图：module 下直接挂 case（测试要点层被拍平）
   if (parentKind === "module") {
-    const meta = obj.metadata ?? {};
     if (
-      meta.caseNature ||
-      meta.originalTitle ||
+      obj.metadata?.caseNature ||
+      obj.metadata?.originalTitle ||
       obj.tags?.some((tag) => tag === "正" || tag === "反")
     ) {
       return "case";

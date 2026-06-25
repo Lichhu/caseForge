@@ -99,15 +99,15 @@ const selectedKindLabel = computed(() =>
 );
 
 const childItems = computed(() => {
-  const children = selectedNode.value?.children ?? [];
+  const children = (selectedNode.value?.children ?? []) as CaseNodeObj[];
   return children.map((child) => {
     const kind = child.metadata?.kind;
     const kindLabel = kind
       ? CASE_NODE_KIND_LABELS[kind] ?? kind
       : "节点";
-    const extraTags = (child.tags ?? []).filter(
-      (tag) => tag !== kindLabel && !tag.startsWith("优先级·"),
-    );
+    const extraTags = (child.tags ?? [])
+      .map((tag) => (typeof tag === "string" ? tag : tag.text))
+      .filter((tag) => tag !== kindLabel && !tag.startsWith("优先级·"));
     return {
       id: child.id,
       topic: child.topic ?? "",
@@ -134,7 +134,7 @@ function refreshSelectedNode() {
   selectedNode.value = (obj as CaseNodeObj | null) ?? null;
 }
 
-function handleSelectNodes(nodes: CaseNodeObj[]) {
+function handleSelectNodes(nodes: NodeObj<unknown>[]) {
   if (!nodes.length) {
     selectedNodeId.value = null;
     selectedNode.value = null;

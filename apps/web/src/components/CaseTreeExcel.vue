@@ -134,7 +134,7 @@
               <a-checkbox
                 :checked="isRowSelected(rowIndex)"
                 @click.stop
-                @change="(event) => toggleRowSelect(rowIndex, !!event.target?.checked)"
+                @change="(event: Event) => toggleRowSelect(rowIndex, !!(event.target as HTMLInputElement)?.checked)"
               />
             </td>
             <template
@@ -368,9 +368,12 @@ const visibleColumns = computed(() => {
   });
 });
 
-const lastVisibleStickyCol = computed(
-  () => visibleColumns.value.filter((column) => column.sticky).at(-1)?.col,
-);
+const lastVisibleStickyCol = computed(() => {
+  const stickyColumns = visibleColumns.value.filter((column) => column.sticky);
+  return stickyColumns.length
+    ? stickyColumns[stickyColumns.length - 1].col
+    : undefined;
+});
 
 const firstEditableColumn = computed(() =>
   visibleColumns.value.find((column) => !column.hierarchy),
