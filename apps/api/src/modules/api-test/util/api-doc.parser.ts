@@ -5,7 +5,15 @@ import {
   API_DOC_SHEET_NAMES,
 } from "./api-doc-format.const";
 
-const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
+const HTTP_METHODS = [
+  "GET",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "HEAD",
+  "OPTIONS",
+];
 
 function normalizeMethod(method: string) {
   return method.trim().toUpperCase();
@@ -196,6 +204,79 @@ export function buildStructuredMarkdownFromEndpoints(
   }
   lines.push("");
   return lines.join("\n");
+}
+
+/**
+ * 压缩接口结构化文档，用于缩减 API 案例生成 AI 提示词长度。
+ *
+ * 保留对生成案例最有价值的部分：基础信息、服务信息、技术信息、请求/响应报文。
+ * 请求/响应报文表格过长时，仅保留表头与前面若干行关键字段，避免大文档把整个提示词撑爆。
+ */
+export function compressApiStructuredDoc(
+  structuredDoc: string,
+  maxRowsPerTable = 60,
+): string {
+  if (!structuredDoc?.trim()) {
+    return "";
+  }
+
+  const sections: string[] = [];
+  for (const name of [
+    "基础信息",
+    "服务信息",
+    "技术信息",
+    "请求报文",
+    "响应报文",
+  ] as const) {
+    const text = extractApiDocSection(structuredDoc, name);
+    if (!text.trim()) {
+      continue;
+    }
+    const compressed =
+      name === "请求报文" || name === "响应报文"
+        ? compressApiDocTable(text, maxRowsPerTable)
+        : text;
+    sections.push(`${name}\n${API_DOC_SECTION_SEPARATOR}\n${compressed}`);
+  }
+
+  return sections.join("\n\n");
+}
+
+function compressApiDocTable(tableText: string, maxRows: number): string {
+  const lines = tableText.split("\n");
+  const headerIndex = lines.findIndex((line) => line.includes("|"));
+  if (headerIndex < 0) {
+    return tableText;
+  }
+
+  const separatorIndex = lines.findIndex(
+    (line, index) => index > headerIndex && /^\s*\|[-:\s|]*\|\s*$/.test(line),
+  );
+  const dataStart = separatorIndex >= 0 ? separatorIndex + 1 : headerIndex + 1;
+  const kept = lines.slice(0, dataStart);
+  const dataRows = lines.slice(dataStart).filter((line) => line.includes("|"));
+
+  const requiredRows = dataRows.filter((line) => isRequiredFieldRow(line));
+  const remainingSlots = Math.max(0, maxRows - requiredRows.length);
+  const optionalRows = dataRows
+    .filter((line) => !isRequiredFieldRow(line))
+    .slice(0, remainingSlots);
+  const truncated = [...requiredRows, ...optionalRows];
+
+  const result = [...kept, ...truncated];
+  if (dataRows.length > truncated.length) {
+    const dropped = dataRows.length - truncated.length;
+    result.push(
+      "",
+      `> 提示：报文字段共 ${dataRows.length} 行，已保留全部必填字段（${requiredRows.length} 行）及前 ${optionalRows.length} 行选填字段，省略 ${dropped} 行。`,
+    );
+  }
+  return result.join("\n");
+}
+
+function isRequiredFieldRow(line: string): boolean {
+  const cells = line.split("|").map((cell) => cell.trim());
+  return cells.some((cell) => cell === "Y" || cell === "是");
 }
 
 export function ensureEndpointIds(endpoints: ApiEndpointPayload[]) {

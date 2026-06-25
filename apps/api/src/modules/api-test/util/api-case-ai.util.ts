@@ -8,9 +8,11 @@ import type {
   ApiTestCasePayload,
 } from "@case-forge/shared";
 import { prettyPrintXml, unescapeLiteralXmlEscapes } from "@case-forge/shared";
+import { Logger } from "@nestjs/common";
 import { fetchTextFromUrl } from "../../../common/ai-workflow/util/workflow-input.util";
 import type { AiWorkflowService } from "../../../common/ai-workflow/service/ai-workflow.service";
 import type { ApiEndpointEntity } from "../entity/api-endpoint.entity";
+import { compressApiStructuredDoc } from "./api-doc.parser";
 import {
   appendScenarioProtocolAdaptation,
   buildCaseRequestFromProfile,
@@ -51,23 +53,30 @@ export function buildAtCasePrompt(
     profile: ApiTechnicalProfile;
   },
 ) {
+  const compressedDoc = compressApiStructuredDoc(input.structuredDoc);
   const protocolGuidance = buildProtocolGuidance(
     input.profile,
-    input.structuredDoc,
+    compressedDoc,
     input.transactionCode,
   );
   const endpointContext = buildEndpointContextForPrompt(input.profile, {
     endpointMethod: input.endpointMethod,
     endpointPath: input.endpointPath,
-    structuredDoc: input.structuredDoc,
+    structuredDoc: compressedDoc,
   });
   return skillTemplate
     .replaceAll("{transactionCode}", input.transactionCode)
     .replaceAll("{endpointName}", input.endpointName)
     .replaceAll("{endpointContext}", endpointContext)
-    .replaceAll("{httpMethod}", input.profile.transport === "http" ? input.endpointMethod : "—")
-    .replaceAll("{endpointPath}", input.profile.transport === "http" ? input.endpointPath : "—")
-    .replaceAll("{structuredDoc}", input.structuredDoc)
+    .replaceAll(
+      "{httpMethod}",
+      input.profile.transport === "http" ? input.endpointMethod : "—",
+    )
+    .replaceAll(
+      "{endpointPath}",
+      input.profile.transport === "http" ? input.endpointPath : "—",
+    )
+    .replaceAll("{structuredDoc}", compressedDoc)
     .replaceAll("{protocolGuidance}", protocolGuidance);
 }
 
@@ -79,6 +88,7 @@ export async function generateCasesWithAi(
     endpoint: ApiEndpointEntity;
     scenarioPromptText?: string;
   },
+  logger?: Logger,
 ): Promise<ApiTestCasePayload[]> {
   if (!aiWorkflow.canGenerateApiCases()) {
     throw new Error(
@@ -109,6 +119,10 @@ export async function generateCasesWithAi(
     prompt += `\n\n## 场景约束\n${scenarioText}`;
   }
 
+  logger?.debug(
+    `接口案例生成提示词长度：${prompt.length}（原始文档 ${input.structuredDoc.length}，压缩后 ${compressApiStructuredDoc(input.structuredDoc).length}）`,
+  );
+
   const { text } = await aiWorkflow.runWithAiChat(prompt);
   const items = aiWorkflow.parseJsonArray<AiApiCaseItem>(text) ?? [];
   if (!items.length) {
@@ -116,13 +130,7 @@ export async function generateCasesWithAi(
   }
 
   return items.map((item, index) =>
-    mapAiCaseItem(
-      item,
-      input.endpoint,
-      input.transactionCode,
-      index,
-      profile,
-    ),
+    mapAiCaseItem(item, input.endpoint, input.transactionCode, index, profile),
   );
 }
 

@@ -307,12 +307,16 @@ export class ApiCaseService {
       let payloads;
       try {
         if (structuredDoc && this.aiWorkflow.canGenerateApiCases()) {
-          payloads = await generateCasesWithAi(this.aiWorkflow, {
-            transactionCode: transaction.code,
-            structuredDoc,
-            endpoint,
-            scenarioPromptText,
-          });
+          payloads = await generateCasesWithAi(
+            this.aiWorkflow,
+            {
+              transactionCode: transaction.code,
+              structuredDoc,
+              endpoint,
+              scenarioPromptText,
+            },
+            this.logger,
+          );
         } else {
           throw new Error("fallback");
         }
