@@ -1,26 +1,27 @@
 /**
- * PM2 部署配置 - CaseForge API
+ * PM2 部署配置 - CaseForge（Express 静态前端 + NestJS API）
  *
- * 重要：API 必须以 fork 单实例运行，禁止 cluster 多实例。
- * 原因：AI 案例生成使用「单进程内存队列」（见
- * apps/api/src/modules/case-editor/util/case-generate-concurrency.ts）
- * 多实例会导致任务重复处理、并发上限失效、打爆 AI 接口。
+ * 架构（无 Nginx，适合 CentOS 内网）：
+ *   - caseforge-web：Express cluster，托管 apps/web/dist，反代 /api → API
+ *   - caseforge-api：fork 单实例，禁止 cluster（内存队列见 case-generate-concurrency.ts）
  *
- * 用法：
+ * 首次部署：
  *   pnpm install --frozen-lockfile
  *   pnpm --filter @case-forge/shared build
+ *   pnpm --filter @case-forge/web build
  *   pnpm --filter @case-forge/api build
- *   pm2 start ecosystem.config.js
+ *   npm install --prefix deploy          # 或内网离线 npm install deploy/offline-packages/*.tgz
+ *   mkdir -p logs && pm2 start ecosystem.config.js
  *   pm2 save && pm2 startup
  *
- * 其余环境变量（数据库 / MinIO / AI 接口等）从
- * apps/api/env/.prod.env 读取（NODE_ENV=prod 时自动加载）。
+ * API 环境变量从 apps/api/env/.prod.env 读取（NODE_ENV=prod）。
  */
+const path = require('path');
+
 module.exports = {
   apps: [
     {
       name: 'caseforge-api',
-      // 以 apps/api 为工作目录，env 加载与 dist 路径解析都依赖此目录
       cwd: './apps/api',
       script: 'dist/bootstrap.js',
 
@@ -28,27 +29,46 @@ module.exports = {
       instances: 1,
       exec_mode: 'fork',
 
-      // 内存超限自动重启，防止长跑泄漏拖垮服务
       max_memory_restart: '1G',
-
-      // 崩溃重启策略
       autorestart: true,
       max_restarts: 10,
       min_uptime: '10s',
       restart_delay: 3000,
 
-      // 日志
       time: true,
       merge_logs: true,
-      out_file: './logs/caseforge-api.out.log',
-      error_file: './logs/caseforge-api.err.log',
+      out_file: path.join(__dirname, 'logs/caseforge-api.out.log'),
+      error_file: path.join(__dirname, 'logs/caseforge-api.err.log'),
 
       env: {
-        // 选用 .prod.env（loadApiEnv 按 .${NODE_ENV}.env 解析）
         NODE_ENV: 'prod',
-        // AI 案例生成全局并发上限（默认 2，最大 32）
-        // 按你的 AI Chat 接口承受能力调整，这是吞吐的主要杠杆
         CASE_GENERATE_CONCURRENCY: '4',
+      },
+    },
+    {
+      name: 'caseforge-web',
+      cwd: './deploy',
+      script: 'web-server.cjs',
+
+      // 静态托管可 cluster，充分利用多核
+      instances: 'max',
+      exec_mode: 'cluster',
+
+      max_memory_restart: '512M',
+      autorestart: true,
+      max_restarts: 10,
+      min_uptime: '5s',
+      restart_delay: 2000,
+
+      time: true,
+      merge_logs: true,
+      out_file: path.join(__dirname, 'logs/caseforge-web.out.log'),
+      error_file: path.join(__dirname, 'logs/caseforge-web.err.log'),
+
+      env: {
+        PORT: '8080',
+        API_TARGET: 'http://127.0.0.1:34550',
+        DIST_DIR: '../apps/web/dist',
       },
     },
   ],

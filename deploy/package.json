@@ -1,0 +1,12 @@
+{
+  "name": "caseforge-web-server",
+  "private": true,
+  "description": "CaseForge 前端静态托管 + API 反代（无 Nginx）",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "compression": "^1.8.0",
+    "express": "^4.21.2"
+  }
+}
