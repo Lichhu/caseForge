@@ -2,7 +2,7 @@ import * as XLSX from "xlsx";
 import {
   assertReadableText,
   extractTextFromBuffer,
-} from "../../../common/document/document-text.util";
+} from "@common/document/document-text.util";
 import { parseEndpointsFromText } from "./api-doc.parser";
 import {
   API_DOC_SECTION_SEPARATOR,

@@ -5,24 +5,72 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import {
   AI_WORKFLOW_CONFIG,
   AiWorkflowModuleConfig,
-} from "../ai-workflow.config";
+} from "@common/ai-workflow/ai-workflow.config";
 import {
   buildCaseGenerateSummaryPrompt,
   fetchWorkflowFileContents,
   buildStructRequirementPrompt,
-} from "../util/workflow-input.util";
+} from "@common/ai-workflow/util/workflow-input.util";
 import { sanitizeStructuredMarkdown } from "@struct-doc/util/struct-doc.parser";
 
 /**
- * 将 AI 生成 JSON 中常见的中文标点统一为英文标点，避免 JSON.parse 失败。
- * 注意：这会同时影响字符串内部的中文标点，属于修复 AI 输出格式问题。
+ * 将 AI 生成 JSON 中常见的中文标点统一为英文标点（仅作用于字符串外部），避免 JSON.parse 失败。
  */
 function normalizeJsonText(text: string): string {
+  const replacements: Record<string, string> = {
+    "，": ",",
+    "：": ":",
+    "\u201c": '"',
+    "\u201d": '"',
+    "\u2018": "'",
+    "\u2019": "'",
+    "（": "(",
+    "）": ")",
+    "【": "[",
+    "】": "]",
+    "；": ";",
+    "？": "?",
+    "！": "!",
+    "。": ".",
+  };
+
+  let result = "";
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      result += char;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      result += char;
+      continue;
+    }
+
+    result += replacements[char] ?? char;
+  }
+
+  return result;
+}
+
+/** 全局替换中文标点，仅作解析兜底；会改动字符串内部内容。 */
+function normalizeJsonTextAggressive(text: string): string {
   return text
     .replace(/[，]/g, ",")
     .replace(/[：]/g, ":")
     .replace(/[""]/g, '"')
-    .replace(/[‘’]/g, "'")
+    .replace(/['']/g, "'")
     .replace(/[（]/g, "(")
     .replace(/[）]/g, ")")
     .replace(/[【]/g, "[")
@@ -227,6 +275,8 @@ export class AiWorkflowService {
       throw new Error("AI Chat URL 未配置");
     }
 
+    const startedAt = Date.now();
+    const inputChars = input.length;
     const requestBody = {
       model: model?.trim() || this.config.aiChat.model,
       temperature: 0.3,
@@ -273,19 +323,65 @@ export class AiWorkflowService {
         if (!text.trim()) {
           throw new Error("AI Chat 返回内容为空");
         }
-        this.logger.debug(`AI Chat 结果长度：${text.length}`);
+        this.logger.log(
+          `AI Chat 完成 durationMs=${Date.now() - startedAt} inputChars=${inputChars} outputChars=${text.length} attempt=${attempt + 1}`,
+        );
         return { text, rawResponse: result };
       } catch (error) {
         lastError = error as Error;
         const isTimeout =
           lastError.name === "TimeoutError" || lastError.name === "AbortError";
         this.logger.warn(
-          `AI Chat 第 ${attempt + 1} 次调用${isTimeout ? "超时" : "失败"}: ${lastError.message}`,
+          `AI Chat 第 ${attempt + 1} 次调用${isTimeout ? "超时" : "失败"} durationMs=${Date.now() - startedAt} inputChars=${inputChars}: ${lastError.message}`,
         );
       }
     }
 
     throw lastError ?? new Error("AI Chat 调用失败");
+  }
+
+  /**
+   * 调用 AI Chat 并解析 JSON 数组；解析失败时追加提示重试一次。
+   */
+  async runWithAiChatJsonArray<T>(
+    input: string,
+    model = this.config.aiChat.model,
+    options?: { context?: string },
+  ): Promise<T[]> {
+    const contextLabel = options?.context?.trim() || "AI JSON 解析";
+    const { text } = await this.runWithAiChat(input, model);
+    let parsed = this.parseJsonArray<T>(text);
+    if (parsed?.length) {
+      this.logger.log(
+        `${contextLabel} JSON 解析成功 items=${parsed.length} outputChars=${text.length}`,
+      );
+      return parsed;
+    }
+
+    this.logger.warn(
+      `${contextLabel} JSON 首次解析失败 outputChars=${text.length}，将追加提示重试`,
+    );
+    const retryPrompt = [
+      input.trim(),
+      "",
+      "---",
+      "",
+      "你上一次的输出无法被解析为 JSON 数组。",
+      "请仅输出 JSON 数组正文，不要使用 markdown 代码块，不要输出解释文字或 thinking 标签。",
+    ].join("\n");
+    const retry = await this.runWithAiChat(retryPrompt, model);
+    parsed = this.parseJsonArray<T>(retry.text);
+    if (parsed?.length) {
+      this.logger.log(
+        `${contextLabel} JSON 重试解析成功 items=${parsed.length} outputChars=${retry.text.length}`,
+      );
+      return parsed;
+    }
+
+    this.logger.warn(
+      `${contextLabel} JSON 重试后仍无法解析 outputChars=${retry.text.length}`,
+    );
+    throw new Error(`${contextLabel} 返回内容无法解析为 JSON 数组`);
   }
 
   /** 解析 AI 返回文本中的 JSON 数组（兼容 ```json ... ``` 包裹、中文标点、转义等） */
@@ -350,6 +446,8 @@ export class AiWorkflowService {
         normalizeJsonText(slice),
         removeTrailingCommas(slice),
         removeTrailingCommas(normalizeJsonText(slice)),
+        normalizeJsonTextAggressive(slice),
+        removeTrailingCommas(normalizeJsonTextAggressive(slice)),
       ];
       for (const variant of variants) {
         try {
@@ -382,6 +480,8 @@ export class AiWorkflowService {
         normalizeJsonText(objectSlice),
         removeTrailingCommas(objectSlice),
         removeTrailingCommas(normalizeJsonText(objectSlice)),
+        normalizeJsonTextAggressive(objectSlice),
+        removeTrailingCommas(normalizeJsonTextAggressive(objectSlice)),
       ];
       for (const variant of variants) {
         try {

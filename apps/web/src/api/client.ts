@@ -215,6 +215,8 @@ export interface StructDocDetail {
   structuringStatus?: "idle" | "processing" | "completed" | "failed";
   structuringError?: string;
   structuringStartedAt?: string;
+  parsedTestPointCount?: number;
+  parseWarning?: string;
   canStructure?: boolean;
   canSave?: boolean;
   canEnterDynamicInstruct?: boolean;

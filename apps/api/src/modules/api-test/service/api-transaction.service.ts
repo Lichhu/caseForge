@@ -9,14 +9,14 @@ import { Repository } from "typeorm";
 import {
   auditFieldsForCreate,
   auditFieldsForUpdate,
-} from "../../../common/audit/request-context";
-import { scopedWhere } from "../../../common/audit/user-scope";
-import { assertApiTestProject } from "../util/assert-api-project.util";
-import { touchProjectUpdatedAt } from "../../../common/project/touch-project.util";
-import { ApiDocEntity } from "../entity/api-doc.entity";
-import { ApiTransactionEntity } from "../entity/api-transaction.entity";
-import { SaveApiTransactionDto } from "../dto/save-transaction.dto";
-import { toPublicApiTransaction } from "../../../common/http/public-response.util";
+} from "@common/audit/request-context";
+import { scopedWhere } from "@common/audit/user-scope";
+import { assertApiTestProject } from "@api-test/util/assert-api-project.util";
+import { touchProjectUpdatedAt } from "@common/project/touch-project.util";
+import { ApiDocEntity } from "@api-test/entity/api-doc.entity";
+import { ApiTransactionEntity } from "@api-test/entity/api-transaction.entity";
+import { SaveApiTransactionDto } from "@api-test/dto/save-transaction.dto";
+import { toPublicApiTransaction } from "@common/http/public-response.util";
 
 @Injectable()
 export class ApiTransactionService {
@@ -37,12 +37,7 @@ export class ApiTransactionService {
     });
     const docs = await this.apiDocRepo.find({
       where: { projectId },
-      select: [
-        "id",
-        "transactionId",
-        "structuringStatus",
-        "sourceDocName",
-      ],
+      select: ["id", "transactionId", "structuringStatus", "sourceDocName"],
     });
     const docByTransaction = new Map(
       docs.map((doc) => [doc.transactionId, doc]),
@@ -127,21 +122,27 @@ export class ApiTransactionService {
   async deleteTransaction(projectId: string, transactionId: string) {
     await this.requireTransaction(projectId, transactionId);
     await this.apiDocRepo.delete({ projectId, transactionId });
-    await this.transactionRepo.delete(scopedWhere({ projectId, id: transactionId }));
+    await this.transactionRepo.delete(
+      scopedWhere({ projectId, id: transactionId }),
+    );
     await touchProjectUpdatedAt(this.projectRepo, projectId);
     return { ok: true };
   }
 
   async batchDeleteTransactions(projectId: string, transactionIds: string[]) {
     await assertApiTestProject(this.projectRepo, projectId);
-    const ids = [...new Set(transactionIds.map((id) => id.trim()).filter(Boolean))];
+    const ids = [
+      ...new Set(transactionIds.map((id) => id.trim()).filter(Boolean)),
+    ];
     if (!ids.length) {
       throw new BadRequestException("请选择要删除的交易码");
     }
     for (const transactionId of ids) {
       await this.requireTransaction(projectId, transactionId);
       await this.apiDocRepo.delete({ projectId, transactionId });
-      await this.transactionRepo.delete(scopedWhere({ projectId, id: transactionId }));
+      await this.transactionRepo.delete(
+        scopedWhere({ projectId, id: transactionId }),
+      );
     }
     await touchProjectUpdatedAt(this.projectRepo, projectId);
     return { ok: true, count: ids.length };

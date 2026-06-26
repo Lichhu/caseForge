@@ -9,9 +9,9 @@ import type {
 } from "@case-forge/shared";
 import { prettyPrintXml, unescapeLiteralXmlEscapes } from "@case-forge/shared";
 import { Logger } from "@nestjs/common";
-import { fetchTextFromUrl } from "../../../common/ai-workflow/util/workflow-input.util";
-import type { AiWorkflowService } from "../../../common/ai-workflow/service/ai-workflow.service";
-import type { ApiEndpointEntity } from "../entity/api-endpoint.entity";
+import { fetchTextFromUrl } from "@common/ai-workflow/util/workflow-input.util";
+import type { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
+import type { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
 import { compressApiStructuredDoc } from "./api-doc.parser";
 import {
   appendScenarioProtocolAdaptation,
@@ -64,7 +64,7 @@ export function buildAtCasePrompt(
     endpointPath: input.endpointPath,
     structuredDoc: compressedDoc,
   });
-  return skillTemplate
+  const prompt = skillTemplate
     .replaceAll("{transactionCode}", input.transactionCode)
     .replaceAll("{endpointName}", input.endpointName)
     .replaceAll("{endpointContext}", endpointContext)
@@ -78,6 +78,12 @@ export function buildAtCasePrompt(
     )
     .replaceAll("{structuredDoc}", compressedDoc)
     .replaceAll("{protocolGuidance}", protocolGuidance);
+
+  return {
+    prompt,
+    originalDocLength: input.structuredDoc.length,
+    compressedDocLength: compressedDoc.length,
+  };
 }
 
 export async function generateCasesWithAi(
@@ -103,14 +109,16 @@ export async function generateCasesWithAi(
 
   const profile = parseApiTechnicalProfile(input.structuredDoc);
 
-  let prompt = buildAtCasePrompt(skillTemplate, {
-    transactionCode: input.transactionCode,
-    endpointName: input.endpoint.name,
-    endpointMethod: input.endpoint.method,
-    endpointPath: input.endpoint.path,
-    structuredDoc: input.structuredDoc,
-    profile,
-  });
+  const { prompt: basePrompt, originalDocLength, compressedDocLength } =
+    buildAtCasePrompt(skillTemplate, {
+      transactionCode: input.transactionCode,
+      endpointName: input.endpoint.name,
+      endpointMethod: input.endpoint.method,
+      endpointPath: input.endpoint.path,
+      structuredDoc: input.structuredDoc,
+      profile,
+    });
+  let prompt = basePrompt;
   if (input.scenarioPromptText?.trim()) {
     const scenarioText = appendScenarioProtocolAdaptation(
       input.scenarioPromptText,
@@ -120,7 +128,7 @@ export async function generateCasesWithAi(
   }
 
   logger?.debug(
-    `接口案例生成提示词长度：${prompt.length}（原始文档 ${input.structuredDoc.length}，压缩后 ${compressApiStructuredDoc(input.structuredDoc).length}）`,
+    `接口案例生成提示词长度：${prompt.length}（原始文档 ${originalDocLength}，压缩后 ${compressedDocLength}）`,
   );
 
   const { text } = await aiWorkflow.runWithAiChat(prompt);

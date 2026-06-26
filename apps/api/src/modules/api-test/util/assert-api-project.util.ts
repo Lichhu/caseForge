@@ -1,6 +1,6 @@
 import { BadRequestException } from "@nestjs/common";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
-import { findOwnedProject } from "../../../common/audit/user-scope";
+import { findOwnedProject } from "@common/audit/user-scope";
 import { Repository } from "typeorm";
 
 export async function assertApiTestProject(

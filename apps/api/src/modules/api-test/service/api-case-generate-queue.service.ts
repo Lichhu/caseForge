@@ -11,7 +11,7 @@ import {
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { In, Repository } from "typeorm";
-import { RequestContext } from "../../../common/audit/request-context";
+import { RequestContext } from "@common/audit/request-context";
 import { buildCaseGenerateInterruptedMessage } from "@case-editor/util/case-generate-interrupted.util";
 import {
   getCaseGenerateActiveCount,
@@ -35,7 +35,7 @@ import {
 import {
   ApiCaseGenerateJobEntity,
   ApiCaseGenerateJobStatus,
-} from "../entity/api-case-generate-job.entity";
+} from "@api-test/entity/api-case-generate-job.entity";
 import { ApiCaseService } from "./api-case.service";
 
 export interface ApiCaseGenerateQueueStatus {

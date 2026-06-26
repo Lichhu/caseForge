@@ -4,11 +4,11 @@ import { Repository } from "typeorm";
 import {
   auditFieldsForCreate,
   auditFieldsForUpdate,
-} from "../../../common/audit/request-context";
-import { ApiTestEnvironmentEntity } from "../entity/api-test-environment.entity";
-import { ApiTestEnvironmentServiceEntity } from "../entity/api-test-environment-service.entity";
-import { SaveApiEnvironmentDto } from "../dto/save-environment.dto";
-import { SaveApiEnvironmentServiceDto } from "../dto/execution-platform.dto";
+} from "@common/audit/request-context";
+import { ApiTestEnvironmentEntity } from "@api-test/entity/api-test-environment.entity";
+import { ApiTestEnvironmentServiceEntity } from "@api-test/entity/api-test-environment-service.entity";
+import { SaveApiEnvironmentDto } from "@api-test/dto/save-environment.dto";
+import { SaveApiEnvironmentServiceDto } from "@api-test/dto/execution-platform.dto";
 import {
   applyParsedServerAddress,
   parseServerAddress,
@@ -17,8 +17,8 @@ import {
   decryptSecrets,
   encryptSecrets,
   maskSecret,
-} from "../util/secret-crypto.util";
-import { toPublicApiEnvironmentService } from "../../../common/http/public-response.util";
+} from "@api-test/util/secret-crypto.util";
+import { toPublicApiEnvironmentService } from "@common/http/public-response.util";
 
 @Injectable()
 export class ApiEnvironmentService {

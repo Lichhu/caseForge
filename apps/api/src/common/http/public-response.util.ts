@@ -1,17 +1,17 @@
-import { ApiDocEntity } from "../../modules/api-test/entity/api-doc.entity";
-import { ApiEndpointEntity } from "../../modules/api-test/entity/api-endpoint.entity";
-import { ApiTestCaseEntity } from "../../modules/api-test/entity/api-test-case.entity";
-import { ApiTestEnvironmentServiceEntity } from "../../modules/api-test/entity/api-test-environment-service.entity";
+import { ApiDocEntity } from "@api-test/entity/api-doc.entity";
+import { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
+import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
+import { ApiTestEnvironmentServiceEntity } from "@api-test/entity/api-test-environment-service.entity";
 import { formatServerAddress } from "@case-forge/shared";
-import { ApiTestExecutionSetEntity } from "../../modules/api-test/entity/api-test-execution-set.entity";
-import { ApiTestRunEntity } from "../../modules/api-test/entity/api-test-run.entity";
-import { ApiTestRunItemEntity } from "../../modules/api-test/entity/api-test-run-item.entity";
-import { ApiTransactionEntity } from "../../modules/api-test/entity/api-transaction.entity";
-import { CaseProjectEntity } from "../../modules/project-manage/entity/project.entity";
-import { PromptEntity } from "../../modules/scenario/entity/prompt.entity";
-import { ScenarioEntity } from "../../modules/scenario/entity/scenario.entity";
-import { StructDocEntity } from "../../modules/struct-doc/entity/struct-doc.entity";
-import { TestPointEntity } from "../../modules/struct-doc/entity/test-point.entity";
+import { ApiTestExecutionSetEntity } from "@api-test/entity/api-test-execution-set.entity";
+import { ApiTestRunEntity } from "@api-test/entity/api-test-run.entity";
+import { ApiTestRunItemEntity } from "@api-test/entity/api-test-run-item.entity";
+import { ApiTransactionEntity } from "@api-test/entity/api-transaction.entity";
+import { CaseProjectEntity } from "@project-manage/entity/project.entity";
+import { PromptEntity } from "@scenario/entity/prompt.entity";
+import { ScenarioEntity } from "@scenario/entity/scenario.entity";
+import { StructDocEntity } from "@struct-doc/entity/struct-doc.entity";
+import { TestPointEntity } from "@struct-doc/entity/test-point.entity";
 
 export function toPublicProject(
   project: CaseProjectEntity,
@@ -95,6 +95,8 @@ export function toPublicStructDocDetail(
     structuringStatus: structDoc.structuringStatus,
     structuringError: structDoc.structuringError,
     structuringStartedAt: structDoc.structuringStartedAt,
+    parsedTestPointCount: structDoc.parsedTestPointCount ?? undefined,
+    parseWarning: structDoc.parseWarning ?? undefined,
     canStructure:
       Boolean(structDoc.reqDocPath) &&
       structDoc.structuringStatus !== "processing",

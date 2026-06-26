@@ -24,6 +24,7 @@ export class SchemaPatchService implements OnModuleInit {
     await this.ensureApiCaseGenerateJobTable();
     await this.ensureStructRequirementJobTable();
     await this.ensureSummaryStructDocColumn();
+    await this.ensureStructDocParseMetaColumns();
     await migrateStructDocProjectIndex(this.dataSource);
     await ensureCaseEditorUtf8mb4TextColumns(this.dataSource, this.logger);
     await applyApiTestSchemaMigrations(this.dataSource);
@@ -236,6 +237,36 @@ export class SchemaPatchService implements OnModuleInit {
         AFTER tempStructDoc
     `);
     this.logger.log("case_struct_doc.summaryStructDoc 列已补齐");
+  }
+
+  private async ensureStructDocParseMetaColumns() {
+    const columns: Array<{ name: string; ddl: string }> = [
+      {
+        name: "parsedTestPointCount",
+        ddl: "ADD COLUMN parsedTestPointCount INT NULL COMMENT '最近一次解析到的测试要点数量' AFTER summaryStructDoc",
+      },
+      {
+        name: "parseWarning",
+        ddl: "ADD COLUMN parseWarning TEXT NULL COMMENT '测试要点解析警告' AFTER parsedTestPointCount",
+      },
+    ];
+
+    for (const column of columns) {
+      const rows: Array<{ Field: string }> = await this.dataSource.query(
+        `SHOW COLUMNS FROM case_struct_doc LIKE '${column.name}'`,
+      );
+      if (rows.length > 0) {
+        continue;
+      }
+      this.logger.warn(
+        `检测到 case_struct_doc 缺少 ${column.name} 列，正在自动执行 schema 补丁…`,
+      );
+      await this.dataSource.query(`
+        ALTER TABLE case_struct_doc
+          ${column.ddl}
+      `);
+      this.logger.log(`case_struct_doc.${column.name} 列已补齐`);
+    }
   }
 
   /**

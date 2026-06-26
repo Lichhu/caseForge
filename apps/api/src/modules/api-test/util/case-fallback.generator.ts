@@ -1,5 +1,5 @@
 import type { ApiTestCasePayload } from "@case-forge/shared";
-import type { ApiEndpointEntity } from "../entity/api-endpoint.entity";
+import type { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
 import {
   buildCaseRequestFromProfile,
   buildDefaultExpected,

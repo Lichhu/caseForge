@@ -49,7 +49,18 @@
               v-else-if="doc.structuringStatus === 'completed'"
               color="success"
               size="small"
-            >已结构化</a-tag>
+            >
+              已结构化
+              <template v-if="doc.parsedTestPointCount != null">
+                · {{ doc.parsedTestPointCount }} 个测试要点
+              </template>
+            </a-tag>
+            <a-tooltip
+              v-if="doc.parseWarning"
+              :title="doc.parseWarning"
+            >
+              <a-tag color="warning" size="small">解析警告</a-tag>
+            </a-tooltip>
             <a-tooltip
               v-else-if="doc.structuringStatus === 'failed'"
               :title="doc.structuringError || '结构化失败'"

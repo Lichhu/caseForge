@@ -5,7 +5,6 @@ import { Type } from "class-transformer";
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import {
   IsArray,
-  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,

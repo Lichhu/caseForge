@@ -9,17 +9,17 @@ import {
   auditFieldsForCreate,
   auditFieldsForUpdate,
   RequestContext,
-} from "../../../common/audit/request-context";
-import { scopedWhere } from "../../../common/audit/user-scope";
-import { ApiTestCaseEntity } from "../entity/api-test-case.entity";
-import { ApiTestExecutionSetCaseEntity } from "../entity/api-test-execution-set-case.entity";
-import { ApiTestExecutionSetEntity } from "../entity/api-test-execution-set.entity";
+} from "@common/audit/request-context";
+import { scopedWhere } from "@common/audit/user-scope";
+import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
+import { ApiTestExecutionSetCaseEntity } from "@api-test/entity/api-test-execution-set-case.entity";
+import { ApiTestExecutionSetEntity } from "@api-test/entity/api-test-execution-set.entity";
 import {
   ReplaceExecutionSetCasesDto,
   SaveApiExecutionSetDto,
-} from "../dto/execution-platform.dto";
-import type { ListApiExecutionSetsDto } from "../dto/list-api-execution-sets.dto";
-import { toPublicApiExecutionSet } from "../../../common/http/public-response.util";
+} from "@api-test/dto/execution-platform.dto";
+import type { ListApiExecutionSetsDto } from "@api-test/dto/list-api-execution-sets.dto";
+import { toPublicApiExecutionSet } from "@common/http/public-response.util";
 import {
   DEFAULT_CASE_FORGE_PAGE_SIZE,
   normalizeCaseForgePageSize,

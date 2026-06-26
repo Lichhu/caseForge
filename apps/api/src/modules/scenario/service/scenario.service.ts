@@ -1,11 +1,7 @@
 /**
  * @file 场景与提示词库业务服务
  */
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import {
   SavePromptDto,
@@ -24,8 +20,8 @@ import {
   assertOwned,
   scopedWhere,
   scopedWhereWithSystem,
-} from "../../../common/audit/user-scope";
-import { toPublicScenario } from "../../../common/http/public-response.util";
+} from "@common/audit/user-scope";
+import { toPublicScenario } from "@common/http/public-response.util";
 
 /**
  * 场景服务：场景的增删改查及下属提示词的同步保存

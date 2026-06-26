@@ -20,38 +20,35 @@ import { Response } from "express";
 import { Repository } from "typeorm";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { MinioStorageService } from "@minio/service/minio.service";
-import { findOwnedProject } from "../../../common/audit/user-scope";
-import { touchProjectUpdatedAt } from "../../../common/project/touch-project.util";
-import { ApiDocService } from "../service/api-doc.service";
-import { ApiCaseService } from "../service/api-case.service";
-import { ApiEnvironmentService } from "../service/api-environment.service";
-import { ApiExecutionService } from "../service/api-execution.service";
-import { ApiReportService } from "../service/api-report.service";
-import { ApiTransactionService } from "../service/api-transaction.service";
-import {
-  AutoSaveApiDocDto,
-  SaveApiDocDto,
-} from "../dto/save-api-doc.dto";
-import { SaveApiDocGenerationDto } from "../dto/save-api-doc-generation.dto";
+import { findOwnedProject } from "@common/audit/user-scope";
+import { touchProjectUpdatedAt } from "@common/project/touch-project.util";
+import { ApiDocService } from "@api-test/service/api-doc.service";
+import { ApiCaseService } from "@api-test/service/api-case.service";
+import { ApiEnvironmentService } from "@api-test/service/api-environment.service";
+import { ApiExecutionService } from "@api-test/service/api-execution.service";
+import { ApiReportService } from "@api-test/service/api-report.service";
+import { ApiTransactionService } from "@api-test/service/api-transaction.service";
+import { AutoSaveApiDocDto, SaveApiDocDto } from "@api-test/dto/save-api-doc.dto";
+import { SaveApiDocGenerationDto } from "@api-test/dto/save-api-doc-generation.dto";
 import {
   ExportApiReportDto,
   GenerateApiCasesDto,
   RunApiCasesDto,
   SaveApiCaseDto,
-} from "../dto/save-api-case.dto";
-import { ApiExecutionSetService } from "../service/api-execution-set.service";
+} from "@api-test/dto/save-api-case.dto";
+import { ApiExecutionSetService } from "@api-test/service/api-execution-set.service";
 import {
   ReplaceExecutionSetCasesDto,
   RunExecutionSetDto,
   ReorderEnvironmentServiceDto,
   SaveApiEnvironmentServiceDto,
   SaveApiExecutionSetDto,
-} from "../dto/execution-platform.dto";
-import { SaveApiEnvironmentDto } from "../dto/save-environment.dto";
-import { SaveApiTransactionDto } from "../dto/save-transaction.dto";
-import { BatchDeleteTransactionsDto } from "../dto/batch-delete-transactions.dto";
-import { ListApiCasesDto } from "../dto/list-api-cases.dto";
-import { ListApiExecutionSetsDto } from "../dto/list-api-execution-sets.dto";
+} from "@api-test/dto/execution-platform.dto";
+import { SaveApiEnvironmentDto } from "@api-test/dto/save-environment.dto";
+import { SaveApiTransactionDto } from "@api-test/dto/save-transaction.dto";
+import { BatchDeleteTransactionsDto } from "@api-test/dto/batch-delete-transactions.dto";
+import { ListApiCasesDto } from "@api-test/dto/list-api-cases.dto";
+import { ListApiExecutionSetsDto } from "@api-test/dto/list-api-execution-sets.dto";
 
 const UPLOAD_EXTENSIONS = ["xls", "xlsx"];
 
@@ -264,7 +261,6 @@ export class ApiTestController {
   @Patch(":projectId/transactions/:transactionId/cases/:caseId")
   updateCase(
     @Param("projectId") projectId: string,
-    @Param("transactionId") transactionId: string,
     @Param("caseId") caseId: string,
     @Body() body: SaveApiCaseDto,
   ) {
@@ -274,7 +270,6 @@ export class ApiTestController {
   @Delete(":projectId/transactions/:transactionId/cases/:caseId")
   deleteCase(
     @Param("projectId") projectId: string,
-    @Param("transactionId") transactionId: string,
     @Param("caseId") caseId: string,
   ) {
     return this.apiCaseService.deleteCase(projectId, caseId);
@@ -287,14 +282,10 @@ export class ApiTestController {
     @Param("transactionId") transactionId: string,
     @Body() body: GenerateApiCasesDto,
   ) {
-    return this.apiCaseService.generateCases(
-      projectId,
-      transactionId,
-      {
-        endpointIds: body.endpointIds,
-        promptIds: body.promptIds,
-      },
-    );
+    return this.apiCaseService.generateCases(projectId, transactionId, {
+      endpointIds: body.endpointIds,
+      promptIds: body.promptIds,
+    });
   }
 
   @Get(":projectId/transactions/:transactionId/cases/generate/status")
@@ -425,7 +416,11 @@ export class ApiTestController {
     @Param("transactionId") transactionId: string,
     @Query() query: ListApiExecutionSetsDto,
   ) {
-    return this.apiExecutionSetService.listSets(projectId, transactionId, query);
+    return this.apiExecutionSetService.listSets(
+      projectId,
+      transactionId,
+      query,
+    );
   }
 
   @Post(":projectId/transactions/:transactionId/execution-sets")
@@ -524,10 +519,7 @@ export class ApiTestController {
   }
 
   @Get(":projectId/runs/:runId")
-  getRun(
-    @Param("projectId") projectId: string,
-    @Param("runId") runId: string,
-  ) {
+  getRun(@Param("projectId") projectId: string, @Param("runId") runId: string) {
     return this.apiExecutionService.getRunDetail(projectId, runId);
   }
 

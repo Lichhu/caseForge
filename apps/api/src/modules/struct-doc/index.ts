@@ -12,7 +12,7 @@ import { StructRequirementJobEntity } from "./entity/struct-requirement-job.enti
 import { TestPointEntity } from "./entity/test-point.entity";
 import { MinioStorageModule } from "@minio/index";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
-import { AiWorkflowModule } from "../../common/ai-workflow";
+import { AiWorkflowModule } from "@common/ai-workflow";
 
 /** NestJS 模块：提供结构化需求文档的上传、解析、保存与查询能力。 */
 @Module({

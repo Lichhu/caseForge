@@ -3,23 +3,20 @@ import { InjectRepository } from "@nestjs/typeorm";
 import iconv from "iconv-lite";
 import { Socket } from "node:net";
 import { In, Repository } from "typeorm";
-import { scopedWhere } from "../../../common/audit/user-scope";
-import {
-  auditFieldsForCreate,
-  auditFieldsForUpdate,
-} from "../../../common/audit/request-context";
-import { ApiTestCaseEntity } from "../entity/api-test-case.entity";
-import { ApiTestRunEntity } from "../entity/api-test-run.entity";
-import { ApiTestRunItemEntity } from "../entity/api-test-run-item.entity";
+import { scopedWhere } from "@common/audit/user-scope";
+import { auditFieldsForCreate } from "@common/audit/request-context";
+import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
+import { ApiTestRunEntity } from "@api-test/entity/api-test-run.entity";
+import { ApiTestRunItemEntity } from "@api-test/entity/api-test-run-item.entity";
 import { ApiEnvironmentService } from "./api-environment.service";
 import { ApiExecutionSetService } from "./api-execution-set.service";
 import {
   buildRuntimeVariables,
   substituteDeep,
-} from "../util/variable-substitute.util";
-import { isAllPassed, runAssertions } from "../util/assertion-runner.util";
+} from "@api-test/util/variable-substitute.util";
+import { isAllPassed, runAssertions } from "@api-test/util/assertion-runner.util";
 import type { ApiCaseRequest, ApiRunItemStatus } from "@case-forge/shared";
-import { toPublicApiRun } from "../../../common/http/public-response.util";
+import { toPublicApiRun } from "@common/http/public-response.util";
 
 const DEFAULT_CONCURRENCY = 5;
 const MAX_CONCURRENCY = 10;

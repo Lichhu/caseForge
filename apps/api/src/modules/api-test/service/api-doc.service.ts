@@ -7,27 +7,27 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { Repository } from "typeorm";
 import { MinioStorageService } from "@minio/service/minio.service";
-import { auditFieldsForUpdate } from "../../../common/audit/request-context";
-import { scopedWhere } from "../../../common/audit/user-scope";
-import { assertApiTestProject } from "../util/assert-api-project.util";
-import { touchProjectUpdatedAt } from "../../../common/project/touch-project.util";
-import { ApiDocEntity } from "../entity/api-doc.entity";
-import { ApiEndpointEntity } from "../entity/api-endpoint.entity";
-import { ApiTestCaseEntity } from "../entity/api-test-case.entity";
-import { ApiTransactionEntity } from "../entity/api-transaction.entity";
+import { auditFieldsForUpdate } from "@common/audit/request-context";
+import { scopedWhere } from "@common/audit/user-scope";
+import { assertApiTestProject } from "@api-test/util/assert-api-project.util";
+import { touchProjectUpdatedAt } from "@common/project/touch-project.util";
+import { ApiDocEntity } from "@api-test/entity/api-doc.entity";
+import { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
+import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
+import { ApiTransactionEntity } from "@api-test/entity/api-transaction.entity";
 import {
   extractDocumentText,
   structureEndpointsFromRawText,
-} from "../util/api-doc-extract.util";
+} from "@api-test/util/api-doc-extract.util";
 import {
   ensureEndpointIds,
   parseEndpointsFromText,
-} from "../util/api-doc.parser";
+} from "@api-test/util/api-doc.parser";
 import type { ApiEndpointPayload } from "@case-forge/shared";
-import { SaveApiDocDto } from "../dto/save-api-doc.dto";
-import { SaveApiDocGenerationDto } from "../dto/save-api-doc-generation.dto";
-import { toPublicApiDoc } from "../../../common/http/public-response.util";
-import { RequestContext } from "../../../common/audit/request-context";
+import { SaveApiDocDto } from "@api-test/dto/save-api-doc.dto";
+import { SaveApiDocGenerationDto } from "@api-test/dto/save-api-doc-generation.dto";
+import { toPublicApiDoc } from "@common/http/public-response.util";
+import { RequestContext } from "@common/audit/request-context";
 
 @Injectable()
 export class ApiDocService {

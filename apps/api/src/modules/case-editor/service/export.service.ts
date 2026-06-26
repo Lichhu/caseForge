@@ -20,7 +20,7 @@ import JSZip from "jszip";
 import {
   buildTestPlatformCaseExcel,
   readTestPlatformCaseExcelTemplate,
-} from "../util/test-platform-case-excel.util";
+} from "@case-editor/util/test-platform-case-excel.util";
 
 /** XMind 打开所需的 1x1 占位缩略图 */
 const XMIND_THUMBNAIL_PNG = Buffer.from(

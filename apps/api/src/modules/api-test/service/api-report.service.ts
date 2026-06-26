@@ -6,10 +6,10 @@ import { In, Repository } from "typeorm";
 import {
   applyPdfCjkFont,
   formatRunItemStatus,
-} from "../../../common/pdf/pdf-cjk-font.util";
-import { buildApiReportHtml } from "../util/api-report-html.util";
-import { ApiTestCaseEntity } from "../entity/api-test-case.entity";
-import { ApiEndpointEntity } from "../entity/api-endpoint.entity";
+} from "@common/pdf/pdf-cjk-font.util";
+import { buildApiReportHtml } from "@api-test/util/api-report-html.util";
+import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
+import { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
 import { ApiExecutionService } from "./api-execution.service";
 
 type RunDetail = Awaited<ReturnType<ApiExecutionService["getRunDetail"]>>;

@@ -37,8 +37,8 @@ import { CaseNodeMetadataEntity } from "@case-editor/entity/case-node-metadata.e
 import { CaseTreeEntity } from "@case-editor/entity/case-tree.entity";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { DataSource, EntityManager, In, Repository } from "typeorm";
-import { scopedWhere } from "../../../common/audit/user-scope";
-import { touchProjectUpdatedAt } from "../../../common/project/touch-project.util";
+import { scopedWhere } from "@common/audit/user-scope";
+import { touchProjectUpdatedAt } from "@common/project/touch-project.util";
 import {
   buildCaseTreeDiffPlan,
   flattenCaseTreeForPersist,
@@ -59,8 +59,6 @@ export class CaseEditorService {
     private readonly caseEditorRepo: Repository<CaseEditorEntity>,
     @InjectRepository(CaseTreeEntity)
     private readonly caseTreeRepo: Repository<CaseTreeEntity>,
-    @InjectRepository(CaseNodeMetadataEntity)
-    private readonly caseNodeMetadataRepo: Repository<CaseNodeMetadataEntity>,
     @InjectRepository(CaseProjectEntity)
     private readonly projectRepo: Repository<CaseProjectEntity>,
     @InjectDataSource()

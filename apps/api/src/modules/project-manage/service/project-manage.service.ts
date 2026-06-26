@@ -14,13 +14,13 @@ import {
   extractProjectCodeFromText,
   isValidProjectRequirementCode,
 } from "@case-editor/util/requirement-code.util";
-import { auditFieldsForCreate } from "../../../common/audit/request-context";
+import { auditFieldsForCreate } from "@common/audit/request-context";
 import {
   applyUserScope,
   findOwnedProject,
   scopedWhere,
-} from "../../../common/audit/user-scope";
-import { toPublicProject } from "../../../common/http/public-response.util";
+} from "@common/audit/user-scope";
+import { toPublicProject } from "@common/http/public-response.util";
 
 function normalizeRequirementNo(raw: string): string {
   const trimmed = raw.trim();

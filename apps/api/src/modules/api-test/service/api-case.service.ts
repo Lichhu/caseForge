@@ -8,27 +8,27 @@ import {
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, In } from "typeorm";
-import { AiWorkflowService } from "../../../common/ai-workflow/service/ai-workflow.service";
+import { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
 import {
   auditFieldsForCreate,
   auditFieldsForUpdate,
   RequestContext,
-} from "../../../common/audit/request-context";
+} from "@common/audit/request-context";
 import {
   scopedWhere,
   scopedWhereWithSystem,
-} from "../../../common/audit/user-scope";
+} from "@common/audit/user-scope";
 import { PromptEntity } from "@scenario/entity/prompt.entity";
-import { ApiDocEntity } from "../entity/api-doc.entity";
-import { ApiEndpointEntity } from "../entity/api-endpoint.entity";
-import { ApiTestCaseEntity } from "../entity/api-test-case.entity";
-import { ApiTestExecutionSetCaseEntity } from "../entity/api-test-execution-set-case.entity";
-import { ApiTransactionEntity } from "../entity/api-transaction.entity";
-import { SaveApiCaseDto } from "../dto/save-api-case.dto";
-import { ListApiCasesDto } from "../dto/list-api-cases.dto";
-import { generateCasesWithAi, nextCaseNo } from "../util/api-case-ai.util";
-import { buildFallbackCasesForEndpoint } from "../util/case-fallback.generator";
-import { toPublicApiCase } from "../../../common/http/public-response.util";
+import { ApiDocEntity } from "@api-test/entity/api-doc.entity";
+import { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
+import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
+import { ApiTestExecutionSetCaseEntity } from "@api-test/entity/api-test-execution-set-case.entity";
+import { ApiTransactionEntity } from "@api-test/entity/api-transaction.entity";
+import { SaveApiCaseDto } from "@api-test/dto/save-api-case.dto";
+import { ListApiCasesDto } from "@api-test/dto/list-api-cases.dto";
+import { generateCasesWithAi, nextCaseNo } from "@api-test/util/api-case-ai.util";
+import { buildFallbackCasesForEndpoint } from "@api-test/util/case-fallback.generator";
+import { toPublicApiCase } from "@common/http/public-response.util";
 import {
   DEFAULT_CASE_FORGE_PAGE_SIZE,
   normalizeCaseForgePageSize,

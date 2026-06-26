@@ -1,6 +1,6 @@
 import { Injectable, Logger, NestMiddleware } from "@nestjs/common";
 import { NextFunction, Request, Response } from "express";
-import { RequestContext } from "../audit/request-context";
+import { RequestContext } from "@common/audit/request-context";
 
 /** 记录 HTTP 请求：方法、路径、状态码、耗时、用户 */
 @Injectable()

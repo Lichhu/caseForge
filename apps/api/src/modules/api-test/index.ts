@@ -2,7 +2,7 @@ import { Module } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { MinioStorageModule } from "@minio/index";
-import { AiWorkflowModule } from "../../common/ai-workflow";
+import { AiWorkflowModule } from "@common/ai-workflow";
 import { ApiTestController } from "./controller/api-test.controller";
 import { ApiCaseGenerateJobEntity } from "./entity/api-case-generate-job.entity";
 import { ApiDocEntity } from "./entity/api-doc.entity";

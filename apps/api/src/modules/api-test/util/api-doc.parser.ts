@@ -206,77 +206,211 @@ export function buildStructuredMarkdownFromEndpoints(
   return lines.join("\n");
 }
 
+/** 压缩后文档的默认字符预算，留出余量给技能模板、协议规则与场景约束。 */
+export const DEFAULT_COMPRESSED_DOC_MAX_CHARS = 4000;
+
+/** 报文表中需要保留的关键列（按表头关键字匹配，其余列裁剪以缩短文档）。 */
+const MESSAGE_TABLE_KEEP_KEYWORDS = [
+  "节点路径",
+  "节点代码",
+  "节点名称",
+  "字段",
+  "中文",
+  "英文",
+  "类型",
+  "长度",
+  "必填",
+  "必输",
+  "是否",
+  "说明",
+  "描述",
+  "取值",
+  "枚举",
+];
+
+/** 这些列内容通常较长，超过阈值时截断。 */
+const MESSAGE_TABLE_TRUNCATE_KEYWORDS = [
+  "说明",
+  "描述",
+  "备注",
+  "取值",
+  "枚举",
+];
+const MESSAGE_TABLE_MAX_CELL_LENGTH = 40;
+
 /**
  * 压缩接口结构化文档，用于缩减 API 案例生成 AI 提示词长度。
  *
  * 保留对生成案例最有价值的部分：基础信息、服务信息、技术信息、请求/响应报文。
- * 请求/响应报文表格过长时，仅保留表头与前面若干行关键字段，避免大文档把整个提示词撑爆。
+ * 在固定分区（基础/服务/技术信息）之外，对请求/响应报文按字符预算压缩：
+ * 1. 列裁剪：仅保留与字段定义相关的关键列（节点路径/代码、类型、长度、必填、说明等）；
+ * 2. 说明截断：超长说明/取值列截断到固定长度；
+ * 3. 动态行数：必填字段优先保留，选填字段按剩余字符预算补齐。
  */
 export function compressApiStructuredDoc(
   structuredDoc: string,
   maxRowsPerTable = 60,
+  maxChars = DEFAULT_COMPRESSED_DOC_MAX_CHARS,
 ): string {
   if (!structuredDoc?.trim()) {
     return "";
   }
 
-  const sections: string[] = [];
-  for (const name of [
-    "基础信息",
-    "服务信息",
-    "技术信息",
-    "请求报文",
-    "响应报文",
-  ] as const) {
+  const fixedSections: string[] = [];
+  for (const name of ["基础信息", "服务信息", "技术信息"] as const) {
     const text = extractApiDocSection(structuredDoc, name);
-    if (!text.trim()) {
-      continue;
+    if (text.trim()) {
+      fixedSections.push(`${name}\n${API_DOC_SECTION_SEPARATOR}\n${text}`);
     }
-    const compressed =
-      name === "请求报文" || name === "响应报文"
-        ? compressApiDocTable(text, maxRowsPerTable)
-        : text;
-    sections.push(`${name}\n${API_DOC_SECTION_SEPARATOR}\n${compressed}`);
+  }
+  const fixedText = fixedSections.join("\n\n");
+
+  // 报文表可用的字符预算（请求报文权重更高，因为它决定 requestBody 生成）。
+  const tableBudget = Math.max(0, maxChars - fixedText.length - 200);
+  const requestBudget = Math.round(tableBudget * 0.6);
+  const responseBudget = tableBudget - requestBudget;
+
+  const tableSections: string[] = [];
+  const requestText = extractApiDocSection(structuredDoc, "请求报文");
+  if (requestText.trim()) {
+    tableSections.push(
+      `请求报文\n${API_DOC_SECTION_SEPARATOR}\n${compressApiDocTable(
+        requestText,
+        maxRowsPerTable,
+        requestBudget,
+      )}`,
+    );
+  }
+  const responseText = extractApiDocSection(structuredDoc, "响应报文");
+  if (responseText.trim()) {
+    tableSections.push(
+      `响应报文\n${API_DOC_SECTION_SEPARATOR}\n${compressApiDocTable(
+        responseText,
+        maxRowsPerTable,
+        responseBudget,
+      )}`,
+    );
   }
 
-  return sections.join("\n\n");
+  const compressed = [fixedText, ...tableSections].filter(Boolean).join("\n\n");
+
+  // 兜底：极端情况下（必填字段极多）按硬上限截断，确保不突破 AI 长度限制。
+  if (compressed.length > maxChars) {
+    return `${compressed.slice(0, maxChars)}\n> 提示：文档超出长度预算，已截断，请结合接口文档核对完整字段。`;
+  }
+  return compressed;
 }
 
-function compressApiDocTable(tableText: string, maxRows: number): string {
-  const lines = tableText.split("\n");
-  const headerIndex = lines.findIndex((line) => line.includes("|"));
+function splitTableRow(line: string): string[] {
+  return line.split("|").map((cell) => cell.trim());
+}
+
+function isRequiredFieldCells(cells: string[]): boolean {
+  return cells.some((cell) => cell === "Y" || cell === "是");
+}
+
+function compressApiDocTable(
+  tableText: string,
+  maxRows: number,
+  maxChars?: number,
+): string {
+  const rawLines = tableText.split("\n");
+  const headerIndex = rawLines.findIndex((line) => line.includes("|"));
   if (headerIndex < 0) {
     return tableText;
   }
 
-  const separatorIndex = lines.findIndex(
+  const separatorIndex = rawLines.findIndex(
     (line, index) => index > headerIndex && /^\s*\|[-:\s|]*\|\s*$/.test(line),
   );
   const dataStart = separatorIndex >= 0 ? separatorIndex + 1 : headerIndex + 1;
-  const kept = lines.slice(0, dataStart);
-  const dataRows = lines.slice(dataStart).filter((line) => line.includes("|"));
+  const preLines = rawLines.slice(0, headerIndex);
 
-  const requiredRows = dataRows.filter((line) => isRequiredFieldRow(line));
-  const remainingSlots = Math.max(0, maxRows - requiredRows.length);
+  // 1. 列裁剪：仅保留命中关键字的列；若无命中则保留全部列。
+  const headerCells = splitTableRow(rawLines[headerIndex]);
+  let keepIndices = headerCells
+    .map((cell, idx) => ({ cell, idx }))
+    .filter(({ cell }) =>
+      MESSAGE_TABLE_KEEP_KEYWORDS.some((kw) => cell.includes(kw)),
+    )
+    .map(({ idx }) => idx);
+  if (!keepIndices.length) {
+    keepIndices = headerCells.map((_, idx) => idx);
+  }
+  const truncateIndices = new Set(
+    keepIndices.filter((idx) =>
+      MESSAGE_TABLE_TRUNCATE_KEYWORDS.some((kw) =>
+        headerCells[idx]?.includes(kw),
+      ),
+    ),
+  );
+
+  const projectRow = (cells: string[]) =>
+    `| ${keepIndices
+      .map((idx) => {
+        let value = cells[idx] ?? "";
+        if (
+          truncateIndices.has(idx) &&
+          value.length > MESSAGE_TABLE_MAX_CELL_LENGTH
+        ) {
+          value = `${value.slice(0, MESSAGE_TABLE_MAX_CELL_LENGTH)}…`;
+        }
+        return value;
+      })
+      .join(" | ")} |`;
+
+  const header = projectRow(headerCells);
+  const separator = `| ${keepIndices.map(() => "---").join(" | ")} |`;
+
+  const dataRows = rawLines
+    .slice(dataStart)
+    .filter((line) => line.includes("|"))
+    .map((line) => splitTableRow(line));
+
+  const requiredRows = dataRows
+    .filter((cells) => isRequiredFieldCells(cells))
+    .map(projectRow);
   const optionalRows = dataRows
-    .filter((line) => !isRequiredFieldRow(line))
-    .slice(0, remainingSlots);
-  const truncated = [...requiredRows, ...optionalRows];
+    .filter((cells) => !isRequiredFieldCells(cells))
+    .map(projectRow);
 
-  const result = [...kept, ...truncated];
-  if (dataRows.length > truncated.length) {
-    const dropped = dataRows.length - truncated.length;
+  // 2. 行数上限。
+  const remainingSlots = Math.max(0, maxRows - requiredRows.length);
+  let keptOptional = optionalRows.slice(0, remainingSlots);
+
+  // 3. 字符预算：必填字段优先，选填字段在预算内逐行补齐。
+  if (typeof maxChars === "number") {
+    const baseLen = [...preLines, header, separator, ...requiredRows].join(
+      "\n",
+    ).length;
+    let budget = maxChars - baseLen;
+    const fitted: string[] = [];
+    for (const row of keptOptional) {
+      if (budget - (row.length + 1) < 0) {
+        break;
+      }
+      fitted.push(row);
+      budget -= row.length + 1;
+    }
+    keptOptional = fitted;
+  }
+
+  const result = [
+    ...preLines,
+    header,
+    separator,
+    ...requiredRows,
+    ...keptOptional,
+  ];
+  const totalKept = requiredRows.length + keptOptional.length;
+  if (dataRows.length > totalKept) {
+    const dropped = dataRows.length - totalKept;
     result.push(
       "",
-      `> 提示：报文字段共 ${dataRows.length} 行，已保留全部必填字段（${requiredRows.length} 行）及前 ${optionalRows.length} 行选填字段，省略 ${dropped} 行。`,
+      `> 提示：报文字段共 ${dataRows.length} 行，已保留全部必填字段（${requiredRows.length} 行）及前 ${keptOptional.length} 行选填字段，省略 ${dropped} 行。`,
     );
   }
   return result.join("\n");
-}
-
-function isRequiredFieldRow(line: string): boolean {
-  const cells = line.split("|").map((cell) => cell.trim());
-  return cells.some((cell) => cell === "Y" || cell === "是");
 }
 
 export function ensureEndpointIds(endpoints: ApiEndpointPayload[]) {

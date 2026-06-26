@@ -15,22 +15,22 @@ import { TestPointEntity } from "@struct-doc/entity/test-point.entity";
 import {
   CaseGenerateJobEntity,
   CaseGenerateJobStatus,
-} from "../entity/case-generate-job.entity";
+} from "@case-editor/entity/case-generate-job.entity";
 import {
   getCaseGenerateActiveCount,
   getCaseGenerateConcurrency,
   getCaseGenerateWaitingCount,
   setCaseGenerateSlotReleaseHook,
   withCaseGenerateSlot,
-} from "../util/case-generate-concurrency";
+} from "@case-editor/util/case-generate-concurrency";
 import {
   estimateRemainingSeconds,
   resolveAverageRunSeconds,
-} from "../util/case-generate-queue-metrics.util";
+} from "@case-editor/util/case-generate-queue-metrics.util";
 import { CaseWorkspaceService } from "./case-workspace.service";
-import { buildCaseGenerateInterruptedMessage } from "../util/case-generate-interrupted.util";
-import { isCaseGenerateCancelled } from "../util/case-generate-cancel.registry";
-import { RequestContext } from "../../../common/audit/request-context";
+import { buildCaseGenerateInterruptedMessage } from "@case-editor/util/case-generate-interrupted.util";
+import { isCaseGenerateCancelled } from "@case-editor/util/case-generate-cancel.registry";
+import { RequestContext } from "@common/audit/request-context";
 import {
   buildRunningCountByUser,
   countActiveUsers,
@@ -38,7 +38,7 @@ import {
   estimateFairWaitSeconds,
   getCaseGeneratePerUserMaxRunning,
   pickFairQueuedJob,
-} from "../util/case-generate-fair-schedule.util";
+} from "@case-editor/util/case-generate-fair-schedule.util";
 
 export interface CaseGenerateQueueItemStatus {
   testPointId: string;

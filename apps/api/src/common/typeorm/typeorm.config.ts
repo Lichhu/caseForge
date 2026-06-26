@@ -6,7 +6,7 @@ import { TypeOrmModuleOptions } from "@nestjs/typeorm";
 import { join } from "node:path";
 import { getAppConfig } from "@config/app-config.util";
 import { AppConfig } from "@config/app-config.types";
-import { AuditSubscriber } from "../audit/audit.subscriber";
+import { AuditSubscriber } from "@common/audit/audit.subscriber";
 
 /**
  * 根据应用配置创建 TypeORM 模块选项

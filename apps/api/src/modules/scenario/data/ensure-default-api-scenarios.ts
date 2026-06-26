@@ -3,9 +3,9 @@
  */
 import { SCENARIO_SCOPE_API } from "@case-forge/shared";
 import { Repository } from "typeorm";
-import { SYSTEM_OWNER } from "../../../common/audit/user-scope";
-import { PromptEntity } from "../entity/prompt.entity";
-import { ScenarioEntity } from "../entity/scenario.entity";
+import { SYSTEM_OWNER } from "@common/audit/user-scope";
+import { PromptEntity } from "@scenario/entity/prompt.entity";
+import { ScenarioEntity } from "@scenario/entity/scenario.entity";
 import {
   DEFAULT_API_SCENARIOS,
   type DefaultApiScenarioDefinition,

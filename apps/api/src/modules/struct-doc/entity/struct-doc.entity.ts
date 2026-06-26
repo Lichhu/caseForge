@@ -74,6 +74,14 @@ export class StructDocEntity {
   @Column({ type: "longtext", nullable: true })
   summaryStructDoc?: string;
 
+  /** 最近一次从 Markdown 解析到的测试要点数量 */
+  @Column({ type: "int", nullable: true })
+  parsedTestPointCount?: number;
+
+  /** 解析结果为 0 或异常时的提示（供前端展示） */
+  @Column({ type: "text", nullable: true })
+  parseWarning?: string;
+
   /** 异步结构化任务状态 */
   @Column({
     type: "enum",

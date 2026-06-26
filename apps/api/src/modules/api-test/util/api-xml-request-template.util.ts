@@ -1,8 +1,5 @@
-import { minifyXml, prettyPrintXml, unescapeLiteralXmlEscapes } from "@case-forge/shared";
-import {
-  extractApiDocSection,
-  getApiDocFieldValue,
-} from "./api-doc.parser";
+import { minifyXml, prettyPrintXml } from "@case-forge/shared";
+import { extractApiDocSection, getApiDocFieldValue } from "./api-doc.parser";
 export interface ApiDocMessageField {
   path: string;
   code: string;
@@ -40,7 +37,12 @@ const SYS_HEADER_FIELDS = [
   "pinValue",
 ] as const;
 
-const BIZ_HEADER_FIELDS = ["pageNum", "pageSize", "tranCode", "tranNbr"] as const;
+const BIZ_HEADER_FIELDS = [
+  "pageNum",
+  "pageSize",
+  "tranCode",
+  "tranNbr",
+] as const;
 
 function indent(level: number) {
   return "\t".repeat(level);
@@ -80,7 +82,9 @@ function fieldCodeFromPath(path: string, fallbackCode: string) {
 }
 
 /** 解析「请求报文」表字段行 */
-export function parseApiDocMessageFields(sectionText: string): ApiDocMessageField[] {
+export function parseApiDocMessageFields(
+  sectionText: string,
+): ApiDocMessageField[] {
   const lines = sectionText
     .split("\n")
     .map((line) => line.split("|").map((cell) => cell.trim()))
@@ -148,12 +152,14 @@ function sampleTraceId(clientCd: string) {
 }
 
 function groupFieldsBySection(fields: ApiDocMessageField[]) {
-  const grouped: Record<"sysHeader" | "bizHeader" | "bizBody", ApiDocMessageField[]> =
-    {
-      sysHeader: [],
-      bizHeader: [],
-      bizBody: [],
-    };
+  const grouped: Record<
+    "sysHeader" | "bizHeader" | "bizBody",
+    ApiDocMessageField[]
+  > = {
+    sysHeader: [],
+    bizHeader: [],
+    bizBody: [],
+  };
 
   for (const field of fields) {
     grouped[sectionPathPrefix(field.path)].push(field);
@@ -169,10 +175,7 @@ function buildSectionXml(
   baseLevel: number,
 ) {
   const orderedCodes = [
-    ...new Set([
-      ...fields.map((field) => field.code),
-      ...fallbackFields,
-    ]),
+    ...new Set([...fields.map((field) => field.code), ...fallbackFields]),
   ];
 
   const lines = orderedCodes.map((code) => {
@@ -228,13 +231,19 @@ export function buildTransactionXmlScaffold(input: {
   const sysHeaderValues = {
     ...buildSysHeaderValues(meta, traceId),
     ...Object.fromEntries(
-      grouped.sysHeader.map((field) => [field.code, input.bizBodyValues?.[field.code]]),
+      grouped.sysHeader.map((field) => [
+        field.code,
+        input.bizBodyValues?.[field.code],
+      ]),
     ),
   };
   const bizHeaderValues = {
     ...buildBizHeaderValues(meta, traceId),
     ...Object.fromEntries(
-      grouped.bizHeader.map((field) => [field.code, input.bizBodyValues?.[field.code]]),
+      grouped.bizHeader.map((field) => [
+        field.code,
+        input.bizBodyValues?.[field.code],
+      ]),
     ),
   };
   const bizBodyValues = {
@@ -315,7 +324,10 @@ export function buildXmlGuidanceExtra(
     transactionCode,
     bizBodyValues: Object.fromEntries(
       (bizBodyFields.length ? bizBodyFields.slice(0, 2) : ["cstNo"]).map(
-        (code) => [code, code === "pageNum" || code === "pageSize" ? "1" : "样例值"],
+        (code) => [
+          code,
+          code === "pageNum" || code === "pageSize" ? "1" : "样例值",
+        ],
       ),
     ),
   });

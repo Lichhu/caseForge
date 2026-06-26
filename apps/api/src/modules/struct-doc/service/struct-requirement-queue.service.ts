@@ -18,7 +18,7 @@ import {
   setStructuringSlotReleaseHook,
 } from "@struct-doc/util/structuring-concurrency";
 import { buildStructRequirementRecoverMessage } from "@struct-doc/util/struct-requirement-interrupted.util";
-import { RequestContext } from "../../../common/audit/request-context";
+import { RequestContext } from "@common/audit/request-context";
 
 @Injectable()
 export class StructRequirementQueueService implements OnModuleInit {

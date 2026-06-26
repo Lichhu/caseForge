@@ -4,7 +4,7 @@
  */
 import { Module } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
-import { AiWorkflowModule } from "../../common/ai-workflow";
+import { AiWorkflowModule } from "@common/ai-workflow";
 import { MinioStorageModule } from "@minio/index";
 import { ProjectManageModule } from "@project-manage/index";
 import { CaseEditorEntity } from "./entity/case-editor.entity";
@@ -19,7 +19,7 @@ import { CaseWorkspaceService } from "./service/case-workspace.service";
 import { ExportService } from "./service/export.service";
 import { CaseTestPlatformSyncService } from "./service/case-test-platform-sync.service";
 import { StructDocModule } from "@struct-doc/index";
-import { TestPlatformModule } from "../../common/test-platform";
+import { TestPlatformModule } from "@common/test-platform";
 import { TestPointInstructEntity } from "@dynamic-instruct/entity/test-point-instruct.entity";
 import { TestPointPromptEntity } from "@dynamic-instruct/entity/test-point-prompt.entity";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";

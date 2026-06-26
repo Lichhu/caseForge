@@ -24,14 +24,14 @@ import {
   findOwnedProject,
   scopedWhere,
   scopedWhereWithSystem,
-} from "../../../common/audit/user-scope";
+} from "@common/audit/user-scope";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import {
   toPublicPrompt,
   toPublicTestPoint,
   toPublicTestPointSummary,
-} from "../../../common/http/public-response.util";
-import { touchProjectUpdatedAt } from "../../../common/project/touch-project.util";
+} from "@common/http/public-response.util";
+import { touchProjectUpdatedAt } from "@common/project/touch-project.util";
 import { normalizeCaseForgePageSize } from "@case-forge/shared";
 
 const TEST_POINT_STATUS_ORDER_SQL = `

@@ -27,9 +27,9 @@ import { SaveStructDocDto } from "@struct-doc/dto/save-struct-doc.dto";
 import {
   assertReadableText,
   extractTextFromBuffer,
-} from "../../../common/document/document-text.util";
-import { findOwnedProject } from "../../../common/audit/user-scope";
-import { touchProjectUpdatedAt } from "../../../common/project/touch-project.util";
+} from "@common/document/document-text.util";
+import { findOwnedProject } from "@common/audit/user-scope";
+import { touchProjectUpdatedAt } from "@common/project/touch-project.util";
 import { StructDocService } from "@struct-doc/service/struct-doc.service";
 import {
   MAX_REQUIREMENT_DOC_CHINESE_CHARS,

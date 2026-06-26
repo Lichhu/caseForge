@@ -16,16 +16,16 @@ import {
 } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
-import { CancelGenerateDto } from "../dto/cancel-generate.dto";
-import { GenerateCasesDto } from "../dto/generate-cases.dto";
-import { RegenerateNodeDto } from "../dto/regenerate-node.dto";
-import { SyncToTestPlatformDto } from "../dto/sync-to-test-platform.dto";
-import { UpdateRunTreeDto } from "../dto/update-run-tree.dto";
-import { ListCaseRowsDto } from "../dto/list-case-rows.dto";
-import { CaseEditorService } from "../service/case-editor.service";
-import { CaseWorkspaceService } from "../service/case-workspace.service";
-import { ExportService } from "../service/export.service";
-import { CaseTestPlatformSyncService } from "../service/case-test-platform-sync.service";
+import { CancelGenerateDto } from "@case-editor/dto/cancel-generate.dto";
+import { GenerateCasesDto } from "@case-editor/dto/generate-cases.dto";
+import { RegenerateNodeDto } from "@case-editor/dto/regenerate-node.dto";
+import { SyncToTestPlatformDto } from "@case-editor/dto/sync-to-test-platform.dto";
+import { UpdateRunTreeDto } from "@case-editor/dto/update-run-tree.dto";
+import { ListCaseRowsDto } from "@case-editor/dto/list-case-rows.dto";
+import { CaseEditorService } from "@case-editor/service/case-editor.service";
+import { CaseWorkspaceService } from "@case-editor/service/case-workspace.service";
+import { ExportService } from "@case-editor/service/export.service";
+import { CaseTestPlatformSyncService } from "@case-editor/service/case-test-platform-sync.service";
 
 /** 案例编辑器 REST 控制器 */
 @ApiTags("case-editor")

@@ -4,9 +4,9 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
-import { PromptEntity } from "../entity/prompt.entity";
-import { ScenarioEntity } from "../entity/scenario.entity";
-import { ensureDefaultApiScenarios } from "../data/ensure-default-api-scenarios";
+import { PromptEntity } from "@scenario/entity/prompt.entity";
+import { ScenarioEntity } from "@scenario/entity/scenario.entity";
+import { ensureDefaultApiScenarios } from "@scenario/data/ensure-default-api-scenarios";
 
 @Injectable()
 export class ApiScenarioBootstrapService implements OnModuleInit {

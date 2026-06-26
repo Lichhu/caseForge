@@ -4,7 +4,7 @@
 import {
   assertReadableText,
   extractTextFromBuffer,
-} from "../../document/document-text.util";
+} from "@common/document/document-text.util";
 
 /** 从 URL 路径解析文件名（用于判断扩展名） */
 function extractFileNameFromUrl(url: string) {

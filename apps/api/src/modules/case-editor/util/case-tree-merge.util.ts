@@ -1,6 +1,6 @@
 import type { CaseTreeNode } from "@case-forge/shared";
 import { randomUUID } from "node:crypto";
-import type { TestPointSnapshot } from "../service/case-pipeline.service";
+import type { TestPointSnapshot } from "@case-editor/service/case-pipeline.service";
 
 type AncestorContext = {
   system?: string;

@@ -2,7 +2,7 @@
  * 结构化需求文档业务服务。
  * 负责需求文档上传记录、AI 异步结构化、临时文档自动保存、正式保存及测试要点同步。
  */
-import { AiWorkflowService } from "../../../common/ai-workflow/service/ai-workflow.service";
+import { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
 import { MinioStorageService } from "@minio/service/minio.service";
 import {
   BadRequestException,
@@ -30,22 +30,22 @@ import {
   isStructuringSlotActive,
   withStructuringSlot,
 } from "@struct-doc/util/structuring-concurrency";
-import { touchProjectUpdatedAt } from "../../../common/project/touch-project.util";
+import { touchProjectUpdatedAt } from "@common/project/touch-project.util";
 import {
   buildStructuringCancelledMessage,
   buildStructuringTimeoutMessage,
   getStructuringTimeoutMs,
   isStructuringTimedOut,
 } from "@struct-doc/util/structuring-timeout.util";
-import { fetchWorkflowFileContents } from "../../../common/ai-workflow/util/workflow-input.util";
+import { fetchWorkflowFileContents } from "@common/ai-workflow/util/workflow-input.util";
 import { In, Repository } from "typeorm";
-import { auditFieldsForUpdate } from "../../../common/audit/request-context";
+import { auditFieldsForUpdate } from "@common/audit/request-context";
 import {
   findOwnedProject,
   getScopedUserName,
   scopedWhere,
-} from "../../../common/audit/user-scope";
-import { toPublicStructDocDetail } from "../../../common/http/public-response.util";
+} from "@common/audit/user-scope";
+import { toPublicStructDocDetail } from "@common/http/public-response.util";
 
 /** 结构化需求文档核心业务逻辑。 */
 @Injectable()
@@ -331,7 +331,11 @@ export class StructDocService {
         }
 
         const parsedTestPoints = parseStructuredDoc(markdown);
-        if (!parsedTestPoints.length && markdown.trim()) {
+        const parseWarning = this.buildParseWarning(
+          parsedTestPoints.length,
+          markdown,
+        );
+        if (parseWarning) {
           this.logger.warn(
             `结构化完成但未解析到测试要点 projectId=${projectId}，请检查 Markdown 是否包含「系统」「功能模块」「测试要点」结构`,
           );
@@ -350,6 +354,8 @@ export class StructDocService {
             aiResponse: rawResponse as Record<string, unknown>,
             tempStructDoc: markdown,
             summaryStructDoc: undefined,
+            parsedTestPointCount: parsedTestPoints.length,
+            parseWarning,
             structuredDocName,
             structuringStatus: "completed",
             structuringError: undefined,
@@ -481,11 +487,21 @@ export class StructDocService {
       );
     }
 
-    const cachedSummaries = savedDocs
-      .filter((d) => d.summaryStructDoc?.trim())
-      .map((d) => d.summaryStructDoc!.trim());
-    if (cachedSummaries.length === savedDocs.length) {
-      return cachedSummaries.join("\n\n---\n\n");
+    const primaryDoc = savedDocs[0];
+    const primarySummary = primaryDoc.summaryStructDoc?.trim();
+    const allHaveCachedSummary = savedDocs.every((d) =>
+      d.summaryStructDoc?.trim(),
+    );
+    if (allHaveCachedSummary && primarySummary) {
+      const uniqueSummaries = [
+        ...new Set(
+          savedDocs.map((d) => d.summaryStructDoc!.trim()).filter(Boolean),
+        ),
+      ];
+      // 聚合 summary 只存一处；历史数据若各文档重复，也只返回单份。
+      return uniqueSummaries.length === 1
+        ? uniqueSummaries[0]
+        : uniqueSummaries.join("\n\n---\n\n");
     }
 
     const fullMarkdown = savedDocs
@@ -497,10 +513,20 @@ export class StructDocService {
         await this.aiWorkflowService.summarizeForCaseGenerate(fullMarkdown);
       const summary = text.trim();
       if (summary) {
-        await this.structDocRepo.update({ projectId }, {
+        await this.structDocRepo.update(primaryDoc.id, {
           summaryStructDoc: summary,
           ...auditFieldsForUpdate(),
         } as never);
+        const otherDocIds = savedDocs.slice(1).map((d) => d.id);
+        if (otherDocIds.length) {
+          await this.structDocRepo.update(
+            { id: In(otherDocIds) },
+            {
+              summaryStructDoc: null,
+              ...auditFieldsForUpdate(),
+            } as never,
+          );
+        }
         await touchProjectUpdatedAt(this.projectRepo, projectId);
         return summary;
       }
@@ -612,17 +638,34 @@ export class StructDocService {
     emptyWarnMessage: string,
   ) {
     const parsed = parseStructuredDoc(markdown);
+    const parseWarning = this.buildParseWarning(parsed.length, markdown);
+    if (parseWarning) {
+      this.logger.warn(`${emptyWarnMessage} projectId=${projectId}`);
+    }
+    await this.structDocRepo.update(structDocId, {
+      parsedTestPointCount: parsed.length,
+      parseWarning,
+      ...auditFieldsForUpdate(),
+    } as never);
     if (!parsed.length) {
-      if (markdown.trim()) {
-        this.logger.warn(`${emptyWarnMessage} projectId=${projectId}`);
-      }
       return;
     }
     await this.appendMissingTestPoints(projectId, structDocId, parsed);
   }
 
+  private buildParseWarning(parsedCount: number, markdown: string) {
+    if (!markdown.trim()) {
+      return undefined;
+    }
+    if (parsedCount > 0) {
+      return undefined;
+    }
+    return "未从结构化文档中解析到测试要点，请检查是否包含「系统」「功能模块」「测试要点」结构";
+  }
+
   /**
-   * 按「项目 ID + 系统 + 功能模块 + 测试要点标题」判断是否已存在；存在则跳过，不存在则新增，不删除、不覆盖已有记录。
+   * 按「项目 ID + 系统 + 功能模块 + 测试要点标题」判断是否已存在；
+   * 存在则按需更新描述字段，不存在则新增，不删除已有记录。
    */
   private async appendMissingTestPoints(
     projectId: string,
@@ -643,14 +686,43 @@ export class StructDocService {
     }
 
     const seenIncoming = new Set<string>();
-    const toInsert = items.filter((item) => {
+    const toInsert: SaveTestPointDto[] = [];
+    const toUpdate: TestPointEntity[] = [];
+
+    for (const item of items) {
       const key = this.testPointContentKey(item);
       if (!key || seenIncoming.has(key)) {
-        return false;
+        continue;
       }
       seenIncoming.add(key);
-      return !existingByContent.has(key);
-    });
+
+      const existingRow = existingByContent.get(key);
+      if (existingRow) {
+        const nextSystemDesc =
+          item.systemDesc?.trim() || existingRow.systemDesc || "";
+        const nextFeatureDesc =
+          item.featureDesc?.trim() || existingRow.featureDesc || "";
+        const nextTestPointDesc =
+          item.testPointDesc?.trim() || existingRow.testPointDesc || "";
+        if (
+          nextSystemDesc !== (existingRow.systemDesc || "") ||
+          nextFeatureDesc !== (existingRow.featureDesc || "") ||
+          nextTestPointDesc !== (existingRow.testPointDesc || "")
+        ) {
+          existingRow.systemDesc = nextSystemDesc;
+          existingRow.featureDesc = nextFeatureDesc;
+          existingRow.testPointDesc = nextTestPointDesc;
+          toUpdate.push(existingRow);
+        }
+        continue;
+      }
+
+      toInsert.push(item);
+    }
+
+    if (toUpdate.length) {
+      await this.testPointRepo.save(toUpdate);
+    }
 
     if (!toInsert.length) {
       return;

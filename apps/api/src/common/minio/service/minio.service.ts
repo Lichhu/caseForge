@@ -4,7 +4,7 @@
 import { Injectable, Logger, Inject } from "@nestjs/common";
 import * as Minio from "minio";
 import * as stream from "node:stream";
-import { MINIO_CONFIG, MinioModuleConfig } from "../minio.config";
+import { MINIO_CONFIG, MinioModuleConfig } from "@minio/minio.config";
 
 /**
  * MinIO 存储服务：封装桶检查、文件上传与访问 URL 生成
@@ -14,17 +14,11 @@ export class MinioStorageService {
   private readonly logger = new Logger(MinioStorageService.name);
   private minioClient: Minio.Client;
   private bucketName: string;
-  private pathPrefix: string;
-  private publicBaseUrl: string;
 
   constructor(
     @Inject(MINIO_CONFIG) private readonly config: MinioModuleConfig,
   ) {
     this.bucketName = this.config.bucketName || "case-forge";
-    this.pathPrefix = this.config.pathPrefix || "case-forge";
-    this.publicBaseUrl =
-      this.config.publicBaseUrl ||
-      `http://${this.config.endPoint}:${this.config.port}/${this.bucketName}`;
     this.minioClient = new Minio.Client({
       endPoint: this.config.endPoint,
       port: this.config.port,

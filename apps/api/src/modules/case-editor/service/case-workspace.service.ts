@@ -27,7 +27,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { extractTextFromBuffer } from "../../../common/document/document-text.util";
+import { extractTextFromBuffer } from "@common/document/document-text.util";
 import type {
   CaseForgeProject,
   CaseTreeNode,
@@ -43,44 +43,43 @@ import {
   mapTestPointsForWorkflow,
   type ScenarioPromptInput,
   type TestPointGenerationInput,
-} from "../util/case-workflow-input.util";
-import { CancelGenerateDto } from "../dto/cancel-generate.dto";
-import { GenerateCasesDto } from "../dto/generate-cases.dto";
-import { RegenerateNodeDto } from "../dto/regenerate-node.dto";
+} from "@case-editor/util/case-workflow-input.util";
+import { CancelGenerateDto } from "@case-editor/dto/cancel-generate.dto";
+import { GenerateCasesDto } from "@case-editor/dto/generate-cases.dto";
+import { RegenerateNodeDto } from "@case-editor/dto/regenerate-node.dto";
 import { CasePipelineService } from "./case-pipeline.service";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { StructDocEntity } from "@struct-doc/entity/struct-doc.entity";
 import { TestPointEntity } from "@struct-doc/entity/test-point.entity";
 import { stripDocumentExtension } from "@struct-doc/util/struct-doc.parser";
 import { In, Repository } from "typeorm";
-import { auditFieldsForUpdate } from "../../../common/audit/request-context";
+import { auditFieldsForUpdate } from "@common/audit/request-context";
 import {
   findOwnedProject,
   scopedWhere,
-} from "../../../common/audit/user-scope";
+} from "@common/audit/user-scope";
 import {
   cancelCaseGenerate,
   clearCaseGenerateSlot,
   getCaseGenerateRevertStatus,
   isCaseGenerateCancelled,
   registerCaseGenerate,
-} from "../util/case-generate-cancel.registry";
+} from "@case-editor/util/case-generate-cancel.registry";
 import {
   type CaseTreeMergeMode,
   mergeCaseTreeBranches,
   mergeSourceTestPointIds,
   reassignCaseTreeNodeIds,
-} from "../util/case-tree-merge.util";
-import { withProjectCaseTreeMerge } from "../util/case-tree-merge-lock";
-import { touchProjectUpdatedAt } from "../../../common/project/touch-project.util";
+} from "@case-editor/util/case-tree-merge.util";
+import { withProjectCaseTreeMerge } from "@case-editor/util/case-tree-merge-lock";
+import { touchProjectUpdatedAt } from "@common/project/touch-project.util";
 import { CaseGenerateQueueService } from "./case-generate-queue.service";
+import { truncateRequirementContext } from "@case-editor/util/requirement-context.util";
 import { StructDocService } from "@struct-doc/service/struct-doc.service";
 
 /** 案例编辑器工作区业务编排服务 */
 @Injectable()
 export class CaseWorkspaceService {
-  private readonly logger = new Logger(CaseWorkspaceService.name);
-
   constructor(
     @InjectRepository(CaseProjectEntity)
     private readonly projectRepo: Repository<CaseProjectEntity>,
@@ -188,10 +187,9 @@ export class CaseWorkspaceService {
   /**
    * 案例生成入口（Controller 直接调用）
    *
-   * - **单条**：同步执行，HTTP 会阻塞到 AI 返回并写入案例树（约 1～3 分钟）
-   * - **批量**：先把全部 testPointIds 标为「生成中」并立即响应；后台 foreach 逐条生成
+   * 立即将测试要点标为「生成中」并入队，HTTP 快速返回；后台队列 worker 逐条消化。
    *
-   * @see runBatchGenerateInBackground 批量后台消化
+   * @see CaseGenerateQueueService 队列调度
    * @see generateCasesInternal       单条实际生成逻辑
    */
   async generateCases(projectId: string, dto: GenerateCasesDto) {
@@ -303,8 +301,9 @@ export class CaseWorkspaceService {
       throw new BadRequestException("请指定要生成案例的测试要点");
     }
 
-    const requirementContext =
-      await this.structDocService.ensureSummaryStructDoc(projectId);
+    const requirementContext = truncateRequirementContext(
+      await this.structDocService.ensureSummaryStructDoc(projectId),
+    );
 
     const selectedTestPoints = await this.loadAndValidateGenerateTestPoints(
       projectId,
@@ -344,7 +343,7 @@ export class CaseWorkspaceService {
     try {
       // --- AI 生成案例 JSON 并转为六级案例树 ---
       const requirementDocument = this.toRequirementDocument(structDoc);
-      const { tree: generatedTree } =
+      const { tree: generatedTree, failures } =
         await this.pipeline.generateJsonCaseTree({
           document: {
             ...requirementDocument,
@@ -373,19 +372,40 @@ export class CaseWorkspaceService {
         return this.buildProjectView(projectId);
       }
 
+      const failedByTestPointId = new Map(
+        failures.map((item) => [item.testPointId, item.message]),
+      );
+      const succeededTestPointIds = stillActiveTestPointIds.filter(
+        (id) => !failedByTestPointId.has(id),
+      );
+      if (failedByTestPointId.size) {
+        for (const [testPointId, message] of failedByTestPointId) {
+          await this.updateDynamicStatus([testPointId], "生成失败", message);
+        }
+      }
+      if (!succeededTestPointIds.length) {
+        throw new BadRequestException(
+          failures
+            .map((item) => `「${item.testPoint}」：${item.message}`)
+            .join("；") || "案例生成失败，请稍后重试",
+        );
+      }
+
       const activeSnapshots = activeTestPointInputs.filter((item) =>
-        stillActiveTestPointIds.includes(item.id),
+        succeededTestPointIds.includes(item.id),
       );
 
       const instructs = await this.instructRepo.find({
-        where: { testPointId: In(stillActiveTestPointIds) },
+        where: { testPointId: In(succeededTestPointIds) },
       });
       const mergeModeByTestPointId = new Map<string, CaseTreeMergeMode>(
-        stillActiveTestPointIds.map((testPointId) => {
+        succeededTestPointIds.map((testPointId) => {
           const instruct = instructs.find(
             (item) => item.testPointId === testPointId,
           );
-          const mode: CaseTreeMergeMode = instruct?.isAppend ? "append" : "full";
+          const mode: CaseTreeMergeMode = instruct?.isAppend
+            ? "append"
+            : "full";
           return [testPointId, mode];
         }),
       );
@@ -395,7 +415,7 @@ export class CaseWorkspaceService {
         const runs = await this.caseEditorService.listRuns(projectId);
         const previousRun = runs[0];
         let finalTree = generatedTree;
-        let sourceTestPointIds = stillActiveTestPointIds;
+        let sourceTestPointIds = succeededTestPointIds;
         if (previousRun?.tree && activeSnapshots.length) {
           finalTree = reassignCaseTreeNodeIds(
             mergeCaseTreeBranches(
@@ -422,7 +442,7 @@ export class CaseWorkspaceService {
         });
       });
 
-      await this.updateDynamicStatus(stillActiveTestPointIds, "生成完成");
+      await this.updateDynamicStatus(succeededTestPointIds, "生成完成");
       await touchProjectUpdatedAt(this.projectRepo, projectId);
       return this.buildProjectView(projectId);
     } catch (error) {
@@ -785,15 +805,6 @@ export class CaseWorkspaceService {
 
   private async ensureProject(projectId: string) {
     return findOwnedProject(this.projectRepo, projectId);
-  }
-
-  private async getStructDocId(projectId: string) {
-    return (
-      await this.structDocRepo.findOne({
-        where: scopedWhere({ projectId }),
-        select: ["id"],
-      })
-    )?.id;
   }
 
   private async extractText(

@@ -12,23 +12,23 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
-import { RequestContext } from "../../../common/audit/request-context";
-import { TEST_PLATFORM_CONNECTION } from "../../../common/test-platform";
-import { TestPlatformCaseEntity } from "../../../common/test-platform/entity/test-platform-case.entity";
-import { TestPlatformCaseStepEntity } from "../../../common/test-platform/entity/test-platform-case-step.entity";
-import { TestPlatformProjectEntity } from "../../../common/test-platform/entity/test-platform-project.entity";
+import { RequestContext } from "@common/audit/request-context";
+import { TEST_PLATFORM_CONNECTION } from "@common/test-platform";
+import { TestPlatformCaseEntity } from "@common/test-platform/entity/test-platform-case.entity";
+import { TestPlatformCaseStepEntity } from "@common/test-platform/entity/test-platform-case-step.entity";
+import { TestPlatformProjectEntity } from "@common/test-platform/entity/test-platform-project.entity";
 import {
   findOwnedProject,
   scopedWhere,
-} from "../../../common/audit/user-scope";
+} from "@common/audit/user-scope";
 import { CaseEditorEntity } from "@case-editor/entity/case-editor.entity";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { DataSource, Repository } from "typeorm";
-import { buildOperatingSteps } from "../util/case-operating-steps.util";
+import { buildOperatingSteps } from "@case-editor/util/case-operating-steps.util";
 import {
   isValidProjectRequirementCode,
   resolveProjectRequirementCode,
-} from "../util/requirement-code.util";
+} from "@case-editor/util/requirement-code.util";
 
 export interface SyncToTestPlatformResult {
   projectCode: string;
@@ -48,10 +48,6 @@ export class CaseTestPlatformSyncService {
     private readonly projectRepo: Repository<CaseProjectEntity>,
     @InjectRepository(TestPlatformProjectEntity, TEST_PLATFORM_CONNECTION)
     private readonly testProjectRepo: Repository<TestPlatformProjectEntity>,
-    @InjectRepository(TestPlatformCaseEntity, TEST_PLATFORM_CONNECTION)
-    private readonly testCaseRepo: Repository<TestPlatformCaseEntity>,
-    @InjectRepository(TestPlatformCaseStepEntity, TEST_PLATFORM_CONNECTION)
-    private readonly testStepRepo: Repository<TestPlatformCaseStepEntity>,
     @InjectDataSource(TEST_PLATFORM_CONNECTION)
     private readonly testDataSource: DataSource,
   ) {}
@@ -91,7 +87,9 @@ export class CaseTestPlatformSyncService {
       throw new BadRequestException("当前案例树中没有可同步的案例节点");
     }
 
-    const uniqueIds = [...new Set(caseNodeIds.map((id) => id.trim()).filter(Boolean))];
+    const uniqueIds = [
+      ...new Set(caseNodeIds.map((id) => id.trim()).filter(Boolean)),
+    ];
     if (!uniqueIds.length) {
       throw new BadRequestException("请至少选择一条案例进行同步");
     }
@@ -105,7 +103,9 @@ export class CaseTestPlatformSyncService {
     }
 
     const selectedIdSet = new Set(uniqueIds);
-    const selectedRows = rows.filter((row) => selectedIdSet.has(row.caseNodeId));
+    const selectedRows = rows.filter((row) =>
+      selectedIdSet.has(row.caseNodeId),
+    );
     if (!selectedRows.length) {
       throw new BadRequestException("请至少选择一条案例进行同步");
     }

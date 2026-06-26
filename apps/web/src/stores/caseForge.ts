@@ -974,7 +974,29 @@ export const useCaseForgeStore = defineStore("caseForge", {
           if (completed) {
             await this.loadDynamicWorkspace();
             await this.bumpSidebarProjectOrder(projectId);
-            message.success("需求文档已结构化");
+            const completedDocs = docs.filter(
+              (d) => d.structuringStatus === "completed",
+            );
+            const zeroParseDoc = completedDocs.find(
+              (d) =>
+                d.parseWarning ||
+                (d.parsedTestPointCount != null && d.parsedTestPointCount === 0),
+            );
+            if (zeroParseDoc?.parseWarning) {
+              message.warning(
+                `${zeroParseDoc.reqDocName || "需求文档"}：${zeroParseDoc.parseWarning}`,
+              );
+            } else {
+              const totalPoints = completedDocs.reduce(
+                (sum, d) => sum + (d.parsedTestPointCount ?? 0),
+                0,
+              );
+              message.success(
+                totalPoints > 0
+                  ? `需求文档已结构化，解析到 ${totalPoints} 个测试要点`
+                  : "需求文档已结构化",
+              );
+            }
           } else if (failed) {
             message.error(failed.structuringError || "结构化失败，请稍后重试");
           }

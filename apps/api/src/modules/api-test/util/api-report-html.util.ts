@@ -1,4 +1,4 @@
-import { formatRunItemStatus } from "../../../common/pdf/pdf-cjk-font.util";
+import { formatRunItemStatus } from "@common/pdf/pdf-cjk-font.util";
 
 interface HtmlRunItem {
   caseTitle: string;
