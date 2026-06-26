@@ -54,7 +54,12 @@
               v-else-if="doc.structuringStatus === 'failed'"
               :title="doc.structuringError || '结构化失败'"
             >
-              <a-tag color="error" size="small">结构化失败</a-tag>
+              <a-tag
+                :color="doc.structuringError?.includes('取消') ? 'warning' : 'error'"
+                size="small"
+              >
+                {{ doc.structuringError?.includes('取消') ? '取消结构化' : '结构化失败' }}
+              </a-tag>
             </a-tooltip>
             <a-tag v-else color="default" size="small">待上传/结构化</a-tag>
           </div>
@@ -69,6 +74,18 @@
           >
             结构化
           </a-button>
+          <a-tooltip
+            v-if="doc.structuringStatus === 'processing'"
+            title="取消当前正在进行的结构化任务"
+          >
+            <a-button
+              type="default"
+              size="small"
+              @click="cancelStructure(doc)"
+            >
+              取消结构化
+            </a-button>
+          </a-tooltip>
           <a-button
             type="text"
             size="small"
@@ -146,6 +163,22 @@ function startStructure(doc: StructDocDetail) {
   void store.submitRequirement();
 }
 
+function cancelStructure(doc: StructDocDetail) {
+  if (doc.structuringStatus !== 'processing') {
+    return;
+  }
+  Modal.confirm({
+    title: '取消结构化？',
+    content: '取消后当前结构化任务将终止，已生成的内容可能不完整，是否继续？',
+    okText: '继续取消',
+    cancelText: '再等等',
+    centered: true,
+    onOk: () => {
+      void store.cancelStructuring(doc.id);
+    },
+  });
+}
+
 function confirmDeleteDoc(doc: StructDocDetail) {
   Modal.confirm({
     title: '删除文档',
@@ -168,9 +201,9 @@ function confirmDeleteDoc(doc: StructDocDetail) {
 
 .struct-doc-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 16px;
-  padding: 16px 0;
+  padding: 16px;
 }
 
 .struct-doc-card {
@@ -235,7 +268,9 @@ function confirmDeleteDoc(doc: StructDocDetail) {
 
 .struct-doc-card-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
   flex-shrink: 0;
 }

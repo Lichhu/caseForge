@@ -137,6 +137,8 @@ interface State {
   testPointDetails: Record<string, TestPointInstructionItem>;
   testPointDetailLoadingIds: string[];
   selectedTestPointIds: string[];
+  /** 本地新增但尚未保存到后端的测试要点 ID */
+  newTestPointIds: string[];
   /** 当前前端正在请求生成的测试要点 ID，用于区分「真在生成」与「卡住」 */
   generatingTestPointIds: string[];
   /** 批量生成进度（非阻塞提示，不用 message.loading 遮罩） */
@@ -184,6 +186,7 @@ export const useCaseForgeStore = defineStore("caseForge", {
     testPointDetails: {},
     testPointDetailLoadingIds: [],
     selectedTestPointIds: [],
+    newTestPointIds: [],
     generatingTestPointIds: [],
     batchGenerateProgress: null,
     treeSaving: false,
@@ -471,6 +474,7 @@ export const useCaseForgeStore = defineStore("caseForge", {
       this.testPointDetails = {};
       this.testPointDetailLoadingIds = [];
       this.selectedTestPointIds = [];
+      this.newTestPointIds = [];
     },
     async loadTestPointWorkspaceMeta() {
       if (!this.activeProject) {
@@ -667,6 +671,15 @@ export const useCaseForgeStore = defineStore("caseForge", {
       if (!this.activeProject) {
         this.resetTestPointWorkspaceState();
         return;
+      }
+      // 刷新时丢弃未保存的本地新增项
+      const newIds = this.newTestPointIds;
+      if (newIds.length) {
+        newIds.forEach((id) => delete this.testPointDetails[id]);
+        this.newTestPointIds = [];
+        this.selectedTestPointIds = this.selectedTestPointIds.filter(
+          (id) => !newIds.includes(id),
+        );
       }
       const page = options?.page ?? this.testPointListPage;
       const result = await listDynamicTestPoints({
@@ -887,9 +900,11 @@ export const useCaseForgeStore = defineStore("caseForge", {
         message.error((error as Error)?.message || "启动结构化失败");
       }
     },
-    async cancelStructuring() {
+    async cancelStructuring(docId?: string) {
       if (!this.activeProject) return;
-      const doc = this.activeStructDoc;
+      const doc = docId
+        ? this.structDocs.find((item) => item.id === docId)
+        : this.activeStructDoc;
       if (!doc) return;
       try {
         const updated = await cancelStructureRequirement(
@@ -1486,40 +1501,63 @@ export const useCaseForgeStore = defineStore("caseForge", {
         };
       },
     ) {
-      if (!this.activeProject || !testPointIds.length) return;
+      if (!this.activeProject || !testPointIds.length) return testPointIds;
       if (payload.definition) {
         const { system, featureModule, testPoint } = payload.definition;
         if (!system.trim() || !featureModule.trim() || !testPoint.trim()) {
           message.warning("系统、功能模块、测试要点均不能为空");
-          return;
+          return testPointIds;
         }
       }
+
+      let finalIds = [...testPointIds];
+
       if (payload.definition && testPointIds.length === 1) {
-        await updateDynamicTestPointDefinition(
-          testPointIds[0],
-          payload.definition,
-        );
+        const isNew = this.newTestPointIds.includes(testPointIds[0]);
+        if (isNew) {
+          if (!this.activeStructDoc?.id) {
+            message.warning("请先选择结构化文档");
+            return testPointIds;
+          }
+          const real = await createDynamicTestPoint({
+            projectId: this.activeProject.id,
+            structDocId: this.activeStructDoc.id,
+            system: payload.definition.system,
+            systemDesc: payload.definition.systemDesc,
+            featureModule: payload.definition.featureModule,
+            featureDesc: payload.definition.featureDesc,
+            testPoint: payload.definition.testPoint,
+            testPointDesc: payload.definition.testPointDesc,
+          });
+          this.replaceNewTestPointWithReal(testPointIds[0], real);
+          finalIds = [real.id];
+        } else {
+          await updateDynamicTestPointDefinition(
+            testPointIds[0],
+            payload.definition,
+          );
+        }
         await this.loadTestPointWorkspaceMeta();
       }
-      if (testPointIds.length === 1) {
-        await this.saveTestPointInstruction(
-          testPointIds[0],
-          payload.instruction,
-          { silent: true },
-        );
+
+      if (finalIds.length === 1) {
+        await this.saveTestPointInstruction(finalIds[0], payload.instruction, {
+          silent: true,
+        });
       } else {
         const rows = await this.batchSaveTestPointInstruction(
           {
-            testPointIds,
+            testPointIds: finalIds,
             ...payload.instruction,
           },
           { silent: true },
         );
         if (!rows.length) {
-          return;
+          return finalIds;
         }
       }
       message.success("测试要点已保存");
+      return finalIds;
     },
     async saveTree(options?: { successMessage?: string }) {
       if (!this.activeProject || !this.activeRun) return;
@@ -1643,19 +1681,27 @@ export const useCaseForgeStore = defineStore("caseForge", {
       if (!this.activeProject || !this.activeStructDoc?.id) {
         return null;
       }
-      const created = await createDynamicTestPoint({
+      const tempId = createTempTestPointId();
+      const now = new Date().toISOString();
+      const created: TestPointSummaryItem = {
+        id: tempId,
         projectId: this.activeProject.id,
         structDocId: this.activeStructDoc.id,
-        system: payload?.system,
-        systemDesc: payload?.systemDesc,
-        featureModule: payload?.featureModule,
-        featureDesc: payload?.featureDesc,
-        testPoint: payload?.testPoint,
-        testPointDesc: payload?.testPointDesc,
-      });
-      await this.loadTestPointWorkspaceMeta();
-      await this.refreshTestPoints({ force: true, page: 1 });
-      this.testPointDetails[created.id] = {
+        system: payload?.system ?? "",
+        systemDesc: payload?.systemDesc ?? "",
+        featureModule: payload?.featureModule ?? "",
+        featureDesc: payload?.featureDesc ?? "",
+        testPoint: payload?.testPoint ?? "",
+        testPointDesc: payload?.testPointDesc ?? "",
+        status: "待编辑",
+        generateError: "",
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.testPoints.unshift(created);
+      this.testPointTotal += 1;
+      this.newTestPointIds.push(tempId);
+      this.testPointDetails[tempId] = {
         ...created,
         naturalText: "",
         isFull: true,
@@ -1665,6 +1711,50 @@ export const useCaseForgeStore = defineStore("caseForge", {
       };
       return created;
     },
+    discardNewTestPoints(testPointIds: string[]) {
+      const ids = testPointIds.filter((id) =>
+        this.newTestPointIds.includes(id),
+      );
+      if (!ids.length) {
+        return;
+      }
+      this.testPoints = this.testPoints.filter(
+        (item) => !ids.includes(item.id),
+      );
+      this.testPointTotal = Math.max(0, this.testPointTotal - ids.length);
+      ids.forEach((id) => {
+        delete this.testPointDetails[id];
+      });
+      this.newTestPointIds = this.newTestPointIds.filter(
+        (id) => !ids.includes(id),
+      );
+      this.selectedTestPointIds = this.selectedTestPointIds.filter(
+        (id) => !ids.includes(id),
+      );
+    },
+    replaceNewTestPointWithReal(
+      tempId: string,
+      realItem: TestPointSummaryItem,
+    ) {
+      const index = this.testPoints.findIndex((item) => item.id === tempId);
+      if (index >= 0) {
+        this.testPoints.splice(index, 1, { ...realItem });
+      }
+      if (this.testPointDetails[tempId]) {
+        this.testPointDetails[realItem.id] = {
+          ...this.testPointDetails[tempId],
+          ...realItem,
+          id: realItem.id,
+        };
+        delete this.testPointDetails[tempId];
+      }
+      if (this.selectedTestPointIds.includes(tempId)) {
+        this.selectedTestPointIds = this.selectedTestPointIds.map((id) =>
+          id === tempId ? realItem.id : id,
+        );
+      }
+      this.newTestPointIds = this.newTestPointIds.filter((id) => id !== tempId);
+    },
     async deleteTestPoints(
       testPointIds: string[],
       options?: { successMessage?: string },
@@ -1672,19 +1762,33 @@ export const useCaseForgeStore = defineStore("caseForge", {
       if (!testPointIds.length) {
         return;
       }
-      await deleteDynamicTestPoints(testPointIds);
-      testPointIds.forEach((id) => {
-        delete this.testPointDetails[id];
-        this.generatingTestPointIds = this.generatingTestPointIds.filter(
-          (item) => item !== id,
-        );
-        this.pollingGenerateTestPointIds =
-          this.pollingGenerateTestPointIds.filter((item) => item !== id);
-      });
-      this.selectedTestPointIds = this.selectedTestPointIds.filter(
-        (id) => !testPointIds.includes(id),
+      const newIds = testPointIds.filter((id) =>
+        this.newTestPointIds.includes(id),
       );
-      await this.reconcileTestPointListAfterMutation();
+      const realIds = testPointIds.filter(
+        (id) => !this.newTestPointIds.includes(id),
+      );
+
+      if (newIds.length) {
+        this.discardNewTestPoints(newIds);
+      }
+
+      if (realIds.length) {
+        await deleteDynamicTestPoints(realIds);
+        realIds.forEach((id) => {
+          delete this.testPointDetails[id];
+          this.generatingTestPointIds = this.generatingTestPointIds.filter(
+            (item) => item !== id,
+          );
+          this.pollingGenerateTestPointIds =
+            this.pollingGenerateTestPointIds.filter((item) => item !== id);
+        });
+        this.selectedTestPointIds = this.selectedTestPointIds.filter(
+          (id) => !realIds.includes(id),
+        );
+        await this.reconcileTestPointListAfterMutation();
+      }
+
       message.success(
         options?.successMessage ??
           (testPointIds.length > 1
@@ -1803,6 +1907,16 @@ export const useCaseForgeStore = defineStore("caseForge", {
     },
   },
 });
+
+function createTempTestPointId(): string {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
+    return `new-${crypto.randomUUID()}`;
+  }
+  return `new-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
 
 function isEnabledFlag(value: unknown) {
   if (value === true || value === 1) return true;

@@ -3,7 +3,14 @@
  */
 import { ApiPropertyOptional } from "@nestjs/swagger";
 import { Transform, Type } from "class-transformer";
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Min } from "class-validator";
+import {
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Min,
+} from "class-validator";
 import { CASE_FORGE_PAGE_SIZE_OPTIONS } from "@case-forge/shared";
 
 /** 案例 Excel 行分页查询参数 */
@@ -27,6 +34,16 @@ export class ListCaseRowsDto {
   @IsString()
   requirement?: string;
 
+  @ApiPropertyOptional({ description: "按系统精确筛选" })
+  @IsOptional()
+  @IsString()
+  system?: string;
+
+  @ApiPropertyOptional({ description: "按功能模块精确筛选" })
+  @IsOptional()
+  @IsString()
+  module?: string;
+
   @ApiPropertyOptional({ enum: ["高", "中", "低"] })
   @IsOptional()
   @IsIn(["高", "中", "低"])
@@ -47,7 +64,9 @@ export class ListCaseRowsDto {
   @IsString()
   focusCaseNodeId?: string;
 
-  @ApiPropertyOptional({ description: "仅返回符合筛选的 caseNodeId 列表（用于全选）" })
+  @ApiPropertyOptional({
+    description: "仅返回符合筛选的 caseNodeId 列表（用于全选）",
+  })
   @IsOptional()
   @Transform(({ value }) => value === "1" || value === "true" || value === true)
   @IsBoolean()

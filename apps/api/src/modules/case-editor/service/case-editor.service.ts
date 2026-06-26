@@ -23,6 +23,8 @@ import {
   flattenCaseTreeToExcel,
   filterCaseExcelRows,
   collectCaseExcelRequirements,
+  collectCaseExcelSystems,
+  collectCaseExcelModules,
   paginateCaseExcelRows,
   findCaseExcelRowPage,
   normalizeCaseForgePageSize,
@@ -184,12 +186,16 @@ export class CaseEditorService {
     const page = Math.max(1, Number(query.page) || 1);
     const filterQuery = {
       requirement: query.requirement?.trim() || undefined,
+      system: query.system?.trim() || undefined,
+      module: query.module?.trim() || undefined,
       priority: query.priority,
       caseNature: query.caseNature,
       keyword: query.keyword?.trim() || undefined,
     };
     const filtered = filterCaseExcelRows(rows, filterQuery);
     const requirements = collectCaseExcelRequirements(rows);
+    const systems = collectCaseExcelSystems(rows);
+    const modules = collectCaseExcelModules(rows);
     if (query.idsOnly) {
       return {
         items: [],
@@ -199,6 +205,8 @@ export class CaseEditorService {
         page: 1,
         pageSize: filtered.length,
         requirements,
+        systems,
+        modules,
       };
     }
     const focusCaseNodeId = query.focusCaseNodeId?.trim();
@@ -214,6 +222,8 @@ export class CaseEditorService {
       page: effectivePage,
       pageSize,
       requirements,
+      systems,
+      modules,
       ...(focusPage !== undefined ? { focusPage } : {}),
     };
   }

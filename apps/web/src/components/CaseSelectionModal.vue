@@ -25,19 +25,61 @@
       <section class="case-select-filter-card">
         <div class="case-filter-row">
           <div class="case-filter-item">
-            <label class="case-filter-label" for="case-requirement-filter">测试要点</label>
-            <a-select
-              id="case-requirement-filter"
-              v-model:value="selectedRequirement"
-              class="case-filter-control"
-              placeholder="全部测试要点，可输入搜索"
-              allow-clear
-              show-search
-              :disabled="!requirementOptions.length"
-              :options="requirementOptions"
-              :filter-option="filterRequirementOption"
-            />
+            <label class="case-filter-label" for="case-system-filter">系统</label>
+            <a-tooltip :title="selectedSystem || undefined">
+              <a-select
+                id="case-system-filter"
+                v-model:value="selectedSystem"
+                class="case-filter-control"
+                placeholder="全部系统"
+                allow-clear
+                show-search
+                :dropdown-match-select-width="false"
+                popup-class-name="case-select-dropdown"
+                :disabled="!systemOptions.length"
+                :options="systemOptions"
+                :filter-option="filterRequirementOption"
+              />
+            </a-tooltip>
           </div>
+          <div class="case-filter-item">
+            <label class="case-filter-label" for="case-module-filter">功能模块</label>
+            <a-tooltip :title="selectedModule || undefined">
+              <a-select
+                id="case-module-filter"
+                v-model:value="selectedModule"
+                class="case-filter-control"
+                placeholder="全部功能模块"
+                allow-clear
+                show-search
+                :dropdown-match-select-width="false"
+                popup-class-name="case-select-dropdown"
+                :disabled="!moduleOptions.length"
+                :options="moduleOptions"
+                :filter-option="filterRequirementOption"
+              />
+            </a-tooltip>
+          </div>
+          <div class="case-filter-item">
+            <label class="case-filter-label" for="case-requirement-filter">测试要点</label>
+            <a-tooltip :title="selectedRequirement || undefined">
+              <a-select
+                id="case-requirement-filter"
+                v-model:value="selectedRequirement"
+                class="case-filter-control"
+                placeholder="全部测试要点"
+                allow-clear
+                show-search
+                :dropdown-match-select-width="false"
+                popup-class-name="case-select-dropdown"
+                :disabled="!requirementOptions.length"
+                :options="requirementOptions"
+                :filter-option="filterRequirementOption"
+              />
+            </a-tooltip>
+          </div>
+        </div>
+        <div class="case-filter-row">
           <div class="case-filter-item">
             <label class="case-filter-label" for="case-keyword-filter">案例</label>
             <a-input-search
@@ -49,7 +91,7 @@
               :disabled="!totalRows"
             />
           </div>
-          <div class="case-filter-item case-filter-item--compact">
+          <div class="case-filter-item">
             <label class="case-filter-label" for="case-priority-filter">优先级</label>
             <a-select
               id="case-priority-filter"
@@ -57,10 +99,12 @@
               class="case-filter-control"
               placeholder="全部"
               allow-clear
+              :dropdown-match-select-width="false"
+              popup-class-name="case-select-dropdown"
               :options="priorityOptions"
             />
           </div>
-          <div class="case-filter-item case-filter-item--compact">
+          <div class="case-filter-item">
             <label class="case-filter-label" for="case-nature-filter">案例性质</label>
             <a-select
               id="case-nature-filter"
@@ -68,6 +112,8 @@
               class="case-filter-control"
               placeholder="全部"
               allow-clear
+              :dropdown-match-select-width="false"
+              popup-class-name="case-select-dropdown"
               :options="caseNatureOptions"
             />
           </div>
@@ -146,10 +192,14 @@
 import { computed, ref, watch } from 'vue';
 import { DownloadOutlined } from '@ant-design/icons-vue';
 import type { TableColumnType, TablePaginationConfig } from 'ant-design-vue';
-import type { CaseNature, CasePriority } from '@case-forge/shared';
+import type { CaseNature, CasePriority, CaseTreeNode } from '@case-forge/shared';
 import {
   caseForgePageSizeOptionLabels,
+  collectCaseExcelRequirements,
+  collectCaseExcelSystems,
+  collectCaseExcelModules,
   DEFAULT_CASE_FORGE_PAGE_SIZE,
+  flattenCaseTreeToExcel,
   normalizeCaseForgePageSize,
   shouldShowCaseForgePagination,
 } from '@case-forge/shared';
@@ -173,6 +223,7 @@ const props = defineProps<{
   open: boolean;
   projectId?: string;
   runId?: string;
+  tree?: CaseTreeNode;
   mode?: CaseSelectionMode;
   confirmLoading?: boolean;
 }>();
@@ -184,6 +235,8 @@ const emit = defineEmits<{
 }>();
 
 const selectedRowKeys = ref<string[]>([]);
+const selectedSystem = ref<string>();
+const selectedModule = ref<string>();
 const selectedRequirement = ref<string>();
 const selectedPriority = ref<string>();
 const selectedCaseNature = ref<string>();
@@ -194,8 +247,8 @@ const listLoading = ref(false);
 const tableRows = ref<CaseSelectionRow[]>([]);
 const totalFiltered = ref(0);
 const totalRows = ref(0);
-const serverRequirements = ref<string[]>([]);
 let fetchSeq = 0;
+let isCascading = false;
 
 const priorityOptions = [
   { label: '高', value: '高' },
@@ -233,6 +286,8 @@ function buildListParams(options?: { idsOnly?: boolean }) {
     page: listPage.value,
     pageSize: listPageSize.value,
     requirement: selectedRequirement.value,
+    system: selectedSystem.value,
+    module: selectedModule.value,
     priority: selectedPriority.value as CasePriority | undefined,
     caseNature: selectedCaseNature.value as CaseNature | undefined,
     keyword: caseKeyword.value.trim() || undefined,
@@ -247,7 +302,6 @@ async function fetchRows() {
     tableRows.value = [];
     totalFiltered.value = 0;
     totalRows.value = 0;
-    serverRequirements.value = [];
     return;
   }
   const seq = ++fetchSeq;
@@ -266,7 +320,6 @@ async function fetchRows() {
     }));
     totalFiltered.value = result.total;
     totalRows.value = result.totalRows;
-    serverRequirements.value = result.requirements;
     const maxPage = Math.max(1, Math.ceil(result.total / listPageSize.value));
     if (listPage.value > maxPage) {
       listPage.value = maxPage;
@@ -285,12 +338,40 @@ const debouncedFetchRows = debounce(() => {
   void fetchRows();
 }, 300);
 
-const requirementOptions = computed(() =>
-  serverRequirements.value.map((value) => ({ value, label: value })),
+const allRows = computed(() =>
+  props.tree ? flattenCaseTreeToExcel(props.tree).rows : [],
 );
+
+const systemOptions = computed(() =>
+  collectCaseExcelSystems(allRows.value).map((value) => ({ value, label: value })),
+);
+
+const moduleOptions = computed(() => {
+  const rows = selectedSystem.value
+    ? allRows.value.filter((row) => row.system === selectedSystem.value)
+    : allRows.value;
+  return collectCaseExcelModules(rows).map((value) => ({ value, label: value }));
+});
+
+const requirementOptions = computed(() => {
+  let rows = allRows.value;
+  if (selectedSystem.value) {
+    rows = rows.filter((row) => row.system === selectedSystem.value);
+  }
+  if (selectedModule.value) {
+    rows = rows.filter((row) => row.module === selectedModule.value);
+  }
+  return collectCaseExcelRequirements(rows).map((value) => ({ value, label: value }));
+});
 
 const activeFilterSummary = computed(() => {
   const parts: string[] = [];
+  if (selectedSystem.value) {
+    parts.push(`系统：${selectedSystem.value}`);
+  }
+  if (selectedModule.value) {
+    parts.push(`功能模块：${selectedModule.value}`);
+  }
   if (selectedRequirement.value) {
     parts.push(`测试要点：${selectedRequirement.value}`);
   }
@@ -424,6 +505,8 @@ watch(
       return;
     }
     selectedRowKeys.value = [];
+    selectedSystem.value = undefined;
+    selectedModule.value = undefined;
     selectedRequirement.value = undefined;
     selectedPriority.value = undefined;
     selectedCaseNature.value = undefined;
@@ -433,8 +516,25 @@ watch(
   },
 );
 
+watch(selectedSystem, () => {
+  if (!props.open || isCascading) return;
+  isCascading = true;
+  selectedModule.value = undefined;
+  selectedRequirement.value = undefined;
+  isCascading = false;
+  resetFiltersAndFetch();
+});
+
+watch(selectedModule, () => {
+  if (!props.open || isCascading) return;
+  isCascading = true;
+  selectedRequirement.value = undefined;
+  isCascading = false;
+  resetFiltersAndFetch();
+});
+
 watch(selectedRequirement, () => {
-  if (!props.open) return;
+  if (!props.open || isCascading) return;
   resetFiltersAndFetch();
 });
 
@@ -551,15 +651,6 @@ function handleCancel() {
 
 .case-filter-item:first-child {
   flex: 1.1 1 0;
-}
-
-.case-filter-item--compact {
-  flex: 0 1 148px;
-  max-width: 168px;
-}
-
-.case-filter-item--compact .case-filter-label {
-  width: 52px;
 }
 
 .case-filter-label {
@@ -763,5 +854,16 @@ function handleCancel() {
 
 .case-selection-modal .case-select-table-wrap .ant-pagination {
   margin: 10px 16px 8px !important;
+}
+
+.case-select-dropdown {
+  min-width: 220px;
+  max-width: min(480px, 92vw);
+}
+
+.case-select-dropdown .ant-select-item-option-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
 }
 </style>

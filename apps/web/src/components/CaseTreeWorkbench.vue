@@ -111,6 +111,7 @@
       :mode="caseSelectModalMode"
       :project-id="store.activeProject?.id"
       :run-id="store.activeRun?.id ?? store.primaryRunSummary?.id"
+      :tree="store.activeRun?.tree"
       :confirm-loading="caseSelectConfirmLoading"
       @confirm="handleCaseSelectConfirm"
       @download-template="handleDownloadExcelTemplate"

@@ -874,20 +874,15 @@ const systemOptions = computed(() =>
   ),
 );
 
-const featureModuleOptions = computed(() => {
-  const system = definitionDraft.system.trim();
-  const sourceItems = system
-    ? definitionSampleRows.value.filter((item) => (item.system?.trim() || '') === system)
-    : definitionSampleRows.value;
-  return filterDefinitionFieldOptions(
+const featureModuleOptions = computed(() =>
+  filterDefinitionFieldOptions(
     buildDefinitionFieldOptions(
       (item) => item.featureModule,
       definitionDraft.featureModule,
-      sourceItems,
     ),
     definitionDraft.featureModule,
-  );
-});
+  ),
+);
 
 function filterSystemOption(input: string, option: { label?: string; value?: string }) {
   return filterAutocompleteOption(input, {
@@ -1080,6 +1075,9 @@ watch(selectablePromptIds, () => {
 function toggleBatchMode() {
   batchMode.value = !batchMode.value;
   if (batchMode.value) {
+    if (store.newTestPointIds.length) {
+      store.discardNewTestPoints(store.newTestPointIds);
+    }
     store.setSelectedTestPointIds([]);
     return;
   }
@@ -1102,6 +1100,10 @@ function handleCardClick(item: TestPointSummaryItem) {
     }
     toggleRow(item.id);
     return;
+  }
+  const idsToDiscard = store.newTestPointIds.filter((id) => id !== item.id);
+  if (idsToDiscard.length) {
+    store.discardNewTestPoints(idsToDiscard);
   }
   activeTestPointId.value = item.id;
   void store.ensureTestPointDetail(item.id);
@@ -1252,7 +1254,7 @@ async function saveSelection(generateNow: boolean) {
   }
 
   try {
-    await store.saveTestPointBundle(targetIds, {
+    const finalIds = await store.saveTestPointBundle(targetIds, {
       definition: batchMode.value
         ? undefined
         : {
@@ -1268,13 +1270,20 @@ async function saveSelection(generateNow: boolean) {
           },
       instruction: buildInstructionPayload(generateNow),
     });
+    if (!finalIds) {
+      return;
+    }
+    if (!batchMode.value && finalIds[0] !== targetIds[0]) {
+      activeTestPointId.value = finalIds[0];
+      store.setSelectedTestPointIds([finalIds[0]]);
+    }
     if (generateNow) {
-      store.markGeneratingTestPoints(targetIds);
-      void store.generate(targetIds);
+      store.markGeneratingTestPoints(finalIds);
+      void store.generate(finalIds);
       if (batchMode.value) {
         batchMode.value = false;
-        activeTestPointId.value = targetIds[0];
-        store.setSelectedTestPointIds([targetIds[0]]);
+        activeTestPointId.value = finalIds[0];
+        store.setSelectedTestPointIds([finalIds[0]]);
       }
     }
   } catch (error) {

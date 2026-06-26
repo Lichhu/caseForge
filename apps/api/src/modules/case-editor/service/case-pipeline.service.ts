@@ -97,9 +97,7 @@ const sceneLabel: Record<SceneTag, string> = {
 export class CasePipelineService {
   private readonly logger = new Logger(CasePipelineService.name);
 
-  constructor(
-    private readonly aiWorkflow: AiWorkflowService
-  ) {}
+  constructor(private readonly aiWorkflow: AiWorkflowService) {}
 
   /** 将原始需求文本格式化为结构化 Markdown 与分析结果 */
   async formatRequirement(
@@ -1476,7 +1474,10 @@ export class CasePipelineService {
     testPoints: TestPointGenerationInput[],
     casesByTestPointId: Map<string, JsonCaseItem[]>,
   ): CaseTreeNode {
-    const systemMap = new Map<string, Map<string, TestPointGenerationInput[]>>();
+    const systemMap = new Map<
+      string,
+      Map<string, TestPointGenerationInput[]>
+    >();
     for (const item of testPoints) {
       if (!systemMap.has(item.system)) {
         systemMap.set(item.system, new Map());
@@ -1540,9 +1541,7 @@ export class CasePipelineService {
       caseTitle,
       priority,
       caseType,
-      conditions.length
-        ? conditions
-        : ["系统已登录且具备相关操作权限"],
+      conditions.length ? conditions : ["系统已登录且具备相关操作权限"],
       steps.length
         ? steps
         : [
@@ -1550,9 +1549,7 @@ export class CasePipelineService {
             "执行与测试要点相关的操作",
             "查看系统处理结果",
           ],
-      expectations.length
-        ? expectations
-        : ["系统行为与业务规则一致"],
+      expectations.length ? expectations : ["系统行为与业务规则一致"],
       [],
       item.alms?.trim(),
     );
@@ -1606,10 +1603,10 @@ export class CasePipelineService {
     }
 
     promote = promote
-                .replaceAll('{mkName}', featureModule)
-                .replaceAll('{testPoint}', testPoint)
-                .replaceAll('{prompts}', prompts)
-                .replaceAll('{markdownContent}', markdownContent);
+      .replaceAll("{mkName}", featureModule)
+      .replaceAll("{testPoint}", testPoint)
+      .replaceAll("{prompts}", prompts)
+      .replaceAll("{markdownContent}", markdownContent);
 
     try {
       const { text } = await this.aiWorkflow.runWithAiChat(promote, model);

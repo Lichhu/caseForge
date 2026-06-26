@@ -18,6 +18,36 @@
             </template>
             {{ hierarchyCollapsed ? '展开' : '收起' }}
           </a-button>
+          <a-tooltip :title="systemFilter || undefined">
+            <a-select
+              v-model:value="systemFilter"
+              class="excel-filter-select excel-filter-select--cascade"
+              size="small"
+              allow-clear
+              show-search
+              placeholder="全部系统"
+              :dropdown-match-select-width="false"
+              popup-class-name="excel-cascade-dropdown"
+              :disabled="!systemOptions.length"
+              :options="systemOptions"
+              :filter-option="filterRequirementOption"
+            />
+          </a-tooltip>
+          <a-tooltip :title="moduleFilter || undefined">
+            <a-select
+              v-model:value="moduleFilter"
+              class="excel-filter-select excel-filter-select--cascade"
+              size="small"
+              allow-clear
+              show-search
+              placeholder="全部功能模块"
+              :dropdown-match-select-width="false"
+              popup-class-name="excel-cascade-dropdown"
+              :disabled="!moduleOptions.length"
+              :options="moduleOptions"
+              :filter-option="filterRequirementOption"
+            />
+          </a-tooltip>
           <a-tooltip :title="requirementFilter || undefined">
             <a-select
               v-model:value="requirementFilter"
@@ -42,13 +72,6 @@
               </a-select-option>
             </a-select>
           </a-tooltip>
-          <a-input
-            v-model:value="caseKeyword"
-            class="excel-search-input"
-            size="small"
-            allow-clear
-            :placeholder="searchPlaceholder"
-          />
           <a-select
             v-model:value="priorityFilter"
             class="excel-filter-select excel-filter-select--compact"
@@ -64,6 +87,13 @@
             allow-clear
             placeholder="全部性质"
             :options="caseNatureFilterOptions"
+          />
+          <a-input
+            v-model:value="caseKeyword"
+            class="excel-search-input"
+            size="small"
+            allow-clear
+            :placeholder="searchPlaceholder"
           />
         </div>
         <div class="excel-toolbar-actions">
@@ -247,6 +277,8 @@ import {
   applyExcelRowToTree,
   caseForgePageSizeOptionLabels,
   collectCaseExcelRequirements,
+  collectCaseExcelSystems,
+  collectCaseExcelModules,
   countCaseTreeLeaves,
   DEFAULT_CASE_FORGE_PAGE_SIZE,
   filterCaseExcelRows,
@@ -335,6 +367,8 @@ const columns: ExcelColumn[] = columnDefs.map((column) => {
 });
 
 const hierarchyCollapsed = ref(true);
+const systemFilter = ref<string | undefined>(undefined);
+const moduleFilter = ref<string | undefined>(undefined);
 const requirementFilter = ref<string | undefined>(undefined);
 const priorityFilter = ref<string | undefined>(undefined);
 const caseNatureFilter = ref<string | undefined>(undefined);
@@ -390,8 +424,8 @@ const savedRowFingerprints = ref<Map<string, string>>(new Map());
 const listLoading = ref(false);
 const totalFiltered = ref(0);
 const totalRows = ref(0);
-const serverRequirements = ref<string[]>([]);
 let fetchSeq = 0;
+let isCascading = false;
 
 const projectId = computed(() => store.activeProject?.id);
 const runId = computed(() => store.activeRun?.id);
@@ -419,6 +453,8 @@ function rowFingerprint(row: CaseExcelRow) {
 function buildCaseRowFilterQuery() {
   return {
     requirement: requirementFilter.value?.trim() || undefined,
+    system: systemFilter.value?.trim() || undefined,
+    module: moduleFilter.value?.trim() || undefined,
     priority: priorityFilter.value as CasePriority | undefined,
     caseNature: caseNatureFilter.value as CaseNature | undefined,
     keyword: caseKeyword.value.trim() || undefined,
@@ -468,7 +504,6 @@ function loadCaseRowsFromLocalTree(options?: {
   mergeDraftRowsFromItems(paginateCaseExcelRows(filtered, page, listPageSize.value));
   totalFiltered.value = filtered.length;
   totalRows.value = rows.length;
-  serverRequirements.value = collectCaseExcelRequirements(rows);
 }
 
 async function fetchCaseRows(options?: { focusCaseNodeId?: string }) {
@@ -478,7 +513,6 @@ async function fetchCaseRows(options?: { focusCaseNodeId?: string }) {
     draftRows.value = [];
     totalFiltered.value = 0;
     totalRows.value = 0;
-    serverRequirements.value = [];
     return;
   }
   const seq = ++fetchSeq;
@@ -488,6 +522,8 @@ async function fetchCaseRows(options?: { focusCaseNodeId?: string }) {
       page: listPage.value,
       pageSize: listPageSize.value,
       requirement: requirementFilter.value,
+      system: systemFilter.value,
+      module: moduleFilter.value,
       priority: priorityFilter.value as CasePriority | undefined,
       caseNature: caseNatureFilter.value as CaseNature | undefined,
       keyword: caseKeyword.value.trim() || undefined,
@@ -509,7 +545,6 @@ async function fetchCaseRows(options?: { focusCaseNodeId?: string }) {
     mergeDraftRowsFromItems(result.items);
     totalFiltered.value = result.total;
     totalRows.value = result.totalRows;
-    serverRequirements.value = result.requirements;
     if (result.focusPage) {
       listPage.value = result.focusPage;
     } else {
@@ -550,12 +585,35 @@ function isLongRequirementText(full: string) {
   );
 }
 
-const requirementOptions = computed(() =>
-  serverRequirements.value.map((requirement) => ({
+const allRows = computed(() => {
+  const tree = props.tree ?? store.activeRun?.tree;
+  return tree ? flattenCaseTreeToExcel(tree).rows : [];
+});
+
+const systemOptions = computed(() =>
+  collectCaseExcelSystems(allRows.value).map((value) => ({ value, label: value })),
+);
+
+const moduleOptions = computed(() => {
+  const rows = systemFilter.value
+    ? allRows.value.filter((row) => row.system === systemFilter.value)
+    : allRows.value;
+  return collectCaseExcelModules(rows).map((value) => ({ value, label: value }));
+});
+
+const requirementOptions = computed(() => {
+  let rows = allRows.value;
+  if (systemFilter.value) {
+    rows = rows.filter((row) => row.system === systemFilter.value);
+  }
+  if (moduleFilter.value) {
+    rows = rows.filter((row) => row.module === moduleFilter.value);
+  }
+  return collectCaseExcelRequirements(rows).map((requirement) => ({
     label: requirementSelectLabel(requirement),
     value: requirement,
-  })),
-);
+  }));
+});
 
 const selectedRequirementPreview = computed(() => {
   const full = requirementFilter.value?.trim();
@@ -567,6 +625,8 @@ const selectedRequirementPreview = computed(() => {
 
 const isFiltering = computed(
   () =>
+    Boolean(systemFilter.value) ||
+    Boolean(moduleFilter.value) ||
     Boolean(requirementFilter.value) ||
     Boolean(priorityFilter.value) ||
     Boolean(caseNatureFilter.value) ||
@@ -640,6 +700,8 @@ onMounted(() => {
 watch(
   () => [projectId.value, runId.value, props.tree?.id] as const,
   () => {
+    systemFilter.value = undefined;
+    moduleFilter.value = undefined;
     requirementFilter.value = undefined;
     priorityFilter.value = undefined;
     caseNatureFilter.value = undefined;
@@ -667,7 +729,29 @@ function resetExcelListPage() {
   listPage.value = 1;
 }
 
+watch(systemFilter, () => {
+  if (isCascading) return;
+  isCascading = true;
+  moduleFilter.value = undefined;
+  requirementFilter.value = undefined;
+  isCascading = false;
+  resetExcelListPage();
+  selectedCaseNodeIds.value = new Set();
+  void fetchCaseRows();
+});
+
+watch(moduleFilter, () => {
+  if (isCascading) return;
+  isCascading = true;
+  requirementFilter.value = undefined;
+  isCascading = false;
+  resetExcelListPage();
+  selectedCaseNodeIds.value = new Set();
+  void fetchCaseRows();
+});
+
 watch(requirementFilter, () => {
+  if (isCascading) return;
   resetExcelListPage();
   selectedCaseNodeIds.value = new Set();
   void fetchCaseRows();
@@ -1189,10 +1273,10 @@ function deleteSelectedRows() {
 }
 
 .excel-filter-select {
-  width: 200px;
+  width: 180px;
   min-width: 140px;
   flex: 1 1 160px;
-  max-width: 240px;
+  max-width: 220px;
 }
 
 .excel-filter-select--compact {
@@ -1200,6 +1284,18 @@ function deleteSelectedRows() {
   min-width: 96px;
   flex: 0 0 108px;
   max-width: 120px;
+}
+
+.excel-filter-select--cascade {
+  width: 138px;
+  min-width: 120px;
+  flex: 0 0 138px;
+  max-width: 180px;
+}
+
+.excel-cascade-dropdown {
+  min-width: 180px;
+  max-width: 360px;
 }
 
 .excel-pagination {
@@ -1222,10 +1318,10 @@ function deleteSelectedRows() {
 }
 
 .excel-search-input {
-  width: 168px;
+  width: 140px;
   min-width: 120px;
-  flex: 0 0 168px;
-  max-width: 200px;
+  flex: 0 0 140px;
+  max-width: 180px;
 }
 
 .excel-requirement-preview {
@@ -1575,6 +1671,17 @@ function deleteSelectedRows() {
 }
 
 .excel-requirement-dropdown .ant-select-item-option-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.excel-cascade-dropdown {
+  min-width: 180px;
+  max-width: min(360px, 92vw);
+}
+
+.excel-cascade-dropdown .ant-select-item-option-content {
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.5;

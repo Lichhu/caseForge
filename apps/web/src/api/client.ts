@@ -621,6 +621,8 @@ export async function listRunCaseRows(
     page?: number;
     pageSize?: number;
     requirement?: string;
+    system?: string;
+    module?: string;
     priority?: CasePriority;
     caseNature?: CaseNature;
     keyword?: string;

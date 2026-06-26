@@ -13,6 +13,62 @@ import {
 } from "../util/workflow-input.util";
 import { sanitizeStructuredMarkdown } from "@struct-doc/util/struct-doc.parser";
 
+/**
+ * 将 AI 生成 JSON 中常见的中文标点统一为英文标点，避免 JSON.parse 失败。
+ * 注意：这会同时影响字符串内部的中文标点，属于修复 AI 输出格式问题。
+ */
+function normalizeJsonText(text: string): string {
+  return text
+    .replace(/[，]/g, ",")
+    .replace(/[：]/g, ":")
+    .replace(/[""]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[（]/g, "(")
+    .replace(/[）]/g, ")")
+    .replace(/[【]/g, "[")
+    .replace(/[】]/g, "]")
+    .replace(/[；]/g, ";")
+    .replace(/[？]/g, "?")
+    .replace(/[！]/g, "!")
+    .replace(/[。]/g, ".");
+}
+
+/** 移除 JSON 末尾多余的逗号（如 `[1, 2,]` 或 `{"a": 1,}`），同时不破坏字符串内容 */
+function removeTrailingCommas(text: string): string {
+  let result = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      result += char;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      result += char;
+    } else if (char === ",") {
+      // 跳过紧跟在 } 或 ] 前面的逗号
+      const next = text.slice(i + 1).trimStart();
+      if (next.startsWith("}") || next.startsWith("]")) {
+        continue;
+      }
+      result += char;
+    } else {
+      result += char;
+    }
+  }
+  return result;
+}
+
 /** AI Chat 调用结果 */
 export interface AiChatResult {
   text: string;
@@ -232,7 +288,7 @@ export class AiWorkflowService {
     throw lastError ?? new Error("AI Chat 调用失败");
   }
 
-  /** 解析 AI 返回文本中的 JSON 数组（兼容 ```json ... ``` 包裹） */
+  /** 解析 AI 返回文本中的 JSON 数组（兼容 ```json ... ``` 包裹、中文标点、转义等） */
   parseJsonArray<T>(text: string): T[] | null {
     const normalized = this.stripMarkdownFence(text.trim());
     if (!normalized) {
@@ -256,6 +312,9 @@ export class AiWorkflowService {
       }
     }
 
+    this.logger.warn(
+      `AI 返回内容无法解析为 JSON 数组，原始内容前 500 字符：${normalized.slice(0, 500)}`,
+    );
     return null;
   }
 
@@ -270,23 +329,40 @@ export class AiWorkflowService {
       // continue to fallbacks
     }
 
-    // 2. Extract JSON array between first [ and last ]
-    const start = candidate.indexOf("[");
-    const end = candidate.lastIndexOf("]");
-    if (start >= 0 && end > start) {
-      const slice = candidate.slice(start, end + 1);
-      try {
-        const parsed = JSON.parse(slice) as unknown;
+    // 2. AI 有时把 JSON 数组当作 JSON 字符串返回（如 "[{...}]"），先解包
+    try {
+      const unwrapped = JSON.parse(candidate) as string;
+      if (typeof unwrapped === "string") {
+        const parsed = JSON.parse(normalizeJsonText(unwrapped)) as unknown;
         if (Array.isArray(parsed)) {
           return parsed as T[];
         }
-      } catch {
-        // continue to next fallback
+      }
+    } catch {
+      // not a string literal
+    }
+
+    // 3. Extract JSON array between balanced brackets
+    const slice = this.extractBalancedJsonArray(candidate);
+    if (slice) {
+      const variants = [
+        slice,
+        normalizeJsonText(slice),
+        removeTrailingCommas(slice),
+        removeTrailingCommas(normalizeJsonText(slice)),
+      ];
+      for (const variant of variants) {
+        try {
+          const parsed = JSON.parse(variant) as unknown;
+          if (Array.isArray(parsed)) {
+            return parsed as T[];
+          }
+        } catch {
+          // try next variant
+        }
       }
 
-      // 3. Handle doubly-escaped JSON: AI sometimes returns literal \n and \"
-      //    instead of actual newlines/quotes. Wrapping in quotes and parsing
-      //    as a JSON string unescapes them, yielding valid JSON.
+      // 3.1 处理 slice 本身是被转义的 JSON 字符串
       try {
         const unescaped = JSON.parse(`"${slice}"`) as string;
         const parsed = JSON.parse(unescaped) as unknown;
@@ -295,6 +371,103 @@ export class AiWorkflowService {
         }
       } catch {
         // not doubly-escaped, give up on this candidate
+      }
+    }
+
+    // 4. AI 有时返回 { "data": [...] } 或 { "list": [...] }，提取其中的数组
+    const objectSlice = this.extractBalancedJsonObject(candidate);
+    if (objectSlice) {
+      const variants = [
+        objectSlice,
+        normalizeJsonText(objectSlice),
+        removeTrailingCommas(objectSlice),
+        removeTrailingCommas(normalizeJsonText(objectSlice)),
+      ];
+      for (const variant of variants) {
+        try {
+          const parsed = JSON.parse(variant) as Record<string, unknown>;
+          for (const value of Object.values(parsed)) {
+            if (Array.isArray(value)) {
+              return value as T[];
+            }
+          }
+        } catch {
+          // try next variant
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private extractBalancedJsonObject(text: string): string | null {
+    const start = text.indexOf("{");
+    if (start < 0) {
+      return null;
+    }
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < text.length; i++) {
+      const char = text[i];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char === "\\") {
+          escaped = true;
+        } else if (char === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (char === '"') {
+        inString = true;
+      } else if (char === "{") {
+        depth++;
+      } else if (char === "}") {
+        depth--;
+        if (depth === 0) {
+          return text.slice(start, i + 1);
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private extractBalancedJsonArray(text: string): string | null {
+    const start = text.indexOf("[");
+    if (start < 0) {
+      return null;
+    }
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < text.length; i++) {
+      const char = text[i];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char === "\\") {
+          escaped = true;
+        } else if (char === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (char === '"') {
+        inString = true;
+      } else if (char === "[") {
+        depth++;
+      } else if (char === "]") {
+        depth--;
+        if (depth === 0) {
+          return text.slice(start, i + 1);
+        }
       }
     }
 
@@ -324,16 +497,17 @@ export class AiWorkflowService {
   }
 
   private stripMarkdownFence(text: string) {
-    const tripleFenced = text.match(
+    const bomStripped = text.replace(/^\uFEFF/, "");
+    const tripleFenced = bomStripped.match(
       /^```(?:markdown|md|json)?\s*([\s\S]*?)\s*```$/i,
     );
     if (tripleFenced) {
       return tripleFenced[1].trim();
     }
-    const singleFenced = text.match(/^`(?:json)?\s*([\s\S]*?)\s*`$/i);
+    const singleFenced = bomStripped.match(/^`(?:json)?\s*([\s\S]*?)\s*`$/i);
     if (singleFenced) {
       return singleFenced[1].trim();
     }
-    return text.trim();
+    return bomStripped.trim();
   }
 }
