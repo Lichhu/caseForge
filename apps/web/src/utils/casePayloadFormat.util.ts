@@ -212,7 +212,8 @@ function inferBodyFormat(request: ApiCaseRequest): CaseBodyFormat {
   if (request.contentType?.includes("xml")) return "xml";
   if (request.contentType?.includes("json")) return "json";
   if (request.contentType?.includes("text/plain")) return "text";
-  if (typeof request.body === "string" && looksLikeXml(request.body)) return "xml";
+  if (typeof request.body === "string" && looksLikeXml(request.body))
+    return "xml";
   if (request.body && typeof request.body === "object") return "json";
   if (typeof request.body === "string" && request.body.trim()) return "text";
   return "json";
@@ -267,9 +268,7 @@ export function defaultContentType(format: CaseBodyFormat): string {
   }
 }
 
-function defaultSocketFraming(
-  encoding: string,
-): ApiMessageFraming | undefined {
+function defaultSocketFraming(encoding: string): ApiMessageFraming | undefined {
   if (!encoding.toUpperCase().includes("GBK")) return undefined;
   return {
     type: "length-prefix",
@@ -332,7 +331,9 @@ export function splitRequestForEditor(request: ApiCaseRequest) {
       requestBodyText:
         bodyFormat === "text" ? formatBodyForEditor(request.body, "text") : "",
       requestBodyJson:
-        bodyFormat === "json" ? formatBodyForEditor(request.body, "json") : "{}",
+        bodyFormat === "json"
+          ? formatBodyForEditor(request.body, "json")
+          : "{}",
       requestJson: "",
       requestMetaJson: "",
       requestTcpMeta: {
@@ -340,8 +341,7 @@ export function splitRequestForEditor(request: ApiCaseRequest) {
         encoding: request.encoding,
         contentType: request.contentType,
         framing:
-          request.framing ??
-          defaultSocketFraming(request.encoding || "UTF-8"),
+          request.framing ?? defaultSocketFraming(request.encoding || "UTF-8"),
       },
       requestBodyXml:
         bodyFormat === "xml" ? formatBodyForEditor(request.body, "xml") : "",
@@ -406,10 +406,9 @@ export function mergeRequestFromEditor(input: {
 }): ApiCaseRequest {
   const headers = keyValueRowsToRecord(input.headerRows);
   const contentType = defaultContentType(input.bodyFormat);
-  const hasBody = input.protocol !== "http" || httpMethodHasBody(input.httpMethod);
-  const body = hasBody
-    ? parseBodyFromEditor(input.mode, input)
-    : undefined;
+  const hasBody =
+    input.protocol !== "http" || httpMethodHasBody(input.httpMethod);
+  const body = hasBody ? parseBodyFromEditor(input.mode, input) : undefined;
 
   if (input.protocol === "http") {
     if (!headers["Content-Type"] && !headers["content-type"]) {
@@ -432,7 +431,7 @@ export function mergeRequestFromEditor(input: {
     const encoding = input.socketEncoding || "UTF-8";
     const framing =
       input.bodyFormat === "xml" && encoding.toUpperCase().includes("GBK")
-        ? input.requestTcpMeta?.framing ?? defaultSocketFraming(encoding)
+        ? (input.requestTcpMeta?.framing ?? defaultSocketFraming(encoding))
         : input.requestTcpMeta?.framing;
     return {
       method: "",

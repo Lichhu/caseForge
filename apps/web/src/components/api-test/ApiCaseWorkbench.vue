@@ -1533,7 +1533,6 @@ function onBatchDelete() {
   background: #f2f4f7;
   border-radius: 4px;
 }
-
 .case-request-tabs {
   display: flex;
   gap: 4px;
