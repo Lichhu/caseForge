@@ -25,7 +25,6 @@ import { ListCaseRowsDto } from "@case-editor/dto/list-case-rows.dto";
 import { CaseEditorService } from "@case-editor/service/case-editor.service";
 import { CaseWorkspaceService } from "@case-editor/service/case-workspace.service";
 import { ExportService } from "@case-editor/service/export.service";
-import { CaseTestPlatformSyncService } from "@case-editor/service/case-test-platform-sync.service";
 
 /** 案例编辑器 REST 控制器 */
 @ApiTags("case-editor")
@@ -38,8 +37,6 @@ export class CaseEditorController {
     private readonly workspaceService: CaseWorkspaceService,
     @Inject(ExportService)
     private readonly exporter: ExportService,
-    @Inject(CaseTestPlatformSyncService)
-    private readonly testPlatformSync: CaseTestPlatformSyncService,
   ) {}
 
   /**
@@ -188,12 +185,7 @@ export class CaseEditorController {
     @Param("runId") runId: string,
     @Body() dto: SyncToTestPlatformDto,
   ) {
-    return this.testPlatformSync.syncRunToTestPlatform(
-      projectId,
-      runId,
-      dto.tree,
-      dto.caseNodeIds,
-    );
+    return null
   }
 
   /** 保存编辑后的案例树 */

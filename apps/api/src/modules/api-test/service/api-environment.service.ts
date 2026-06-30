@@ -14,10 +14,6 @@ import {
   parseServerAddress,
 } from "@case-forge/shared";
 import {
-  applyParsedServerAddress,
-  parseServerAddress,
-} from "@case-forge/shared";
-import {
   decryptSecrets,
   encryptSecrets,
   maskSecret,
@@ -219,14 +215,9 @@ export class ApiEnvironmentService {
     serviceId: string,
     direction: "up" | "down" | "top",
   ) {
-<<<<<<< Updated upstream
     await this.requireEnv(projectId, environmentId);
     const rows = await this.serviceRepo.find({
       where: { environmentId },
-=======
-    const rows = await this.serviceRepo.find({
-      where: scopedWhere({ projectId, environmentId }),
->>>>>>> Stashed changes
       order: { sortOrder: "ASC", createdAt: "ASC" },
     });
     const index = rows.findIndex((row) => row.id === serviceId);

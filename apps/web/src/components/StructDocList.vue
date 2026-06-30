@@ -72,7 +72,12 @@
                 {{ doc.structuringError?.includes('取消') ? '取消结构化' : '结构化失败' }}
               </a-tag>
             </a-tooltip>
-            <a-tag v-else color="default" size="small">待上传/结构化</a-tag>
+            <a-tag 
+              v-else-if="doc.structuringStatus === 'idle'" 
+              color="default" 
+              size="small">
+              待上传/结构化
+            </a-tag>
           </div>
         </div>
         <div class="struct-doc-card-actions" @click.stop>
