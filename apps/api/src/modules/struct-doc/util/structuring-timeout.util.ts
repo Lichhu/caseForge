@@ -4,10 +4,11 @@ const DEFAULT_TIMEOUT_MINUTES = 10;
 export function getStructuringTimeoutMs() {
   const raw = process.env.STRUCTURING_TIMEOUT_MINUTES;
   const minutes = raw ? Number(raw) : DEFAULT_TIMEOUT_MINUTES;
-  if (!Number.isFinite(minutes) || minutes <= 0) {
-    return DEFAULT_TIMEOUT_MINUTES * 60000;
-  }
-  return minutes * 60000;
+  const baseMinutes =
+    !Number.isFinite(minutes) || minutes <= 0
+      ? DEFAULT_TIMEOUT_MINUTES
+      : minutes;
+  return baseMinutes * 60000;
 }
 
 export function getStructuringTimeoutMinutes() {

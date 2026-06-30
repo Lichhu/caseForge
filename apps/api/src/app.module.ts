@@ -13,6 +13,7 @@ import { ProjectManageModule } from "./modules/project-manage";
 import { StructDocModule } from "./modules/struct-doc";
 import { MinioStorageModule } from "@minio/index";
 import { ScenarioModule } from "@scenario/index";
+import { ApiTestModule } from "./modules/api-test";
 import { AiWorkflowModule } from "./common/ai-workflow";
 import { TypeormModule } from "./common/typeorm";
 import { TestPlatformModule } from "./common/test-platform";
@@ -33,6 +34,7 @@ import { TestPlatformModule } from "./common/test-platform";
     ProjectManageModule,
     StructDocModule,
     ScenarioModule,
+    ApiTestModule,
   ],
 })
 /** CaseForge API 根模块 */

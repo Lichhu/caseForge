@@ -30,9 +30,18 @@ export type CaseNodeKind =
   | 'expectation'
   | 'metadata';
 
-export type CasePriority = 'P0' | 'P1' | 'P2' | 'P3';
+export type CaseNature = '正' | '反';
+
+export const DEFAULT_CASE_NATURE: CaseNature = '正';
+
+export type CasePriority = '高' | '中' | '低';
+
+export const DEFAULT_CASE_PRIORITY: CasePriority = '高';
 
 export interface CaseNodeMetadata {
+  /** 案例性质：正 / 反 */
+  caseNature?: CaseNature;
+  /** 优先级：高 / 中 / 低，默认高 */
   priority?: CasePriority;
   caseType?: string;
   source?: string;
@@ -91,15 +100,6 @@ export interface RequirementDocument {
   updatedAt: string;
 }
 
-export interface ConstraintInstruction {
-  id: string;
-  projectId: string;
-  input: ConstraintInput;
-  /** @deprecated 案例生成不再使用，仅兼容旧库记录 */
-  markdown?: string;
-  createdAt: string;
-}
-
 /** Mind Elixir 思维导图摘要（画布「摘要」连线标注） */
 export interface MindMapSummary {
   id: string;
@@ -118,8 +118,13 @@ export interface MindMapExtras {
   summaries?: MindMapSummary[];
 }
 
-export interface GenerationRun {
+export interface GenerationRunSummary {
   id: string;
+  title: string;
+  createdAt: string;
+}
+
+export interface GenerationRun extends GenerationRunSummary {
   projectId: string;
   constraintId?: string;
   prompt: string;
@@ -129,18 +134,27 @@ export interface GenerationRun {
   mindMapExtras?: MindMapExtras;
   /** 本 run 案例树覆盖的测试要点 ID（多次生成会累积合并） */
   sourceTestPointIds?: string[];
-  createdAt: string;
 }
 
+/** 案例平台当前项目（仅项目表字段；各阶段业务数据走对应模块 API） */
 export interface CaseForgeProject {
   id: string;
   title: string;
   description: string;
-  document?: RequirementDocument;
-  constraints: ConstraintInstruction[];
-  runs: GenerationRun[];
+  requirementNo?: string | null;
   createdAt: string;
   updatedAt: string;
+  /** 案例生成次数，侧边栏展示用 */
+  runCount?: number;
 }
 
 export * from './case-tree';
+export * from './pagination';
+export * from './api-environment-service.util';
+export * from './api-environment';
+export * from './api-test';
+export * from './api-execution-profile.util';
+export * from './xml-format.util';
+export * from './platform';
+export * from './scenario-scope';
+export * from './struct-doc';

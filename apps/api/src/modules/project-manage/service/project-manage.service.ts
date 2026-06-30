@@ -1,7 +1,8 @@
 /**
  * @file 项目管理业务服务：项目的 CRUD 及级联删除
  */
-import { Injectable, NotFoundException } from "@nestjs/common";
+import type { ProjectPlatform } from "@case-forge/shared";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 import { CreateProjectDto } from "@project-manage/dto/create-project.dto";
 import { UpdateProjectDto } from "@project-manage/dto/update-project.dto";
@@ -9,16 +10,31 @@ import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { CaseEditorEntity } from "@case-editor/entity/case-editor.entity";
 import { StructDocEntity } from "@struct-doc/entity/struct-doc.entity";
 import { DataSource, EntityManager, Repository } from "typeorm";
-import { auditFieldsForCreate } from "../../../common/audit/request-context";
+import {
+  extractProjectCodeFromText,
+  isValidProjectRequirementCode,
+} from "@case-editor/util/requirement-code.util";
+import { auditFieldsForCreate } from "@common/audit/request-context";
 import {
   applyUserScope,
-  assertOwned,
   findOwnedProject,
   scopedWhere,
-} from "../../../common/audit/user-scope";
+} from "@common/audit/user-scope";
+import { toPublicProject } from "@common/http/public-response.util";
 
-/** 项目列表项：实体字段 + 案例生成次数 */
-export type ProjectListItem = CaseProjectEntity & {
+function normalizeRequirementNo(raw: string): string {
+  const trimmed = raw.trim();
+  const code = extractProjectCodeFromText(trimmed) ?? trimmed;
+  if (!isValidProjectRequirementCode(code)) {
+    throw new BadRequestException(
+      "需求编号格式必须为 XQxxxx-xxxx-xx，例如 XQ2026-0818-01",
+    );
+  }
+  return code.toUpperCase();
+}
+
+/** 项目列表项：对外字段 + 案例生成次数 */
+export type ProjectListItem = ReturnType<typeof toPublicProject> & {
   generationCount: number;
 };
 
@@ -40,15 +56,49 @@ export class ProjectManageService {
    * 创建项目，未传标题时自动生成默认名称
    * @param dto - 创建载荷
    */
-  async createProject(dto: CreateProjectDto): Promise<CaseProjectEntity> {
-    const total = await this.projectRepo.count({ where: scopedWhere() });
+  async createProject(dto: CreateProjectDto): Promise<ReturnType<typeof toPublicProject>> {
+    const platform: ProjectPlatform = dto.platform ?? "case-forge";
+    if (platform === "api-test") {
+      const title = dto.title?.trim();
+      const requirementNo = dto.requirementNo?.trim();
+      if (!title) {
+        throw new BadRequestException("请输入需求名称");
+      }
+      if (!requirementNo) {
+        throw new BadRequestException("请输入需求编号（XQxxxx-xxxx-xx）");
+      }
+      const normalizedRequirementNo = normalizeRequirementNo(requirementNo);
+      await this.assertApiTestRequirementAvailable(normalizedRequirementNo);
+      const project = this.projectRepo.create({
+        title,
+        description: dto.description?.trim() || "",
+        requirementNo: normalizedRequirementNo,
+        platform,
+        ...auditFieldsForCreate(),
+      });
+      return toPublicProject(await this.projectRepo.save(project));
+    }
+
+    const total = await this.projectRepo.count({
+      where: scopedWhere({ platform }),
+    });
     const project = this.projectRepo.create({
       title: dto.title?.trim() || `案例生成项目 ${total + 1}`,
       description: dto.description?.trim() || "",
       requirementNo: dto.requirementNo?.trim() || undefined,
+      platform,
       ...auditFieldsForCreate(),
     });
-    return await this.projectRepo.save(project);
+    return toPublicProject(await this.projectRepo.save(project));
+  }
+
+  /** 校验项目属于指定平台 */
+  async assertProjectPlatform(projectId: string, platform: ProjectPlatform) {
+    const project = await findOwnedProject(this.projectRepo, projectId);
+    if (project.platform !== platform) {
+      throw new BadRequestException("项目不属于当前平台");
+    }
+    return project;
   }
 
   /**
@@ -61,6 +111,7 @@ export class ProjectManageService {
     page: number = 1,
     size: number = 10,
     input: string = "",
+    platform: ProjectPlatform = "case-forge",
   ): Promise<{ rows: ProjectListItem[]; count: number }> {
     if (page < 1 || size < 1) {
       throw new Error("Invalid page or size value.");
@@ -69,6 +120,7 @@ export class ProjectManageService {
     const query = applyUserScope(
       this.projectRepo
         .createQueryBuilder("project")
+        .where("project.platform = :platform", { platform })
         .orderBy("project.updatedAt", "DESC")
         .skip((page - 1) * size)
         .take(size),
@@ -90,7 +142,7 @@ export class ProjectManageService {
 
     return {
       rows: rows.map((row) => ({
-        ...row,
+        ...toPublicProject(row),
         generationCount: generationCountMap.get(String(row.id)) ?? 0,
       })),
       count,
@@ -108,7 +160,7 @@ export class ProjectManageService {
       String(project.id),
     ]);
     return {
-      ...project,
+      ...toPublicProject(project),
       generationCount: generationCountMap.get(String(project.id)) ?? 0,
     };
   }
@@ -121,20 +173,62 @@ export class ProjectManageService {
   async updateProject(
     projectId: string,
     dto: UpdateProjectDto,
-  ): Promise<CaseProjectEntity> {
+  ): Promise<ReturnType<typeof toPublicProject>> {
     const project = await findOwnedProject(this.projectRepo, projectId);
 
-    if (dto.title !== undefined) {
-      project.title = dto.title.trim();
+    if (project.platform === "api-test") {
+      if (dto.title !== undefined) {
+        const title = dto.title.trim();
+        if (!title) {
+          throw new BadRequestException("请输入需求名称");
+        }
+        project.title = title;
+      }
+      if (dto.requirementNo !== undefined) {
+        const requirementNo = dto.requirementNo.trim();
+        if (!requirementNo) {
+          throw new BadRequestException("请输入需求编号（XQxxxx-xxxx-xx）");
+        }
+        const normalizedRequirementNo = normalizeRequirementNo(requirementNo);
+        await this.assertApiTestRequirementAvailable(
+          normalizedRequirementNo,
+          projectId,
+        );
+        project.requirementNo = normalizedRequirementNo;
+      }
+    } else {
+      if (dto.title !== undefined) {
+        project.title = dto.title.trim();
+      }
+      if (dto.requirementNo !== undefined) {
+        project.requirementNo = dto.requirementNo.trim() || undefined;
+      }
     }
     if (dto.description !== undefined) {
       project.description = dto.description.trim();
     }
-    if (dto.requirementNo !== undefined) {
-      project.requirementNo = dto.requirementNo.trim() || undefined;
-    }
 
-    return await this.projectRepo.save(project);
+    return toPublicProject(await this.projectRepo.save(project));
+  }
+
+  private async assertApiTestRequirementAvailable(
+    requirementNo: string,
+    excludeProjectId?: string,
+  ) {
+    const query = applyUserScope(
+      this.projectRepo
+        .createQueryBuilder("project")
+        .where("project.platform = :platform", { platform: "api-test" })
+        .andWhere("project.requirementNo = :requirementNo", { requirementNo }),
+      "project",
+    );
+    if (excludeProjectId) {
+      query.andWhere("project.id != :excludeProjectId", { excludeProjectId });
+    }
+    const existing = await query.getOne();
+    if (existing) {
+      throw new BadRequestException(`需求编号 ${requirementNo} 已存在，请勿重复创建`);
+    }
   }
 
   /**

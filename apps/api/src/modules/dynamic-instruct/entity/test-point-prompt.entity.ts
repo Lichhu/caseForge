@@ -2,7 +2,7 @@
  * @file 测试要点与场景提示词多对多关联实体
  */
 import { PromptEntity } from "@scenario/entity/prompt.entity";
-import { TestPointEntity } from "@struct-doc/entity/test-point.entity";
+import type { TestPointEntity } from "@struct-doc/entity/test-point.entity";
 import {
   Column,
   CreateDateColumn,
@@ -19,7 +19,6 @@ import {
  */
 @Entity("case_test_point_prompt")
 @Index("uk_case_test_point_prompt", ["testPointId", "promptId"], { unique: true })
-@Index(["testPointId"])
 @Index("idx_test_point_prompt_prompt", ["promptId"])
 export class TestPointPromptEntity {
   @PrimaryGeneratedColumn("uuid")
@@ -31,10 +30,14 @@ export class TestPointPromptEntity {
   @Column()
   promptId: string;
 
-  @ManyToOne(() => TestPointEntity, (testPoint) => testPoint.promptSelections, {
-    onDelete: "CASCADE",
-    onUpdate: "CASCADE",
-  })
+  @ManyToOne(
+    () => require("@struct-doc/entity/test-point.entity").TestPointEntity,
+    (testPoint: TestPointEntity) => testPoint.promptSelections,
+    {
+      onDelete: "CASCADE",
+      onUpdate: "CASCADE",
+    },
+  )
   @JoinColumn({ name: "testPointId" })
   testPoint: TestPointEntity;
 

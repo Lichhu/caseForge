@@ -5,7 +5,7 @@ import { ConfigService } from "@nestjs/config";
 import { AppConfig } from "./app-config.types";
 
 /**
- * 读取并归一化应用配置（含数据库、MinIO、AI Workflow 等）
+ * 读取并归一化应用配置（含数据库、MinIO、AI Chat 等）
  * @param configService - Nest 配置服务
  */
 export function getAppConfig(configService: ConfigService): AppConfig {

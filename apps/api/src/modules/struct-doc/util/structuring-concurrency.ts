@@ -4,8 +4,14 @@ const MAX_CONCURRENCY = 5;
 let activeCount = 0;
 const waitQueue: Array<() => void> = [];
 const activeProjectIds = new Set<string>();
+let slotReleaseHook: (() => void) | undefined;
 
-/** 从环境变量读取结构化并发上限（保护 AI Workflow） */
+/** 注册槽位释放回调（用于立刻拉起队列中的下一个结构化任务） */
+export function setStructuringSlotReleaseHook(hook: (() => void) | undefined) {
+  slotReleaseHook = hook;
+}
+
+/** 从环境变量读取结构化并发上限（保护 AI Chat） */
 export function getStructuringConcurrency() {
   const raw = process.env.STRUCTURING_CONCURRENCY;
   const parsed = raw ? Number(raw) : DEFAULT_CONCURRENCY;
@@ -20,7 +26,9 @@ function releaseSlot() {
   const next = waitQueue.shift();
   if (next) {
     next();
+    return;
   }
+  slotReleaseHook?.();
 }
 
 function acquireSlot(limit: number) {

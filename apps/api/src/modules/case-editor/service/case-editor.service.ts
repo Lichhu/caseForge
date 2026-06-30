@@ -2,22 +2,54 @@
  * 案例编辑运行持久化服务：负责案例树运行记录的创建、
  * 查询、更新及树形结构的读写。
  */
-import { Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
-import type { CaseTreeNode, GenerationRun, MindMapExtras } from "@case-forge/shared";
+import type {
+  CaseTreeNode,
+  CaseExcelRowListPage,
+  GenerationRun,
+  GenerationRunSummary,
+  MindMapExtras,
+} from "@case-forge/shared";
+import {
+  ensureCaseMetadata,
+  isCaseLikeKind,
+  normalizeCaseNature,
+  normalizeCasePriority,
+  flattenCaseTreeToExcel,
+  filterCaseExcelRows,
+  collectCaseExcelRequirements,
+  collectCaseExcelSystems,
+  collectCaseExcelModules,
+  paginateCaseExcelRows,
+  findCaseExcelRowPage,
+  normalizeCaseForgePageSize,
+  findCaseTreeNodeById,
+  type RunNodeChildrenResponse,
+} from "@case-forge/shared";
 import { randomUUID } from "node:crypto";
 import { CaseEditorEntity } from "@case-editor/entity/case-editor.entity";
 import { CaseNodeMetadataEntity } from "@case-editor/entity/case-node-metadata.entity";
 import { CaseTreeEntity } from "@case-editor/entity/case-tree.entity";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { DataSource, EntityManager, In, Repository } from "typeorm";
-import { scopedWhere } from "../../../common/audit/user-scope";
-import { touchProjectUpdatedAt } from "../../../common/project/touch-project.util";
+import { scopedWhere } from "@common/audit/user-scope";
+import { touchProjectUpdatedAt } from "@common/project/touch-project.util";
+import {
+  buildCaseTreeDiffPlan,
+  flattenCaseTreeForPersist,
+  isFullTreeReplace,
+  type CaseTreePersistContext,
+} from "@case-editor/util/case-tree-diff.util";
+import type { ListCaseRowsDto } from "@case-editor/dto/list-case-rows.dto";
 
-interface TreeSaveContext {
-  projectId: string;
-  caseEditorId: string;
-}
+interface TreeSaveContext extends CaseTreePersistContext {}
+
+const TREE_BATCH_CHUNK_SIZE = 400;
 
 /** 案例编辑运行与案例树持久化服务 */
 @Injectable()
@@ -27,8 +59,6 @@ export class CaseEditorService {
     private readonly caseEditorRepo: Repository<CaseEditorEntity>,
     @InjectRepository(CaseTreeEntity)
     private readonly caseTreeRepo: Repository<CaseTreeEntity>,
-    @InjectRepository(CaseNodeMetadataEntity)
-    private readonly caseNodeMetadataRepo: Repository<CaseNodeMetadataEntity>,
     @InjectRepository(CaseProjectEntity)
     private readonly projectRepo: Repository<CaseProjectEntity>,
     @InjectDataSource()
@@ -68,10 +98,27 @@ export class CaseEditorService {
         mindMapExtras: input.mindMapExtras,
       });
       await manager.save(CaseEditorEntity, editorEntity);
-      await this.saveTree(manager, input.tree, null, context);
+      await this.insertTreeBatch(
+        manager,
+        flattenCaseTreeForPersist(input.tree, context),
+      );
       return editorEntity;
     });
     return this.toGenerationRun(editor, input.tree);
+  }
+
+  /** 查询项目下运行摘要（不含案例树，供 workspace 等轻量接口） */
+  async listRunSummaries(projectId: string): Promise<GenerationRunSummary[]> {
+    const editors = await this.caseEditorRepo.find({
+      where: scopedWhere({ projectId }),
+      order: { createdAt: "DESC" },
+      select: ["id", "title", "createdAt"],
+    });
+    return editors.map((editor) => ({
+      id: editor.id,
+      title: editor.title || "未命名",
+      createdAt: editor.createdAt.toISOString(),
+    }));
   }
 
   /** 查询项目下所有案例生成运行记录 */
@@ -103,6 +150,82 @@ export class CaseEditorService {
     return this.toGenerationRun(editor, tree);
   }
 
+  /** 按需加载测试要点下的案例子树（XMind 懒加载） */
+  async listRunNodeChildren(
+    projectId: string,
+    runId: string,
+    nodeId: string,
+  ): Promise<RunNodeChildrenResponse> {
+    const run = await this.getRun(projectId, runId);
+    const node = findCaseTreeNodeById(run.tree, nodeId);
+    if (!node) {
+      throw new NotFoundException(`Node ${nodeId} not found`);
+    }
+    if (node.kind !== "requirement") {
+      throw new BadRequestException("仅支持查询测试要点节点的子节点");
+    }
+    const children = node.children || [];
+    return {
+      nodeId,
+      children,
+      total: children.length,
+    };
+  }
+
+  /** 分页查询案例 Excel 行（筛选 + 分页，基于内存摊平） */
+  async listCaseRows(
+    projectId: string,
+    runId: string,
+    query: ListCaseRowsDto,
+  ): Promise<CaseExcelRowListPage> {
+    const run = await this.getRun(projectId, runId);
+    const { rows } = flattenCaseTreeToExcel(run.tree);
+    const pageSize = normalizeCaseForgePageSize(query.pageSize);
+    const page = Math.max(1, Number(query.page) || 1);
+    const filterQuery = {
+      requirement: query.requirement?.trim() || undefined,
+      system: query.system?.trim() || undefined,
+      module: query.module?.trim() || undefined,
+      priority: query.priority,
+      caseNature: query.caseNature,
+      keyword: query.keyword?.trim() || undefined,
+    };
+    const filtered = filterCaseExcelRows(rows, filterQuery);
+    const requirements = collectCaseExcelRequirements(rows);
+    const systems = collectCaseExcelSystems(rows);
+    const modules = collectCaseExcelModules(rows);
+    if (query.idsOnly) {
+      return {
+        items: [],
+        ids: filtered.map((row) => row.caseNodeId),
+        total: filtered.length,
+        totalRows: rows.length,
+        page: 1,
+        pageSize: filtered.length,
+        requirements,
+        systems,
+        modules,
+      };
+    }
+    const focusCaseNodeId = query.focusCaseNodeId?.trim();
+    const focusPage = focusCaseNodeId
+      ? findCaseExcelRowPage(filtered, focusCaseNodeId, pageSize)
+      : undefined;
+    const effectivePage = focusPage ?? page;
+    const items = paginateCaseExcelRows(filtered, effectivePage, pageSize);
+    return {
+      items,
+      total: filtered.length,
+      totalRows: rows.length,
+      page: effectivePage,
+      pageSize,
+      requirements,
+      systems,
+      modules,
+      ...(focusPage !== undefined ? { focusPage } : {}),
+    };
+  }
+
   /** 更新运行记录关联的案例树并递增版本号 */
   async updateRunTree(
     projectId: string,
@@ -123,8 +246,7 @@ export class CaseEditorService {
     };
 
     await this.dataSource.transaction(async (manager) => {
-      await manager.delete(CaseTreeEntity, { caseEditorId: editor.id });
-      await this.saveTree(manager, tree, null, context);
+      await this.applyTreeDiff(manager, tree, context);
       editor.caseTreeId = tree.id;
       editor.title = tree.title;
       editor.version += 1;
@@ -134,61 +256,140 @@ export class CaseEditorService {
 
     await touchProjectUpdatedAt(this.projectRepo, projectId);
 
-    return this.toGenerationRun(editor, tree);
+    return this.toGenerationRunMeta(editor);
   }
 
-  private async saveTree(
+  private async applyTreeDiff(
     manager: EntityManager,
-    node: CaseTreeNode,
-    parentId: string | null,
+    tree: CaseTreeNode,
     context: TreeSaveContext,
-    sortOrder = 0,
   ): Promise<void> {
-    await manager.save(
-      CaseTreeEntity,
-      manager.create(CaseTreeEntity, {
-        id: node.id,
-        projectId: context.projectId,
+    const existing = await manager.find(CaseTreeEntity, {
+      where: { caseEditorId: context.caseEditorId },
+      relations: ["metadata"],
+    });
+    const incoming = flattenCaseTreeForPersist(tree, context);
+    const plan = buildCaseTreeDiffPlan(existing, incoming);
+
+    if (isFullTreeReplace(plan, existing.length)) {
+      await manager.delete(CaseTreeEntity, {
         caseEditorId: context.caseEditorId,
-        title: (node.title ?? "").trim() || "未命名节点",
-        kind: node.kind,
-        parentId: parentId || undefined,
-        collapsed: node.collapsed ?? false,
-        sortOrder,
-      }),
+      });
+      await this.insertTreeBatch(manager, incoming);
+      return;
+    }
+
+    await this.deleteByIds(manager, CaseTreeEntity, plan.treeDeleteIds, {
+      caseEditorId: context.caseEditorId,
+    });
+    await this.deleteByCaseTreeIds(manager, plan.metadataDeleteCaseTreeIds);
+    await this.insertTreeBatch(manager, {
+      treeRows: plan.treeInserts,
+      metadataRows: plan.metadataInserts,
+    });
+    await this.saveInChunks(manager, CaseTreeEntity, plan.treeUpdates);
+    await this.saveInChunks(
+      manager,
+      CaseNodeMetadataEntity,
+      plan.metadataUpdates,
     );
+  }
 
-    if (node.metadata) {
-      await manager.save(
+  private async deleteByIds(
+    manager: EntityManager,
+    entity: typeof CaseTreeEntity,
+    ids: string[],
+    scope: { caseEditorId: string },
+  ) {
+    for (let index = 0; index < ids.length; index += TREE_BATCH_CHUNK_SIZE) {
+      const chunk = ids.slice(index, index + TREE_BATCH_CHUNK_SIZE);
+      if (!chunk.length) continue;
+      await manager.delete(entity, { id: In(chunk), ...scope });
+    }
+  }
+
+  private async deleteByCaseTreeIds(
+    manager: EntityManager,
+    caseTreeIds: string[],
+  ) {
+    for (
+      let index = 0;
+      index < caseTreeIds.length;
+      index += TREE_BATCH_CHUNK_SIZE
+    ) {
+      const chunk = caseTreeIds.slice(index, index + TREE_BATCH_CHUNK_SIZE);
+      if (!chunk.length) continue;
+      await manager.delete(CaseNodeMetadataEntity, { caseTreeId: In(chunk) });
+    }
+  }
+
+  private async saveInChunks(
+    manager: EntityManager,
+    entity: typeof CaseTreeEntity | typeof CaseNodeMetadataEntity,
+    rows: object[],
+  ) {
+    for (let index = 0; index < rows.length; index += TREE_BATCH_CHUNK_SIZE) {
+      const chunk = rows.slice(index, index + TREE_BATCH_CHUNK_SIZE);
+      if (!chunk.length) continue;
+      await manager.save(entity, chunk);
+    }
+  }
+
+  private async insertTreeBatch(
+    manager: EntityManager,
+    flattened: ReturnType<typeof flattenCaseTreeForPersist>,
+  ): Promise<void> {
+    for (
+      let index = 0;
+      index < flattened.treeRows.length;
+      index += TREE_BATCH_CHUNK_SIZE
+    ) {
+      await manager.insert(
+        CaseTreeEntity,
+        flattened.treeRows.slice(index, index + TREE_BATCH_CHUNK_SIZE),
+      );
+    }
+    for (
+      let index = 0;
+      index < flattened.metadataRows.length;
+      index += TREE_BATCH_CHUNK_SIZE
+    ) {
+      await manager.insert(
         CaseNodeMetadataEntity,
-        manager.create(CaseNodeMetadataEntity, {
-          caseTreeId: node.id,
-          priority: node.metadata.priority,
-          caseType: node.metadata.caseType,
-          source: node.metadata.source,
-          knowledgeBaseIds: node.metadata.knowledgeBaseIds,
-        }),
+        flattened.metadataRows.slice(index, index + TREE_BATCH_CHUNK_SIZE),
       );
     }
+  }
 
-    for (let index = 0; index < (node.children || []).length; index += 1) {
-      await this.saveTree(
-        manager,
-        node.children[index],
-        node.id,
-        context,
-        index,
-      );
-    }
+  /** 保存接口仅返回运行元数据，避免大树重复下发 */
+  private toGenerationRunMeta(editor: CaseEditorEntity): GenerationRun {
+    return {
+      ...this.toRunSummary(editor),
+      projectId: editor.projectId,
+      constraintId: editor.constraintId,
+      prompt: editor.prompt || "",
+      model: editor.model || "local-rule-generator",
+      tree: {
+        id: editor.caseTreeId || editor.id,
+        title: editor.title || "未命名",
+        kind: "root",
+        children: [],
+      },
+      mindMapExtras: editor.mindMapExtras,
+      sourceTestPointIds: editor.sourceTestPointIds,
+    };
   }
 
   private async loadTree(
     rootId: string,
     caseEditorId?: string,
   ): Promise<CaseTreeNode> {
-    const nodes = caseEditorId
+    let nodes = caseEditorId
       ? await this.loadTreeNodesByEditor(caseEditorId)
       : await this.collectTreeNodes(rootId);
+    if (!nodes.length && caseEditorId) {
+      nodes = await this.collectTreeNodes(rootId);
+    }
     const nodeMap = new Map<string, CaseTreeNode>();
     for (const entity of nodes) {
       nodeMap.set(entity.id, {
@@ -198,7 +399,12 @@ export class CaseEditorService {
         collapsed: entity.collapsed,
         metadata: entity.metadata
           ? {
-              priority: entity.metadata.priority as any,
+              caseNature: entity.metadata.caseNature
+                ? normalizeCaseNature(entity.metadata.caseNature)
+                : undefined,
+              priority: entity.metadata.priority
+                ? normalizeCasePriority(entity.metadata.priority)
+                : undefined,
               caseType: entity.metadata.caseType,
               source: entity.metadata.source,
               knowledgeBaseIds: entity.metadata.knowledgeBaseIds,
@@ -221,7 +427,21 @@ export class CaseEditorService {
     if (!root) {
       throw new NotFoundException(`Root tree ${rootId} not found`);
     }
-    return root;
+    return this.normalizeLoadedTree(root);
+  }
+
+  private normalizeLoadedTree(node: CaseTreeNode): CaseTreeNode {
+    const children = (node.children || []).map((child) =>
+      this.normalizeLoadedTree(child),
+    );
+    if (isCaseLikeKind(node.kind)) {
+      return {
+        ...node,
+        metadata: ensureCaseMetadata(node),
+        children,
+      };
+    }
+    return { ...node, children };
   }
 
   /** 按运行 ID 一次加载整棵案例树（替代逐层 BFS，减少 round-trip） */
@@ -269,7 +489,7 @@ export class CaseEditorService {
     tree: CaseTreeNode,
   ): GenerationRun {
     return {
-      id: editor.id,
+      ...this.toRunSummary(editor),
       projectId: editor.projectId,
       constraintId: editor.constraintId,
       prompt: editor.prompt || "",
@@ -277,6 +497,13 @@ export class CaseEditorService {
       tree,
       mindMapExtras: editor.mindMapExtras,
       sourceTestPointIds: editor.sourceTestPointIds,
+    };
+  }
+
+  private toRunSummary(editor: CaseEditorEntity): GenerationRunSummary {
+    return {
+      id: editor.id,
+      title: editor.title || "未命名",
       createdAt: editor.createdAt.toISOString(),
     };
   }

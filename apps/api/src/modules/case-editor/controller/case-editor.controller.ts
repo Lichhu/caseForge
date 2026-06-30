@@ -1,5 +1,5 @@
 /**
- * 案例编辑器 HTTP 接口：工作区查询、约束保存、案例生成、
+ * 案例编辑器 HTTP 接口：工作区查询、案例生成、
  * 运行记录管理与多格式导出。
  */
 import {
@@ -12,19 +12,20 @@ import {
   Post,
   Query,
   Res,
+  BadRequestException,
 } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
-import { BuildConstraintsDto } from "../dto/build-constraints.dto";
-import { CancelGenerateDto } from "../dto/cancel-generate.dto";
-import { GenerateCasesDto } from "../dto/generate-cases.dto";
-import { RegenerateNodeDto } from "../dto/regenerate-node.dto";
-import { SyncToTestPlatformDto } from "../dto/sync-to-test-platform.dto";
-import { UpdateRunTreeDto } from "../dto/update-run-tree.dto";
-import { CaseEditorService } from "../service/case-editor.service";
-import { CaseWorkspaceService } from "../service/case-workspace.service";
-import { ExportService } from "../service/export.service";
-import { CaseTestPlatformSyncService } from "../service/case-test-platform-sync.service";
+import { CancelGenerateDto } from "@case-editor/dto/cancel-generate.dto";
+import { GenerateCasesDto } from "@case-editor/dto/generate-cases.dto";
+import { RegenerateNodeDto } from "@case-editor/dto/regenerate-node.dto";
+import { SyncToTestPlatformDto } from "@case-editor/dto/sync-to-test-platform.dto";
+import { UpdateRunTreeDto } from "@case-editor/dto/update-run-tree.dto";
+import { ListCaseRowsDto } from "@case-editor/dto/list-case-rows.dto";
+import { CaseEditorService } from "@case-editor/service/case-editor.service";
+import { CaseWorkspaceService } from "@case-editor/service/case-workspace.service";
+import { ExportService } from "@case-editor/service/export.service";
+import { CaseTestPlatformSyncService } from "@case-editor/service/case-test-platform-sync.service";
 
 /** 案例编辑器 REST 控制器 */
 @ApiTags("case-editor")
@@ -40,23 +41,6 @@ export class CaseEditorController {
     @Inject(CaseTestPlatformSyncService)
     private readonly testPlatformSync: CaseTestPlatformSyncService,
   ) {}
-
-  /** 获取项目工作区（文档、约束、案例运行） */
-  @Get("projects/:projectId/workspace")
-  @ApiOperation({ summary: "获取项目工作区（文档、约束、案例运行）" })
-  getProjectWorkspace(@Param("projectId") projectId: string) {
-    return this.workspaceService.getProjectWorkspace(projectId);
-  }
-
-  /** 保存约束快照 */
-  @Post("projects/:projectId/constraints")
-  @ApiOperation({ summary: "保存约束快照" })
-  buildConstraints(
-    @Param("projectId") projectId: string,
-    @Body() dto: BuildConstraintsDto,
-  ) {
-    return this.workspaceService.buildConstraints(projectId, dto);
-  }
 
   /**
    * 触发案例生成
@@ -84,6 +68,23 @@ export class CaseEditorController {
     return this.workspaceService.cancelGenerateCases(projectId, dto);
   }
 
+  /** 查询案例生成队列进度与 ETA */
+  @Get("projects/:projectId/generate/queue")
+  @ApiOperation({ summary: "查询案例生成队列进度" })
+  getGenerateQueueStatus(
+    @Param("projectId") projectId: string,
+    @Query("testPointIds") testPointIdsRaw?: string,
+  ) {
+    const testPointIds = (testPointIdsRaw || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    return this.workspaceService.getGenerateQueueStatus(
+      projectId,
+      testPointIds.length ? testPointIds : undefined,
+    );
+  }
+
   /** 局部重生成案例节点 */
   @Post("projects/:projectId/regenerate-node")
   @ApiOperation({ summary: "局部重生成案例节点" })
@@ -94,11 +95,11 @@ export class CaseEditorController {
     return this.workspaceService.regenerateNode(projectId, dto);
   }
 
-  /** 查询项目案例编辑运行记录 */
+  /** 查询项目案例编辑运行摘要（不含案例树） */
   @Get("projects/:projectId/runs")
-  @ApiOperation({ summary: "查询项目案例编辑运行记录" })
+  @ApiOperation({ summary: "查询项目案例编辑运行摘要" })
   listRuns(@Param("projectId") projectId: string) {
-    return this.caseEditorService.listRuns(projectId);
+    return this.caseEditorService.listRunSummaries(projectId);
   }
 
   /** 查询单个案例树运行记录 */
@@ -108,17 +109,46 @@ export class CaseEditorController {
     return this.caseEditorService.getRun(projectId, runId);
   }
 
-  /** 导出案例树（支持 json、excel、xmind） */
+  /** 按需加载测试要点下的案例子树 */
+  @Get("projects/:projectId/runs/:runId/nodes/:nodeId/children")
+  @ApiOperation({ summary: "按需加载测试要点下的案例子树" })
+  listRunNodeChildren(
+    @Param("projectId") projectId: string,
+    @Param("runId") runId: string,
+    @Param("nodeId") nodeId: string,
+  ) {
+    return this.caseEditorService.listRunNodeChildren(projectId, runId, nodeId);
+  }
+
+  /** 分页查询案例 Excel 行 */
+  @Get("projects/:projectId/runs/:runId/case-rows")
+  @ApiOperation({ summary: "分页查询案例 Excel 行" })
+  listCaseRows(
+    @Param("projectId") projectId: string,
+    @Param("runId") runId: string,
+    @Query() query: ListCaseRowsDto,
+  ) {
+    return this.caseEditorService.listCaseRows(projectId, runId, query);
+  }
+
+  /** 导出案例树（支持 excel、xmind；excel 可按 caseNodeIds 筛选） */
   @Get("projects/:projectId/runs/:runId/export")
   @ApiOperation({ summary: "导出案例树" })
   async exportRun(
     @Param("projectId") projectId: string,
     @Param("runId") runId: string,
-    @Query("format") format: "json" | "excel" | "xmind" = "json",
+    @Query("format") format: "excel" | "xmind",
+    @Query("template") template: string | undefined,
+    @Query("caseNodeIds") caseNodeIdsRaw: string | undefined,
     @Res() response: Response,
   ) {
     const run = await this.caseEditorService.getRun(projectId, runId);
     const fileBase = `${run.tree.title.replace(/[\\/:*?"<>|]/g, "_")}`;
+    const caseNodeIds = (caseNodeIdsRaw || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const downloadTemplate = template === "1" || template === "true";
     if (format === "xmind") {
       const buffer = await this.exporter.toXmind(run.tree, run.mindMapExtras);
       response.setHeader("Content-Type", "application/vnd.xmind.workbook");
@@ -129,23 +159,25 @@ export class CaseEditorController {
       return response.send(buffer);
     }
     if (format === "excel") {
-      const buffer = await this.exporter.toExcel(run.tree);
+      const buffer = downloadTemplate
+        ? this.exporter.toExcelTemplate()
+        : await this.exporter.toExcel(
+            run.tree,
+            caseNodeIds.length ? caseNodeIds : undefined,
+          );
       response.setHeader(
         "Content-Type",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       );
       response.setHeader(
         "Content-Disposition",
-        `attachment; filename="${encodeURIComponent(fileBase)}.xlsx"`,
+        `attachment; filename="${encodeURIComponent(
+          downloadTemplate ? "测试案例模板" : fileBase,
+        )}.xlsx"`,
       );
       return response.send(buffer);
     }
-    response.setHeader("Content-Type", "application/json; charset=utf-8");
-    response.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${encodeURIComponent(fileBase)}.json"`,
-    );
-    return response.send(this.exporter.toJson(run.tree, run.mindMapExtras));
+    throw new BadRequestException("format 仅支持 excel 或 xmind");
   }
 
   /** 将案例树同步至测管平台 */

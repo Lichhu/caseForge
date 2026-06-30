@@ -15,10 +15,15 @@ export default (): AppConfig => ({
     database: process.env.TYPEORM_DATABASE ?? "case_forge",
   },
   typeOrmTest: {
-    host: process.env.TYPEORM_TEST_HOST ?? process.env.TYPEORM_HOST ?? "localhost",
-    port: Number(process.env.TYPEORM_TEST_PORT ?? process.env.TYPEORM_PORT ?? 3306),
+    host:
+      process.env.TYPEORM_TEST_HOST ?? process.env.TYPEORM_HOST ?? "localhost",
+    port: Number(
+      process.env.TYPEORM_TEST_PORT ?? process.env.TYPEORM_PORT ?? 3306,
+    ),
     username:
-      process.env.TYPEORM_TEST_USERNAME ?? process.env.TYPEORM_USERNAME ?? "root",
+      process.env.TYPEORM_TEST_USERNAME ??
+      process.env.TYPEORM_USERNAME ??
+      "root",
     password:
       process.env.TYPEORM_TEST_PASSWORD ?? process.env.TYPEORM_PASSWORD ?? "",
     database: process.env.TYPEORM_TEST_DATABASE ?? "jnyh_test",
@@ -33,24 +38,18 @@ export default (): AppConfig => ({
     publicBaseUrl: process.env.MINIO_PUBLIC_BASE_URL ?? "",
   },
   aiWorkflow: {
-    isExternalNetwork: process.env.IS_EXTERNAL_NETWORK === "true",
-    invokeUrl: process.env.AI_WORKFLOW_INVOKE_URL ?? "",
-    stopUrl: process.env.AI_WORKFLOW_STOP_URL ?? "",
-    workflowId: process.env.AI_WORKFLOW_ID ?? "",
     reqDocSkillUrl: process.env.REQ_DOC_SKILL_URL ?? "",
-    caseDocSkillUrl: process.env.CASE_DOC_SKILL_URL ?? "",
     caseDocPromoteUrl: process.env.CASE_DOC_PROMOTE_URL ?? "",
-    dify: {
-      workflowUrl: process.env.DIFY_WORKFLOW_URL ?? "",
-      apiKey: process.env.DIFY_WORKFLOW_ID ?? "",
-      user: process.env.DIFY_WORKFLOW_USER ?? "caseforge",
-    },
+    atCaseSkillUrl: process.env.AT_CASE_SKILL_URL ?? "",
     aiChat: {
       url: process.env.AI_CHAT_URL ?? "",
       model: process.env.AI_CHAT_MODEL ?? "qwen-72b",
       apiKey: process.env.AI_CHAT_API_KEY ?? "",
       retryTime: Number(
         process.env.AI_CHAT_RETRY_TIME ?? process.env.AI_CHAT_RETRY ?? 2,
+      ),
+      requestTimeoutMs: Number(
+        process.env.AI_CHAT_REQUEST_TIMEOUT_MS ?? 600000,
       ),
     },
   },

@@ -4,7 +4,7 @@
 import { Injectable, Logger, Inject } from "@nestjs/common";
 import * as Minio from "minio";
 import * as stream from "node:stream";
-import { MINIO_CONFIG, MinioModuleConfig } from "../minio.config";
+import { MINIO_CONFIG, MinioModuleConfig } from "@minio/minio.config";
 
 /**
  * MinIO 存储服务：封装桶检查、文件上传与访问 URL 生成
@@ -14,15 +14,11 @@ export class MinioStorageService {
   private readonly logger = new Logger(MinioStorageService.name);
   private minioClient: Minio.Client;
   private bucketName: string;
-  private pathPrefix: string;
-  private publicBaseUrl: string;
 
-  constructor(@Inject(MINIO_CONFIG) private readonly config: MinioModuleConfig) {
+  constructor(
+    @Inject(MINIO_CONFIG) private readonly config: MinioModuleConfig,
+  ) {
     this.bucketName = this.config.bucketName || "case-forge";
-    this.pathPrefix = this.config.pathPrefix || "case-forge";
-    this.publicBaseUrl =
-      this.config.publicBaseUrl ||
-      `http://${this.config.endPoint}:${this.config.port}/${this.bucketName}`;
     this.minioClient = new Minio.Client({
       endPoint: this.config.endPoint,
       port: this.config.port,
@@ -42,7 +38,9 @@ export class MinioStorageService {
     const randomSuffix = Math.random().toString(36).slice(2, 11);
     const extensionMatch = safeName.match(/(\.[^.]+)$/);
     const extension = extensionMatch?.[1] ?? "";
-    const baseName = extension ? safeName.slice(0, -extension.length) : safeName;
+    const baseName = extension
+      ? safeName.slice(0, -extension.length)
+      : safeName;
     const objectFileName = extension
       ? `${baseName}-${randomSuffix}${extension}`
       : `${baseName}-${randomSuffix}`;
@@ -61,7 +59,10 @@ export class MinioStorageService {
    * @param objectPath - 桶内对象路径
    * @param expirySeconds - 链接有效期（秒），默认 7 天
    */
-  async getAccessUrl(objectPath?: string | null, expirySeconds = 7 * 24 * 3600) {
+  async getAccessUrl(
+    objectPath?: string | null,
+    expirySeconds = 7 * 24 * 3600,
+  ) {
     if (!objectPath) {
       return undefined;
     }
@@ -112,5 +113,31 @@ export class MinioStorageService {
    */
   async checkBucketExists(bucketName: string): Promise<boolean> {
     return this.minioClient.bucketExists(bucketName);
+  }
+
+  /** 删除 MinIO 对象 */
+  async deleteObject(objectPath: string) {
+    try {
+      const isExistBucket = await this.checkBucketExists(this.bucketName);
+      if (!isExistBucket) {
+        throw new Error(`MinIO bucket ${this.bucketName} 不存在`);
+      }
+      await this.minioClient.removeObject(this.bucketName, objectPath);
+    } catch (error) {
+      this.logger.error(`Delete failed for ${objectPath}`, error);
+      throw error;
+    }
+  }
+
+  /** 读取对象内容为 Buffer */
+  async getObjectBuffer(objectPath: string): Promise<Buffer> {
+    const data = await this.minioClient.getObject(this.bucketName, objectPath);
+    const chunks: Buffer[] = [];
+    await new Promise<void>((resolve, reject) => {
+      data.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+      data.on("end", () => resolve());
+      data.on("error", reject);
+    });
+    return Buffer.concat(chunks);
   }
 }

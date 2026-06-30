@@ -20,16 +20,26 @@
     "axios": "^1.7.3",
     "dayjs": "^1.11.12",
     "markdown-it": "^14.1.0",
-    "mind-elixir": "^5.11.0",
+    "mind-elixir": "^5.12.2",
     "pinia": "^2.2.2",
     "vue": "^3.4.38",
     "vue-router": "^4.4.3"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.1.2",
+    "autoprefixer": "^10.4.19",
     "less": "^4.2.0",
+    "postcss": "^8.4.40",
     "typescript": "^5.4.5",
     "vite": "^5.4.2",
     "vue-tsc": "^2.0.29"
-  }
+  },
+  "browserslist": [
+    "> 0.5%",
+    "last 2 versions",
+    "Firefox ESR",
+    "Edge >= 88",
+    "Safari >= 14",
+    "not dead"
+  ]
 }

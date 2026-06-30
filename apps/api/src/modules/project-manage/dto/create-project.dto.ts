@@ -1,8 +1,9 @@
 /**
  * @file 创建项目请求 DTO
  */
+import { PROJECT_PLATFORMS, type ProjectPlatform } from "@case-forge/shared";
 import { ApiPropertyOptional } from "@nestjs/swagger";
-import { IsOptional, IsString, MaxLength } from "class-validator";
+import { IsIn, IsOptional, IsString, MaxLength } from "class-validator";
 
 /** 创建项目：标题、描述、需求编号（均为可选，标题缺省由服务生成） */
 export class CreateProjectDto {
@@ -23,4 +24,9 @@ export class CreateProjectDto {
   @IsString()
   @MaxLength(64)
   requirementNo?: string;
+
+  @ApiPropertyOptional({ enum: PROJECT_PLATFORMS, default: "case-forge" })
+  @IsOptional()
+  @IsIn(PROJECT_PLATFORMS)
+  platform?: ProjectPlatform;
 }

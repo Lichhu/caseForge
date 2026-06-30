@@ -3,8 +3,7 @@
  */
 import {
   flattenCaseTreeToExcel,
-  extractCasePolarity,
-  type CasePriority,
+  normalizeCasePriority,
   type CaseTreeNode,
 } from "@case-forge/shared";
 import {
@@ -13,23 +12,23 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
-import { RequestContext } from "../../../common/audit/request-context";
-import { TEST_PLATFORM_CONNECTION } from "../../../common/test-platform";
-import { TestPlatformCaseEntity } from "../../../common/test-platform/entity/test-platform-case.entity";
-import { TestPlatformCaseStepEntity } from "../../../common/test-platform/entity/test-platform-case-step.entity";
-import { TestPlatformProjectEntity } from "../../../common/test-platform/entity/test-platform-project.entity";
+import { RequestContext } from "@common/audit/request-context";
+import { TEST_PLATFORM_CONNECTION } from "@common/test-platform";
+import { TestPlatformCaseEntity } from "@common/test-platform/entity/test-platform-case.entity";
+import { TestPlatformCaseStepEntity } from "@common/test-platform/entity/test-platform-case-step.entity";
+import { TestPlatformProjectEntity } from "@common/test-platform/entity/test-platform-project.entity";
 import {
   findOwnedProject,
   scopedWhere,
-} from "../../../common/audit/user-scope";
+} from "@common/audit/user-scope";
 import { CaseEditorEntity } from "@case-editor/entity/case-editor.entity";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { DataSource, Repository } from "typeorm";
-import { buildOperatingSteps } from "../util/case-operating-steps.util";
+import { buildOperatingSteps } from "@case-editor/util/case-operating-steps.util";
 import {
   isValidProjectRequirementCode,
   resolveProjectRequirementCode,
-} from "../util/requirement-code.util";
+} from "@case-editor/util/requirement-code.util";
 
 export interface SyncToTestPlatformResult {
   projectCode: string;
@@ -49,10 +48,6 @@ export class CaseTestPlatformSyncService {
     private readonly projectRepo: Repository<CaseProjectEntity>,
     @InjectRepository(TestPlatformProjectEntity, TEST_PLATFORM_CONNECTION)
     private readonly testProjectRepo: Repository<TestPlatformProjectEntity>,
-    @InjectRepository(TestPlatformCaseEntity, TEST_PLATFORM_CONNECTION)
-    private readonly testCaseRepo: Repository<TestPlatformCaseEntity>,
-    @InjectRepository(TestPlatformCaseStepEntity, TEST_PLATFORM_CONNECTION)
-    private readonly testStepRepo: Repository<TestPlatformCaseStepEntity>,
     @InjectDataSource(TEST_PLATFORM_CONNECTION)
     private readonly testDataSource: DataSource,
   ) {}
@@ -92,7 +87,9 @@ export class CaseTestPlatformSyncService {
       throw new BadRequestException("当前案例树中没有可同步的案例节点");
     }
 
-    const uniqueIds = [...new Set(caseNodeIds.map((id) => id.trim()).filter(Boolean))];
+    const uniqueIds = [
+      ...new Set(caseNodeIds.map((id) => id.trim()).filter(Boolean)),
+    ];
     if (!uniqueIds.length) {
       throw new BadRequestException("请至少选择一条案例进行同步");
     }
@@ -106,7 +103,9 @@ export class CaseTestPlatformSyncService {
     }
 
     const selectedIdSet = new Set(uniqueIds);
-    const selectedRows = rows.filter((row) => selectedIdSet.has(row.caseNodeId));
+    const selectedRows = rows.filter((row) =>
+      selectedIdSet.has(row.caseNodeId),
+    );
     if (!selectedRows.length) {
       throw new BadRequestException("请至少选择一条案例进行同步");
     }
@@ -183,8 +182,7 @@ export class CaseTestPlatformSyncService {
     testProjectId: string;
     operator: string;
   }): Partial<TestPlatformCaseEntity> {
-    const polarity = extractCasePolarity(input.row.caseName) || "正向";
-    const caseNature = /反|负/.test(polarity) ? 2 : 1;
+    const caseNature = /反|负/.test(input.row.caseNature) ? 2 : 1;
     const caseSerial = `CF-${input.projectCode}-`;
 
     return {
@@ -201,7 +199,7 @@ export class CaseTestPlatformSyncService {
       caseExecuteType: 1,
       testPurpose: truncate(input.row.requirement, 2000),
       detailedDescription: truncate(input.row.caseStep, 2000),
-      priority: mapPriority(input.row.caseName),
+      priority: mapPriority(input.row.priority),
       caseStatus: 1,
       expectedResult: truncate(input.row.caseExpected, 2000),
       precondition: truncate(input.row.caseCondition, 200),
@@ -258,12 +256,8 @@ function truncate(value: string, max: number) {
   return text.length > max ? text.slice(0, max) : text;
 }
 
-function mapPriority(caseName: string): number {
-  const match = caseName.match(/\bP([0-3])\b/i);
-  if (!match) {
-    return 2;
-  }
-  const map: Record<CasePriority, number> = { P0: 1, P1: 2, P2: 3, P3: 3 };
-  const key = `P${match[1]}` as CasePriority;
-  return map[key] ?? 2;
+function mapPriority(priority?: string): number {
+  const normalized = normalizeCasePriority(priority);
+  const levelMap = { 高: 1, 中: 2, 低: 3 } as const;
+  return levelMap[normalized];
 }

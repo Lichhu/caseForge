@@ -1,11 +1,7 @@
 /**
  * @file 场景与提示词库业务服务
  */
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import {
   SavePromptDto,
@@ -13,8 +9,19 @@ import {
 } from "@scenario/dto/save-scenario.dto";
 import { PromptEntity } from "@scenario/entity/prompt.entity";
 import { ScenarioEntity } from "@scenario/entity/scenario.entity";
+import {
+  normalizeScenarioScope,
+  SCENARIO_SCOPE_CASE,
+  type ScenarioScope,
+} from "@case-forge/shared";
 import { In, Repository } from "typeorm";
-import { assertOwned, scopedWhere } from "../../../common/audit/user-scope";
+import {
+  assertAccessible,
+  assertOwned,
+  scopedWhere,
+  scopedWhereWithSystem,
+} from "@common/audit/user-scope";
+import { toPublicScenario } from "@common/http/public-response.util";
 
 /**
  * 场景服务：场景的增删改查及下属提示词的同步保存
@@ -28,10 +35,10 @@ export class ScenarioService {
     private readonly promptRepo: Repository<PromptEntity>,
   ) {}
 
-  /** 列出全部场景及其提示词 */
-  async listScenarios() {
-    return this.scenarioRepo.find({
-      where: scopedWhere(),
+  /** 按归属列出系统预置与当前用户维护的场景及其提示词 */
+  async listScenarios(scope: ScenarioScope = SCENARIO_SCOPE_CASE) {
+    const rows = await this.scenarioRepo.find({
+      where: scopedWhereWithSystem({ scope }),
       relations: ["prompts"],
       order: {
         updatedAt: "DESC",
@@ -41,6 +48,7 @@ export class ScenarioService {
         },
       },
     });
+    return rows.map(toPublicScenario);
   }
 
   /**
@@ -48,8 +56,12 @@ export class ScenarioService {
    * @param id - 场景 ID
    */
   async getScenario(id: string) {
+    return toPublicScenario(await this.findScenarioEntity(id));
+  }
+
+  private async findScenarioEntity(id: string) {
     const scenario = await this.scenarioRepo.findOne({
-      where: scopedWhere({ id }),
+      where: { id },
       relations: ["prompts"],
       order: {
         prompts: {
@@ -58,6 +70,12 @@ export class ScenarioService {
         },
       },
     });
+    assertAccessible(scenario, "场景");
+    return scenario;
+  }
+
+  private async getOwnedScenario(id: string) {
+    const scenario = await this.findScenarioEntity(id);
     assertOwned(scenario, "场景");
     return scenario;
   }
@@ -67,12 +85,14 @@ export class ScenarioService {
    * @param dto - 保存载荷
    */
   async createScenario(dto: SaveScenarioDto) {
-    await this.ensureScenarioNameUnique(dto.name.trim());
+    const scope = normalizeScenarioScope(dto.scope, SCENARIO_SCOPE_CASE);
+    await this.ensureScenarioNameUnique(dto.name.trim(), scope);
     const scenario = await this.scenarioRepo.save(
       this.scenarioRepo.create({
         name: dto.name.trim(),
         description: dto.description?.trim() || "",
         category: dto.category.trim(),
+        scope,
         isActive: dto.isActive ?? true,
       }),
     );
@@ -89,8 +109,8 @@ export class ScenarioService {
    * @param dto - 保存载荷
    */
   async updateScenario(id: string, dto: SaveScenarioDto) {
-    const scenario = await this.getScenario(id);
-    await this.ensureScenarioNameUnique(dto.name.trim(), id);
+    const scenario = await this.getOwnedScenario(id);
+    await this.ensureScenarioNameUnique(dto.name.trim(), scenario.scope, id);
     await this.scenarioRepo.save(
       this.scenarioRepo.create({
         ...scenario,
@@ -112,13 +132,13 @@ export class ScenarioService {
    * @param id - 场景 ID
    */
   async deleteScenario(id: string) {
-    const scenario = await this.getScenario(id);
+    const scenario = await this.getOwnedScenario(id);
     await this.scenarioRepo.remove(scenario);
     return { id, deleted: true };
   }
 
   private async replacePrompts(scenarioId: string, prompts: SavePromptDto[]) {
-    await this.getScenario(scenarioId);
+    await this.getOwnedScenario(scenarioId);
     const existing = await this.promptRepo.find({
       where: scopedWhere({ scenarioId }),
       select: ["id"],
@@ -135,9 +155,13 @@ export class ScenarioService {
     await this.savePrompts(scenarioId, prompts);
   }
 
-  private async ensureScenarioNameUnique(name: string, excludeId?: string) {
+  private async ensureScenarioNameUnique(
+    name: string,
+    scope: ScenarioScope,
+    excludeId?: string,
+  ) {
     const existing = await this.scenarioRepo.findOne({
-      where: scopedWhere({ name }),
+      where: scopedWhereWithSystem({ name, scope }),
     });
     if (existing && existing.id !== excludeId) {
       throw new BadRequestException(`场景名称「${name}」已存在`);

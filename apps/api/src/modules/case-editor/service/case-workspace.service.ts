@@ -1,7 +1,7 @@
 /**
  * 案例工作区编排服务
  *
- * 职责：聚合项目视图，协调「需求格式化 → 约束 → 案例生成 → 编辑台运行记录」。
+ * 职责：聚合项目视图，协调「需求格式化 → 动态指令 → 案例生成 → 编辑台运行记录」。
  *
  * ## 案例生成主流程（promote-skill + AI Chat）
  *
@@ -19,19 +19,18 @@
  * 取消生成仅由用户点「停止」触发 POST /generate/cancel，刷新页面不会 cancel。
  */
 import {
+  forwardRef,
+  Inject,
   BadRequestException,
   Injectable,
   Logger,
   NotFoundException,
-  OnModuleInit,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { extractTextFromBuffer } from "../../../common/document/document-text.util";
+import { extractTextFromBuffer } from "@common/document/document-text.util";
 import type {
   CaseForgeProject,
   CaseTreeNode,
-  ConstraintInput,
-  ConstraintInstruction,
   RequirementAnalysis,
   RequirementDocument,
   RequirementModule,
@@ -39,51 +38,48 @@ import type {
 import { CaseEditorService } from "@case-editor/service/case-editor.service";
 import { TestPointInstructEntity } from "@dynamic-instruct/entity/test-point-instruct.entity";
 import { TestPointPromptEntity } from "@dynamic-instruct/entity/test-point-prompt.entity";
-import { CaseConstraintEntity } from "@case-editor/entity/case-constraint.entity";
-import { BuildConstraintsDto } from "../dto/build-constraints.dto";
 import {
   buildCaseWorkflowInput,
   mapTestPointsForWorkflow,
   type ScenarioPromptInput,
   type TestPointGenerationInput,
-} from "../util/case-workflow-input.util";
-import { CancelGenerateDto } from "../dto/cancel-generate.dto";
-import { GenerateCasesDto } from "../dto/generate-cases.dto";
-import { RegenerateNodeDto } from "../dto/regenerate-node.dto";
+} from "@case-editor/util/case-workflow-input.util";
+import { CancelGenerateDto } from "@case-editor/dto/cancel-generate.dto";
+import { GenerateCasesDto } from "@case-editor/dto/generate-cases.dto";
+import { RegenerateNodeDto } from "@case-editor/dto/regenerate-node.dto";
 import { CasePipelineService } from "./case-pipeline.service";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { StructDocEntity } from "@struct-doc/entity/struct-doc.entity";
 import { TestPointEntity } from "@struct-doc/entity/test-point.entity";
 import { stripDocumentExtension } from "@struct-doc/util/struct-doc.parser";
 import { In, Repository } from "typeorm";
-import { auditFieldsForUpdate } from "../../../common/audit/request-context";
+import { auditFieldsForUpdate } from "@common/audit/request-context";
 import {
   findOwnedProject,
   scopedWhere,
-} from "../../../common/audit/user-scope";
-import { withCaseGenerateSlot } from "../util/case-generate-concurrency";
+} from "@common/audit/user-scope";
 import {
   cancelCaseGenerate,
   clearCaseGenerateSlot,
   getCaseGenerateRevertStatus,
   isCaseGenerateCancelled,
   registerCaseGenerate,
-} from "../util/case-generate-cancel.registry";
+} from "@case-editor/util/case-generate-cancel.registry";
 import {
   type CaseTreeMergeMode,
   mergeCaseTreeBranches,
   mergeSourceTestPointIds,
   reassignCaseTreeNodeIds,
-} from "../util/case-tree-merge.util";
-import { withProjectCaseTreeMerge } from "../util/case-tree-merge-lock";
-import { buildCaseGenerateInterruptedMessage } from "../util/case-generate-interrupted.util";
-import { touchProjectUpdatedAt } from "../../../common/project/touch-project.util";
+} from "@case-editor/util/case-tree-merge.util";
+import { withProjectCaseTreeMerge } from "@case-editor/util/case-tree-merge-lock";
+import { touchProjectUpdatedAt } from "@common/project/touch-project.util";
+import { CaseGenerateQueueService } from "./case-generate-queue.service";
+import { truncateRequirementContext } from "@case-editor/util/requirement-context.util";
+import { StructDocService } from "@struct-doc/service/struct-doc.service";
 
 /** 案例编辑器工作区业务编排服务 */
 @Injectable()
-export class CaseWorkspaceService implements OnModuleInit {
-  private readonly logger = new Logger(CaseWorkspaceService.name);
-
+export class CaseWorkspaceService {
   constructor(
     @InjectRepository(CaseProjectEntity)
     private readonly projectRepo: Repository<CaseProjectEntity>,
@@ -91,36 +87,16 @@ export class CaseWorkspaceService implements OnModuleInit {
     private readonly structDocRepo: Repository<StructDocEntity>,
     @InjectRepository(TestPointEntity)
     private readonly testPointRepo: Repository<TestPointEntity>,
-    @InjectRepository(CaseConstraintEntity)
-    private readonly constraintRepo: Repository<CaseConstraintEntity>,
     @InjectRepository(TestPointInstructEntity)
     private readonly instructRepo: Repository<TestPointInstructEntity>,
     @InjectRepository(TestPointPromptEntity)
     private readonly promptSelectionRepo: Repository<TestPointPromptEntity>,
     private readonly caseEditorService: CaseEditorService,
     private readonly pipeline: CasePipelineService,
+    @Inject(forwardRef(() => CaseGenerateQueueService))
+    private readonly generateQueueService: CaseGenerateQueueService,
+    private readonly structDocService: StructDocService,
   ) {}
-
-  /** 服务启动时将遗留的「生成中」测试要点标记为失败（常见于生成中重启） */
-  async onModuleInit() {
-    const result = await this.instructRepo.update(
-      { status: "生成中" },
-      {
-        status: "生成失败",
-        modifiedBy: "system",
-      },
-    );
-    if (result.affected) {
-      this.logger.warn(
-        `服务启动：已将 ${result.affected} 条中断的案例生成任务标记为失败（${buildCaseGenerateInterruptedMessage()}）`,
-      );
-    }
-  }
-
-  /** 获取项目完整工作区视图 */
-  async getProjectWorkspace(projectId: string) {
-    return this.buildProjectView(projectId);
-  }
 
   private async formatRequirement(
     projectId: string,
@@ -179,25 +155,26 @@ export class CaseWorkspaceService implements OnModuleInit {
     structuredMarkdown: string,
     rawText?: string,
   ) {
-    const project = await this.buildProjectView(projectId);
-    if (!project.document) {
+    const { project, structDoc } = await this.loadProjectBundle(projectId);
+    if (!structDoc) {
       throw new NotFoundException("Requirement document not found");
     }
+    const existing = this.toRequirementDocument(structDoc);
     const document: RequirementDocument = {
-      ...project.document,
+      ...existing,
       structuredMarkdown,
-      rawText: rawText || project.document.rawText,
+      rawText: rawText || existing.rawText,
       analysis: this.pipeline.rebuildAnalysisFromMarkdown(structuredMarkdown),
       updatedAt: new Date().toISOString(),
     };
-    const structDoc = await this.saveRequirementDocument(
+    const saved = await this.saveRequirementDocument(
       projectId,
       document,
-      project.document.fileName,
+      existing.fileName,
     );
     await this.syncTestPointsFromAnalysis(
       projectId,
-      structDoc.id,
+      saved.id,
       document.analysis,
     );
     await touchProjectUpdatedAt(this.projectRepo, projectId, {
@@ -207,31 +184,12 @@ export class CaseWorkspaceService implements OnModuleInit {
     return this.buildProjectView(projectId);
   }
 
-  /** 保存约束输入（JSON）快照 */
-  async buildConstraints(projectId: string, dto: BuildConstraintsDto) {
-    const project = await this.buildProjectView(projectId);
-    const input = this.normalizeConstraintInput(
-      dto,
-      project.document?.analysis,
-    );
-    const constraintEntity = this.constraintRepo.create({
-      projectId,
-      structDocId: await this.getStructDocId(projectId),
-      input: input as unknown as Record<string, unknown>,
-      markdown: "",
-    });
-    await this.constraintRepo.save(constraintEntity);
-    await touchProjectUpdatedAt(this.projectRepo, projectId);
-    return this.buildProjectView(projectId);
-  }
-
   /**
    * 案例生成入口（Controller 直接调用）
    *
-   * - **单条**：同步执行，HTTP 会阻塞到 AI 返回并写入案例树（约 1～3 分钟）
-   * - **批量**：先把全部 testPointIds 标为「生成中」并立即响应；后台 foreach 逐条生成
+   * 立即将测试要点标为「生成中」并入队，HTTP 快速返回；后台队列 worker 逐条消化。
    *
-   * @see runBatchGenerateInBackground 批量后台消化
+   * @see CaseGenerateQueueService 队列调度
    * @see generateCasesInternal       单条实际生成逻辑
    */
   async generateCases(projectId: string, dto: GenerateCasesDto) {
@@ -241,60 +199,28 @@ export class CaseWorkspaceService implements OnModuleInit {
     }
 
     await this.loadAndValidateGenerateTestPoints(projectId, testPointIds);
-    // 登记内存槽：记录「若用户点停止，应回退到什么状态」（已编辑/再编辑）
-    await this.registerGenerateSlots(projectId, testPointIds);
-
-    if (testPointIds.length === 1) {
-      // 单条：在全局 AI 并发槽内同步跑完
-      return withCaseGenerateSlot(() =>
-        this.generateCasesInternal(projectId, dto),
-      );
-    }
-
-    // 批量：先落库「生成中」，前端刷新也能看到；不阻塞 HTTP
     await this.updateDynamicStatus(testPointIds, "生成中");
-    void this.runBatchGenerateInBackground(projectId, dto, testPointIds).catch(
-      (error) => {
-        this.logger.error(
-          `批量案例生成后台任务异常: ${(error as Error).message}`,
-        );
-      },
-    );
+    await this.generateQueueService.enqueue(projectId, testPointIds, dto.model);
     return this.buildProjectView(projectId);
   }
 
-  /**
-   * 批量生成的后台 worker（fire-and-forget）
-   *
-   * 按 testPointIds 顺序逐条调用 generateCasesInternal；
-   * 每条之间竞争 withCaseGenerateSlot，与别的用户/别的批量任务共享并发上限。
-   * skipGeneratingStatus=true 因为入口已统一标过「生成中」。
-   */
-  private async runBatchGenerateInBackground(
-    projectId: string,
-    dto: GenerateCasesDto,
-    testPointIds: string[],
-  ) {
-    for (const testPointId of testPointIds) {
-      if (isCaseGenerateCancelled(projectId, testPointId)) {
-        await this.revertCancelledGenerations(projectId, [testPointId]);
-        clearCaseGenerateSlot(projectId, testPointId);
-        continue;
-      }
-      try {
-        await withCaseGenerateSlot(() =>
-          this.generateCasesInternal(
-            projectId,
-            { ...dto, testPointIds: [testPointId] },
-            { skipGeneratingStatus: true },
-          ),
-        );
-      } catch (error) {
-        this.logger.warn(
-          `测试要点 ${testPointId} 案例生成失败: ${(error as Error).message}`,
-        );
-      }
-    }
+  async getGenerateQueueStatus(projectId: string, testPointIds?: string[]) {
+    await this.ensureProject(projectId);
+    return this.generateQueueService.getQueueStatus(projectId, testPointIds);
+  }
+
+  /** 队列 worker 执行单条测试要点生成 */
+  async runQueuedGenerateJob(input: {
+    projectId: string;
+    testPointId: string;
+    model?: string;
+  }) {
+    await this.registerGenerateSlots(input.projectId, [input.testPointId]);
+    return this.generateCasesInternal(
+      input.projectId,
+      { testPointIds: [input.testPointId], model: input.model },
+      { skipGeneratingStatus: true },
+    );
   }
 
   /**
@@ -343,6 +269,8 @@ export class CaseWorkspaceService implements OnModuleInit {
       await this.updateDynamicStatus(ids, status);
     }
 
+    await this.generateQueueService.cancelJobs(projectId, testPointIds);
+
     return this.buildProjectView(projectId);
   }
 
@@ -362,8 +290,8 @@ export class CaseWorkspaceService implements OnModuleInit {
     dto: GenerateCasesDto,
     options?: { skipGeneratingStatus?: boolean },
   ) {
-    const { view: project, structDoc } = await this.loadProjectBundle(projectId);
-    if (!project.document || !structDoc) {
+    const { project, structDoc } = await this.loadProjectBundle(projectId);
+    if (!structDoc) {
       throw new BadRequestException(
         "Requirement document must be formatted before generation",
       );
@@ -373,12 +301,9 @@ export class CaseWorkspaceService implements OnModuleInit {
       throw new BadRequestException("请指定要生成案例的测试要点");
     }
 
-    const requirementContext = project.document.structuredMarkdown.trim();
-    if (!requirementContext) {
-      throw new BadRequestException(
-        "需求前景为空，请先在「结构化需求文档」完成结构化并保存",
-      );
-    }
+    const requirementContext = truncateRequirementContext(
+      await this.structDocService.ensureSummaryStructDoc(projectId),
+    );
 
     const selectedTestPoints = await this.loadAndValidateGenerateTestPoints(
       projectId,
@@ -386,8 +311,9 @@ export class CaseWorkspaceService implements OnModuleInit {
     );
 
     const analysis = this.buildAnalysisFromTestPoints(
-      project.document.analysis,
+      project.requirementNo?.trim() || "",
       selectedTestPoints,
+      project.title,
     );
     const testPointInputs =
       await this.buildTestPointWorkflowInputs(selectedTestPoints);
@@ -416,10 +342,11 @@ export class CaseWorkspaceService implements OnModuleInit {
 
     try {
       // --- AI 生成案例 JSON 并转为六级案例树 ---
-      const { tree: generatedTree } =
+      const requirementDocument = this.toRequirementDocument(structDoc);
+      const { tree: generatedTree, failures } =
         await this.pipeline.generateJsonCaseTree({
           document: {
-            ...project.document,
+            ...requirementDocument,
             analysis,
             structuredMarkdown: requirementContext,
           },
@@ -445,19 +372,40 @@ export class CaseWorkspaceService implements OnModuleInit {
         return this.buildProjectView(projectId);
       }
 
+      const failedByTestPointId = new Map(
+        failures.map((item) => [item.testPointId, item.message]),
+      );
+      const succeededTestPointIds = stillActiveTestPointIds.filter(
+        (id) => !failedByTestPointId.has(id),
+      );
+      if (failedByTestPointId.size) {
+        for (const [testPointId, message] of failedByTestPointId) {
+          await this.updateDynamicStatus([testPointId], "生成失败", message);
+        }
+      }
+      if (!succeededTestPointIds.length) {
+        throw new BadRequestException(
+          failures
+            .map((item) => `「${item.testPoint}」：${item.message}`)
+            .join("；") || "案例生成失败，请稍后重试",
+        );
+      }
+
       const activeSnapshots = activeTestPointInputs.filter((item) =>
-        stillActiveTestPointIds.includes(item.id),
+        succeededTestPointIds.includes(item.id),
       );
 
       const instructs = await this.instructRepo.find({
-        where: { testPointId: In(stillActiveTestPointIds) },
+        where: { testPointId: In(succeededTestPointIds) },
       });
       const mergeModeByTestPointId = new Map<string, CaseTreeMergeMode>(
-        stillActiveTestPointIds.map((testPointId) => {
+        succeededTestPointIds.map((testPointId) => {
           const instruct = instructs.find(
             (item) => item.testPointId === testPointId,
           );
-          const mode: CaseTreeMergeMode = instruct?.isFull ? "full" : "append";
+          const mode: CaseTreeMergeMode = instruct?.isAppend
+            ? "append"
+            : "full";
           return [testPointId, mode];
         }),
       );
@@ -467,7 +415,7 @@ export class CaseWorkspaceService implements OnModuleInit {
         const runs = await this.caseEditorService.listRuns(projectId);
         const previousRun = runs[0];
         let finalTree = generatedTree;
-        let sourceTestPointIds = stillActiveTestPointIds;
+        let sourceTestPointIds = succeededTestPointIds;
         if (previousRun?.tree && activeSnapshots.length) {
           finalTree = reassignCaseTreeNodeIds(
             mergeCaseTreeBranches(
@@ -494,7 +442,7 @@ export class CaseWorkspaceService implements OnModuleInit {
         });
       });
 
-      await this.updateDynamicStatus(stillActiveTestPointIds, "生成完成");
+      await this.updateDynamicStatus(succeededTestPointIds, "生成完成");
       await touchProjectUpdatedAt(this.projectRepo, projectId);
       return this.buildProjectView(projectId);
     } catch (error) {
@@ -508,7 +456,11 @@ export class CaseWorkspaceService implements OnModuleInit {
         await this.revertCancelledGenerations(projectId, cancelledTestPointIds);
       }
       if (failedTestPointIds.length) {
-        await this.updateDynamicStatus(failedTestPointIds, "生成失败");
+        await this.updateDynamicStatus(
+          failedTestPointIds,
+          "生成失败",
+          this.extractGenerateErrorMessage(error),
+        );
       }
       if (!failedTestPointIds.length) {
         return this.buildProjectView(projectId);
@@ -545,37 +497,25 @@ export class CaseWorkspaceService implements OnModuleInit {
     return updated;
   }
 
-  /** 一次加载项目、结构化文档、约束与运行记录（避免重复查 structDoc） */
+  /** 加载项目实体与 struct-doc（生成/文档保存等内部流程用） */
   private async loadProjectBundle(projectId: string) {
     const project = await this.ensureProject(projectId);
-    const [structDoc, constraints, runs] = await Promise.all([
-      this.structDocRepo.findOne({
-        where: scopedWhere({ projectId }),
-      }),
-      this.constraintRepo.find({
-        where: scopedWhere({ projectId }),
-        order: { createdAt: "DESC" },
-      }),
-      this.caseEditorService.listRuns(projectId),
-    ]);
-
-    const view: CaseForgeProject = {
-      id: project.id,
-      title: project.title || "未命名案例生成项目",
-      description: project.description || "",
-      document: structDoc ? this.toRequirementDocument(structDoc) : undefined,
-      constraints: constraints.map((item) => this.toConstraint(item)),
-      runs,
-      createdAt: project.createdAt.toISOString(),
-      updatedAt: project.updatedAt.toISOString(),
-    };
-
-    return { project, structDoc: structDoc ?? undefined, view };
+    const structDoc = await this.structDocRepo.findOne({
+      where: scopedWhere({ projectId }),
+    });
+    return { project, structDoc: structDoc ?? undefined };
   }
 
   private async buildProjectView(projectId: string): Promise<CaseForgeProject> {
-    const { view } = await this.loadProjectBundle(projectId);
-    return view;
+    const project = await this.ensureProject(projectId);
+    return {
+      id: project.id,
+      title: project.title || "未命名案例生成项目",
+      description: project.description || "",
+      requirementNo: project.requirementNo,
+      createdAt: project.createdAt.toISOString(),
+      updatedAt: project.updatedAt.toISOString(),
+    };
   }
 
   private async saveRequirementDocument(
@@ -586,7 +526,7 @@ export class CaseWorkspaceService implements OnModuleInit {
     const existing = await this.structDocRepo.findOne({
       where: scopedWhere({ projectId }),
     });
-    return this.structDocRepo.save(
+    const saved = await this.structDocRepo.save(
       this.structDocRepo.create({
         ...existing,
         projectId,
@@ -603,6 +543,10 @@ export class CaseWorkspaceService implements OnModuleInit {
           `${document.analysis.requirementId || "structured"}-structured.md`,
       }),
     );
+    await this.structDocRepo.update(saved.id, {
+      summaryStructDoc: null,
+    } as never);
+    return saved;
   }
 
   private toRequirementDocument(
@@ -669,55 +613,6 @@ export class CaseWorkspaceService implements OnModuleInit {
     }
   }
 
-  private normalizeConstraintInput(
-    dto: BuildConstraintsDto,
-    analysis?: RequirementAnalysis,
-  ): ConstraintInput {
-    return {
-      scenarioTags: dto.scenarioTags?.length
-        ? dto.scenarioTags
-        : ["positive", "negative"],
-      testDimensions: dto.testDimensions?.length
-        ? dto.testDimensions
-        : ["functional", "interface"],
-      grouping: dto.grouping || "bySystem",
-      knowledgeBaseIds: dto.knowledgeBaseIds || [],
-      naturalLanguage: dto.naturalLanguage || "",
-      featureInstructions: this.normalizeFeatureInstructions(
-        dto.featureInstructions,
-        analysis,
-      ),
-    };
-  }
-
-  private normalizeFeatureInstructions(
-    instructions: BuildConstraintsDto["featureInstructions"] | undefined,
-    analysis?: RequirementAnalysis,
-  ) {
-    const byModuleId = new Map(
-      (instructions || []).map((item) => [item.moduleId, item]),
-    );
-    if (!analysis?.modules.length) {
-      return (instructions || []).map((item) => ({
-        moduleId: item.moduleId,
-        system: item.system,
-        featureName: item.featureName,
-        instruction: item.instruction,
-      }));
-    }
-    return analysis.modules.map((module) => {
-      const matched = byModuleId.get(module.id);
-      return {
-        moduleId: module.id,
-        system: module.system,
-        featureName: module.name,
-        instruction:
-          matched?.instruction?.trim() ||
-          `围绕“${module.name}”生成可执行案例，每个测试要点包含正向与反向案例，步骤从系统登录或访问系统开始。`,
-      };
-    });
-  }
-
   /**
    * 从 DB 拉取测试要点关联数据，供 promote-skill 拼 {prompts} 使用
    *
@@ -769,63 +664,10 @@ export class CaseWorkspaceService implements OnModuleInit {
     }));
   }
 
-  private async buildConstraintInputFromDynamic(
-    projectId: string,
-    analysis: RequirementAnalysis,
-    testPoints: TestPointEntity[],
-  ): Promise<ConstraintInput> {
-    const testPointIds = testPoints.map((item) => item.id);
-    const [instructs, selections] = await Promise.all([
-      this.instructRepo.find({ where: { testPointId: In(testPointIds) } }),
-      this.promptSelectionRepo.find({
-        where: { testPointId: In(testPointIds) },
-        relations: ["prompt"],
-        order: { createdAt: "ASC" },
-      }),
-    ]);
-
-    const instructMap = new Map(
-      instructs.map((item) => [item.testPointId, item]),
-    );
-    const selectionMap = new Map<string, TestPointPromptEntity[]>();
-    for (const row of selections) {
-      selectionMap.set(row.testPointId, [
-        ...(selectionMap.get(row.testPointId) || []),
-        row,
-      ]);
-    }
-
-    return {
-      scenarioTags: ["positive", "negative"],
-      testDimensions: ["functional", "interface", "data"],
-      grouping: "bySystem",
-      knowledgeBaseIds: [],
-      naturalLanguage: "",
-      featureInstructions: testPoints.map((testPoint) => {
-        const instruct = instructMap.get(testPoint.id);
-        const promptText = (selectionMap.get(testPoint.id) || [])
-          .map((item) => item.prompt?.content?.trim())
-          .filter(Boolean)
-          .join("\n");
-        const naturalText = instruct?.naturalText?.trim() || "";
-        const instruction = [promptText, naturalText]
-          .filter(Boolean)
-          .join("\n");
-        return {
-          moduleId: testPoint.id,
-          system: testPoint.system,
-          featureName: `${testPoint.featureModule} / ${testPoint.testPoint}`,
-          instruction:
-            instruction ||
-            `围绕“${testPoint.testPoint}”生成可执行案例，覆盖业务规则、系统交互、异常分支和数据一致性断言。`,
-        };
-      }),
-    };
-  }
-
   private buildAnalysisFromTestPoints(
-    baseAnalysis: RequirementAnalysis,
+    requirementId: string,
     testPoints: TestPointEntity[],
+    projectTitle?: string,
   ): RequirementAnalysis {
     const modules: RequirementModule[] = testPoints.map((item) => ({
       id: item.id,
@@ -837,7 +679,11 @@ export class CaseWorkspaceService implements OnModuleInit {
       interactions: [item.featureDesc].filter(Boolean),
     }));
     return {
-      ...baseAnalysis,
+      requirementId,
+      requirementName: projectTitle || "",
+      businessScope: "",
+      summary: "",
+      risks: [],
       modules,
     };
   }
@@ -923,8 +769,12 @@ export class CaseWorkspaceService implements OnModuleInit {
     }
   }
 
-  /** 批量更新 case_test_point_instruct.status */
-  private async updateDynamicStatus(testPointIds: string[], status: string) {
+  /** 批量更新 case_test_point_instruct.status，并在非失败状态时清空 generateError */
+  private async updateDynamicStatus(
+    testPointIds: string[],
+    status: string,
+    generateError?: string | null,
+  ) {
     if (!testPointIds.length) {
       return;
     }
@@ -933,32 +783,28 @@ export class CaseWorkspaceService implements OnModuleInit {
       .update(TestPointInstructEntity)
       .set({
         status: status as TestPointInstructEntity["status"],
+        generateError:
+          status === "生成失败"
+            ? generateError?.trim() || "案例生成失败，请稍后重试"
+            : null,
         ...auditFieldsForUpdate(),
       })
       .where("testPointId IN (:...testPointIds)", { testPointIds })
       .execute();
   }
 
-  private toConstraint(entity: CaseConstraintEntity): ConstraintInstruction {
-    return {
-      id: entity.id,
-      projectId: entity.projectId,
-      input: entity.input as unknown as ConstraintInput,
-      createdAt: entity.createdAt.toISOString(),
-    };
+  private extractGenerateErrorMessage(error: unknown) {
+    if (error instanceof BadRequestException) {
+      return error.message;
+    }
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return "案例生成失败，请稍后重试";
   }
 
   private async ensureProject(projectId: string) {
     return findOwnedProject(this.projectRepo, projectId);
-  }
-
-  private async getStructDocId(projectId: string) {
-    return (
-      await this.structDocRepo.findOne({
-        where: scopedWhere({ projectId }),
-        select: ["id"],
-      })
-    )?.id;
   }
 
   private async extractText(

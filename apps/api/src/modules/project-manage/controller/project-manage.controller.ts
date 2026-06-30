@@ -16,6 +16,8 @@ import { ApiOperation, ApiQuery, ApiTags } from "@nestjs/swagger";
 import { BatchDeleteProjectsDto } from "@project-manage/dto/batch-delete-projects.dto";
 import { CreateProjectDto } from "@project-manage/dto/create-project.dto";
 import { UpdateProjectDto } from "@project-manage/dto/update-project.dto";
+import type { ProjectPlatform } from "@case-forge/shared";
+import { PROJECT_PLATFORMS } from "@case-forge/shared";
 import { ProjectManageService } from "@project-manage/service/project-manage.service";
 
 @ApiTags("project-manage")
@@ -36,17 +38,44 @@ export class ProjectManageController {
   /** 获取侧边栏展示用的项目列表（含运行次数等摘要字段） */
   @Get("projects/sidebar")
   @ApiOperation({ summary: "获取侧边栏项目列表" })
-  async listProjectsForSidebar() {
-    const { rows } = await this.pmService.listProjects(1, 1000, "");
-    return rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      description: row.description,
-      createdAt: row.createdAt.toISOString(),
-      updatedAt: row.updatedAt.toISOString(),
-      constraints: [],
-      runCount: row.generationCount,
-    }));
+  @ApiQuery({
+    name: "platform",
+    enum: PROJECT_PLATFORMS,
+    required: false,
+    description: "case-forge=案例生成平台，api-test=接口测试平台",
+  })
+  @ApiQuery({ name: "page", type: Number, required: false, example: 1 })
+  @ApiQuery({ name: "size", type: Number, required: false, example: 15 })
+  @ApiQuery({
+    name: "input",
+    type: String,
+    required: false,
+    description: "项目名称或需求编号",
+  })
+  async listProjectsForSidebar(
+    @Query("platform") platform: ProjectPlatform = "case-forge",
+    @Query("page") page: number = 1,
+    @Query("size") size: number = 15,
+    @Query("input") input?: string,
+  ) {
+    const result = await this.pmService.listProjects(
+      Number(page) || 1,
+      Number(size) || 15,
+      input,
+      platform,
+    );
+    return {
+      count: result.count,
+      rows: result.rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        description: row.description,
+        requirementNo: row.requirementNo,
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+        runCount: row.generationCount,
+      })),
+    };
   }
 
   /** 分页查询项目列表，支持按标题或需求编号模糊搜索 */
@@ -59,16 +88,19 @@ export class ProjectManageController {
     description: "项目名称或需求编号",
   })
   @ApiQuery({ name: "page", type: Number, required: false, example: 1 })
-  @ApiQuery({ name: "size", type: Number, required: false, example: 10 })
+  @ApiQuery({ name: "size", type: Number, required: false, example: 15 })
+  @ApiQuery({ name: "platform", enum: PROJECT_PLATFORMS, required: false })
   async listProjects(
     @Query("page") page: number = 1,
-    @Query("size") size: number = 10,
+    @Query("size") size: number = 15,
     @Query("input") input?: string,
+    @Query("platform") platform: ProjectPlatform = "case-forge",
   ) {
     return await this.pmService.listProjects(
       Number(page) || 1,
-      Number(size) || 10,
+      Number(size) || 15,
       input,
+      platform,
     );
   }
 

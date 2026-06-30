@@ -9,3 +9,5 @@ coverage
 apps/api/.data
 apps/web/.vite
 .pnpm-store
+information/*
+.srclight/

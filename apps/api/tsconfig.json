@@ -19,12 +19,14 @@
       "@utils/*": ["src/utils/*"],
       "@config/*" : ["src/config/*"],
       "@constant/*": ["src/constant/*"],
+      "@common/*": ["src/common/*"],
       "@minio/*": ["src/common/minio/*"],
       "@case-editor/*": ["src/modules/case-editor/*"],
       "@dynamic-instruct/*": ["src/modules/dynamic-instruct/*"],
       "@project-manage/*": ["src/modules/project-manage/*"],
       "@struct-doc/*": ["src/modules/struct-doc/*"],
-      "@scenario/*": ["src/modules/scenario/*"]
+      "@scenario/*": ["src/modules/scenario/*"],
+      "@api-test/*": ["src/modules/api-test/*"]
     }
   },
   "include": ["src/**/*.ts"],

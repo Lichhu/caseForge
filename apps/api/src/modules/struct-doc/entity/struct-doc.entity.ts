@@ -27,9 +27,10 @@ export const STRUCTURING_STATUS = [
 /** 结构化任务状态类型 */
 export type StructuringStatus = (typeof STRUCTURING_STATUS)[number];
 
-/** 项目级结构化需求文档记录，每个项目唯一一条。 */
+/** 项目级结构化需求文档记录，一个项目可有多条（拆分文档）。 */
 @Entity("case_struct_doc")
-@Index("uk_case_struct_doc_project", ["projectId"], { unique: true })
+@Index("idx_case_struct_doc_project", ["projectId"])
+@Index("idx_case_struct_doc_structuring_status", ["structuringStatus"])
 export class StructDocEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
@@ -38,7 +39,10 @@ export class StructDocEntity {
   @Column()
   projectId: string;
 
-  @ManyToOne(() => CaseProjectEntity, { onDelete: "CASCADE", onUpdate: "CASCADE" })
+  @ManyToOne(() => CaseProjectEntity, {
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  })
   @JoinColumn({ name: "projectId" })
   project: CaseProjectEntity;
 
@@ -50,7 +54,7 @@ export class StructDocEntity {
   @Column({ nullable: true })
   reqDocPath?: string;
 
-  /** AI Workflow 返回的原始响应 JSON */
+  /** AI 结构化返回的原始响应 JSON */
   @Column({ type: "json", nullable: true })
   aiResponse?: Record<string, unknown>;
 
@@ -65,6 +69,18 @@ export class StructDocEntity {
   /** 在线编辑中的临时结构化 Markdown，尚未写入 MinIO */
   @Column({ type: "longtext", nullable: true })
   tempStructDoc?: string;
+
+  /** 案例生成共用的需求总结（由 tempStructDoc 压缩生成，显著短于全文） */
+  @Column({ type: "longtext", nullable: true })
+  summaryStructDoc?: string;
+
+  /** 最近一次从 Markdown 解析到的测试要点数量 */
+  @Column({ type: "int", nullable: true })
+  parsedTestPointCount?: number;
+
+  /** 解析结果为 0 或异常时的提示（供前端展示） */
+  @Column({ type: "text", nullable: true })
+  parseWarning?: string;
 
   /** 异步结构化任务状态 */
   @Column({

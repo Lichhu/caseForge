@@ -1,7 +1,7 @@
 /**
  * @file 测试要点动态指令主表实体（状态、自然语言、全量/追加标志）
  */
-import { TestPointEntity } from "@struct-doc/entity/test-point.entity";
+import type { TestPointEntity } from "@struct-doc/entity/test-point.entity";
 import {
   Column,
   CreateDateColumn,
@@ -33,6 +33,7 @@ export type TestPointInstructStatus = (typeof TEST_POINT_INSTRUCT_STATUS)[number
 @Index("uk_case_test_point_instruct_test_point", ["testPointId"], {
   unique: true,
 })
+@Index("idx_case_test_point_instruct_status", ["status"])
 export class TestPointInstructEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
@@ -40,10 +41,14 @@ export class TestPointInstructEntity {
   @Column()
   testPointId: string;
 
-  @OneToOne(() => TestPointEntity, (testPoint) => testPoint.instruct, {
-    onDelete: "CASCADE",
-    onUpdate: "CASCADE",
-  })
+  @OneToOne(
+    () => require("@struct-doc/entity/test-point.entity").TestPointEntity,
+    (testPoint: TestPointEntity) => testPoint.instruct,
+    {
+      onDelete: "CASCADE",
+      onUpdate: "CASCADE",
+    },
+  )
   @JoinColumn({ name: "testPointId" })
   testPoint: TestPointEntity;
 
@@ -57,10 +62,14 @@ export class TestPointInstructEntity {
   @Column({ type: "text", nullable: true })
   naturalText?: string;
 
-  @Column({ default: false })
-  isFull: boolean;
+  /** 最近一次案例生成失败原因（status 为「生成失败」时展示） */
+  @Column({ type: "text", nullable: true })
+  generateError?: string | null;
 
   @Column({ default: true })
+  isFull: boolean;
+
+  @Column({ default: false })
   isAppend: boolean;
 
   @Column({ nullable: true, default: "system" })

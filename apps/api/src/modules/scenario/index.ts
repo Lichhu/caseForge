@@ -6,12 +6,13 @@ import { TypeOrmModule } from "@nestjs/typeorm";
 import { ScenarioEntity } from "./entity/scenario.entity";
 import { ScenarioController } from "./controller/scenario.controller";
 import { ScenarioService } from "./service/scenario.service";
+import { ApiScenarioBootstrapService } from "./service/api-scenario-bootstrap.service";
 import { PromptEntity } from "./entity/prompt.entity";
 
 @Module({
   imports: [TypeOrmModule.forFeature([ScenarioEntity, PromptEntity])],
   controllers: [ScenarioController],
-  providers: [ScenarioService],
+  providers: [ScenarioService, ApiScenarioBootstrapService],
   exports: [ScenarioService],
 })
 /** 场景维护功能模块 */

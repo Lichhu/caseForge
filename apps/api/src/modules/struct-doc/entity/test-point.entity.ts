@@ -2,9 +2,9 @@
  * 测试要点实体定义。
  * 映射 case_test_point 表，存储从结构化文档解析出的系统、模块与测试要点信息。
  */
-import { DynamicInstructEntity } from "@dynamic-instruct/entity/dynamic-instruct";
-import { TestPointInstructEntity } from "@dynamic-instruct/entity/test-point-instruct.entity";
-import { TestPointPromptEntity } from "@dynamic-instruct/entity/test-point-prompt.entity";
+import type { DynamicInstructEntity } from "@dynamic-instruct/entity/dynamic-instruct";
+import type { TestPointInstructEntity } from "@dynamic-instruct/entity/test-point-instruct.entity";
+import type { TestPointPromptEntity } from "@dynamic-instruct/entity/test-point-prompt.entity";
 import { StructDocEntity } from "@struct-doc/entity/struct-doc.entity";
 import {
   Column,
@@ -21,7 +21,16 @@ import {
 
 /** 结构化文档解析出的测试要点，关联项目与结构化文档。 */
 @Entity("case_test_point")
-@Index(["projectId", "structDocId"])
+@Index("idx_case_test_point_project_struct_created", [
+  "projectId",
+  "structDocId",
+  "createdAt",
+])
+@Index("idx_case_test_point_project_struct_module", [
+  "projectId",
+  "structDocId",
+  "featureModule",
+])
 @Index(["structDocId", "testPoint"])
 export class TestPointEntity {
     @PrimaryGeneratedColumn("uuid")
@@ -66,18 +75,33 @@ export class TestPointEntity {
     @Column()
     testPointDesc: string;
 
-    @OneToOne(() => TestPointInstructEntity, (instruct) => instruct.testPoint)
+    @OneToOne(
+      () =>
+        require("@dynamic-instruct/entity/test-point-instruct.entity")
+          .TestPointInstructEntity,
+      (instruct: TestPointInstructEntity) => instruct.testPoint,
+    )
     instruct?: TestPointInstructEntity;
   
-    @OneToMany(() => TestPointPromptEntity, (selection) => selection.testPoint)
+    @OneToMany(
+      () =>
+        require("@dynamic-instruct/entity/test-point-prompt.entity")
+          .TestPointPromptEntity,
+      (selection: TestPointPromptEntity) => selection.testPoint,
+    )
     promptSelections: TestPointPromptEntity[];
   
 
     // 新增：一对多关系，指向中间表
-    @OneToOne(() => DynamicInstructEntity, (selection) => selection.testPoint, {
-      cascade: true,
-      eager: false
-    })
+    @OneToOne(
+      () =>
+        require("@dynamic-instruct/entity/dynamic-instruct").DynamicInstructEntity,
+      (selection: DynamicInstructEntity) => selection.testPoint,
+      {
+        cascade: true,
+        eager: false
+      }
+    )
     selections: DynamicInstructEntity;
 
 

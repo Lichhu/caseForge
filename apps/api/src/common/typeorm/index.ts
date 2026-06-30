@@ -4,6 +4,7 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { TypeOrmModule } from "@nestjs/typeorm";
+import { SchemaPatchService } from "./schema-patch.service";
 import { createTypeOrmOptions } from "./typeorm.config";
 
 @Module({
@@ -14,6 +15,7 @@ import { createTypeOrmOptions } from "./typeorm.config";
       useFactory: createTypeOrmOptions,
     }),
   ],
+  providers: [SchemaPatchService],
 })
 /** 注册 TypeORM 根连接的 Nest 模块 */
 export class TypeormModule {}

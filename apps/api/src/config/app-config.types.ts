@@ -31,23 +31,16 @@ export interface AppConfig {
     publicBaseUrl: string;
   };
   aiWorkflow: {
-    isExternalNetwork: boolean;
-    invokeUrl: string;
-    stopUrl: string;
-    workflowId: string;
     reqDocSkillUrl: string;
-    caseDocSkillUrl: string;
     caseDocPromoteUrl: string;
-    dify: {
-      workflowUrl: string;
-      apiKey: string;
-      user: string;
-    };
+    atCaseSkillUrl: string;
     aiChat: {
       url: string;
       model: string;
       apiKey: string;
       retryTime: number;
+      /** 单次 AI Chat 请求超时（毫秒），默认 600000（10 分钟） */
+      requestTimeoutMs: number;
     };
   };
 }

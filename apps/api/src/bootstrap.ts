@@ -7,6 +7,7 @@ import { loadApiEnv } from "@config/load-env";
 import { ValidationPipe, VersioningType } from "@nestjs/common";
 
 loadApiEnv();
+import { runPreSyncSchemaPatch } from "./common/typeorm/pre-sync-schema-patch";
 import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { AppModule } from "./app.module";
@@ -15,6 +16,7 @@ import * as express from "express";
 import { NextFunction, Request, Response } from "express";
 /** 启动 CaseForge API 服务 */
 async function bootstrap() {
+  await runPreSyncSchemaPatch();
   const app = await NestFactory.create(AppModule, {
     cors: true,
   });

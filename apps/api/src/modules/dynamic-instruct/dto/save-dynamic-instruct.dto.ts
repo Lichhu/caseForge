@@ -37,12 +37,12 @@ export class SaveDynamicInstructDto {
   @IsIn(statuses)
   status?: (typeof statuses)[number];
 
-  @ApiPropertyOptional({ example: false })
+  @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
   isFull?: boolean;
 
-  @ApiPropertyOptional({ example: true })
+  @ApiPropertyOptional({ example: false })
   @IsOptional()
   @IsBoolean()
   isAppend?: boolean;

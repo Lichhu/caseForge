@@ -1,0 +1,33 @@
+/**
+ * Jest 配置：ts-jest 编译 TS，moduleNameMapper 镜像 tsconfig.json 的路径别名，
+ * 让测试可直接 import `@common/*`、`@api-test/*`、`@case-forge/shared` 等。
+ */
+/** @type {import('jest').Config} */
+module.exports = {
+  rootDir: ".",
+  testEnvironment: "node",
+  moduleFileExtensions: ["js", "json", "ts"],
+  testRegex: ".*\\.spec\\.ts$",
+  transform: {
+    "^.+\\.ts$": [
+      "ts-jest",
+      { tsconfig: "<rootDir>/tsconfig.json", isolatedModules: true },
+    ],
+  },
+  moduleNameMapper: {
+    "^@case-forge/shared$": "<rootDir>/../../packages/shared/src/index.ts",
+    "^@utils/(.*)$": "<rootDir>/src/utils/$1",
+    "^@config/(.*)$": "<rootDir>/src/config/$1",
+    "^@constant/(.*)$": "<rootDir>/src/constant/$1",
+    "^@minio/(.*)$": "<rootDir>/src/common/minio/$1",
+    "^@common/(.*)$": "<rootDir>/src/common/$1",
+    "^@case-editor/(.*)$": "<rootDir>/src/modules/case-editor/$1",
+    "^@dynamic-instruct/(.*)$": "<rootDir>/src/modules/dynamic-instruct/$1",
+    "^@project-manage/(.*)$": "<rootDir>/src/modules/project-manage/$1",
+    "^@struct-doc/(.*)$": "<rootDir>/src/modules/struct-doc/$1",
+    "^@scenario/(.*)$": "<rootDir>/src/modules/scenario/$1",
+    "^@api-test/(.*)$": "<rootDir>/src/modules/api-test/$1",
+  },
+  collectCoverageFrom: ["src/**/*.{ts}", "!src/**/*.entity.ts", "!src/**/*.dto.ts"],
+  coverageDirectory: "coverage",
+};

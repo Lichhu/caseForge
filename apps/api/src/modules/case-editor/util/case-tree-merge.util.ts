@@ -1,6 +1,6 @@
 import type { CaseTreeNode } from "@case-forge/shared";
 import { randomUUID } from "node:crypto";
-import type { TestPointSnapshot } from "../service/case-pipeline.service";
+import type { TestPointSnapshot } from "@case-editor/service/case-pipeline.service";
 
 type AncestorContext = {
   system?: string;
@@ -10,7 +10,7 @@ type AncestorContext = {
 export type CaseTreeMergeMode = "append" | "full";
 
 export type MergeCaseTreeOptions = {
-  /** 默认 append；isFull 为 true 的测试要点会先移除原案例再写入新案例 */
+  /** 默认 full；isFull 为 true 的测试要点会先移除原案例再写入新案例 */
   mergeModeByTestPointId?: Map<string, CaseTreeMergeMode>;
 };
 
@@ -48,7 +48,7 @@ function resolveMergeMode(
   testPointId: string,
   mergeModeByTestPointId: Map<string, CaseTreeMergeMode>,
 ): CaseTreeMergeMode {
-  return mergeModeByTestPointId.get(testPointId) ?? "append";
+  return mergeModeByTestPointId.get(testPointId) ?? "full";
 }
 
 export function mergeSourceTestPointIds(

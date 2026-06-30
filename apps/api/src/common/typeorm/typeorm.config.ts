@@ -6,7 +6,7 @@ import { TypeOrmModuleOptions } from "@nestjs/typeorm";
 import { join } from "node:path";
 import { getAppConfig } from "@config/app-config.util";
 import { AppConfig } from "@config/app-config.types";
-import { AuditSubscriber } from "../audit/audit.subscriber";
+import { AuditSubscriber } from "@common/audit/audit.subscriber";
 
 /**
  * 根据应用配置创建 TypeORM 模块选项
@@ -22,8 +22,12 @@ export function createTypeOrmConfig(
     username: appConfig.typeOrm.username,
     password: appConfig.typeOrm.password,
     database: appConfig.typeOrm.database,
-    synchronize: appConfig.nodeEnv === "development",
-    entities: [join(__dirname, "../../**/entity/*{.ts,.js}")],
+    charset: "utf8mb4",
+    synchronize:
+      process.env.TYPEORM_SYNCHRONIZE === "true" ||
+      appConfig.nodeEnv === "development" ||
+      appConfig.nodeEnv === "local",
+    entities: [join(__dirname, "../../**/entity/*.js")],
     subscribers: [AuditSubscriber],
     logging: false, //appConfig.nodeEnv === "development" || appConfig.nodeEnv === "local",
   };

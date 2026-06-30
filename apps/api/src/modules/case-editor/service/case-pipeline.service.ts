@@ -3,29 +3,34 @@
  *
  * **当前主路径**：generateJsonCaseTree（promote-skill + AI Chat + JSON → 案例树）
  *
- * **遗留路径**：generateCaseTree（旧 case-skill Markdown 工作流），保留作参考/未配置 AI Chat 时本地规则。
+ * **遗留路径**：generateCaseTree（旧 case-skill Markdown），保留作参考/未配置 AI Chat 时本地规则。
  *
  * Skill 文件均从 MinIO URL 拉取：promote-skill / case-skill / require-skill
  */
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { AiWorkflowService } from "../../../common/ai-workflow/service/ai-workflow.service";
-import { fetchTextFromUrl } from "../../../common/ai-workflow/util/workflow-input.util";
-import { MinioStorageService } from "../../../common/minio/service/minio.service";
+import { mapWithConcurrency } from "@common/util/concurrency.util";
+import { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
+import {
+  buildStructRequirementPrompt,
+  fetchTextFromUrl,
+} from "@common/ai-workflow/util/workflow-input.util";
+import { sanitizeStructuredMarkdown } from "@struct-doc/util/struct-doc.parser";
 import type {
+  CaseNature,
   CaseNodeKind,
   CasePriority,
   CaseTreeNode,
-  ConstraintInput,
   RequirementAnalysis,
   RequirementDocument,
   RequirementModule,
-  SceneTag,
 } from "@case-forge/shared";
 import {
   buildFallbackCaseTitle,
   extractCasePolarity,
   isPlaceholderCaseTitle,
+  normalizeCaseNature,
+  normalizeCasePriority,
   normalizeCaseTreeForSkill,
   sanitizeCaseTitleText,
   simplifyRequirementTitleForDisplay,
@@ -41,12 +46,20 @@ export interface TestPointSnapshot {
   testPointDesc?: string;
 }
 
-import type { TestPointGenerationInput } from "../util/case-workflow-input.util";
-export type { TestPointGenerationInput } from "../util/case-workflow-input.util";
-import {
-  buildCaseWorkflowInput,
-  buildPromotePromptsText,
-} from "../util/case-workflow-input.util";
+import type { TestPointGenerationInput } from "@case-editor/util/case-workflow-input.util";
+export type { TestPointGenerationInput } from "@case-editor/util/case-workflow-input.util";
+import { buildPromotePromptsText } from "@case-editor/util/case-workflow-input.util";
+import { truncateRequirementContext } from "@case-editor/util/requirement-context.util";
+
+/** 单个测试要点案例生成失败信息 */
+export interface CaseGeneratePointFailure {
+  testPointId: string;
+  testPoint: string;
+  message: string;
+}
+
+/** 单个 generateJsonCaseTree 调用内并发的 AI 请求上限 */
+const CASE_POINT_AI_CONCURRENCY = 3;
 
 /** AI Chat 返回的单条案例 JSON（字段名与 promote-skill 约定一致） */
 interface JsonCaseItem {
@@ -72,29 +85,13 @@ export interface GenerateCaseTreeParams {
   /** 用户点「停止」时返回 true，中断后续 testPoint 的 AI 调用 */
   shouldAbort?: () => boolean;
 }
-import { parseCaseSkillMarkdown } from "../util/case-markdown-tree.util";
-
-const sceneLabel: Record<SceneTag, string> = {
-  positive: "正向案例",
-  negative: "反向案例",
-  exception: "异常流程",
-  boundary: "边界值",
-  permission: "权限校验",
-  e2e: "端到端",
-  api: "接口测试",
-  ui: "UI 交互",
-  concurrency: "并发重复提交",
-};
 
 /** 案例生成流水线服务 */
 @Injectable()
 export class CasePipelineService {
   private readonly logger = new Logger(CasePipelineService.name);
 
-  constructor(
-    private readonly aiWorkflow: AiWorkflowService,
-    private readonly minio: MinioStorageService,
-  ) {}
+  constructor(private readonly aiWorkflow: AiWorkflowService) {}
 
   /** 将原始需求文本格式化为结构化 Markdown 与分析结果 */
   async formatRequirement(
@@ -110,7 +107,7 @@ export class CasePipelineService {
     ]
       .filter(Boolean)
       .join("\n");
-    const aiMarkdown = await this.generateMarkdownByWorkflow(
+    const aiMarkdown = await this.generateMarkdownByAiChat(
       requirementInput,
       "req",
     );
@@ -127,62 +124,14 @@ export class CasePipelineService {
     };
   }
 
-  /** 检查 AI Workflow 是否已配置 */
+  /** 检查 AI Chat 与 Skill 是否已配置 */
   isAiConfigured() {
-    return this.aiWorkflow.isConfigured();
+    return this.aiWorkflow.isAiConfigured();
   }
 
   /** 从结构化 Markdown 重建需求分析对象 */
   rebuildAnalysisFromMarkdown(markdown: string): RequirementAnalysis {
     return this.analyzeRequirement(markdown);
-  }
-
-  /** 生成案例树：已配置 AI Workflow 时仅走工作流，失败则抛错；未配置时用本地规则 */
-  async generateCaseTree(params: GenerateCaseTreeParams) {
-    const { document, requirementContext, testPoints } = params;
-    const workflowInput = buildCaseWorkflowInput({
-      requirementContext,
-      testPoints,
-    });
-    const rootTitle =
-      `${document.analysis.requirementId} ${document.analysis.requirementName}`.trim() ||
-      "测试案例";
-    const prompt = workflowInput;
-    const localConstraint = this.defaultLocalConstraint();
-
-    let tree: CaseTreeNode;
-    if (this.shouldUseWorkflowForCaseGeneration()) {
-      const llmTree = await this.generateCaseTreeByWorkflow(
-        workflowInput,
-        rootTitle,
-      );
-      const normalizedLlmTree = this.normalizeToSixLevelTree(
-        this.ensureNodeIds(llmTree, "root"),
-        document.analysis,
-      );
-      if (this.isLowQualityAiTree(normalizedLlmTree)) {
-        throw new BadRequestException(
-          "AI Workflow 返回的案例树缺少有效业务内容，生成失败",
-        );
-      }
-      tree = normalizedLlmTree;
-    } else {
-      this.logger.warn("AI Workflow 未配置，使用本地规则生成案例树");
-      tree = this.generateSixLevelLocalTree(
-        document.analysis,
-        localConstraint,
-        testPoints,
-      );
-    }
-    if (testPoints.length) {
-      tree = this.alignTreeToTestPointHierarchy(tree, testPoints);
-      tree = this.normalizeRequirementTitles(tree, testPoints);
-    }
-    tree = this.normalizeCaseNodesToSkillFormat(tree);
-    tree = this.ensureCaseTitles(tree);
-    tree = normalizeCaseTreeForSkill(tree);
-    tree = this.ensureNodeIds(tree, "root");
-    return { prompt, tree };
   }
 
   /**
@@ -208,34 +157,68 @@ export class CasePipelineService {
     const rootTitle =
       `${document.analysis.requirementId} ${document.analysis.requirementName}`.trim() ||
       "测试案例";
+    const boundedRequirementContext =
+      truncateRequirementContext(requirementContext);
     const casesByTestPointId = new Map<string, JsonCaseItem[]>();
+    const failures: CaseGeneratePointFailure[] = [];
 
-    for (const point of testPoints) {
-      if (shouldAbort?.()) {
-        break;
-      }
-      const promptsText = buildPromotePromptsText(point);
-      const jsonCases = await this.runCaseWorkflowJson(
-        point.featureModule,
-        point.testPoint,
-        requirementContext,
-        promptsText,
-        model,
+    await mapWithConcurrency(
+      testPoints,
+      CASE_POINT_AI_CONCURRENCY,
+      async (point) => {
+        if (shouldAbort?.()) {
+          return;
+        }
+        try {
+          const promptsText = buildPromotePromptsText(point);
+          const jsonCases = await this.runCaseWorkflowJson(
+            point.featureModule,
+            point.testPoint,
+            boundedRequirementContext,
+            promptsText,
+            model,
+          );
+          casesByTestPointId.set(point.id, jsonCases);
+        } catch (error) {
+          const message =
+            error instanceof BadRequestException
+              ? error.message
+              : (error as Error).message || "案例生成失败";
+          failures.push({
+            testPointId: point.id,
+            testPoint: point.testPoint,
+            message,
+          });
+          this.logger.warn(
+            `测试要点案例生成失败 id=${point.id} title=${point.testPoint}: ${message}`,
+          );
+        }
+      },
+    );
+
+    const succeededTestPoints = testPoints.filter((point) =>
+      casesByTestPointId.has(point.id),
+    );
+    if (!succeededTestPoints.length) {
+      const detail = failures
+        .map((item) => `「${item.testPoint}」：${item.message}`)
+        .join("；");
+      throw new BadRequestException(
+        detail || "全部测试要点案例生成失败，请稍后重试",
       );
-      casesByTestPointId.set(point.id, jsonCases);
     }
 
     let tree = this.buildCaseTreeFromJsonCases(
       rootTitle,
-      testPoints,
+      succeededTestPoints,
       casesByTestPointId,
     );
-    tree = this.normalizeRequirementTitles(tree, testPoints);
+    tree = this.normalizeRequirementTitles(tree, succeededTestPoints);
     tree = this.normalizeCaseNodesToSkillFormat(tree);
     tree = this.ensureCaseTitles(tree);
     tree = normalizeCaseTreeForSkill(tree);
     tree = this.ensureNodeIds(tree, "root");
-    return { tree };
+    return { tree, failures };
   }
 
   /** 根据自然语言指令生成局部节点扩展子树 */
@@ -243,9 +226,9 @@ export class CasePipelineService {
     const normalized = instruction.trim() || "补充测试场景";
     return [
       this.sixLevelCaseNode(
-        "案例详情 [正向]",
+        "案例详情 [正]",
         `[补充] ${normalized}`,
-        "P1",
+        "高",
         "补充测试",
         [
           `已选中目标节点，依据指令“${normalized}”进行局部扩展`,
@@ -339,230 +322,10 @@ export class CasePipelineService {
     ].join("\n");
   }
 
-  private generateSixLevelLocalTree(
-    analysis: RequirementAnalysis,
-    constraint: ConstraintInput,
-    testPoints?: TestPointSnapshot[],
-  ): CaseTreeNode {
-    const root = this.node(
-      `${analysis.requirementId} ${analysis.requirementName}`.trim(),
-      "root",
-      [],
-    );
-
-    if (testPoints?.length) {
-      root.children = this.buildSystemNodesFromTestPoints(
-        testPoints,
-        constraint,
-      );
-      return root;
-    }
-
-    const modulesBySystem = new Map<string, RequirementModule[]>();
-    for (const module of analysis.modules) {
-      modulesBySystem.set(module.system, [
-        ...(modulesBySystem.get(module.system) || []),
-        module,
-      ]);
-    }
-
-    root.children = [...modulesBySystem.entries()].map(([system, modules]) =>
-      this.node(
-        system,
-        "system",
-        modules.map((module) => this.buildModuleBranch(module, constraint)),
-      ),
-    );
-    return root;
-  }
-
-  private buildSystemNodesFromTestPoints(
-    testPoints: TestPointSnapshot[],
-    constraint: ConstraintInput,
-  ) {
-    const systemMap = new Map<string, Map<string, TestPointSnapshot[]>>();
-    for (const item of testPoints) {
-      if (!systemMap.has(item.system)) {
-        systemMap.set(item.system, new Map());
-      }
-      const moduleMap = systemMap.get(item.system)!;
-      if (!moduleMap.has(item.featureModule)) {
-        moduleMap.set(item.featureModule, []);
-      }
-      moduleMap.get(item.featureModule)!.push(item);
-    }
-
-    return [...systemMap.entries()].map(([system, moduleMap]) =>
-      this.node(
-        system,
-        "system",
-        [...moduleMap.entries()].map(([featureModule, points]) =>
-          this.node(
-            featureModule,
-            "module",
-            points.map((point) =>
-              this.buildRequirementBranch(point, constraint),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  private buildModuleBranch(
-    module: RequirementModule,
-    constraint: ConstraintInput,
-  ) {
-    const requirementTitle =
-      module.rules[0] || module.description || `${module.name}测试要点`;
-    return this.node(
-      requirementTitle,
-      "requirement",
-      this.buildCasesForModule(module, constraint),
-      {
-        source: module.source,
-      },
-    );
-  }
-
-  private buildRequirementBranch(
-    point: TestPointSnapshot,
-    constraint: ConstraintInput,
-  ) {
-    const requirementTitle = (point.testPoint || "").trim() || "测试要点";
-    const module = this.testPointToModule(point);
-    return this.node(
-      requirementTitle,
-      "requirement",
-      this.buildCasesForModule(module, constraint, point.testPointDesc),
-      {
-        source: point.featureDesc || "动态指令测试要点",
-      },
-    );
-  }
-
-  private buildCasesForModule(
-    module: RequirementModule,
-    constraint: ConstraintInput,
-    instructionHint = "",
-  ) {
-    const featureInstruction =
-      this.findFeatureInstruction(module, constraint) || instructionHint;
-    const knowledgeBaseIds = constraint.knowledgeBaseIds;
-    return [
-      this.buildSkillPolarityCase(
-        "正向",
-        module,
-        constraint,
-        featureInstruction,
-        knowledgeBaseIds,
-      ),
-      this.buildSkillPolarityCase(
-        "反向",
-        module,
-        constraint,
-        featureInstruction,
-        knowledgeBaseIds,
-      ),
-    ];
-  }
-
-  /** 按 case-skill：每个测试要点一条正向、一条反向 */
-  private buildSkillPolarityCase(
-    polarity: "正向" | "反向",
-    module: RequirementModule,
-    constraint: ConstraintInput,
-    featureInstruction: string,
-    knowledgeBaseIds: string[],
-  ) {
-    const positive = polarity === "正向";
-    const caseTitle = positive
-      ? `${module.name}在满足准入条件时正常完成`
-      : `未满足「${module.rules[0] || "业务规则"}」时系统拦截并提示`;
-    const conditions = positive
-      ? [`${module.system} 可正常访问`, "客户或业务数据不命中拦截规则"]
-      : [
-          `构造不满足「${module.rules[0] || "业务规则"}」的测试数据`,
-          "用户已进入目标功能页面",
-        ];
-    const steps = positive
-      ? [
-          "从系统登录或访问系统入口进入功能",
-          `执行「${module.name}」核心操作`,
-          "提交业务请求并等待处理结果",
-        ]
-      : [
-          "从系统登录或访问系统入口进入功能",
-          "提交不满足业务规则的请求",
-          "查看页面提示与处理结果",
-        ];
-    const expectations = positive
-      ? ["业务流程正常完成", "关键状态、落库数据和页面提示与需求一致"]
-      : ["系统阻断后续流程", "提示文案清晰准确", "不产生错误业务数据"];
-    return this.sixLevelCaseNode(
-      `案例详情 [${polarity}]`,
-      caseTitle,
-      positive ? "P1" : "P0",
-      positive ? "功能测试" : "功能测试",
-      conditions,
-      steps,
-      expectations,
-      knowledgeBaseIds,
-      featureInstruction,
-    );
-  }
-
-  private testPointToModule(point: TestPointSnapshot): RequirementModule {
-    return {
-      id: point.id,
-      system: point.system,
-      name: point.featureModule,
-      source: point.featureDesc || "动态指令测试要点",
-      description: point.testPointDesc || point.testPoint,
-      rules: [point.testPoint, point.testPointDesc].filter(Boolean) as string[],
-      interactions: [point.featureDesc].filter(Boolean) as string[],
-    };
-  }
-
-  private convertScenarioToCaseNode(
-    scenario: CaseTreeNode,
-    featureInstruction = "",
-  ) {
-    const conditions = this.extractLegacySectionLines(scenario, "前置");
-    const steps = this.extractLegacySectionLines(scenario, "步骤");
-    const expectations = this.extractLegacySectionLines(scenario, "预期");
-    const { caseNodeTitle, caseTitle } = this.resolveSkillCaseTitles(
-      scenario.title,
-    );
-    return this.sixLevelCaseNode(
-      caseNodeTitle,
-      caseTitle,
-      scenario.metadata?.priority || "P1",
-      scenario.metadata?.caseType || "功能测试",
-      conditions.length ? conditions : ["测试数据和环境已准备"],
-      steps.length ? steps : ["执行目标业务操作"],
-      expectations.length ? expectations : ["结果符合需求预期"],
-      scenario.metadata?.knowledgeBaseIds || [],
-      featureInstruction || scenario.metadata?.source,
-    );
-  }
-
-  private extractLegacySectionLines(node: CaseTreeNode, keyword: string) {
-    const section = node.children?.find(
-      (item) => item.kind === "section" && item.title.includes(keyword),
-    );
-    if (!section) {
-      return [] as string[];
-    }
-    return (section.children || []).map((item) =>
-      item.title.replace(/^\d+\.\s*/, ""),
-    );
-  }
-
   private resolveSkillCaseTitles(rawTitle: string) {
     const title = rawTitle.trim();
     const legacy = title.match(
-      /^\[(正向|反向|异常|边界|接口|权限|端到端|UI|并发)\]\s*(.*)$/u,
+      /^\[(正|反|正向|反向|异常|边界|接口|权限|端到端|UI|并发)\]\s*(.*)$/u,
     );
     if (!legacy) {
       if (title.startsWith("案例详情 [")) {
@@ -581,7 +344,8 @@ export class CasePipelineService {
         caseTitle: isPlaceholderCaseTitle(title) ? "" : title,
       };
     }
-    const polarity = legacy[1] === "正向" ? "正向" : ("反向" as const);
+    const polarity: CaseNature =
+      legacy[1] === "正向" || legacy[1] === "正" ? "正" : "反";
     const caseTitle = sanitizeCaseTitleText(legacy[2] || "");
     return {
       caseNodeTitle: `案例详情 [${polarity}]`,
@@ -647,7 +411,7 @@ export class CasePipelineService {
         };
       }
 
-      const polarity = extractCasePolarity(node.title) || "正向";
+      const polarity = extractCasePolarity(node.title) || "正";
       const titleChild = node.children?.find(
         (item) => item.kind === "case_title",
       );
@@ -671,7 +435,7 @@ export class CasePipelineService {
 
   private buildDefaultCaseTitle(
     requirementTitle: string | undefined,
-    polarity: "正向" | "反向",
+    polarity: CaseNature,
   ) {
     return buildFallbackCaseTitle(requirementTitle, polarity);
   }
@@ -700,32 +464,13 @@ export class CasePipelineService {
       ),
     ];
     return this.node(caseNodeTitle, "case", children, {
-      priority,
+      caseNature: extractCasePolarity(caseNodeTitle) || "正",
+      priority: normalizeCasePriority(priority),
       caseType,
       knowledgeBaseIds,
       source: featureInstruction
         ? `动态指令：${featureInstruction}`
         : undefined,
-    });
-  }
-
-  private normalizeToSixLevelTree(
-    tree: CaseTreeNode,
-    analysis: RequirementAnalysis,
-  ): CaseTreeNode {
-    if (
-      this.containsKind(tree, "requirement") ||
-      this.containsKind(tree, "case")
-    ) {
-      return tree;
-    }
-    return this.generateSixLevelLocalTree(analysis, {
-      scenarioTags: ["positive", "negative"],
-      testDimensions: ["functional", "interface"],
-      grouping: "bySystem",
-      knowledgeBaseIds: [],
-      naturalLanguage: "",
-      featureInstructions: [],
     });
   }
 
@@ -738,307 +483,6 @@ export class CasePipelineService {
     );
   }
 
-  private generateLocalTree(
-    analysis: RequirementAnalysis,
-    constraint: ConstraintInput,
-  ): CaseTreeNode {
-    const root = this.node(
-      `${analysis.requirementId} ${analysis.requirementName} - 测试案例`,
-      "root",
-      [],
-    );
-    const modulesBySystem = new Map<string, RequirementModule[]>();
-    for (const module of analysis.modules) {
-      modulesBySystem.set(module.system, [
-        ...(modulesBySystem.get(module.system) || []),
-        module,
-      ]);
-    }
-
-    if (constraint.grouping === "byScenarioType") {
-      root.children = constraint.scenarioTags.map((tag) =>
-        this.node(
-          sceneLabel[tag],
-          "system",
-          analysis.modules.map((module) =>
-            this.moduleNode(module, [tag], constraint),
-          ),
-        ),
-      );
-      return root;
-    }
-
-    if (constraint.grouping === "byModule") {
-      root.children = analysis.modules.map((module) =>
-        this.moduleNode(module, constraint.scenarioTags, constraint),
-      );
-      return root;
-    }
-
-    root.children = [...modulesBySystem.entries()].map(([system, modules]) =>
-      this.node(
-        system,
-        "system",
-        modules.map((module) =>
-          this.moduleNode(module, constraint.scenarioTags, constraint),
-        ),
-      ),
-    );
-    return root;
-  }
-
-  private moduleNode(
-    module: RequirementModule,
-    tags: SceneTag[],
-    constraint: ConstraintInput,
-  ) {
-    const scenarios = tags.flatMap((tag) =>
-      this.scenariosForTag(tag, module, constraint),
-    );
-    const instruction = this.findFeatureInstruction(module, constraint);
-    return this.node(module.name, "module", scenarios, {
-      source: instruction
-        ? `${module.source}；动态指令：${instruction}`
-        : module.source,
-    });
-  }
-
-  private scenariosForTag(
-    tag: SceneTag,
-    module: RequirementModule,
-    constraint: ConstraintInput,
-  ) {
-    const knowledgeBaseIds = constraint.knowledgeBaseIds;
-    const featureInstruction = this.findFeatureInstruction(module, constraint);
-    if (tag === "negative") {
-      return [
-        this.scenarioNode(
-          "[反向] 未满足业务规则时系统拦截",
-          "P0",
-          "功能测试",
-          [
-            `构造不满足「${module.rules[0] || "业务规则"}」的数据`,
-            "用户已进入目标功能页面",
-          ],
-          [
-            "从系统登录或访问系统进入功能",
-            "提交不满足规则的请求",
-            "查看页面提示与处理结果",
-          ],
-          ["系统阻断后续流程", "提示准确", "不产生错误业务数据"],
-          knowledgeBaseIds,
-          featureInstruction,
-        ),
-      ];
-    }
-    if (tag === "positive") {
-      return [
-        this.scenarioNode(
-          "[正向] 满足准入条件时流程正常通过",
-          "P1",
-          "功能测试",
-          [`${module.system} 可正常访问`, "客户或业务数据不命中拦截规则"],
-          [
-            "进入功能入口",
-            `执行“${module.name}”核心操作`,
-            "提交业务请求并等待处理结果",
-          ],
-          ["业务流程正常完成", "关键状态、落库数据和页面提示与需求一致"],
-          knowledgeBaseIds,
-          featureInstruction,
-        ),
-      ];
-    }
-    if (tag === "exception") {
-      return [
-        this.scenarioNode(
-          "[异常] 命中业务规则时拦截",
-          "P0",
-          "异常测试",
-          [
-            `构造命中“${module.rules[0] || "业务拦截"}”的数据`,
-            "用户已进入目标功能页面",
-          ],
-          ["提交业务请求", "检查接口返回和前端反馈", "继续尝试后续流程"],
-          ["系统阻断后续流程", "提示文案清晰准确", "不产生错误业务数据"],
-          knowledgeBaseIds,
-          featureInstruction,
-        ),
-        this.scenarioNode(
-          "[异常] 依赖系统超时或无响应",
-          "P0",
-          "接口测试",
-          ["已模拟下游系统超时或无响应", "请求参数满足基本校验"],
-          ["发起业务请求", "等待接口超时", "查看页面提示和服务端日志"],
-          [
-            "系统返回可理解的失败提示",
-            "不默认放行业务",
-            "日志记录 trace 信息便于排障",
-          ],
-          knowledgeBaseIds,
-          featureInstruction,
-        ),
-      ];
-    }
-    if (tag === "boundary") {
-      return [
-        this.scenarioNode(
-          "[边界] 状态枚举边界识别",
-          "P0",
-          "数据测试",
-          ["准备正常、冻结、解约、待生效、空状态等枚举数据"],
-          ["分别使用不同状态数据提交请求", "记录每次处理结果"],
-          ["仅需求指定状态触发拦截或放行", "未知状态按异常数据处理并可追踪"],
-          knowledgeBaseIds,
-          featureInstruction,
-        ),
-      ];
-    }
-    if (tag === "permission") {
-      return [
-        this.scenarioNode(
-          "[权限] 无权限用户访问功能",
-          "P1",
-          "权限测试",
-          ["准备无权限账号或过期会话", `目标功能为“${module.name}”`],
-          ["使用无权限账号进入功能入口", "尝试提交业务请求"],
-          ["系统拒绝访问或提交", "不会泄露敏感业务数据"],
-          knowledgeBaseIds,
-          featureInstruction,
-        ),
-      ];
-    }
-    if (tag === "e2e") {
-      return [
-        this.scenarioNode(
-          "[端到端] 跨系统主链路一致性",
-          "P1",
-          "端到端测试",
-          ["上下游系统测试环境可用", "准备完整业务链路数据"],
-          ["从渠道入口发起请求", "跟踪下游接口与数据同步", "核对最终业务状态"],
-          ["各系统状态一致", "接口调用顺序、数据同步结果和用户反馈均符合需求"],
-          knowledgeBaseIds,
-          featureInstruction,
-        ),
-      ];
-    }
-    if (tag === "api") {
-      return [
-        this.scenarioNode(
-          "[接口] 返回字段和错误码校验",
-          "P1",
-          "接口测试",
-          ["已关联接口定义或准备接口契约", "请求参数覆盖必填与可选字段"],
-          ["调用接口", "校验响应字段、错误码和错误信息", "检查服务端日志"],
-          ["字段类型、枚举、错误码符合接口约定", "异常分支具备稳定返回结构"],
-          knowledgeBaseIds,
-          featureInstruction,
-        ),
-      ];
-    }
-    if (tag === "ui") {
-      return [
-        this.scenarioNode(
-          "[UI] 提示文案和弹窗控制",
-          "P2",
-          "UI 测试",
-          ["已进入目标页面", "准备触发提示或弹窗的数据"],
-          ["执行页面操作", "观察提示文案、弹窗和按钮状态"],
-          ["文案与需求完全一致", "弹窗展示或关闭逻辑符合业务规则"],
-          knowledgeBaseIds,
-          featureInstruction,
-        ),
-      ];
-    }
-    return [
-      this.scenarioNode(
-        "[并发] 快速重复提交",
-        "P1",
-        "并发测试",
-        ["准备同一用户同一业务数据", "客户端或接口工具支持并发请求"],
-        ["连续快速点击提交或并发调用接口", "观察所有请求处理结果"],
-        [
-          "系统只处理一次有效请求",
-          "重复请求被幂等处理或明确拒绝",
-          "无重复落库或状态错乱",
-        ],
-        knowledgeBaseIds,
-        featureInstruction,
-      ),
-    ];
-  }
-
-  private scenarioNode(
-    title: string,
-    priority: CasePriority,
-    caseType: string,
-    conditions: string[],
-    steps: string[],
-    expectations: string[],
-    knowledgeBaseIds: string[] = [],
-    featureInstruction = "",
-  ) {
-    const children: CaseTreeNode[] = [
-      this.node(
-        "前置条件",
-        "section",
-        conditions.map((item) => this.node(item, "condition")),
-      ),
-      this.node(
-        "测试步骤",
-        "section",
-        steps.map((item, index) => this.node(`${index + 1}. ${item}`, "step")),
-      ),
-      this.node(
-        "预期结果",
-        "section",
-        expectations.map((item, index) =>
-          this.node(`${index + 1}. ${item}`, "expectation"),
-        ),
-      ),
-    ];
-    if (featureInstruction) {
-      children.push(
-        this.node("动态指令", "section", [
-          this.node(featureInstruction, "metadata"),
-        ]),
-      );
-    }
-    children.push(
-      this.node("用例元数据", "metadata", [
-        this.node(`优先级：${priority}`, "metadata"),
-        this.node(`类型：${caseType}`, "metadata"),
-        this.node(
-          `关联知识库：${knowledgeBaseIds.length ? knowledgeBaseIds.join("、") : "无"}`,
-          "metadata",
-        ),
-      ]),
-    );
-    return this.node(title, "scenario", [...children], {
-      priority,
-      caseType,
-      knowledgeBaseIds,
-      source: featureInstruction
-        ? `动态指令：${featureInstruction}`
-        : undefined,
-    });
-  }
-
-  private findFeatureInstruction(
-    module: RequirementModule,
-    constraint: ConstraintInput,
-  ) {
-    return (
-      constraint.featureInstructions
-        .find((item) => item.moduleId === module.id)
-        ?.instruction?.trim() || ""
-    );
-  }
-
-  /**
-   * AI 生成的树常省略「功能模块」层（system → 测试要点 → 案例），
-   * 按动态指令测试要点补全 module 节点。
-   */
   /** 测试要点节点标题仅保留主描述（验证点/测试方法留在结构化文档，不进案例树） */
   private normalizeRequirementTitles(
     tree: CaseTreeNode,
@@ -1076,125 +520,6 @@ export class CasePipelineService {
       normalizedTitle.startsWith(normalizedPoint) ||
       requirementTitle.includes(testPoint)
     );
-  }
-
-  private alignTreeToTestPointHierarchy(
-    tree: CaseTreeNode,
-    testPoints: TestPointSnapshot[],
-  ): CaseTreeNode {
-    const root = this.cloneTreeNode(tree);
-    for (const point of testPoints) {
-      this.ensureModuleLayerForTestPoint(root, point);
-    }
-    return root;
-  }
-
-  private ensureModuleLayerForTestPoint(
-    root: CaseTreeNode,
-    point: TestPointSnapshot,
-  ) {
-    const moduleTitle = point.featureModule?.trim();
-    if (!moduleTitle) {
-      return;
-    }
-
-    const requirement = this.findRequirementNodeForTestPoint(root, point);
-    if (!requirement) {
-      return;
-    }
-    if (!requirement.id) {
-      requirement.id = randomUUID();
-    }
-    if (!requirement.title?.trim()) {
-      requirement.title = (point.testPoint || "").trim() || "测试要点";
-    }
-
-    const parent = this.findParentOf(root, requirement.id);
-    if (!parent) {
-      return;
-    }
-
-    if (parent.kind === "system") {
-      const moduleNode = this.node(
-        moduleTitle,
-        "module",
-        [requirement],
-        point.featureDesc ? { source: point.featureDesc } : undefined,
-      );
-      parent.children = (parent.children || []).map((child) =>
-        child.id === requirement.id ? moduleNode : child,
-      );
-      return;
-    }
-
-    const parentTitle = (parent.title || "").trim();
-    if (parent.kind === "module" && parentTitle !== moduleTitle) {
-      const testPointTitle = (point.testPoint || "").trim();
-      const combined = `${moduleTitle} / ${testPointTitle}`.trim();
-      if (
-        (testPointTitle && parentTitle.includes(testPointTitle)) ||
-        parentTitle === combined
-      ) {
-        parent.title = moduleTitle;
-      }
-    }
-  }
-
-  private findRequirementNodeForTestPoint(
-    root: CaseTreeNode,
-    point: TestPointSnapshot,
-  ): CaseTreeNode | null {
-    const candidates: CaseTreeNode[] = [];
-    this.walkTree(root, (node) => {
-      if (node.kind === "requirement") {
-        candidates.push(node);
-      }
-    });
-
-    const testPointTitle = (point.testPoint || "").trim();
-    if (!testPointTitle) {
-      return candidates[0] || null;
-    }
-
-    const normalizedTarget = this.normalizeMatchText(testPointTitle);
-    if (!normalizedTarget) {
-      return candidates[0] || null;
-    }
-
-    return (
-      candidates.find((node) => {
-        const normalizedTitle = this.normalizeMatchText(node.title);
-        return (
-          normalizedTitle.length > 0 &&
-          normalizedTitle.includes(normalizedTarget)
-        );
-      }) ||
-      candidates.find((node) => {
-        const normalizedTitle = this.normalizeMatchText(node.title);
-        return (
-          normalizedTitle.length > 0 &&
-          normalizedTarget.includes(normalizedTitle)
-        );
-      }) ||
-      candidates[0] ||
-      null
-    );
-  }
-
-  private findParentOf(
-    root: CaseTreeNode,
-    targetId: string,
-  ): CaseTreeNode | null {
-    for (const child of root.children || []) {
-      if (child.id === targetId) {
-        return root;
-      }
-      const found = this.findParentOf(child, targetId);
-      if (found) {
-        return found;
-      }
-    }
-    return null;
   }
 
   private walkTree(node: CaseTreeNode, visit: (node: CaseTreeNode) => void) {
@@ -1245,45 +570,6 @@ export class CasePipelineService {
         this.ensureNodeIds(child, child.kind || this.inferChildKind(kind)),
       ),
     };
-  }
-
-  /** AI 常只返回 kind 无 title，经补全后整棵树都是「功能模块/案例标题」等占位文案 */
-  private isLowQualityAiTree(tree: CaseTreeNode) {
-    const caseNodes: CaseTreeNode[] = [];
-    this.walkTree(tree, (node) => {
-      if (node.kind === "case") {
-        caseNodes.push(node);
-      }
-    });
-    if (!caseNodes.length) {
-      return true;
-    }
-
-    const realCases = caseNodes.filter(
-      (node) => !this.isPlaceholderTitle(node.title, "case"),
-    );
-    if (!realCases.length) {
-      return true;
-    }
-
-    const hollowCases = caseNodes.filter((node) => {
-      const children = node.children || [];
-      if (!children.length) {
-        return true;
-      }
-      return children.every((child) =>
-        this.isPlaceholderTitle(child.title, child.kind || "case_title"),
-      );
-    });
-    return hollowCases.length === caseNodes.length;
-  }
-
-  private isPlaceholderTitle(title: string | undefined, kind: CaseNodeKind) {
-    const normalized = (title || "").trim();
-    if (!normalized) {
-      return true;
-    }
-    return normalized === this.defaultTitleForKind(kind);
   }
 
   private defaultTitleForKind(kind: CaseNodeKind) {
@@ -1482,12 +768,11 @@ export class CasePipelineService {
       : ["响应时效、异常提示、数据一致性和可追溯性需重点验证。"];
   }
 
-  private async generateMarkdownByWorkflow(
+  private async generateMarkdownByAiChat(
     prompt: string,
-    skill: "req" | "case",
+    skill: "req",
   ): Promise<string | null> {
-    const skillUrl = this.resolveSkillUrl(skill);
-    if (!skillUrl || !this.aiWorkflow.isConfigured()) {
+    if (!this.aiWorkflow.canStructRequirement()) {
       return null;
     }
 
@@ -1497,89 +782,14 @@ export class CasePipelineService {
         return null;
       }
 
-      const { text } = await this.aiWorkflow.runWithContent(prompt, skillText);
-      return text ? this.stripMarkdownFence(text) : null;
+      const chatPrompt = buildStructRequirementPrompt(skillText, prompt);
+      const { text } = await this.aiWorkflow.runWithAiChat(chatPrompt);
+      return text ? sanitizeStructuredMarkdown(text) : null;
     } catch (error) {
       this.logger.warn(
-        `AI Workflow Markdown 生成失败，回退本地逻辑: ${(error as Error).message}`,
+        `AI Chat 结构化 Markdown 生成失败，回退本地逻辑: ${(error as Error).message}`,
       );
       return null;
-    }
-  }
-
-  /** 已配置工作流时必须走 AI；未配置完整案例技能 URL 时也视为应走工作流并失败 */
-  private defaultLocalConstraint(): ConstraintInput {
-    return {
-      scenarioTags: ["positive", "negative"],
-      testDimensions: ["functional", "interface"],
-      grouping: "bySystem",
-      knowledgeBaseIds: [],
-      naturalLanguage: "",
-      featureInstructions: [],
-    };
-  }
-
-  private shouldUseWorkflowForCaseGeneration() {
-    if (this.aiWorkflow.canGenerateCases()) {
-      return true;
-    }
-    if (
-      this.aiWorkflow.isConfigured() &&
-      this.aiWorkflow.getCaseDocSkillUrl()
-    ) {
-      throw new BadRequestException(
-        "AI Workflow 案例生成配置不完整，请检查 DIFY_WORKFLOW_URL、DIFY_WORKFLOW_ID 与 CASE_DOC_SKILL_URL",
-      );
-    }
-    return false;
-  }
-
-  private async generateCaseTreeByWorkflow(
-    input: string,
-    rootTitle: string,
-  ): Promise<CaseTreeNode> {
-    if (!input?.trim()) {
-      throw new BadRequestException("案例生成输入为空，生成失败");
-    }
-
-    const markdown = await this.runCaseWorkflowMarkdown(input);
-    const tree = parseCaseSkillMarkdown(markdown, rootTitle);
-    if (!tree) {
-      throw new BadRequestException(
-        "AI Workflow 返回内容无法解析为案例树，请检查输出是否符合 case-skill 格式",
-      );
-    }
-    return tree;
-  }
-
-  private async runCaseWorkflowMarkdown(prompt: string): Promise<string> {
-    const skillUrl = this.resolveSkillUrl("case");
-    if (!skillUrl) {
-      throw new BadRequestException("CASE_DOC_SKILL_URL 未配置，无法生成案例");
-    }
-
-    try {
-      const skillText = await this.loadSkillText("case");
-      if (!skillText) {
-        throw new BadRequestException(
-          "读取案例技能文档失败，请检查 MinIO 上的 case-skill 文件",
-        );
-      }
-
-      const { text } = await this.aiWorkflow.runWithContent(prompt, skillText);
-      const markdown = text ? this.stripMarkdownFence(text) : "";
-      if (!markdown.trim()) {
-        throw new BadRequestException("AI Workflow 未返回有效 Markdown");
-      }
-      return markdown;
-    } catch (error) {
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      this.logger.warn(`AI Workflow 案例生成失败: ${(error as Error).message}`);
-      throw new BadRequestException(
-        `AI Workflow 案例生成失败：${(error as Error).message}`,
-      );
     }
   }
 
@@ -1592,7 +802,10 @@ export class CasePipelineService {
     testPoints: TestPointGenerationInput[],
     casesByTestPointId: Map<string, JsonCaseItem[]>,
   ): CaseTreeNode {
-    const systemMap = new Map<string, Map<string, TestPointGenerationInput[]>>();
+    const systemMap = new Map<
+      string,
+      Map<string, TestPointGenerationInput[]>
+    >();
     for (const item of testPoints) {
       if (!systemMap.has(item.system)) {
         systemMap.set(item.system, new Map());
@@ -1656,9 +869,7 @@ export class CasePipelineService {
       caseTitle,
       priority,
       caseType,
-      conditions.length
-        ? conditions
-        : ["系统已登录且具备相关操作权限"],
+      conditions.length ? conditions : ["系统已登录且具备相关操作权限"],
       steps.length
         ? steps
         : [
@@ -1666,9 +877,7 @@ export class CasePipelineService {
             "执行与测试要点相关的操作",
             "查看系统处理结果",
           ],
-      expectations.length
-        ? expectations
-        : ["系统行为与业务规则一致"],
+      expectations.length ? expectations : ["系统行为与业务规则一致"],
       [],
       item.alms?.trim(),
     );
@@ -1686,21 +895,14 @@ export class CasePipelineService {
       .map((item) => item.replace(/^\d+[、.]?\s*/, ""));
   }
 
-  /** promote-skill 中 allx：「正」→ 正向，「反」→ 反向 */
-  private mapJsonPolarity(allx?: string): "正向" | "反向" {
-    return (allx || "").trim() === "反" ? "反向" : "正向";
+  /** promote-skill 中 allx：「正」/「反」 */
+  private mapJsonPolarity(allx?: string): CaseNature {
+    return normalizeCaseNature(allx);
   }
 
-  /** promote-skill 中 yxj：高/中/低 → P0/P1/P2 */
+  /** promote-skill 中 yxj：高/中/低，默认高 */
   private mapJsonPriority(yxj?: string): CasePriority {
-    const value = (yxj || "").trim();
-    if (value === "高") {
-      return "P0";
-    }
-    if (value === "低") {
-      return "P2";
-    }
-    return "P1";
+    return normalizeCasePriority(yxj);
   }
 
   /**
@@ -1728,22 +930,19 @@ export class CasePipelineService {
       );
     }
 
-    const replacements = [
-      { key: "{mkName}", value: featureModule },
-      { key: "{testPoint}", value: testPoint },
-      { key: "{markdownContent}", value: markdownContent },
-      { key: "{prompts}", value: prompts },
-    ];
-
-    for (const { key, value } of replacements) {
-      const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      promote = promote.replace(new RegExp(escapedKey, "g"), value);
-    }
+    promote = promote
+      .replaceAll("{mkName}", featureModule)
+      .replaceAll("{testPoint}", testPoint)
+      .replaceAll("{prompts}", prompts)
+      .replaceAll("{markdownContent}", markdownContent);
 
     try {
-      const { text } = await this.aiWorkflow.runWithAiChat(promote, model);
-      const cases = this.aiWorkflow.parseJsonArray<JsonCaseItem>(text);
-      if (!cases?.length) {
+      const cases = await this.aiWorkflow.runWithAiChatJsonArray<JsonCaseItem>(
+        promote,
+        model,
+        { context: `测试要点：${testPoint}` },
+      );
+      if (!cases.length) {
         throw new BadRequestException(
           `AI 未返回可解析的案例 JSON（测试要点：${testPoint}）`,
         );
@@ -1762,24 +961,17 @@ export class CasePipelineService {
     }
   }
 
-  private resolveSkillUrl(skill: "req" | "case" | "promote") {
+  private resolveSkillUrl(skill: "req" | "promote") {
     return skill === "req"
       ? this.aiWorkflow.getReqDocSkillUrl()
-      : skill === "case"
-        ? this.aiWorkflow.getCaseDocSkillUrl()
-        : this.aiWorkflow.getPromoteUrl();
+      : this.aiWorkflow.getPromoteUrl();
   }
 
-  private async loadSkillText(skill: "req" | "case" | "promote") {
+  private async loadSkillText(skill: "req" | "promote") {
     const skillUrl = this.resolveSkillUrl(skill);
     if (!skillUrl) {
       return null;
     }
     return fetchTextFromUrl(skillUrl, "技能文档");
-  }
-
-  private stripMarkdownFence(text: string) {
-    const fenced = text.match(/^```(?:markdown|md)?\s*([\s\S]*?)\s*```$/i);
-    return fenced ? fenced[1].trim() : text.trim();
   }
 }
