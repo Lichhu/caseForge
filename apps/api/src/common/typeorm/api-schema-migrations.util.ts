@@ -6,7 +6,11 @@ type Queryable = {
   query(sql: string, params?: unknown[]): Promise<unknown>;
 };
 
-async function queryRows<T>(runner: Queryable, sql: string, params?: unknown[]) {
+async function queryRows<T>(
+  runner: Queryable,
+  sql: string,
+  params?: unknown[],
+) {
   const result = await runner.query(sql, params);
   if (Array.isArray(result) && Array.isArray(result[0])) {
     return result[0] as T[];
@@ -23,7 +27,11 @@ async function tableExists(runner: Queryable, tableName: string) {
   return rows.length > 0;
 }
 
-async function indexExists(runner: Queryable, tableName: string, indexName: string) {
+async function indexExists(
+  runner: Queryable,
+  tableName: string,
+  indexName: string,
+) {
   const rows = await queryRows<{ Key_name: string }>(
     runner,
     `SHOW INDEX FROM ${tableName} WHERE Key_name = ?`,
@@ -32,7 +40,11 @@ async function indexExists(runner: Queryable, tableName: string, indexName: stri
   return rows.length > 0;
 }
 
-async function columnExists(runner: Queryable, tableName: string, columnName: string) {
+async function columnExists(
+  runner: Queryable,
+  tableName: string,
+  columnName: string,
+) {
   const rows = await queryRows<{ Field: string }>(
     runner,
     `SHOW COLUMNS FROM ${tableName} LIKE ?`,
@@ -76,6 +88,14 @@ async function ensureApiTransactionTable(runner: Queryable) {
         name VARCHAR(256) NOT NULL,
         description TEXT NULL,
         sortOrder INT NOT NULL DEFAULT 0,
+        reqCode VARCHAR(64) NULL,
+        taskId VARCHAR(64) NULL,
+        serviceCode VARCHAR(64) NULL,
+        reqSystemId VARCHAR(32) NULL,
+        syncStatus VARCHAR(16) NULL DEFAULT 'pending',
+        syncError TEXT NULL,
+        createdBy VARCHAR(255) NULL DEFAULT 'system',
+        modifiedBy VARCHAR(255) NULL DEFAULT 'system',
         createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
         updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
         UNIQUE KEY uk_api_transaction_project_code (projectId, code)
@@ -93,6 +113,21 @@ async function ensureApiTransactionTable(runner: Queryable) {
         ADD COLUMN createdBy VARCHAR(255) NULL DEFAULT 'system' AFTER sortOrder,
         ADD COLUMN modifiedBy VARCHAR(255) NULL DEFAULT 'system' AFTER createdBy
     `);
+  }
+
+  for (const { name, def } of [
+    { name: "reqCode", def: "VARCHAR(64) NULL" },
+    { name: "taskId", def: "VARCHAR(64) NULL" },
+    { name: "serviceCode", def: "VARCHAR(64) NULL" },
+    { name: "reqSystemId", def: "VARCHAR(32) NULL" },
+    { name: "syncStatus", def: "VARCHAR(16) NULL DEFAULT 'pending'" },
+    { name: "syncError", def: "TEXT NULL" },
+  ]) {
+    if (!(await columnExists(runner, "api_transaction", name))) {
+      await runner.query(`
+        ALTER TABLE api_transaction ADD COLUMN ${name} ${def}
+      `);
+    }
   }
 }
 
@@ -134,6 +169,19 @@ async function ensureApiDocTransactionColumn(runner: Queryable) {
       if (!message.includes("Duplicate")) {
         throw error;
       }
+    }
+  }
+
+  for (const { name, def } of [
+    { name: "source", def: "VARCHAR(16) NOT NULL DEFAULT 'smp'" },
+    { name: "smp_data", def: "JSON NULL" },
+    { name: "last_smp_call_service_hash", def: "VARCHAR(64) NULL" },
+    { name: "last_smp_test_info_hash", def: "VARCHAR(64) NULL" },
+  ]) {
+    if (!(await columnExists(runner, "api_doc", name))) {
+      await runner.query(`
+        ALTER TABLE api_doc ADD COLUMN ${name} ${def}
+      `);
     }
   }
 }
@@ -226,7 +274,10 @@ async function ensureExecutionPlatformTables(runner: Queryable) {
     `);
   }
 
-  for (const table of ["api_test_environment_service", "api_test_execution_set"]) {
+  for (const table of [
+    "api_test_environment_service",
+    "api_test_execution_set",
+  ]) {
     if (!(await tableExists(runner, table))) continue;
     if (!(await columnExists(runner, table, "createdBy"))) {
       await runner.query(`
@@ -276,7 +327,13 @@ async function ensureExecutionPlatformTables(runner: Queryable) {
   }
 
   if (await tableExists(runner, "api_test_environment_service")) {
-    if (!(await columnExists(runner, "api_test_environment_service", "serverAddress"))) {
+    if (
+      !(await columnExists(
+        runner,
+        "api_test_environment_service",
+        "serverAddress",
+      ))
+    ) {
       await runner.query(`
         ALTER TABLE api_test_environment_service
           ADD COLUMN serverAddress VARCHAR(1024) NULL AFTER name,

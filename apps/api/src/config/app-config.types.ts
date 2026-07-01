@@ -43,4 +43,19 @@ export interface AppConfig {
       requestTimeoutMs: number;
     };
   };
+  /** 服务管理平台（SMP）集成配置 */
+  smp: {
+    url: string;
+    /** 是否启用 demo 模式（未配置真实 SMP 时返回示例数据） */
+    demo: boolean;
+    /** 各接口相对路径 */
+    serviceInfoListPath: string;
+    callServiceInfoListPath: string;
+    testInfoListPath: string;
+    changeInfoByReqCodePath: string;
+    /** demo 模式请求超时（毫秒） */
+    requestTimeoutMs: number;
+  };
+  /** 接口案例生成模式：plan（AI 只填字段覆盖值）| legacy（AI 输出完整报文） */
+  apiCasePlanMode: "plan" | "legacy";
 }

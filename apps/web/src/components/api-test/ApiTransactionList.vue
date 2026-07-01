@@ -21,6 +21,10 @@
           >
             删除选中 ({{ selectedRowKeys.length }})
           </a-button>
+          <a-button @click="openSmpSync">
+            <template #icon><SyncOutlined /></template>
+            服管同步
+          </a-button>
           <a-button type="primary" @click="openCreate">
             <template #icon><PlusOutlined /></template>
             新建
@@ -35,6 +39,7 @@
           size="middle"
           row-key="id"
           :pagination="false"
+          :scroll="{ x: 'max-content' }"
           :data-source="paginatedTransactions"
           :columns="columns"
           :row-selection="rowSelection"
@@ -47,9 +52,32 @@
             <template v-else-if="column.key === 'name'">
               <span class="transaction-muted">{{ displayTransactionName(record) }}</span>
             </template>
-            <template v-else-if="column.key === 'docStatus'">
-              <span class="transaction-status" :class="{ done: record.hasDocument }">
-                {{ record.hasDocument ? '已上传文档' : '待上传' }}
+            <template v-else-if="column.key === 'reqCode'">
+              <span class="transaction-muted">{{ record.reqCode || '—' }}</span>
+            </template>
+            <template v-else-if="column.key === 'serviceCode'">
+              <span class="transaction-muted">{{ record.serviceCode || '—' }}</span>
+            </template>
+            <template v-else-if="column.key === 'reqSystemId'">
+              <span class="transaction-muted">{{ record.reqSystemId || '—' }}</span>
+            </template>
+            <template v-else-if="column.key === 'taskId'">
+              <span class="transaction-muted">{{ record.taskId || '—' }}</span>
+            </template>
+            <template v-else-if="column.key === 'syncStatus'">
+              <a-tooltip
+                :title="record.syncError?.trim() || syncStatusHint(record.syncStatus)"
+                :overlay-style="{ maxWidth: '360px' }"
+              >
+                <span class="transaction-status" :class="record.syncStatus">
+                  {{ syncStatusText(record.syncStatus) }}
+                </span>
+              </a-tooltip>
+              <span
+                v-if="record.syncStatus === 'changed'"
+                class="transaction-changed-hint"
+              >
+                需重新生成
               </span>
             </template>
             <template v-else-if="column.key === 'description'">
@@ -88,6 +116,11 @@
       </div>
     </div>
 
+    <ApiTransactionSmpSyncModal
+      v-model:open="smpSyncModalOpen"
+      @synced="selectedRowKeys = []"
+    />
+
     <a-modal
       v-model:open="modalOpen"
       :title="editingId ? '编辑交易码' : '新建'"
@@ -112,8 +145,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue';
-import { PlusOutlined, SearchOutlined } from '@ant-design/icons-vue';
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { PlusOutlined, SearchOutlined, SyncOutlined } from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
 import {
   caseForgePageSizeOptionLabels,
@@ -121,10 +154,12 @@ import {
   normalizeCaseForgePageSize,
 } from '@case-forge/shared';
 import { useApiTestStore } from '@/stores/apiTest';
+import ApiTransactionSmpSyncModal from '@/components/api-test/ApiTransactionSmpSyncModal.vue';
 import type { ApiTransactionRow } from '@/api/apiTestClient';
 
 const apiStore = useApiTestStore();
 const modalOpen = ref(false);
+const smpSyncModalOpen = ref(false);
 const saving = ref(false);
 const deleting = ref(false);
 const editingId = ref('');
@@ -133,6 +168,8 @@ const listPage = ref(1);
 const listPageSize = ref(DEFAULT_CASE_FORGE_PAGE_SIZE);
 const pageSizeOptions = caseForgePageSizeOptionLabels();
 const selectedRowKeys = ref<string[]>([]);
+const pollTimer = ref<number | null>(null);
+const POLL_INTERVAL_MS = 5000;
 const form = reactive({
   code: '',
   name: '',
@@ -152,11 +189,15 @@ watch(keyword, () => {
 });
 
 const columns = [
-  { title: '交易码', dataIndex: 'code', key: 'code', width: 200 },
-  { title: '接口名称', dataIndex: 'name', key: 'name', ellipsis: true },
-  { title: '文档状态', key: 'docStatus', width: 108, align: 'center' as const },
+  { title: '交易码', dataIndex: 'code', key: 'code', width: 180, fixed: 'left' as const },
+  { title: '接口名称', dataIndex: 'name', key: 'name', width: 200, ellipsis: true },
+  { title: '需求编号', dataIndex: 'reqCode', key: 'reqCode', width: 140, ellipsis: true },
+  { title: '服务编码', dataIndex: 'serviceCode', key: 'serviceCode', width: 140, ellipsis: true },
+  { title: '需求系统', dataIndex: 'reqSystemId', key: 'reqSystemId', width: 100, ellipsis: true },
+  { title: '任务ID', dataIndex: 'taskId', key: 'taskId', width: 120, ellipsis: true },
+  { title: '生成状态', key: 'syncStatus', width: 108, align: 'center' as const },
   { title: '备注', key: 'description', width: 200, ellipsis: true },
-  { title: '操作', key: 'actions', width: 108, align: 'center' as const },
+  { title: '操作', key: 'actions', width: 108, align: 'center' as const, fixed: 'right' as const },
 ];
 
 const filteredTransactions = computed(() => {
@@ -164,7 +205,15 @@ const filteredTransactions = computed(() => {
   if (!value) return apiStore.transactions;
   const normalizedKeyword = normalizeSearchText(value);
   return apiStore.transactions.filter((item) => {
-    const haystack = [item.code, item.name, item.description]
+    const haystack = [
+      item.code,
+      item.name,
+      item.description,
+      item.reqCode,
+      item.serviceCode,
+      item.reqSystemId,
+      item.taskId,
+    ]
       .filter(Boolean)
       .join(' ');
     return normalizeSearchText(haystack).includes(normalizedKeyword);
@@ -177,6 +226,50 @@ const paginatedTransactions = computed(() => {
   const items = filteredTransactions.value;
   const start = (listPage.value - 1) * listPageSize.value;
   return items.slice(start, start + listPageSize.value);
+});
+
+const hasGeneratingRows = computed(() =>
+  paginatedTransactions.value.some((item) => item.syncStatus === 'generating'),
+);
+
+function startPolling() {
+  stopPolling();
+  if (!hasGeneratingRows.value) return;
+  if (!apiStore.activeProjectId) return;
+  pollTimer.value = window.setInterval(() => {
+    void apiStore.refreshTransactions(apiStore.activeProjectId!);
+  }, POLL_INTERVAL_MS);
+}
+
+function stopPolling() {
+  if (pollTimer.value !== null) {
+    window.clearInterval(pollTimer.value);
+    pollTimer.value = null;
+  }
+}
+
+watch(hasGeneratingRows, startPolling, { immediate: true });
+
+onMounted(() => {
+  if (apiStore.activeProjectId) {
+    void apiStore.refreshTransactions(apiStore.activeProjectId);
+  }
+  startPolling();
+});
+
+onUnmounted(() => {
+  stopPolling();
+});
+
+onActivated(() => {
+  if (apiStore.activeProjectId) {
+    void apiStore.refreshTransactions(apiStore.activeProjectId);
+  }
+  startPolling();
+});
+
+onDeactivated(() => {
+  stopPolling();
 });
 
 function handlePaginationChange(page: number, pageSize: number) {
@@ -238,6 +331,34 @@ function openCreate() {
   form.name = '';
   form.description = '';
   modalOpen.value = true;
+}
+
+function openSmpSync() {
+  smpSyncModalOpen.value = true;
+}
+
+function syncStatusText(status?: string) {
+  switch (status) {
+    case 'pending': return '待生成';
+    case 'generating': return '生成中';
+    case 'success': return '生成成功';
+    case 'failed': return '生成失败';
+    case 'cancelled': return '取消生成';
+    case 'changed': return '已变更';
+    default: return '—';
+  }
+}
+
+function syncStatusHint(status?: string) {
+  switch (status) {
+    case 'pending': return '等待生成接口测试案例';
+    case 'generating': return '正在生成接口测试案例';
+    case 'success': return '接口测试案例已生成';
+    case 'failed': return '生成失败，请查看详情或重试';
+    case 'cancelled': return '已取消生成';
+    case 'changed': return '服管数据已变更，请重新生成案例';
+    default: return '';
+  }
 }
 
 function openEdit(item: ApiTransactionRow) {
@@ -409,9 +530,40 @@ function onBatchDelete() {
   line-height: 1.5;
 }
 
-.transaction-status.done {
+.transaction-status.pending {
+  background: #f2f4f7;
+  color: #667085;
+}
+
+.transaction-status.generating {
   background: #eff8ff;
   color: #175cd3;
+}
+
+.transaction-status.success {
+  background: #ecfdf3;
+  color: #027a48;
+}
+
+.transaction-status.failed {
+  background: #fef3f2;
+  color: #b42318;
+}
+
+.transaction-status.cancelled {
+  background: #f2f4f7;
+  color: #667085;
+}
+
+.transaction-status.changed {
+  background: #fffaeb;
+  color: #b54708;
+}
+
+.transaction-changed-hint {
+  margin-left: 6px;
+  color: #b54708;
+  font-size: 12px;
 }
 
 .transaction-action {

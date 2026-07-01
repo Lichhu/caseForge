@@ -24,6 +24,8 @@ import { ApiExecutionSetService } from "./service/api-execution-set.service";
 import { ApiEnvironmentService } from "./service/api-environment.service";
 import { ApiExecutionService } from "./service/api-execution.service";
 import { ApiReportService } from "./service/api-report.service";
+import { SmpClientService } from "./service/smp-client.service";
+import { SmpSyncService } from "./service/smp-sync.service";
 
 @Module({
   imports: [
@@ -55,6 +57,8 @@ import { ApiReportService } from "./service/api-report.service";
     ApiExecutionService,
     ApiReportService,
     ApiTransactionService,
+    SmpClientService,
+    SmpSyncService,
   ],
   exports: [
     ApiDocService,
@@ -64,6 +68,8 @@ import { ApiReportService } from "./service/api-report.service";
     ApiExecutionService,
     ApiReportService,
     ApiTransactionService,
+    SmpClientService,
+    SmpSyncService,
   ],
 })
 export class ApiTestModule {}

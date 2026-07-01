@@ -207,7 +207,7 @@ export function buildStructuredMarkdownFromEndpoints(
 }
 
 /** 压缩后文档的默认字符预算，留出余量给技能模板、协议规则与场景约束。 */
-export const DEFAULT_COMPRESSED_DOC_MAX_CHARS = 4000;
+export const DEFAULT_COMPRESSED_DOC_MAX_CHARS = 2800;
 
 /** 报文表中需要保留的关键列（按表头关键字匹配，其余列裁剪以缩短文档）。 */
 const MESSAGE_TABLE_KEEP_KEYWORDS = [
@@ -238,6 +238,41 @@ const MESSAGE_TABLE_TRUNCATE_KEYWORDS = [
 ];
 const MESSAGE_TABLE_MAX_CELL_LENGTH = 40;
 
+const RESPONSE_ASSERTION_CODE_HINTS = [
+  "bizResCode",
+  "bizResText",
+  "resCode",
+  "resText",
+  "retCode",
+  "retMsg",
+];
+
+export interface CompressApiStructuredDocOptions {
+  /** 案例生成仅需 requestBody，响应表改为一行断言摘要。 */
+  requestOnly?: boolean;
+}
+
+/** 从响应报文段提取断言关键节点，替代完整响应表。 */
+export function buildResponseAssertionSummary(structuredDoc: string): string {
+  const responseText = extractApiDocSection(structuredDoc, "响应报文");
+  if (!responseText.trim()) {
+    return "";
+  }
+
+  const found = RESPONSE_ASSERTION_CODE_HINTS.filter((hint) =>
+    responseText.includes(hint),
+  );
+  const nodes = found.length
+    ? found.join("、")
+    : "业务返回码与关键响应字段";
+
+  return [
+    "响应断言参考",
+    API_DOC_SECTION_SEPARATOR,
+    `关键节点：${nodes}；HTTP 接口写状态码，TCP/XML 写 bizResCode（成功通常 000000）。`,
+  ].join("\n");
+}
+
 /**
  * 压缩接口结构化文档，用于缩减 API 案例生成 AI 提示词长度。
  *
@@ -246,15 +281,23 @@ const MESSAGE_TABLE_MAX_CELL_LENGTH = 40;
  * 1. 列裁剪：仅保留与字段定义相关的关键列（节点路径/代码、类型、长度、必填、说明等）；
  * 2. 说明截断：超长说明/取值列截断到固定长度；
  * 3. 动态行数：必填字段优先保留，选填字段按剩余字符预算补齐。
+ *
+ * `requestOnly`：仅保留请求报文表，响应段改为一行断言摘要（用于 AI 案例生成）。
  */
 export function compressApiStructuredDoc(
   structuredDoc: string,
   maxRowsPerTable = 60,
   maxChars = DEFAULT_COMPRESSED_DOC_MAX_CHARS,
+  options: CompressApiStructuredDocOptions = {},
 ): string {
   if (!structuredDoc?.trim()) {
     return "";
   }
+
+  const requestOnly = options.requestOnly === true;
+  const responseSummary = requestOnly
+    ? buildResponseAssertionSummary(structuredDoc)
+    : "";
 
   const fixedSections: string[] = [];
   for (const name of ["基础信息", "服务信息", "技术信息"] as const) {
@@ -265,10 +308,15 @@ export function compressApiStructuredDoc(
   }
   const fixedText = fixedSections.join("\n\n");
 
-  // 报文表可用的字符预算（请求报文权重更高，因为它决定 requestBody 生成）。
-  const tableBudget = Math.max(0, maxChars - fixedText.length - 200);
-  const requestBudget = Math.round(tableBudget * 0.6);
-  const responseBudget = tableBudget - requestBudget;
+  const summaryReserve = responseSummary ? responseSummary.length + 2 : 0;
+  const tableBudget = Math.max(
+    0,
+    maxChars - fixedText.length - summaryReserve - 200,
+  );
+  const requestBudget = requestOnly
+    ? tableBudget
+    : Math.round(tableBudget * 0.6);
+  const responseBudget = requestOnly ? 0 : tableBudget - requestBudget;
 
   const tableSections: string[] = [];
   const requestText = extractApiDocSection(structuredDoc, "请求报文");
@@ -281,15 +329,19 @@ export function compressApiStructuredDoc(
       )}`,
     );
   }
-  const responseText = extractApiDocSection(structuredDoc, "响应报文");
-  if (responseText.trim()) {
-    tableSections.push(
-      `响应报文\n${API_DOC_SECTION_SEPARATOR}\n${compressApiDocTable(
-        responseText,
-        maxRowsPerTable,
-        responseBudget,
-      )}`,
-    );
+  if (!requestOnly) {
+    const responseText = extractApiDocSection(structuredDoc, "响应报文");
+    if (responseText.trim()) {
+      tableSections.push(
+        `响应报文\n${API_DOC_SECTION_SEPARATOR}\n${compressApiDocTable(
+          responseText,
+          maxRowsPerTable,
+          responseBudget,
+        )}`,
+      );
+    }
+  } else if (responseSummary) {
+    tableSections.push(responseSummary);
   }
 
   const compressed = [fixedText, ...tableSections].filter(Boolean).join("\n\n");

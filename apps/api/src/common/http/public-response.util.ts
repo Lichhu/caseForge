@@ -120,6 +120,12 @@ export function toPublicApiTransaction(
     name: row.name,
     description: row.description,
     sortOrder: row.sortOrder,
+    reqCode: row.reqCode,
+    taskId: row.taskId,
+    serviceCode: row.serviceCode,
+    reqSystemId: row.reqSystemId,
+    syncStatus: row.syncStatus,
+    syncError: row.syncError,
     ...(extra?.docStatus !== undefined ? { docStatus: extra.docStatus } : {}),
     ...(extra?.hasDocument !== undefined
       ? { hasDocument: extra.hasDocument }
@@ -158,6 +164,8 @@ export function toPublicApiDoc(
     transactionId: extra.transactionId,
     sourceDocName: doc.sourceDocName,
     sourceDocUrl: extra.sourceDocUrl,
+    source: doc.source,
+    smpData: doc.smpData,
     structuredMarkdown: doc.structuredMarkdown,
     tempStructuredMarkdown: doc.tempStructuredMarkdown,
     structuringStatus: doc.structuringStatus,

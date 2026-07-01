@@ -1,0 +1,179 @@
+{
+  "selectServiceInfoList": {
+    "Transaction": {
+      "Body": {
+        "response": {
+          "bizHeader": {
+            "bizResCode": "000000",
+            "bizResText": "查询sit状态接口信息成功"
+          },
+          "bizBody": {
+            "serviceList": [
+              {
+                "bus": "ESB",
+                "esbReqCode": "XQ2026-1365-0107",
+                "isObscure": "1",
+                "net": "32.113.*.*",
+                "reqCode": "XQ2026-1365-0101",
+                "reqName": "关于优化定价系统二期部分字段的需求_产品定价系统任务",
+                "reqState": "uat",
+                "reqSystemId": "039",
+                "resSystemId": "530",
+                "resSystemName": "供应链综合服务平台",
+                "serviceAttribute": "查询类",
+                "serviceCname": "根据客户号查询数债融资金额--融资完成，到期记账未完成",
+                "serviceCode": "R53000080828",
+                "serviceForm": "单一服务",
+                "serviceType": "接口服务",
+                "taskId": "2026051210027",
+                "taskType": "服务调用",
+                "tranCode": "PCBS03901001"
+              },
+              {
+                "bus": "ESB",
+                "esbReqCode": "XQ2026-1365-0107",
+                "isObscure": "1",
+                "net": "32.113.*.*",
+                "reqCode": "XQ2026-1365-0101",
+                "reqName": "关于优化定价系统二期部分字段的需求_产品定价系统任务",
+                "reqState": "uat",
+                "reqSystemId": "039",
+                "resSystemId": "006",
+                "resSystemName": "信贷核算",
+                "serviceAttribute": "查询类",
+                "serviceCname": "查询客户是否存在未结清贷款",
+                "serviceCode": "R00600079858",
+                "serviceForm": "单一服务",
+                "serviceType": "接口服务",
+                "taskId": "2026051210045",
+                "taskType": "服务调用",
+                "tranCode": "serv10000000219"
+              },
+              {
+                "bus": "ESB",
+                "esbReqCode": "XQ2026-1365-0107",
+                "isObscure": "1",
+                "net": "32.113.*.*",
+                "reqCode": "XQ2026-1365-0103",
+                "reqName": "关于优化定价系统二期部分字段的需求_信贷核算任务",
+                "reqState": "uat",
+                "reqSystemId": "-",
+                "resSystemId": "006",
+                "resSystemName": "信贷核算",
+                "serviceAttribute": "查询类",
+                "serviceCname": "客户资产查询(dp2026)",
+                "serviceCode": "R11101006325",
+                "serviceForm": "单一服务",
+                "serviceType": "接口服务",
+                "taskId": "2026051810003",
+                "taskType": "服务调用",
+                "tranCode": "dp2026"
+              },
+              {
+                "bus": "ESB",
+                "esbReqCode": "XQ2026-1365-0107",
+                "isObscure": "1",
+                "net": "32.113.*.*",
+                "reqCode": "XQ2026-1365-0101",
+                "reqName": "关于优化定价系统二期部分字段的需求_产品定价系统任务",
+                "reqState": "uat",
+                "reqSystemId": "039",
+                "resSystemId": "008",
+                "resSystemName": "国际结算",
+                "serviceAttribute": "账务类",
+                "serviceCname": "同业再保理账面余额查询",
+                "serviceCode": "R00800080957",
+                "serviceForm": "单一服务",
+                "serviceType": "接口服务",
+                "taskId": "2026051910016",
+                "taskType": "服务调用",
+                "tranCode": "302019"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "selectCallServiceInfoList": {
+    "Transaction": {
+      "Body": {
+        "response": {
+          "bizHeader": {
+            "bizResCode": "000000",
+            "bizResText": "查询服务调用列表信息成功"
+          },
+          "bizBody": {
+            "callServiceList": [
+              {
+                "authenticationMethod": "无",
+                "bus": "ESB",
+                "businessRule": "1.客户号必输；\n2.根据客户号查询数债融资金额--融资完成，到期记账未完成；\n3.查询不到返回空",
+                "callMethod": "同步",
+                "descript": "根据客户号查询数债融资金额--融资完成，到期记账未完成",
+                "encryptMethod": "无",
+                "headId": "H53000010660",
+                "isObscure": "1",
+                "isPublic": "是",
+                "maxMessageSize": "10K",
+                "maxResponseTime": "60",
+                "messageCoding": "UTF-8",
+                "messageType": "JSON",
+                "serviceAttribute": "查询类",
+                "serviceCname": "根据客户号查询数债融资金额--融资完成，到期记账未完成",
+                "serviceCode": "R53000080828",
+                "serviceForm": "单一服务",
+                "serviceType": "接口服务",
+                "socketWay": "HTTP",
+                "systemId": "530",
+                "systemName": "供应链综合服务平台",
+                "tranCode": "PCBS03901001"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "selectTestInfoList": {
+    "Transaction": {
+      "Body": {
+        "response": {
+          "bizHeader": {
+            "bizResCode": "000000",
+            "bizResText": "查询接口测试信息成功"
+          },
+          "bizBody": {
+            "serviceTestList": [
+              {
+                "requestBody": "{\"Transaction\": {\"Header\": {\"sysHeader\": {\"orgCode\": \"\",\"serverCd\": \"508\",\"clientCd\": \"520\",\"msgTime\": \"14:18:20\",\"msgId\": \"69e4b9af-5c23-4e2a-be96-279b659e37fd\",\"serviceCd\": \"\",\"operation\": \"selectReqNoByReqCode\",\"msgDate\": \"20260522\"}},\"Body\": {\"request\": {\"bizBody\": {\"taskId\": \"2026051210027\",\"serviceCode\": \"R53000080828\",\"reqSystemId\": \"039\",\"reqCode\": \"XQ2026-1365-0101\"},\"bizHeader\": {}}}}}",
+                "requestEncoding": "UTF-8",
+                "requestMessageType": "ESB标准XML",
+                "requestMethod": "post",
+                "requestUrl": "tcp://33.114.5.56:60000",
+                "responseBody": "{\"Transaction\": {\"Header\": {\"sysHeader\": {\"orgCode\": \"\",\"serverCd\": \"508\",\"clientCd\": \"520\",\"msgTime\": \"14:18:20\",\"msgId\": \"69e4b9af-5c23-4e2a-be96-279b659e37fd\",\"serviceCd\": \"\",\"operation\": \"selectReqNoByReqCode\",\"msgDate\": \"20260522\"}},\"Body\": {\"response\": {\"bizBody\": {\"taskId\": \"2026051210027\",\"serviceCode\": \"R53000080828\",\"reqSystemId\": \"039\",\"reqCode\": \"XQ2026-1365-0101\"},\"bizHeader\": {}}}}}",
+                "responseEncoding": "UTF-8",
+                "responstMessageType": "JSON"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "selectChangeInfoByReqCode": {
+    "Transaction": {
+      "Body": {
+        "response": {
+          "bizHeader": {
+            "bizResCode": "000000",
+            "bizResText": "查询变更列表信息成功"
+          },
+          "bizBody": {
+            "approvalInfoList": []
+          }
+        }
+      }
+    }
+  }
+}

@@ -130,7 +130,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onActivated, onBeforeUnmount, ref, watch, withDefaults, defineProps } from 'vue';
+import { computed, nextTick, onActivated, onBeforeUnmount, ref, watch } from 'vue';
 import { message, Modal } from 'ant-design-vue';
 import { SaveOutlined } from '@ant-design/icons-vue';
 import type { ScenarioLibraryItem } from '@/api/client';

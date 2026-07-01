@@ -27,6 +27,38 @@ export interface ApiTransactionRow {
   sortOrder: number;
   docStatus?: ApiStructuringStatus;
   hasDocument?: boolean;
+  reqCode?: string;
+  taskId?: string;
+  serviceCode?: string;
+  reqSystemId?: string;
+  syncStatus?:
+    | "pending"
+    | "generating"
+    | "success"
+    | "failed"
+    | "cancelled"
+    | "changed";
+  syncError?: string;
+}
+
+export interface SmpTransactionCandidate {
+  code: string;
+  name: string;
+  description?: string;
+  reqCode: string;
+  taskId: string;
+  serviceCode: string;
+  reqSystemId: string;
+  resSystemName?: string;
+  serviceAttribute?: string;
+  serviceType?: string;
+  selected?: boolean;
+}
+
+export interface SmpDocumentData {
+  callServiceList: unknown[];
+  serviceTestList: unknown[];
+  approvalInfoList: unknown[];
 }
 
 export interface ApiDocDetail {
@@ -35,6 +67,8 @@ export interface ApiDocDetail {
   transactionId?: string;
   sourceDocName?: string;
   sourceDocUrl?: string;
+  source?: "smp" | "upload";
+  smpData?: SmpDocumentData;
   structuredMarkdown?: string;
   tempStructuredMarkdown?: string;
   structuringStatus: ApiStructuringStatus;
@@ -84,7 +118,7 @@ export interface ApiEnvironmentRow {
   id: string;
   projectId: string;
   name: string;
-  scope?: 'global' | 'system' | 'personal';
+  scope?: "global" | "system" | "personal";
   baseUrl: string;
   headers: Record<string, string>;
   variables: Record<string, string>;
@@ -216,6 +250,41 @@ export async function batchDeleteApiTransactions(
   const { data } = await http.post<{ ok: boolean; count: number }>(
     `/api-test/${projectId}/transactions/batch-delete`,
     { ids },
+  );
+  return data;
+}
+
+export async function fetchSmpTransactions(projectId: string) {
+  const { data } = await http.post<SmpTransactionCandidate[]>(
+    `/api-test/${projectId}/transactions/smp-list`,
+  );
+  return data;
+}
+
+export async function syncSmpTransactions(
+  projectId: string,
+  items: SmpTransactionCandidate[],
+) {
+  const { data } = await http.post<{ created: number; updated: number }>(
+    `/api-test/${projectId}/transactions/smp-sync`,
+    { items },
+  );
+  return data;
+}
+
+export interface SmpDocumentRefreshResult {
+  changed: boolean;
+  callServiceList: unknown[];
+  serviceTestList: unknown[];
+  approvalInfoList: unknown[];
+}
+
+export async function refreshSmpTransactionDocument(
+  projectId: string,
+  transactionId: string,
+) {
+  const { data } = await http.post<SmpDocumentRefreshResult>(
+    `/api-test/${projectId}/transactions/${transactionId}/smp-refresh`,
   );
   return data;
 }
@@ -400,6 +469,33 @@ export async function generateApiCases(
     {
       timeout: 30_000,
     },
+  );
+  return data;
+}
+
+export interface DocReadinessEndpointResult {
+  endpointId: string;
+  endpointName: string;
+  ok: boolean;
+  message: string;
+  fieldCount: number;
+  transport?: string;
+  messageFormat?: string;
+}
+
+export interface DocReadinessResult {
+  ok: boolean;
+  message: string;
+  fieldCount: number;
+  endpoints: DocReadinessEndpointResult[];
+}
+
+export async function checkDocReadiness(
+  projectId: string,
+  transactionId: string,
+) {
+  const { data } = await http.get<DocReadinessResult>(
+    `${transactionBase(projectId, transactionId)}/doc-readiness`,
   );
   return data;
 }
@@ -700,8 +796,14 @@ async function assertExportBlobFormat(
     const payload = JSON.parse(await blob.text()) as { message?: string };
     throw new Error(payload.message?.trim() || "导出失败");
   }
-  if (format === "html" && !prefix.toLowerCase().includes("<!doctype") && !prefix.toLowerCase().includes("<html")) {
-    throw new Error("导出 HTML 失败：服务端返回了非 HTML 内容，请确认 API 已更新并重启");
+  if (
+    format === "html" &&
+    !prefix.toLowerCase().includes("<!doctype") &&
+    !prefix.toLowerCase().includes("<html")
+  ) {
+    throw new Error(
+      "导出 HTML 失败：服务端返回了非 HTML 内容，请确认 API 已更新并重启",
+    );
   }
   if (format === "pdf" && !prefix.startsWith("%PDF")) {
     throw new Error("导出 PDF 失败：服务端返回了非 PDF 内容");

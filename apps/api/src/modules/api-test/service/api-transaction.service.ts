@@ -17,6 +17,7 @@ import { ApiDocEntity } from "@api-test/entity/api-doc.entity";
 import { ApiTransactionEntity } from "@api-test/entity/api-transaction.entity";
 import { SaveApiTransactionDto } from "@api-test/dto/save-transaction.dto";
 import { toPublicApiTransaction } from "@common/http/public-response.util";
+import { ApiCaseGenerateQueueService } from "./api-case-generate-queue.service";
 
 @Injectable()
 export class ApiTransactionService {
@@ -27,6 +28,7 @@ export class ApiTransactionService {
     private readonly apiDocRepo: Repository<ApiDocEntity>,
     @InjectRepository(CaseProjectEntity)
     private readonly projectRepo: Repository<CaseProjectEntity>,
+    private readonly generateQueueService: ApiCaseGenerateQueueService,
   ) {}
 
   async listTransactions(projectId: string) {
@@ -121,6 +123,7 @@ export class ApiTransactionService {
 
   async deleteTransaction(projectId: string, transactionId: string) {
     await this.requireTransaction(projectId, transactionId);
+    await this.generateQueueService.cancel(projectId, transactionId);
     await this.apiDocRepo.delete({ projectId, transactionId });
     await this.transactionRepo.delete(
       scopedWhere({ projectId, id: transactionId }),
@@ -139,6 +142,7 @@ export class ApiTransactionService {
     }
     for (const transactionId of ids) {
       await this.requireTransaction(projectId, transactionId);
+      await this.generateQueueService.cancel(projectId, transactionId);
       await this.apiDocRepo.delete({ projectId, transactionId });
       await this.transactionRepo.delete(
         scopedWhere({ projectId, id: transactionId }),

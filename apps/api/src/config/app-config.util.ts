@@ -16,5 +16,10 @@ export function getAppConfig(configService: ConfigService): AppConfig {
     typeOrmTest: configService.get<AppConfig["typeOrmTest"]>("typeOrmTest")!,
     minio: configService.get<AppConfig["minio"]>("minio")!,
     aiWorkflow: configService.get<AppConfig["aiWorkflow"]>("aiWorkflow")!,
+    smp: configService.get<AppConfig["smp"]>("smp")!,
+    apiCasePlanMode: configService.get<AppConfig["apiCasePlanMode"]>(
+      "apiCasePlanMode",
+      "plan",
+    )!,
   };
 }

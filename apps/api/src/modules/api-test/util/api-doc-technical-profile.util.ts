@@ -6,10 +6,7 @@ import type {
   ApiTechnicalProfile,
   ApiTransport,
 } from "@case-forge/shared";
-import {
-  extractApiDocSection,
-  getApiDocFieldValue,
-} from "./api-doc.parser";
+import { extractApiDocSection, getApiDocFieldValue } from "./api-doc.parser";
 import { buildXmlGuidanceExtra } from "./api-xml-request-template.util";
 
 const DEFAULT_PROFILE: ApiTechnicalProfile = {
@@ -47,13 +44,14 @@ export function parseApiTechnicalProfile(
     return { ...DEFAULT_PROFILE };
   }
 
-  const transport = normalizeTransport(getApiDocFieldValue(section, "通讯方式"));
+  const transport = normalizeTransport(
+    getApiDocFieldValue(section, "通讯方式"),
+  );
   const messageFormat = normalizeMessageFormat(
     getApiDocFieldValue(section, "报文类型"),
   );
   const encoding =
-    getApiDocFieldValue(section, "报文编码").trim() ||
-    DEFAULT_PROFILE.encoding;
+    getApiDocFieldValue(section, "报文编码").trim() || DEFAULT_PROFILE.encoding;
   const invocationMode =
     getApiDocFieldValue(section, "调用模式").trim() || undefined;
   const maxMessageSize =
@@ -124,7 +122,10 @@ export function buildProtocolGuidance(
       "- `requestBody` 输出 **JSON 对象字符串**（仅业务报文体，不含 HTTP 头）。",
       "- 字段名须与文档「请求报文」表中的**节点代码**一致。",
     );
-  } else if (profile.messageFormat === "xml" || profile.messageFormat === "soap") {
+  } else if (
+    profile.messageFormat === "xml" ||
+    profile.messageFormat === "soap"
+  ) {
     lines.push(
       "- `requestBody` 输出 **完整 XML 字符串**（非 JSON 对象）。",
       "- 按文档「请求报文」表的**节点路径**嵌套生成标签，标签名取**节点代码**。",
@@ -147,9 +148,7 @@ export function buildProtocolGuidance(
       "- `requestBody` 输出 **纯文本字符串**，按文档字段顺序或定长格式拼接。",
     );
   } else {
-    lines.push(
-      "- `requestBody` 按文档「请求报文」定义的格式输出字符串。",
-    );
+    lines.push("- `requestBody` 按文档「请求报文」定义的格式输出字符串。");
   }
 
   lines.push("", "### 预期结果生成规则");
@@ -231,6 +230,8 @@ export function buildEndpointContextForPrompt(
     endpointMethod: string;
     endpointPath: string;
     structuredDoc: string;
+    requestNotes?: string;
+    responseNotes?: string;
   },
 ): string {
   const formatLabel =
@@ -240,39 +241,63 @@ export function buildEndpointContextForPrompt(
         ? "XML"
         : profile.messageFormat.toUpperCase();
 
+  const lines: string[] = [];
+
   if (profile.transport === "tcp") {
     const basic = extractApiDocSection(input.structuredDoc, "基础信息");
     const serviceUrl = getApiDocFieldValue(basic, "服务URL").trim();
-    return [
+    lines.push(
       `- 通讯方式：Socket`,
       `- 报文类型：${formatLabel}`,
-      `- 连接地址：${serviceUrl || "（由执行环境 host:port 配置，如 32.114.71.6:60030）"}`,
+      `- 连接地址：${serviceUrl || input.endpointPath || "（由执行环境 host:port 配置，如 32.114.71.6:60030）"}`,
       `- **禁止**生成 HTTP 方法、URL、HTTP 状态码；requestBody 仅输出报文体`,
-    ].join("\n");
-  }
-
-  if (profile.transport === "mq") {
-    return [
+    );
+  } else if (profile.transport === "mq") {
+    lines.push(
       `- 通讯方式：MQ`,
       `- 报文类型：${formatLabel}`,
       `- **禁止**生成 HTTP 方法、URL、HTTP 状态码；requestBody 仅输出消息体`,
-    ].join("\n");
-  }
-
-  if (profile.transport === "http") {
-    return [
+    );
+  } else if (profile.transport === "http") {
+    lines.push(
       `- 通讯方式：HTTP`,
       `- 报文类型：${formatLabel}`,
       `- HTTP 方法：${input.endpointMethod}`,
       `- 接口路径：${input.endpointPath}`,
-    ].join("\n");
+    );
+  } else {
+    lines.push(
+      `- 通讯方式：${profile.transport.toUpperCase()}`,
+      `- 报文类型：${formatLabel}`,
+      `- 接口标识：${input.endpointPath || input.endpointMethod}`,
+    );
   }
 
-  return [
-    `- 通讯方式：${profile.transport.toUpperCase()}`,
-    `- 报文类型：${formatLabel}`,
-    `- 接口标识：${input.endpointPath || input.endpointMethod}`,
-  ].join("\n");
+  if (input.requestNotes?.trim()) {
+    lines.push(
+      "",
+      "- 请求报文示例（请严格参照字段结构与数据类型）：",
+      "```",
+      truncateText(input.requestNotes.trim(), 3000),
+      "```",
+    );
+  }
+  if (input.responseNotes?.trim()) {
+    lines.push(
+      "",
+      "- 响应报文示例：",
+      "```",
+      truncateText(input.responseNotes.trim(), 3000),
+      "```",
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function truncateText(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars) + "\n...（已截断）";
 }
 
 export function buildCaseRequestFromProfile(
@@ -296,7 +321,10 @@ export function buildCaseRequestFromProfile(
     request.headers = { "Content-Type": contentType };
   }
 
-  if (profile.transport === "tcp" && profile.messageFormat === "xml") {
+  if (
+    profile.transport === "tcp" &&
+    (profile.messageFormat === "xml" || profile.messageFormat === "json")
+  ) {
     request.framing = {
       type: "length-prefix",
       width: 8,

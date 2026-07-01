@@ -197,12 +197,6 @@ export const useCaseForgeStore = defineStore("caseForge", {
     isStructuring(state): boolean {
       return state.structDocs.some((d) => d.structuringStatus === "processing");
     },
-    activeStructDoc(state): StructDocDetail | null {
-      if (!state.activeStructDocId) return null;
-      return (
-        state.structDocs.find((d) => d.id === state.activeStructDocId) ?? null
-      );
-    },
     selectedNode(state): CaseTreeNode | null {
       if (!state.activeRun || !state.selectedNodeId) {
         return null;
@@ -980,7 +974,8 @@ export const useCaseForgeStore = defineStore("caseForge", {
             const zeroParseDoc = completedDocs.find(
               (d) =>
                 d.parseWarning ||
-                (d.parsedTestPointCount != null && d.parsedTestPointCount === 0),
+                (d.parsedTestPointCount != null &&
+                  d.parsedTestPointCount === 0),
             );
             if (zeroParseDoc?.parseWarning) {
               message.warning(

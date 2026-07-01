@@ -1,14 +1,18 @@
-export type ApiCasePolarity = 'positive' | 'negative';
-export type ApiCasePriority = 'P0' | 'P1' | 'P2';
-export type ApiCaseSource = 'ai' | 'manual' | 'ai_edited';
-export type ApiCaseStatus = 'draft' | 'ready' | 'disabled';
-export type ApiRunItemStatus = 'passed' | 'failed' | 'error' | 'skipped';
-export type ApiStructuringStatus = 'idle' | 'processing' | 'completed' | 'failed';
-export type ApiTransport = 'http' | 'tcp' | 'mq' | 'tuxedo' | 'other';
-export type ApiMessageFormat = 'json' | 'xml' | 'text' | 'soap' | 'other';
+export type ApiCasePolarity = "positive" | "negative";
+export type ApiCasePriority = "P0" | "P1" | "P2";
+export type ApiCaseSource = "ai" | "manual" | "ai_edited";
+export type ApiCaseStatus = "draft" | "ready" | "disabled";
+export type ApiRunItemStatus = "passed" | "failed" | "error" | "skipped";
+export type ApiStructuringStatus =
+  | "idle"
+  | "processing"
+  | "completed"
+  | "failed";
+export type ApiTransport = "http" | "tcp" | "mq" | "tuxedo" | "other";
+export type ApiMessageFormat = "json" | "xml" | "text" | "soap" | "other";
 
 export interface ApiMessageFraming {
-  type: 'length-prefix';
+  type: "length-prefix";
   width: number;
   encoding?: string;
 }
@@ -23,7 +27,7 @@ export interface ApiTechnicalProfile {
 }
 
 export interface ApiBodyAssertion {
-  type: 'jsonPath' | 'contains' | 'equals' | 'matches';
+  type: "jsonPath" | "contains" | "equals" | "matches";
   path?: string;
   expected: unknown;
   description?: string;
@@ -67,6 +71,7 @@ export interface ApiTestCasePayload {
     source?: ApiCaseSource;
     inferredFields?: string[];
     promptIds?: string[];
+    bodyOverrides?: Record<string, unknown>;
   };
 }
 
@@ -87,4 +92,17 @@ export interface AssertionResult {
   expected: unknown;
   actual: unknown;
   message?: string;
+}
+
+export interface AiCasePlanItem {
+  caseNo?: string;
+  caseName: string;
+  caseDesc: string;
+  caseType: "正" | "反";
+  priority?: "高" | "中" | "低";
+  remark?: string;
+  bodyOverrides?: Record<string, string | number | boolean | null>;
+  headerOverrides?: Record<string, string>;
+  expectedResult: string;
+  assertions?: Array<{ type: "contains"; expected: string }>;
 }

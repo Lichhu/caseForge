@@ -69,8 +69,13 @@ export class ApiDocService {
       throw new BadRequestException("已存在接口文档，请传 force=true 覆盖上传");
     }
     if (!doc) {
-      doc = this.apiDocRepo.create({ projectId, transactionId });
+      doc = this.apiDocRepo.create({
+        projectId,
+        transactionId,
+        source: "upload",
+      });
     }
+    doc.source = "upload";
     doc.sourceDocName = input.fileName;
     doc.sourceDocPath = input.objectPath;
     doc.structuringStatus = "idle";
@@ -79,7 +84,10 @@ export class ApiDocService {
     return this.getByTransactionId(projectId, transactionId);
   }
 
-  async extractAndStructureFromUpload(projectId: string, transactionId: string) {
+  async extractAndStructureFromUpload(
+    projectId: string,
+    transactionId: string,
+  ) {
     const transaction = await this.assertTransaction(projectId, transactionId);
     const doc = await this.ensureDoc(projectId, transactionId);
     if (!doc.sourceDocPath) {
@@ -106,12 +114,8 @@ export class ApiDocService {
           ? { ...endpoint, name: endpoint.name || transaction.name }
           : endpoint,
       );
-      await this.replaceEndpoints(
-        projectId,
-        transactionId,
-        doc.id,
-        normalized,
-      );
+      await this.replaceEndpoints(projectId, transactionId, doc.id, normalized);
+      doc.source = "upload";
       doc.extractedRawText = rawText;
       doc.structuredMarkdown = rawText;
       doc.tempStructuredMarkdown = rawText;
@@ -152,19 +156,13 @@ export class ApiDocService {
     if (!markdown?.trim()) {
       throw new BadRequestException("结构化内容不能为空");
     }
-    const endpoints =
-      payload.endpoints?.length
-        ? ensureEndpointIds(payload.endpoints)
-        : parseEndpointsFromText(markdown);
+    const endpoints = payload.endpoints?.length
+      ? ensureEndpointIds(payload.endpoints)
+      : parseEndpointsFromText(markdown);
     if (!endpoints.length) {
       throw new BadRequestException("至少保留一个接口端点");
     }
-    await this.replaceEndpoints(
-      projectId,
-      transactionId,
-      doc.id,
-      endpoints,
-    );
+    await this.replaceEndpoints(projectId, transactionId, doc.id, endpoints);
     doc.structuredMarkdown = markdown;
     doc.tempStructuredMarkdown = markdown;
     doc.structuringStatus = "completed";

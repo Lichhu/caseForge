@@ -21,6 +21,16 @@ export const API_STRUCTURING_STATUS = [
 
 export type ApiStructuringStatus = (typeof API_STRUCTURING_STATUS)[number];
 
+export const API_DOC_SOURCES = ["smp", "upload"] as const;
+
+export type ApiDocSource = (typeof API_DOC_SOURCES)[number];
+
+export interface SmpDocumentData {
+  callServiceList: unknown[];
+  serviceTestList: unknown[];
+  approvalInfoList: unknown[];
+}
+
 @Entity("api_doc")
 @Index("uk_api_doc_transaction", ["transactionId"], { unique: true })
 @Index("idx_api_doc_project", ["projectId"])
@@ -34,7 +44,10 @@ export class ApiDocEntity {
   @Column({ nullable: true, length: 36 })
   transactionId?: string;
 
-  @ManyToOne(() => CaseProjectEntity, { onDelete: "CASCADE", onUpdate: "CASCADE" })
+  @ManyToOne(() => CaseProjectEntity, {
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  })
   @JoinColumn({ name: "projectId" })
   project: CaseProjectEntity;
 
@@ -67,6 +80,27 @@ export class ApiDocEntity {
   metadata?: {
     promptIds?: string[];
   };
+
+  /** 接口文档来源：smp（服管平台）或 upload（上传 Excel） */
+  @Column({
+    type: "enum",
+    enum: API_DOC_SOURCES,
+    default: "smp",
+    name: "source",
+  })
+  source: ApiDocSource;
+
+  /** 从 SMP 拉取到的文档数据（callServiceList / serviceTestList / approvalInfoList） */
+  @Column({ type: "json", nullable: true, name: "smp_data" })
+  smpData?: SmpDocumentData;
+
+  /** 上次同步 SMP 服务调用数据的 hash（用于变更检测） */
+  @Column({ length: 64, nullable: true, name: "last_smp_call_service_hash" })
+  lastSmpCallServiceHash?: string;
+
+  /** 上次同步 SMP 接口测试数据的 hash（用于变更检测） */
+  @Column({ length: 64, nullable: true, name: "last_smp_test_info_hash" })
+  lastSmpTestInfoHash?: string;
 
   @OneToMany(() => ApiEndpointEntity, (endpoint) => endpoint.apiDoc)
   endpoints: ApiEndpointEntity[];

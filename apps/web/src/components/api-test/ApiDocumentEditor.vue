@@ -33,14 +33,14 @@
         </a-button>
         <a-button
           type="primary"
-          :disabled="!apiStore.canGenerateCases"
+          :disabled="!apiStore.canGenerateCases || apiStore.docReadiness?.ok === false"
           :loading="generatingCases"
           @click="onGenerate"
         >
           <template #icon><ThunderboltOutlined /></template>
           AI 生成案例
         </a-button>
-        <a-button :disabled="!canSave" @click="onSave">
+        <a-button v-if="!showSmpData" :disabled="!canSave" @click="onSave">
           <template #icon><SaveOutlined /></template>
           保存
         </a-button>
@@ -62,54 +62,81 @@
     </a-alert>
 
     <a-alert
-      v-if="apiStore.apiDoc?.structuringStatus === 'failed'"
+      v-if="!showSmpData && apiStore.apiDoc?.structuringStatus === 'failed'"
       type="error"
       show-icon
       :message="apiStore.apiDoc.structuringError"
       class="document-panel-alert"
     />
 
+    <a-alert
+      v-if="apiStore.docReadinessMessage"
+      type="warning"
+      show-icon
+      :message="apiStore.docReadinessMessage"
+      class="document-panel-alert"
+    >
+      <template #description>
+        <span v-if="apiStore.docReadiness?.endpoints?.length">
+          未通过检查的接口：
+          <span
+            v-for="ep in apiStore.docReadiness.endpoints.filter((e) => !e.ok)"
+            :key="ep.endpointId"
+            class="readiness-endpoint-tag"
+          >
+            {{ ep.endpointName }}（{{ ep.message }}）
+          </span>
+        </span>
+      </template>
+    </a-alert>
+
     <div ref="tableScrollRef" class="document-table-scroll">
-      <a-empty
-        v-if="!sections.length"
-        description="上传 Excel 后将自动结构化，可 AI 生成案例"
-      />
-      <div v-for="(section, sectionIndex) in sections" :key="section.title" class="doc-section-block">
-        <h3 class="doc-section-title">{{ section.title }}</h3>
-        <div class="api-doc-table-wrap">
-          <table class="api-doc-table">
-            <thead>
-              <tr>
-                <th
-                  v-for="(label, colIndex) in sectionTableHeaders(section)"
-                  :key="`${section.title}-head-${colIndex}`"
+      <template v-if="showSmpData">
+        <div class="smp-doc-source-tag">来源：服管平台</div>
+        <SmpDocumentViewer :data="apiStore.apiDoc!.smpData!" />
+      </template>
+      <template v-else>
+        <a-empty
+          v-if="!sections.length"
+          description="上传 Excel 后将自动结构化，可 AI 生成案例"
+        />
+        <div v-for="(section, sectionIndex) in sections" :key="section.title" class="doc-section-block">
+          <h3 class="doc-section-title">{{ section.title }}</h3>
+          <div class="api-doc-table-wrap">
+            <table class="api-doc-table">
+              <thead>
+                <tr>
+                  <th
+                    v-for="(label, colIndex) in sectionTableHeaders(section)"
+                    :key="`${section.title}-head-${colIndex}`"
+                  >
+                    {{ label }}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="record in sectionData[sectionIndex]"
+                  :key="record.key"
                 >
-                  {{ label }}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="record in sectionData[sectionIndex]"
-                :key="record.key"
-              >
-                <td
-                  v-for="colKey in sectionTableColumnKeys(section)"
-                  :key="`${record.key}-${colKey}`"
-                >
-                  <textarea
-                    v-model="record[colKey]"
-                    class="doc-cell-input"
-                    rows="1"
-                    @input="onCellInput(sectionIndex, $event)"
-                    @blur="handleCellBlur(sectionIndex)"
-                  />
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                  <td
+                    v-for="colKey in sectionTableColumnKeys(section)"
+                    :key="`${record.key}-${colKey}`"
+                  >
+                    <textarea
+                      v-model="record[colKey]"
+                      class="doc-cell-input"
+                      rows="1"
+                      @input="onCellInput(sectionIndex, $event)"
+                      @blur="handleCellBlur(sectionIndex)"
+                    />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      </template>
     </div>
   </section>
 
@@ -158,6 +185,7 @@ import { Modal, message } from 'ant-design-vue';
 import type { UploadProps } from 'ant-design-vue';
 import ScenarioMaintainModal from '@/components/ScenarioMaintainModal.vue';
 import ScenarioPromptPicker from '@/components/ScenarioPromptPicker.vue';
+import SmpDocumentViewer from '@/components/api-test/SmpDocumentViewer.vue';
 import { useApiTestStore } from '@/stores/apiTest';
 import { filterSelectablePromptIds, collectDefaultPromptIds } from '@/utils/scenarioLibrary';
 import {
@@ -191,6 +219,11 @@ const generatingCases = computed(() =>
     : false,
 );
 
+const showSmpData = computed(() =>
+  apiStore.apiDoc?.source === 'smp' &&
+  Boolean(apiStore.apiDoc?.smpData?.callServiceList?.length),
+);
+
 onActivated(() => {
   panelActive.value = true;
   void ensureScenarioLibrary();
@@ -198,8 +231,17 @@ onActivated(() => {
   const tid = transactionId.value;
   if (pid && tid) {
     void apiStore.syncCaseGenerateLoading(pid, tid);
+    void ensureSmpDocumentLoaded(pid, tid);
   }
 });
+
+async function ensureSmpDocumentLoaded(projectId: string, transactionId: string) {
+  const transaction = apiStore.activeTransaction;
+  if (!transaction?.reqCode) return;
+  const doc = apiStore.apiDoc;
+  if (doc?.source === 'smp' && doc?.smpData?.callServiceList?.length) return;
+  await apiStore.refreshSmpTransactionDocument(transactionId);
+}
 
 onDeactivated(() => {
   panelActive.value = false;
@@ -497,6 +539,11 @@ async function onSave() {
   gap: 8px;
 }
 
+.readiness-endpoint-tag {
+  margin-right: 8px;
+  color: #d48806;
+}
+
 .generate-modal-body {
   display: flex;
   flex-direction: column;
@@ -583,5 +630,15 @@ async function onSave() {
 .doc-cell-input:focus {
   outline: none;
   background: #fffbeb;
+}
+
+.smp-doc-source-tag {
+  display: inline-block;
+  margin: 12px 0 6px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  background: #eff8ff;
+  color: #175cd3;
+  font-size: 12px;
 }
 </style>

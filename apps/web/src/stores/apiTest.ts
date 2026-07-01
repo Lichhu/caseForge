@@ -22,6 +22,7 @@ import {
 } from "@/api/client";
 import {
   autoSaveApiDocument,
+  checkDocReadiness,
   createApiCase,
   createApiEnvironment,
   createApiEnvironmentService,
@@ -34,7 +35,9 @@ import {
   deleteApiExecutionSet,
   batchDeleteApiTransactions,
   exportApiReport,
+  fetchSmpTransactions,
   generateApiCases,
+  refreshSmpTransactionDocument,
   getApiCaseGenerateStatus,
   cancelApiCaseGenerate,
   type ApiCaseGenerateQueueStatus,
@@ -54,6 +57,7 @@ import {
   saveApiDocument,
   saveApiDocumentGeneration,
   structureApiDocument,
+  syncSmpTransactions,
   updateApiCase,
   updateApiEnvironment,
   updateApiEnvironmentService,
@@ -67,6 +71,8 @@ import {
   type ApiRunDetail,
   type ApiTestCaseRow,
   type ApiTransactionRow,
+  type DocReadinessResult,
+  type SmpTransactionCandidate,
 } from "@/api/apiTestClient";
 import {
   applyScenarioLibraryItemInPlace,
@@ -116,6 +122,7 @@ interface State {
   transactions: ApiTransactionRow[];
   activeTransactionId: string;
   apiDoc: ApiDocDetail | null;
+  docReadiness: DocReadinessResult | null;
   cases: ApiTestCaseRow[];
   runnerCases: ApiTestCaseRow[];
   caseListPage: number;
@@ -155,6 +162,7 @@ export const useApiTestStore = defineStore("apiTest", {
     transactions: [],
     activeTransactionId: "",
     apiDoc: null,
+    docReadiness: null,
     cases: [],
     runnerCases: [],
     caseListPage: 1,
@@ -205,6 +213,10 @@ export const useApiTestStore = defineStore("apiTest", {
       return Boolean(state.apiDoc?.canEnterCases);
     },
     canGenerateCases: (state) => Boolean(state.apiDoc?.canGenerateCases),
+    docReadinessMessage: (state) =>
+      state.docReadiness && !state.docReadiness.ok
+        ? state.docReadiness.message
+        : null,
     canEnterRunner: (state) => {
       const pool =
         state.runnerCases.length > 0 ? state.runnerCases : state.cases;
@@ -308,6 +320,7 @@ export const useApiTestStore = defineStore("apiTest", {
     clearTransactionWorkspace() {
       this.activeTransactionId = "";
       this.apiDoc = null;
+      this.docReadiness = null;
       this.cases = [];
       this.runnerCases = [];
       this.caseListPage = 1;
@@ -413,6 +426,36 @@ export const useApiTestStore = defineStore("apiTest", {
     async refreshTransactions(projectId: string) {
       this.transactions = await listApiTransactions(projectId);
     },
+    async fetchSmpTransactionList() {
+      if (!this.activeProjectId) return [];
+      return fetchSmpTransactions(this.activeProjectId);
+    },
+    async syncSmpTransactions(items: SmpTransactionCandidate[]) {
+      if (!this.activeProjectId) return;
+      const result = await syncSmpTransactions(this.activeProjectId, items);
+      await this.refreshTransactions(this.activeProjectId);
+      message.success(
+        `已同步 ${result.created} 条新增、${result.updated} 条更新`,
+      );
+      return result;
+    },
+    async refreshSmpTransactionDocument(transactionId: string) {
+      if (!this.activeProjectId) return;
+      const result = await refreshSmpTransactionDocument(
+        this.activeProjectId,
+        transactionId,
+      );
+      if (result.changed) {
+        message.warning("检测到服管数据变更，请重新生成案例并测试");
+      }
+      await this.refreshTransactions(this.activeProjectId);
+      this.apiDoc = await getApiDocument(
+        this.activeProjectId,
+        transactionId,
+      ).catch(() => this.apiDoc);
+      await this.refreshDocReadiness(this.activeProjectId, transactionId);
+      return result;
+    },
     async createTransaction(payload: {
       code: string;
       name: string;
@@ -477,6 +520,7 @@ export const useApiTestStore = defineStore("apiTest", {
         WORKSPACE_STAGE_REGISTRY.apiTestTransaction,
         activeTransactionKey(this.activeProjectId),
       );
+      void this.refreshTransactions(this.activeProjectId);
     },
     async loadTransactionWorkspace(projectId: string, transactionId: string) {
       this.restoreStage(projectId, transactionId);
@@ -535,11 +579,27 @@ export const useApiTestStore = defineStore("apiTest", {
     async loadDocumentStage(projectId: string, transactionId: string) {
       try {
         this.apiDoc = await getApiDocument(projectId, transactionId);
+        const transaction = this.activeTransaction;
+        if (transaction?.reqCode && this.apiDoc?.source !== "upload") {
+          try {
+            await this.refreshSmpTransactionDocument(transactionId);
+          } catch (error) {
+            console.error("SMP 文档刷新失败", error);
+          }
+        }
       } catch {
         this.apiDoc = null;
         message.error("接口文档加载失败，请刷新页面或重启 API");
       }
+      await this.refreshDocReadiness(projectId, transactionId);
       await this.loadApiScenarioLibrary().catch(() => undefined);
+    },
+    async refreshDocReadiness(projectId: string, transactionId: string) {
+      try {
+        this.docReadiness = await checkDocReadiness(projectId, transactionId);
+      } catch {
+        this.docReadiness = null;
+      }
     },
     async loadCasesStage(projectId: string, transactionId: string) {
       const doc = this.apiDoc
@@ -608,6 +668,7 @@ export const useApiTestStore = defineStore("apiTest", {
       } finally {
         this.loading = false;
       }
+      await this.refreshDocReadiness(projectId, transactionId);
     },
     async structureDocument(projectId: string, transactionId: string) {
       this.loading = true;
@@ -617,6 +678,7 @@ export const useApiTestStore = defineStore("apiTest", {
       } finally {
         this.loading = false;
       }
+      await this.refreshDocReadiness(projectId, transactionId);
     },
     async saveDocument(
       projectId: string,
@@ -629,6 +691,7 @@ export const useApiTestStore = defineStore("apiTest", {
         endpoints: this.apiDoc.endpoints,
       });
       message.success("接口文档已保存");
+      await this.refreshDocReadiness(projectId, transactionId);
     },
     async autoSave(
       projectId: string,
@@ -644,6 +707,7 @@ export const useApiTestStore = defineStore("apiTest", {
       if (options?.successMessage) {
         message.success(options.successMessage);
       }
+      await this.refreshDocReadiness(projectId, transactionId);
     },
     async refreshCases(
       projectId: string,
@@ -703,10 +767,12 @@ export const useApiTestStore = defineStore("apiTest", {
       };
       try {
         await generateApiCases(projectId, transactionId, options);
+        await this.refreshTransactions(projectId);
         const status = await this.pollApiCaseGenerateOutcome(
           projectId,
           transactionId,
         );
+        await this.refreshTransactions(projectId);
         if (status.phase === "completed") {
           if (this.activeTransactionId === transactionId) {
             this.apiDoc = await getApiDocument(projectId, transactionId).catch(
@@ -856,6 +922,7 @@ export const useApiTestStore = defineStore("apiTest", {
         const { [transactionId]: _removed, ...rest } =
           this._caseGeneratePollers;
         this._caseGeneratePollers = rest;
+        await this.refreshTransactions(projectId);
       }
     },
     async saveCase(

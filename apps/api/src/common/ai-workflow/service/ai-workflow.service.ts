@@ -304,7 +304,7 @@ export class AiWorkflowService {
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
-        const timeoutMs = this.config.aiChat.requestTimeoutMs || 600000;
+        const timeoutMs = this.config.aiChat.requestTimeoutMs || 900000;
         const response = await fetch(url, {
           method: "POST",
           headers,

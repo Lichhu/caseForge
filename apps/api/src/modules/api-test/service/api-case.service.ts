@@ -14,10 +14,7 @@ import {
   auditFieldsForUpdate,
   RequestContext,
 } from "@common/audit/request-context";
-import {
-  scopedWhere,
-  scopedWhereWithSystem,
-} from "@common/audit/user-scope";
+import { scopedWhere, scopedWhereWithSystem } from "@common/audit/user-scope";
 import { PromptEntity } from "@scenario/entity/prompt.entity";
 import { ApiDocEntity } from "@api-test/entity/api-doc.entity";
 import { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
@@ -26,14 +23,23 @@ import { ApiTestExecutionSetCaseEntity } from "@api-test/entity/api-test-executi
 import { ApiTransactionEntity } from "@api-test/entity/api-transaction.entity";
 import { SaveApiCaseDto } from "@api-test/dto/save-api-case.dto";
 import { ListApiCasesDto } from "@api-test/dto/list-api-cases.dto";
-import { generateCasesWithAi, nextCaseNo } from "@api-test/util/api-case-ai.util";
-import { buildFallbackCasesForEndpoint } from "@api-test/util/case-fallback.generator";
+import {
+  generateCasesWithAi,
+  generateCasesWithPlan,
+  nextCaseNo,
+} from "@api-test/util/api-case-ai.util";
+import {
+  assessDocReadiness,
+  resolveCanonicalDoc,
+} from "@api-test/util/api-canonical-doc.util";
 import { toPublicApiCase } from "@common/http/public-response.util";
 import {
   DEFAULT_CASE_FORGE_PAGE_SIZE,
   normalizeCaseForgePageSize,
 } from "@case-forge/shared";
 import { ApiCaseGenerateQueueService } from "./api-case-generate-queue.service";
+import { ConfigService } from "@nestjs/config";
+import type { AppConfig } from "@config/app-config.types";
 
 @Injectable()
 export class ApiCaseService {
@@ -55,6 +61,7 @@ export class ApiCaseService {
     private readonly aiWorkflow: AiWorkflowService,
     @Inject(forwardRef(() => ApiCaseGenerateQueueService))
     private readonly generateQueueService: ApiCaseGenerateQueueService,
+    private readonly config: ConfigService<AppConfig>,
   ) {}
 
   async listCases(
@@ -234,6 +241,64 @@ export class ApiCaseService {
     });
   }
 
+  async checkDocReadiness(projectId: string, transactionId: string) {
+    await this.requireTransaction(projectId, transactionId);
+    const doc = await this.apiDocRepo.findOne({
+      where: scopedWhere({ projectId, transactionId }),
+    });
+    if (!doc) {
+      return {
+        ok: false,
+        message: "请先上传并结构化接口文档",
+        fieldCount: 0,
+        endpoints: [],
+      };
+    }
+    const structuredDoc =
+      doc.tempStructuredMarkdown?.trim() ||
+      doc.structuredMarkdown?.trim() ||
+      doc.extractedRawText?.trim() ||
+      "";
+    const endpoints = await this.endpointRepo.find({
+      where: { projectId, transactionId, apiDocId: doc.id },
+      order: { sortOrder: "ASC" },
+    });
+    const results = endpoints.map((ep) => {
+      const canonicalDoc = resolveCanonicalDoc(
+        structuredDoc,
+        ep.requestNotes,
+        ep.responseNotes,
+      );
+      const readiness = assessDocReadiness(canonicalDoc, ep.path);
+      return {
+        endpointId: ep.id,
+        endpointName: ep.name,
+        ok: readiness.ok,
+        message: readiness.message,
+        fieldCount: readiness.fieldCount,
+        transport: readiness.profile.transport,
+        messageFormat: readiness.profile.messageFormat,
+      };
+    });
+    if (!results.length) {
+      return {
+        ok: false,
+        message: "没有接口端点，请先结构化文档并提取接口",
+        fieldCount: 0,
+        endpoints: [],
+      };
+    }
+    const allOk = results.every((r) => r.ok);
+    return {
+      ok: allOk,
+      message: allOk
+        ? "文档就绪"
+        : (results.find((r) => !r.ok)?.message ?? "文档未就绪"),
+      fieldCount: results[0]?.fieldCount ?? 0,
+      endpoints: results,
+    };
+  }
+
   private async validateGenerateRequest(
     projectId: string,
     transactionId: string,
@@ -304,10 +369,25 @@ export class ApiCaseService {
       if (endpoint.transactionId !== transactionId) {
         throw new BadRequestException("接口端点不属于当前交易码");
       }
-      let payloads;
-      try {
-        if (structuredDoc && this.aiWorkflow.canGenerateApiCases()) {
-          payloads = await generateCasesWithAi(
+      if (!this.aiWorkflow.canGenerateApiCases()) {
+        throw new BadRequestException(
+          "AI Chat 或 at-case-skill 未配置，请检查 AI_CHAT_URL 与 AT_CASE_SKILL_URL",
+        );
+      }
+      const usePlanMode =
+        this.config.get("apiCasePlanMode", { infer: true }) !== "legacy";
+      const payloads = usePlanMode
+        ? await generateCasesWithPlan(
+            this.aiWorkflow,
+            {
+              transactionCode: transaction.code,
+              structuredDoc,
+              endpoint,
+              scenarioPromptText,
+            },
+            this.logger,
+          )
+        : await generateCasesWithAi(
             this.aiWorkflow,
             {
               transactionCode: transaction.code,
@@ -317,19 +397,6 @@ export class ApiCaseService {
             },
             this.logger,
           );
-        } else {
-          throw new Error("fallback");
-        }
-      } catch (error) {
-        this.logger.warn(
-          `AI 案例生成失败，使用模板兜底（${endpoint.name}）：${error instanceof Error ? error.message : error}`,
-        );
-        payloads = buildFallbackCasesForEndpoint(
-          endpoint,
-          transaction.code,
-          structuredDoc,
-        );
-      }
 
       for (const payload of payloads) {
         const entity = this.caseRepo.create({

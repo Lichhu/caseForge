@@ -36,6 +36,7 @@ import {
   ApiCaseGenerateJobEntity,
   ApiCaseGenerateJobStatus,
 } from "@api-test/entity/api-case-generate-job.entity";
+import { ApiTransactionEntity } from "@api-test/entity/api-transaction.entity";
 import { ApiCaseService } from "./api-case.service";
 
 export interface ApiCaseGenerateQueueStatus {
@@ -57,7 +58,9 @@ export interface ApiCaseGenerateQueueStatus {
 }
 
 @Injectable()
-export class ApiCaseGenerateQueueService implements OnModuleInit, OnModuleDestroy {
+export class ApiCaseGenerateQueueService
+  implements OnModuleInit, OnModuleDestroy
+{
   private readonly logger = new Logger(ApiCaseGenerateQueueService.name);
   private pumping = false;
   private unregisterSlotHook?: () => void;
@@ -65,6 +68,8 @@ export class ApiCaseGenerateQueueService implements OnModuleInit, OnModuleDestro
   constructor(
     @InjectRepository(ApiCaseGenerateJobEntity)
     private readonly jobRepo: Repository<ApiCaseGenerateJobEntity>,
+    @InjectRepository(ApiTransactionEntity)
+    private readonly transactionRepo: Repository<ApiTransactionEntity>,
     @Inject(forwardRef(() => ApiCaseService))
     private readonly apiCaseService: ApiCaseService,
   ) {}
@@ -114,6 +119,31 @@ export class ApiCaseGenerateQueueService implements OnModuleInit, OnModuleDestro
       order: { queuedAt: "DESC" },
     });
     if (existing) {
+      if (existing.status === "running") {
+        return existing;
+      }
+      const endpointIds = options?.endpointIds?.length
+        ? [...new Set(options.endpointIds)]
+        : null;
+      const promptIds = options?.promptIds?.length
+        ? [...new Set(options.promptIds)]
+        : null;
+      const changed =
+        !this.sameIdList(existing.endpointIds, endpointIds) ||
+        !this.sameIdList(existing.promptIds, promptIds);
+      if (changed) {
+        existing.endpointIds = endpointIds;
+        existing.promptIds = promptIds;
+        existing.queuedAt = new Date();
+        existing.errorMessage = null;
+        await this.jobRepo.save(existing);
+        await this.updateTransactionSyncStatus(
+          projectId,
+          transactionId,
+          "generating",
+        );
+        void this.pump();
+      }
       return existing;
     }
 
@@ -132,8 +162,23 @@ export class ApiCaseGenerateQueueService implements OnModuleInit, OnModuleDestro
         createdBy: RequestContext.getUserName(),
       }),
     );
+    await this.updateTransactionSyncStatus(
+      projectId,
+      transactionId,
+      "generating",
+    );
     void this.pump();
     return job;
+  }
+
+  private sameIdList(
+    a: string[] | null | undefined,
+    b: string[] | null | undefined,
+  ): boolean {
+    const left = (a ?? []).slice().sort();
+    const right = (b ?? []).slice().sort();
+    if (left.length !== right.length) return false;
+    return left.every((value, index) => value === right[index]);
   }
 
   async cancel(projectId: string, transactionId: string) {
@@ -153,6 +198,11 @@ export class ApiCaseGenerateQueueService implements OnModuleInit, OnModuleDestro
       job.finishedAt = now;
     }
     await this.jobRepo.save(jobs);
+    await this.updateTransactionSyncStatus(
+      projectId,
+      transactionId,
+      "cancelled",
+    );
     return { ok: true };
   }
 
@@ -266,7 +316,11 @@ export class ApiCaseGenerateQueueService implements OnModuleInit, OnModuleDestro
     const order: ApiCaseGenerateJobEntity[] = [];
 
     while (remainingQueued.length) {
-      const picked = pickFairQueuedJob(remainingQueued, runningByUser, perUserMax);
+      const picked = pickFairQueuedJob(
+        remainingQueued,
+        runningByUser,
+        perUserMax,
+      );
       if (!picked) {
         order.push(...remainingQueued);
         break;
@@ -295,8 +349,7 @@ export class ApiCaseGenerateQueueService implements OnModuleInit, OnModuleDestro
     },
   ): ApiCaseGenerateQueueStatus {
     const now = Date.now();
-    const queuePosition =
-      context.queueIndex >= 0 ? context.queueIndex + 1 : 0;
+    const queuePosition = context.queueIndex >= 0 ? context.queueIndex + 1 : 0;
     const userQueuedAhead =
       job.status === "queued"
         ? countUserQueuedAhead(job, context.queuedJobs)
@@ -424,23 +477,50 @@ export class ApiCaseGenerateQueueService implements OnModuleInit, OnModuleDestro
         latest.resultCount = result.count;
         latest.errorMessage = null;
         await this.jobRepo.save(latest);
+        await this.updateTransactionSyncStatus(
+          job.projectId,
+          job.transactionId,
+          "success",
+        );
       } catch (error) {
         const refreshed = await this.jobRepo.findOne({ where: { id: job.id } });
         const message =
           (error as Error)?.message ||
           refreshed?.errorMessage ||
           "接口案例生成失败，请稍后重试";
-        if (refreshed && refreshed.status !== "cancelled") {
+        const isCancelled = refreshed?.status === "cancelled";
+        if (refreshed && !isCancelled) {
           refreshed.status = "failed";
           refreshed.finishedAt = new Date();
           refreshed.errorMessage = message;
           await this.jobRepo.save(refreshed);
         }
+        await this.updateTransactionSyncStatus(
+          job.projectId,
+          job.transactionId,
+          isCancelled ? "cancelled" : "failed",
+          isCancelled ? undefined : message,
+        );
         this.logger.warn(
           `接口案例生成任务失败 ${job.projectId}/${job.transactionId}: ${message}`,
         );
       }
     });
     void this.pump();
+  }
+
+  private async updateTransactionSyncStatus(
+    projectId: string,
+    transactionId: string,
+    status: "generating" | "success" | "failed" | "cancelled",
+    error?: string,
+  ) {
+    await this.transactionRepo.update(
+      { projectId, id: transactionId },
+      {
+        syncStatus: status,
+        syncError: error?.trim() || undefined,
+      },
+    );
   }
 }

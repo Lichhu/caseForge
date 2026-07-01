@@ -28,7 +28,10 @@ import { ApiEnvironmentService } from "@api-test/service/api-environment.service
 import { ApiExecutionService } from "@api-test/service/api-execution.service";
 import { ApiReportService } from "@api-test/service/api-report.service";
 import { ApiTransactionService } from "@api-test/service/api-transaction.service";
-import { AutoSaveApiDocDto, SaveApiDocDto } from "@api-test/dto/save-api-doc.dto";
+import {
+  AutoSaveApiDocDto,
+  SaveApiDocDto,
+} from "@api-test/dto/save-api-doc.dto";
 import { SaveApiDocGenerationDto } from "@api-test/dto/save-api-doc-generation.dto";
 import {
   ExportApiReportDto,
@@ -37,6 +40,7 @@ import {
   SaveApiCaseDto,
 } from "@api-test/dto/save-api-case.dto";
 import { ApiExecutionSetService } from "@api-test/service/api-execution-set.service";
+import { SmpSyncService } from "@api-test/service/smp-sync.service";
 import {
   ReplaceExecutionSetCasesDto,
   RunExecutionSetDto,
@@ -47,6 +51,7 @@ import {
 import { SaveApiEnvironmentDto } from "@api-test/dto/save-environment.dto";
 import { SaveApiTransactionDto } from "@api-test/dto/save-transaction.dto";
 import { BatchDeleteTransactionsDto } from "@api-test/dto/batch-delete-transactions.dto";
+import { SmpSyncTransactionsDto } from "@api-test/dto/smp-sync-transactions.dto";
 import { ListApiCasesDto } from "@api-test/dto/list-api-cases.dto";
 import { ListApiExecutionSetsDto } from "@api-test/dto/list-api-execution-sets.dto";
 
@@ -63,6 +68,7 @@ export class ApiTestController {
     private readonly apiExecutionSetService: ApiExecutionSetService,
     private readonly apiReportService: ApiReportService,
     private readonly apiTransactionService: ApiTransactionService,
+    private readonly smpSyncService: SmpSyncService,
     private readonly minio: MinioStorageService,
     @InjectRepository(CaseProjectEntity)
     private readonly projectRepo: Repository<CaseProjectEntity>,
@@ -127,6 +133,33 @@ export class ApiTestController {
     @Param("transactionId") transactionId: string,
   ) {
     return this.apiDocService.getUploadStatus(projectId, transactionId);
+  }
+
+  @Post(":projectId/transactions/smp-list")
+  @ApiOperation({ summary: "从服管平台拉取交易码候选列表" })
+  fetchSmpTransactionList(@Param("projectId") projectId: string) {
+    return this.smpSyncService.fetchServiceInfoList(projectId);
+  }
+
+  @Post(":projectId/transactions/smp-sync")
+  @ApiOperation({ summary: "同步选中的服管交易码到本地" })
+  syncSmpTransactions(
+    @Param("projectId") projectId: string,
+    @Body() body: SmpSyncTransactionsDto,
+  ) {
+    return this.smpSyncService.syncTransactions(projectId, body.items);
+  }
+
+  @Post(":projectId/transactions/:transactionId/smp-refresh")
+  @ApiOperation({ summary: "从服管平台刷新交易详情并检测变更" })
+  refreshSmpTransactionDocument(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+  ) {
+    return this.smpSyncService.refreshTransactionDocumentFromSmp(
+      projectId,
+      transactionId,
+    );
   }
 
   @ApiOperation({ summary: "上传接口测试文档（Excel）" })
@@ -273,6 +306,15 @@ export class ApiTestController {
     @Param("caseId") caseId: string,
   ) {
     return this.apiCaseService.deleteCase(projectId, caseId);
+  }
+
+  @Get(":projectId/transactions/:transactionId/doc-readiness")
+  @ApiOperation({ summary: "检查接口文档就绪状态" })
+  checkDocReadiness(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+  ) {
+    return this.apiCaseService.checkDocReadiness(projectId, transactionId);
   }
 
   @Post(":projectId/transactions/:transactionId/cases/generate")

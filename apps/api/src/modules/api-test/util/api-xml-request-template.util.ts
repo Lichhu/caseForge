@@ -319,44 +319,23 @@ export function buildXmlGuidanceExtra(
   const bizBodyFields = fields
     .filter((field) => sectionPathPrefix(field.path) === "bizBody")
     .map((field) => field.code);
-  const example = buildTransactionXmlScaffold({
-    structuredDoc,
-    transactionCode,
-    bizBodyValues: Object.fromEntries(
-      (bizBodyFields.length ? bizBodyFields.slice(0, 2) : ["cstNo"]).map(
-        (code) => [
-          code,
-          code === "pageNum" || code === "pageSize" ? "1" : "样例值",
-        ],
-      ),
-    ),
-  });
+  const example = buildXmlProtocolScaffoldExample(structuredDoc, transactionCode);
 
   return [
     "",
     "### ESB XML 报文骨架（TCP/XML 必读）",
     "",
-    "完整请求须包含三层，**禁止只输出 bizBody**：",
-    "1. `Transaction/Header/sysHeader`：系统头（msgId、serviceCd、operation 等）",
-    "2. `Transaction/Body/request/bizHeader`：业务头（pageNum、pageSize、tranCode、tranNbr）",
-    "3. `Transaction/Body/request/bizBody`：业务体（文档「请求报文」表中的业务字段）",
-    "",
-    "字段联动规则：",
-    "- `msgId` 与 `tranNbr` 使用同一流水号",
-    "- `operation` 与 `tranCode` 均取交易码",
-    "- 请求中 `resCode`/`resText`/`bizResCode`/`bizResText` 留空",
-    "- 仅修改 `bizBody` 中被测字段，其余头字段保持合法默认值",
-    "- 分页类反向案例可改 `bizHeader.pageNum` / `bizHeader.pageSize`",
-    "",
+    "完整请求须含 `sysHeader`、`bizHeader`、`bizBody` 三层，**禁止只输出 bizBody**。",
+    "字段联动：`msgId`= `tranNbr`；`operation`= `tranCode`；响应码节点请求时留空。",
+    "反向案例可只改 `bizHeader` 分页字段或 `bizBody` 被测字段，其余保持合法默认值。",
     bizBodyFields.length
       ? `当前文档 bizBody 字段：${bizBodyFields.join("、")}`
       : "bizBody 字段以文档「请求报文」表为准",
     "",
-    "紧凑示例（TCP 发送时可压成单行；案例存储建议保留缩进美化格式）：",
+    "紧凑示例（仅示意结构，勿照抄样例值）：",
     `\`${example}\``,
     "",
-    "案例 `requestBody` 请输出 **Tab 缩进的美化 XML**（与 ESB 报文示例一致），空节点用 `<field/>` 自闭合。",
-    "响应断言字段：优先使用 `sysHeader/bizResCode`、`sysHeader/bizResText`，",
-    "或 `sysHeader/resCode`、`sysHeader/resText`，**不要编造 retCode/retMsg**（除非文档明确）。",
+    "案例 `requestBody` 输出**紧凑单行 XML**（无换行缩进）；空节点用 `<field/>`。",
+    "响应断言优先 `sysHeader/bizResCode`、`sysHeader/bizResText`，勿编造 retCode/retMsg。",
   ].join("\n");
 }

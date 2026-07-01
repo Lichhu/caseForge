@@ -49,8 +49,29 @@ export default (): AppConfig => ({
         process.env.AI_CHAT_RETRY_TIME ?? process.env.AI_CHAT_RETRY ?? 2,
       ),
       requestTimeoutMs: Number(
-        process.env.AI_CHAT_REQUEST_TIMEOUT_MS ?? 600000,
+        process.env.AI_CHAT_REQUEST_TIMEOUT_MS ?? 900000,
       ),
     },
   },
+  smp: {
+    url: process.env.SMP_URL ?? "",
+    demo:
+      process.env.SMP_DEMO_MODE === "true" ||
+      !(process.env.SMP_URL ?? "").trim(),
+    serviceInfoListPath:
+      process.env.SMP_SERVICE_INFO_LIST ??
+      "serviceManagementGovernanceController/selectServiceInfoList",
+    callServiceInfoListPath:
+      process.env.SMP_CALL_SERVICE_INFO_LIST ??
+      "serviceManagementGovernanceController/selectCallServiceInfoList",
+    testInfoListPath:
+      process.env.SMP_TEST_INFO_LIST ??
+      "serviceManagementGovernanceController/selectTestInfoList",
+    changeInfoByReqCodePath:
+      process.env.SMP_CHANGE_INFO_BY_REQCODE ??
+      "serviceManagementGovernanceController/selectChangeInfoByReqCode",
+    requestTimeoutMs: Number(process.env.SMP_REQUEST_TIMEOUT_MS ?? 90000),
+  },
+  apiCasePlanMode:
+    (process.env.API_CASE_PLAN_MODE ?? "plan") === "legacy" ? "legacy" : "plan",
 });

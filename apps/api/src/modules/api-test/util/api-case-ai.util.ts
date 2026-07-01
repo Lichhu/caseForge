@@ -1,4 +1,5 @@
 import type {
+  AiCasePlanItem,
   ApiCaseExpected,
   ApiCasePolarity,
   ApiCasePriority,
@@ -12,7 +13,10 @@ import { Logger } from "@nestjs/common";
 import { fetchTextFromUrl } from "@common/ai-workflow/util/workflow-input.util";
 import type { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
 import type { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
-import { compressApiStructuredDoc } from "./api-doc.parser";
+import {
+  compressApiStructuredDoc,
+  DEFAULT_COMPRESSED_DOC_MAX_CHARS,
+} from "./api-doc.parser";
 import {
   appendScenarioProtocolAdaptation,
   buildCaseRequestFromProfile,
@@ -20,6 +24,12 @@ import {
   buildProtocolGuidance,
   parseApiTechnicalProfile,
 } from "./api-doc-technical-profile.util";
+import { mapCasePlanToPayload } from "./api-case-assembler.util";
+import {
+  assessDocReadiness,
+  buildFieldCatalogSummary,
+  resolveCanonicalDoc,
+} from "./api-canonical-doc.util";
 
 interface AiApiCaseItem {
   caseNo?: string;
@@ -42,7 +52,134 @@ export async function loadAtCaseSkillText(aiWorkflow: AiWorkflowService) {
   return fetchTextFromUrl(skillUrl, "接口案例技能文档", "at-case-skill.md");
 }
 
-export function buildAtCasePrompt(
+/** 单次 AI Chat user message 目标上限（为场景约束等动态内容预留余量）。 */
+export const DEFAULT_AT_CASE_PROMPT_MAX_CHARS = 10000;
+/** 未提供场景文本时，为「场景约束」段落预留的默认字符。 */
+export const AT_CASE_SCENARIO_RESERVE_CHARS = 1_500;
+/** 场景约束正文（不含章节标题）字符上限。 */
+export const AT_CASE_SCENARIO_MAX_CHARS = 1_200;
+/** 压缩文档下限，避免报文表被裁到无法生成案例。 */
+export const MIN_COMPRESSED_DOC_MAX_CHARS = 1_200;
+
+const AT_CASE_SKILL_EXAMPLE_MARKERS = ["\n输出格式示例", "\n### TCP + XML"];
+const AT_CASE_SCENARIO_SECTION_PREFIX = "\n\n## 场景约束\n";
+const AT_CASE_SCENARIO_TRUNCATED_SUFFIX =
+  "\n> 提示：场景约束已截断，完整规则见场景库。";
+
+export interface PreparedScenarioBlock {
+  block: string;
+  blockChars: number;
+  scenarioTextChars: number;
+  truncated: boolean;
+}
+
+/** 截断场景提示词，避免多选场景撑爆 prompt。 */
+export function truncateScenarioPromptText(
+  text: string,
+  maxChars = AT_CASE_SCENARIO_MAX_CHARS,
+): { text: string; truncated: boolean; originalLength: number } {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return { text: "", truncated: false, originalLength: 0 };
+  }
+  if (trimmed.length <= maxChars) {
+    return { text: trimmed, truncated: false, originalLength: trimmed.length };
+  }
+
+  const budget = Math.max(
+    0,
+    maxChars - AT_CASE_SCENARIO_TRUNCATED_SUFFIX.length,
+  );
+  return {
+    text: `${trimmed.slice(0, budget).trimEnd()}${AT_CASE_SCENARIO_TRUNCATED_SUFFIX}`,
+    truncated: true,
+    originalLength: trimmed.length,
+  };
+}
+
+/** 组装场景约束块（含通讯适配与截断），供动态预算与 prompt 拼接。 */
+export function prepareScenarioBlock(
+  scenarioPromptText: string | undefined,
+  profile: ApiTechnicalProfile,
+): PreparedScenarioBlock {
+  if (!scenarioPromptText?.trim()) {
+    return {
+      block: "",
+      blockChars: 0,
+      scenarioTextChars: 0,
+      truncated: false,
+    };
+  }
+
+  const adapted = appendScenarioProtocolAdaptation(scenarioPromptText, profile);
+  const { text, truncated, originalLength } =
+    truncateScenarioPromptText(adapted);
+  const block = `${AT_CASE_SCENARIO_SECTION_PREFIX}${text}`;
+
+  return {
+    block,
+    blockChars: block.length,
+    scenarioTextChars: originalLength,
+    truncated,
+  };
+}
+
+/** 去掉 skill 中的长示例（运行时兜底，兼容 MinIO 上未更新的旧版 skill）。 */
+export function compactAtCaseSkillTemplate(skillTemplate: string): string {
+  let end = skillTemplate.length;
+  for (const marker of AT_CASE_SKILL_EXAMPLE_MARKERS) {
+    const index = skillTemplate.indexOf(marker);
+    if (index >= 0) {
+      end = Math.min(end, index);
+    }
+  }
+  return skillTemplate.slice(0, end).trimEnd();
+}
+
+function estimateAtCasePromptOverhead(
+  compactSkill: string,
+  input: {
+    transactionCode: string;
+    endpointName: string;
+    endpointMethod: string;
+    endpointPath: string;
+    requestNotes?: string;
+    responseNotes?: string;
+  },
+  profile: ApiTechnicalProfile,
+  structuredDocForGuidance: string,
+): number {
+  const protocolGuidance = buildProtocolGuidance(
+    profile,
+    structuredDocForGuidance,
+    input.transactionCode,
+  );
+  const endpointContext = buildEndpointContextForPrompt(profile, {
+    endpointMethod: input.endpointMethod,
+    endpointPath: input.endpointPath,
+    structuredDoc: structuredDocForGuidance,
+    requestNotes: input.requestNotes,
+    responseNotes: input.responseNotes,
+  });
+
+  return compactSkill
+    .replaceAll("{transactionCode}", input.transactionCode)
+    .replaceAll("{endpointName}", input.endpointName)
+    .replaceAll("{endpointContext}", endpointContext)
+    .replaceAll(
+      "{httpMethod}",
+      profile.transport === "http" ? input.endpointMethod : "—",
+    )
+    .replaceAll(
+      "{endpointPath}",
+      profile.transport === "http" ? input.endpointPath : "—",
+    )
+    .replaceAll("{structuredDoc}", "")
+    .replaceAll("{protocolGuidance}", protocolGuidance).length;
+}
+
+/** 按 skill / 协议说明 / 场景块占用动态计算文档压缩预算。 */
+export function resolveCompressedDocMaxChars(
   skillTemplate: string,
   input: {
     transactionCode: string;
@@ -52,8 +189,61 @@ export function buildAtCasePrompt(
     structuredDoc: string;
     profile: ApiTechnicalProfile;
   },
+  options: {
+    promptMaxChars?: number;
+    scenarioBlockChars?: number;
+  } = {},
+): number {
+  const promptMaxChars =
+    options.promptMaxChars ?? DEFAULT_AT_CASE_PROMPT_MAX_CHARS;
+  const scenarioReserve =
+    options.scenarioBlockChars ?? AT_CASE_SCENARIO_RESERVE_CHARS;
+  const compactSkill = compactAtCaseSkillTemplate(skillTemplate);
+  const preliminaryDoc = compressApiStructuredDoc(
+    input.structuredDoc,
+    30,
+    MIN_COMPRESSED_DOC_MAX_CHARS,
+    { requestOnly: true },
+  );
+  const overhead = estimateAtCasePromptOverhead(
+    compactSkill,
+    input,
+    input.profile,
+    preliminaryDoc,
+  );
+  const available = promptMaxChars - overhead - scenarioReserve;
+  return Math.max(
+    MIN_COMPRESSED_DOC_MAX_CHARS,
+    Math.min(DEFAULT_COMPRESSED_DOC_MAX_CHARS, available),
+  );
+}
+
+export function buildAtCasePrompt(
+  skillTemplate: string,
+  input: {
+    transactionCode: string;
+    endpointName: string;
+    endpointMethod: string;
+    endpointPath: string;
+    structuredDoc: string;
+    requestNotes?: string;
+    responseNotes?: string;
+    profile: ApiTechnicalProfile;
+  },
+  options: {
+    scenarioBlockChars?: number;
+  } = {},
 ) {
-  const compressedDoc = compressApiStructuredDoc(input.structuredDoc);
+  const compactSkill = compactAtCaseSkillTemplate(skillTemplate);
+  const docMaxChars = resolveCompressedDocMaxChars(compactSkill, input, {
+    scenarioBlockChars: options.scenarioBlockChars,
+  });
+  const compressedDoc = compressApiStructuredDoc(
+    input.structuredDoc,
+    40,
+    docMaxChars,
+    { requestOnly: true },
+  );
   const protocolGuidance = buildProtocolGuidance(
     input.profile,
     compressedDoc,
@@ -63,8 +253,10 @@ export function buildAtCasePrompt(
     endpointMethod: input.endpointMethod,
     endpointPath: input.endpointPath,
     structuredDoc: compressedDoc,
+    requestNotes: input.requestNotes,
+    responseNotes: input.responseNotes,
   });
-  const prompt = skillTemplate
+  const prompt = compactSkill
     .replaceAll("{transactionCode}", input.transactionCode)
     .replaceAll("{endpointName}", input.endpointName)
     .replaceAll("{endpointContext}", endpointContext)
@@ -83,6 +275,9 @@ export function buildAtCasePrompt(
     prompt,
     originalDocLength: input.structuredDoc.length,
     compressedDocLength: compressedDoc.length,
+    compactSkillLength: compactSkill.length,
+    docMaxChars,
+    scenarioBlockChars: options.scenarioBlockChars ?? 0,
   };
 }
 
@@ -107,29 +302,48 @@ export async function generateCasesWithAi(
     throw new Error("读取 at-case-skill 失败，请检查 MinIO 上的技能文档");
   }
 
-  const profile = parseApiTechnicalProfile(input.structuredDoc);
+  const profile = input.structuredDoc.trim()
+    ? parseApiTechnicalProfile(input.structuredDoc)
+    : deriveTechnicalProfileFromEndpoint(input.endpoint);
+  const scenario = prepareScenarioBlock(input.scenarioPromptText, profile);
+  const structuredDocForPrompt =
+    input.structuredDoc.trim() ||
+    buildStructuredDocFromEndpointNotes(
+      input.endpoint.requestNotes,
+      input.endpoint.responseNotes,
+    );
 
-  const { prompt: basePrompt, originalDocLength, compressedDocLength } =
-    buildAtCasePrompt(skillTemplate, {
+  const {
+    prompt: basePrompt,
+    originalDocLength,
+    compressedDocLength,
+    compactSkillLength,
+    docMaxChars,
+    scenarioBlockChars,
+  } = buildAtCasePrompt(
+    skillTemplate,
+    {
       transactionCode: input.transactionCode,
       endpointName: input.endpoint.name,
       endpointMethod: input.endpoint.method,
       endpointPath: input.endpoint.path,
-      structuredDoc: input.structuredDoc,
+      structuredDoc: structuredDocForPrompt,
+      requestNotes: input.endpoint.requestNotes,
+      responseNotes: input.endpoint.responseNotes,
       profile,
-    });
-  let prompt = basePrompt;
-  if (input.scenarioPromptText?.trim()) {
-    const scenarioText = appendScenarioProtocolAdaptation(
-      input.scenarioPromptText,
-      profile,
-    );
-    prompt += `\n\n## 场景约束\n${scenarioText}`;
-  }
-
-  logger?.debug(
-    `接口案例生成提示词长度：${prompt.length}（原始文档 ${originalDocLength}，压缩后 ${compressedDocLength}）`,
+    },
+    { scenarioBlockChars: scenario.blockChars },
   );
+  const prompt = `${basePrompt}${scenario.block}`;
+
+  logger?.log(
+    `接口案例生成提示词：总长 ${prompt.length}，skill ${compactSkillLength}，文档 ${originalDocLength}→${compressedDocLength}（预算 ${docMaxChars}），场景 ${scenario.scenarioTextChars}${scenario.truncated ? "（已截断）" : ""}，场景块 ${scenarioBlockChars}`,
+  );
+  if (prompt.length > DEFAULT_AT_CASE_PROMPT_MAX_CHARS) {
+    logger?.warn(
+      `接口案例生成提示词仍超过目标 ${DEFAULT_AT_CASE_PROMPT_MAX_CHARS} 字符，可能触发 AI Chat 超时；请精简 skill 或减少场景提示词`,
+    );
+  }
 
   const { text } = await aiWorkflow.runWithAiChat(prompt);
   const items = aiWorkflow.parseJsonArray<AiApiCaseItem>(text) ?? [];
@@ -348,6 +562,140 @@ function extractAssertionSnippet(content: string) {
     return content;
   }
   return content.slice(0, 80);
+}
+
+function deriveTechnicalProfileFromEndpoint(
+  endpoint: ApiEndpointEntity,
+): ApiTechnicalProfile {
+  const method = (endpoint.method || "").toUpperCase();
+  const path = (endpoint.path || "").toLowerCase();
+  const requestNotes = (endpoint.requestNotes || "").trim();
+  const responseNotes = (endpoint.responseNotes || "").trim();
+  const sample = requestNotes || responseNotes;
+
+  const isTcp =
+    method === "TCP" ||
+    path.startsWith("tcp://") ||
+    path.startsWith("socket://");
+  const transport = isTcp ? ("tcp" as const) : ("http" as const);
+
+  const isXml =
+    sample.startsWith("<") || sample.includes("</") || sample.includes("<?xml");
+  const messageFormat = isXml ? ("xml" as const) : ("json" as const);
+
+  return {
+    transport,
+    messageFormat,
+    encoding: "UTF-8",
+  };
+}
+
+function buildStructuredDocFromEndpointNotes(
+  requestNotes?: string,
+  responseNotes?: string,
+): string {
+  const lines = ["技术信息", "----"];
+  if (requestNotes?.trim()) {
+    lines.push("请求报文", "----", requestNotes.trim());
+  }
+  if (responseNotes?.trim()) {
+    lines.push("响应报文", "----", responseNotes.trim());
+  }
+  return lines.join("\n");
+}
+
+const PLAN_MODE_PROMPT_FALLBACK = `作为资深接口测试专家，请根据以下接口信息与字段目录，设计接口测试案例计划。
+
+## bodyOverrides 规则
+1. **只填需要覆盖的业务字段**，未列出的字段由平台填默认值
+2. **key 必须使用字段目录中的节点代码**
+3. 正向：填合法值；反向必填缺失：设为空串；反向非法值：只改被测字段
+4. **禁止输出完整报文结构**（Transaction/Header/Body 由平台拼装）
+
+## 输出要求
+1. **仅输出 JSON 数组**，不要 Markdown 代码块或说明文字
+2. caseType：正 / 反；priority：高 / 中 / 低
+3. expectedResult：HTTP 接口写状态码；TCP/MQ 接口写响应报文业务返回码
+4. 至少 6 条，建议配比：正 2～3 条 / 反 3～4 条
+
+JSON 字段：caseNo, caseName, caseDesc, caseType, priority, remark, bodyOverrides, expectedResult`;
+
+export async function generateCasesWithPlan(
+  aiWorkflow: AiWorkflowService,
+  input: {
+    transactionCode: string;
+    structuredDoc: string;
+    endpoint: ApiEndpointEntity;
+    scenarioPromptText?: string;
+  },
+  logger?: Logger,
+): Promise<ApiTestCasePayload[]> {
+  if (!aiWorkflow.canGenerateApiCases()) {
+    throw new Error(
+      "AI Chat 或 at-case-skill 未配置，请检查 AI_CHAT_URL 与 AT_CASE_SKILL_URL",
+    );
+  }
+
+  const canonicalDoc = resolveCanonicalDoc(
+    input.structuredDoc,
+    input.endpoint.requestNotes,
+    input.endpoint.responseNotes,
+  );
+
+  const readiness = assessDocReadiness(canonicalDoc, input.endpoint.path);
+  if (!readiness.ok) {
+    throw new Error(readiness.message);
+  }
+
+  const profile = readiness.profile;
+  const fieldCatalog = buildFieldCatalogSummary(canonicalDoc);
+
+  const endpointContext = buildEndpointContextForPrompt(profile, {
+    endpointMethod: input.endpoint.method,
+    endpointPath: input.endpoint.path,
+    structuredDoc: canonicalDoc,
+  });
+
+  const skillTemplate = await loadAtCaseSkillText(aiWorkflow);
+  const skillBody = skillTemplate.trim() || PLAN_MODE_PROMPT_FALLBACK;
+
+  const scenario = prepareScenarioBlock(input.scenarioPromptText, profile);
+  const scenarioBlockText = scenario.block || "";
+
+  const technicalContext = [
+    `## 接口信息`,
+    `- 交易码：${input.transactionCode}`,
+    `- 接口名称：${input.endpoint.name}`,
+    endpointContext,
+    "",
+    `## 请求字段目录`,
+    fieldCatalog,
+  ].join("\n");
+
+  const prompt = [skillBody, "", technicalContext, scenarioBlockText].join(
+    "\n",
+  );
+
+  logger?.log(
+    `接口案例生成（Plan 模式）提示词：总长 ${prompt.length}，字段 ${readiness.fieldCount} 个，场景 ${scenario.scenarioTextChars}${scenario.truncated ? "（已截断）" : ""}`,
+  );
+
+  const { text } = await aiWorkflow.runWithAiChat(prompt);
+  const items = aiWorkflow.parseJsonArray<AiCasePlanItem>(text) ?? [];
+  if (!items.length) {
+    throw new Error("AI 未返回可解析的案例计划 JSON");
+  }
+
+  return items.map((item, index) =>
+    mapCasePlanToPayload(
+      item,
+      input.endpoint,
+      input.transactionCode,
+      index,
+      profile,
+      canonicalDoc,
+    ),
+  );
 }
 
 export async function nextCaseNo(
