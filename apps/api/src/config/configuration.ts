@@ -67,9 +67,6 @@ export default (): AppConfig => ({
     testInfoListPath:
       process.env.SMP_TEST_INFO_LIST ??
       "serviceManagementGovernanceController/selectTestInfoList",
-    changeInfoByReqCodePath:
-      process.env.SMP_CHANGE_INFO_BY_REQCODE ??
-      "serviceManagementGovernanceController/selectChangeInfoByReqCode",
     requestTimeoutMs: Number(process.env.SMP_REQUEST_TIMEOUT_MS ?? 90000),
   },
   apiCasePlanMode:

@@ -57,7 +57,8 @@ export function getApiDocFieldValue(sectionText: string, fieldName: string) {
 export function resolveDocTransport(text: string) {
   const section = extractApiDocSection(text, "技术信息");
   const value = getApiDocFieldValue(section, "通讯方式").trim().toUpperCase();
-  if (value.includes("TCP")) return "tcp" as const;
+  if (value.includes("TCP") || value.includes("TEP")) return "tcp" as const;
+  if (value.includes("SOCKET")) return "tcp" as const;
   if (value.includes("HTTP")) return "http" as const;
   if (value.includes("TUXEDO")) return "tuxedo" as const;
   if (value) return "other" as const;
@@ -262,9 +263,7 @@ export function buildResponseAssertionSummary(structuredDoc: string): string {
   const found = RESPONSE_ASSERTION_CODE_HINTS.filter((hint) =>
     responseText.includes(hint),
   );
-  const nodes = found.length
-    ? found.join("、")
-    : "业务返回码与关键响应字段";
+  const nodes = found.length ? found.join("、") : "业务返回码与关键响应字段";
 
   return [
     "响应断言参考",

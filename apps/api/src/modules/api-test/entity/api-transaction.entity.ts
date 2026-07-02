@@ -19,9 +19,6 @@ export type ApiTransactionSyncStatus =
   | "changed";
 
 @Entity("api_transaction")
-@Index("uk_api_transaction_project_code", ["projectId", "code"], {
-  unique: true,
-})
 @Index(
   "uk_api_transaction_smp",
   ["projectId", "reqCode", "taskId", "serviceCode", "reqSystemId", "code"],

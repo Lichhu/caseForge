@@ -1,7 +1,24 @@
 import type { ApiTechnicalProfile } from "@case-forge/shared";
 import { extractApiDocSection, getApiDocFieldValue } from "./api-doc.parser";
 import { parseApiDocMessageFields } from "./api-xml-request-template.util";
-import { parseApiTechnicalProfile } from "./api-doc-technical-profile.util";
+import {
+  parseApiTechnicalProfile,
+  resolveTechnicalProfileFromSmpData,
+} from "./api-doc-technical-profile.util";
+
+/** SMP 兜底数据形状（避免与 entity 强耦合） */
+export interface DocReadinessSmpData {
+  callServiceList?: unknown[];
+  serviceTestList?: unknown[];
+}
+
+function isDefaultProfile(profile: ApiTechnicalProfile): boolean {
+  return (
+    profile.transport === "http" &&
+    profile.messageFormat === "json" &&
+    (profile.encoding ?? "UTF-8") === "UTF-8"
+  );
+}
 
 export interface DocReadinessResult {
   ok: boolean;
@@ -31,8 +48,15 @@ export function resolveCanonicalDoc(
 export function assessDocReadiness(
   canonicalDoc: string,
   endpointPath?: string,
+  smpData?: DocReadinessSmpData | null,
 ): DocReadinessResult {
-  const profile = parseApiTechnicalProfile(canonicalDoc);
+  // 优先用文档「技术信息」；若为默认 http+json（多为未刷新的旧数据），
+  // 用 smpData 的 socketWay / messageType 兜底，与生成链路 resolveTechnicalProfile 保持一致。
+  let profile = parseApiTechnicalProfile(canonicalDoc);
+  if (isDefaultProfile(profile)) {
+    const smpProfile = resolveTechnicalProfileFromSmpData(smpData);
+    if (smpProfile) profile = smpProfile;
+  }
 
   const requestSection = extractApiDocSection(canonicalDoc, "请求报文");
   const fields = parseApiDocMessageFields(requestSection);

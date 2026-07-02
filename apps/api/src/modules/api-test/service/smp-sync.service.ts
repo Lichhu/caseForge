@@ -6,13 +6,14 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { InjectRepository } from "@nestjs/typeorm";
+import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { createHash } from "crypto";
-import { In, Repository } from "typeorm";
+import { DataSource, EntityManager, In, Repository } from "typeorm";
 import { assertApiTestProject } from "@api-test/util/assert-api-project.util";
 import { auditFieldsForCreate } from "@common/audit/request-context";
 import { scopedWhere } from "@common/audit/user-scope";
+import { touchProjectUpdatedAt } from "@common/project/touch-project.util";
 import { ApiDocEntity } from "@api-test/entity/api-doc.entity";
 import { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
 import {
@@ -20,11 +21,11 @@ import {
   type ApiTransactionSyncStatus,
 } from "@api-test/entity/api-transaction.entity";
 import { parseEndpointsFromSmpData } from "@api-test/util/smp-doc.parser";
+import { buildStructuredMarkdownFromSmp } from "@api-test/util/smp-structured-doc.builder";
 import {
   type SmpServiceInfoItem,
   type SmpCallServiceInfoItem,
   type SmpTestInfoItem,
-  type SmpChangeInfoItem,
   SmpClientService,
 } from "./smp-client.service";
 
@@ -53,6 +54,8 @@ export class SmpSyncService {
     private readonly endpointRepo: Repository<ApiEndpointEntity>,
     @InjectRepository(CaseProjectEntity)
     private readonly projectRepo: Repository<CaseProjectEntity>,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
     private readonly smpClient: SmpClientService,
   ) {}
 
@@ -91,22 +94,75 @@ export class SmpSyncService {
     }
 
     await this.getApiTestProject(projectId);
-    let created = 0;
-    let updated = 0;
 
-    for (const candidate of candidates) {
-      this.validateCandidate(candidate);
-      const existing = await this.findSmpTransaction(projectId, candidate);
-      if (existing) {
-        await this.updateSmpTransaction(existing, candidate);
-        updated++;
-      } else {
-        await this.createSmpTransaction(projectId, candidate);
-        created++;
+    const existingRows = await this.transactionRepo.find({
+      where: scopedWhere({ projectId }),
+      select: [
+        "id",
+        "code",
+        "reqCode",
+        "taskId",
+        "serviceCode",
+        "reqSystemId",
+        "sortOrder",
+      ],
+    });
+
+    this.validateSyncBatch(candidates, existingRows);
+
+    const existingBySmpKey = new Map<string, ApiTransactionEntity>();
+    for (const row of existingRows) {
+      if (row.reqCode) {
+        existingBySmpKey.set(
+          this.smpKey(
+            row.reqCode,
+            row.taskId!,
+            row.serviceCode!,
+            row.reqSystemId!,
+            row.code,
+          ),
+          row,
+        );
       }
     }
 
-    return { created, updated };
+    const baseSortOrder = existingRows.length;
+
+    return this.dataSource.transaction(async (manager) => {
+      let created = 0;
+      let updated = 0;
+      let createOffset = 0;
+
+      for (const candidate of candidates) {
+        const key = this.smpKey(
+          candidate.reqCode,
+          candidate.taskId,
+          candidate.serviceCode,
+          candidate.reqSystemId,
+          candidate.code,
+        );
+        const existing = existingBySmpKey.get(key);
+        if (existing) {
+          await this.updateSmpTransaction(manager, existing, candidate);
+          updated++;
+        } else {
+          await this.createSmpTransaction(
+            manager,
+            projectId,
+            candidate,
+            baseSortOrder + createOffset,
+          );
+          createOffset++;
+          created++;
+        }
+      }
+
+      await touchProjectUpdatedAt(
+        manager.getRepository(CaseProjectEntity),
+        projectId,
+      );
+      return { created, updated };
+    });
   }
 
   /**
@@ -131,7 +187,7 @@ export class SmpSyncService {
 
   /**
    * 从 SMP 拉取交易详情数据，检测是否变更。
-   * 方案 A：记录 callServiceList + serviceTestList 的 hash，仅当与上次 hash 不一致时才标记为已变更。
+   * 通过 callServiceList 的 hash 与上次对比判断是否变更，不再调用 selectChangeInfoByReqCode。
    */
   async refreshTransactionDocumentFromSmp(
     projectId: string,
@@ -140,7 +196,7 @@ export class SmpSyncService {
     changed: boolean;
     callServiceList: SmpCallServiceInfoItem[];
     serviceTestList: SmpTestInfoItem[];
-    approvalInfoList: SmpChangeInfoItem[];
+    approvalInfoList: unknown[];
   }> {
     const transaction = await this.transactionRepo.findOne({
       where: scopedWhere({ projectId, id: transactionId }),
@@ -152,7 +208,7 @@ export class SmpSyncService {
       throw new BadRequestException("该交易码非 SMP 来源，无法刷新服管数据");
     }
 
-    const [callService, testInfo, changeInfo] = await Promise.all([
+    const [callService, testInfo] = await Promise.all([
       this.smpClient.selectCallServiceInfoList(
         transaction.reqCode,
         transaction.taskId!,
@@ -167,10 +223,6 @@ export class SmpSyncService {
         transaction.serviceCode!,
         transaction.reqSystemId!,
       ),
-      this.smpClient.selectChangeInfoByReqCode(
-        transaction.reqCode,
-        transaction.serviceCode!,
-      ),
     ]);
 
     if (callService.bizResCode !== "000000") {
@@ -181,11 +233,6 @@ export class SmpSyncService {
     if (testInfo.bizResCode !== "000000") {
       throw new BadRequestException(
         `SMP 接口测试信息查询失败: ${testInfo.bizResCode} ${testInfo.bizResText}`,
-      );
-    }
-    if (changeInfo.bizResCode !== "000000") {
-      throw new BadRequestException(
-        `SMP 变更信息查询失败: ${changeInfo.bizResCode} ${changeInfo.bizResText}`,
       );
     }
 
@@ -207,14 +254,9 @@ export class SmpSyncService {
     }
 
     const previousCallServiceHash = doc.lastSmpCallServiceHash;
-    const previousTestInfoHash = doc.lastSmpTestInfoHash;
-    const hasPreviousHash = Boolean(
-      previousCallServiceHash && previousTestInfoHash,
-    );
+    const hasPreviousHash = Boolean(previousCallServiceHash);
     const changed =
-      hasPreviousHash &&
-      (previousCallServiceHash !== callServiceHash ||
-        previousTestInfoHash !== testInfoHash);
+      hasPreviousHash && previousCallServiceHash !== callServiceHash;
 
     if (changed) {
       transaction.syncStatus = "changed";
@@ -226,8 +268,12 @@ export class SmpSyncService {
     doc.smpData = {
       callServiceList: callService.data,
       serviceTestList: testInfo.data,
-      approvalInfoList: changeInfo.data,
+      approvalInfoList: [],
     };
+    doc.structuredMarkdown = buildStructuredMarkdownFromSmp(
+      callService.data,
+      testInfo.data,
+    );
     doc.lastSmpCallServiceHash = callServiceHash;
     doc.lastSmpTestInfoHash = testInfoHash;
     doc.structuringStatus = "completed";
@@ -245,7 +291,7 @@ export class SmpSyncService {
       changed,
       callServiceList: callService.data,
       serviceTestList: testInfo.data,
-      approvalInfoList: changeInfo.data,
+      approvalInfoList: [],
     };
   }
 
@@ -386,6 +432,65 @@ export class SmpSyncService {
     return `${reqCode}|${taskId}|${serviceCode}|${reqSystemId}|${code}`;
   }
 
+  private validateSyncBatch(
+    candidates: SmpTransactionCandidate[],
+    existingRows: Pick<
+      ApiTransactionEntity,
+      "id" | "code" | "reqCode" | "taskId" | "serviceCode" | "reqSystemId"
+    >[],
+  ): void {
+    const seenSmpKeys = new Set<string>();
+    const seenCodes = new Set<string>();
+    const existingBySmpKey = new Map<string, (typeof existingRows)[number]>();
+    const existingByCode = new Map<string, (typeof existingRows)[number]>();
+
+    for (const row of existingRows) {
+      if (row.reqCode) {
+        const key = this.smpKey(
+          row.reqCode,
+          row.taskId!,
+          row.serviceCode!,
+          row.reqSystemId!,
+          row.code,
+        );
+        existingBySmpKey.set(key, row);
+      }
+      existingByCode.set(row.code, row);
+    }
+
+    for (const candidate of candidates) {
+      this.validateCandidate(candidate);
+
+      const key = this.smpKey(
+        candidate.reqCode,
+        candidate.taskId,
+        candidate.serviceCode,
+        candidate.reqSystemId,
+        candidate.code,
+      );
+
+      if (seenSmpKeys.has(key)) {
+        throw new BadRequestException(
+          `批量中存在重复服管记录：交易码 ${candidate.code}`,
+        );
+      }
+      seenSmpKeys.add(key);
+
+      if (seenCodes.has(candidate.code)) {
+        throw new BadRequestException(
+          `批量中存在相同交易码 ${candidate.code}，无法同时同步`,
+        );
+      }
+      seenCodes.add(candidate.code);
+
+      if (!existingBySmpKey.has(key) && existingByCode.has(candidate.code)) {
+        throw new BadRequestException(
+          `交易码 ${candidate.code} 已在项目中存在，且非同一服管记录`,
+        );
+      }
+    }
+  }
+
   private validateCandidate(candidate: SmpTransactionCandidate) {
     if (!candidate.code?.trim()) {
       throw new BadRequestException("交易码不能为空");
@@ -404,31 +509,16 @@ export class SmpSyncService {
     }
   }
 
-  private async findSmpTransaction(
-    projectId: string,
-    candidate: SmpTransactionCandidate,
-  ): Promise<ApiTransactionEntity | null> {
-    return this.transactionRepo.findOne({
-      where: scopedWhere({
-        projectId,
-        reqCode: candidate.reqCode,
-        taskId: candidate.taskId,
-        serviceCode: candidate.serviceCode,
-        reqSystemId: candidate.reqSystemId,
-        code: candidate.code,
-      }),
-    });
-  }
-
   private async createSmpTransaction(
+    manager: EntityManager,
     projectId: string,
     candidate: SmpTransactionCandidate,
+    sortOrder: number,
   ): Promise<void> {
-    const count = await this.transactionRepo.count({
-      where: scopedWhere({ projectId }),
-    });
-    const transaction = await this.transactionRepo.save(
-      this.transactionRepo.create({
+    const txRepo = manager.getRepository(ApiTransactionEntity);
+    const docRepo = manager.getRepository(ApiDocEntity);
+    const transaction = await txRepo.save(
+      txRepo.create({
         projectId,
         code: candidate.code.trim(),
         name: candidate.name?.trim() || candidate.code.trim(),
@@ -438,12 +528,12 @@ export class SmpSyncService {
         serviceCode: candidate.serviceCode.trim(),
         reqSystemId: candidate.reqSystemId.trim(),
         syncStatus: "pending",
-        sortOrder: count,
+        sortOrder,
         ...auditFieldsForCreate(),
       }),
     );
-    await this.apiDocRepo.save(
-      this.apiDocRepo.create({
+    await docRepo.save(
+      docRepo.create({
         projectId,
         transactionId: transaction.id,
         source: "smp",
@@ -454,6 +544,7 @@ export class SmpSyncService {
   }
 
   private async updateSmpTransaction(
+    manager: EntityManager,
     existing: ApiTransactionEntity,
     candidate: SmpTransactionCandidate,
   ): Promise<void> {
@@ -469,6 +560,6 @@ export class SmpSyncService {
     if (!existing.syncStatus || !keepStatuses.includes(existing.syncStatus)) {
       existing.syncStatus = "pending";
     }
-    await this.transactionRepo.save(existing);
+    await manager.getRepository(ApiTransactionEntity).save(existing);
   }
 }

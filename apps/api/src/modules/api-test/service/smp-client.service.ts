@@ -29,6 +29,21 @@ export interface SmpServiceInfoItem {
   tranCode: string;
 }
 
+/** SMP 报文字段定义（requestHeadList / requestBodyList / responseHeadList / responseBodyList 条目） */
+export interface SmpMessageFieldItem {
+  nodeCode?: string;
+  nodeName?: string;
+  /** 节点所在路径，如 Transaction/Body/request/bizBody */
+  nodeUrl?: string;
+  dataType?: string;
+  dataLength?: string;
+  isNotNull?: string;
+  nodeType?: string;
+  headType?: string;
+  bodyType?: string;
+  descBind?: string;
+}
+
 /** SMP 服务调用信息条目 */
 export interface SmpCallServiceInfoItem {
   authenticationMethod?: string;
@@ -44,6 +59,10 @@ export interface SmpCallServiceInfoItem {
   maxResponseTime?: string;
   messageCoding?: string;
   messageType?: string;
+  requestBodyList?: SmpMessageFieldItem[];
+  requestHeadList?: SmpMessageFieldItem[];
+  responseBodyList?: SmpMessageFieldItem[];
+  responseHeadList?: SmpMessageFieldItem[];
   serviceAttribute?: string;
   serviceCname?: string;
   serviceCode?: string;
@@ -65,15 +84,6 @@ export interface SmpTestInfoItem {
   responseBody?: string;
   responseEncoding?: string;
   responstMessageType?: string;
-}
-
-/** SMP 变更信息条目 */
-export interface SmpChangeInfoItem {
-  taskId?: string;
-  tranCode?: string;
-  reqDeleteDatas?: unknown[];
-  reqAddDatas?: unknown[];
-  // 其他字段按需扩展
 }
 
 /** SMP 标准化响应包装 */
@@ -236,45 +246,6 @@ export class SmpClientService {
       bizResCode: response.bizHeader.bizResCode,
       bizResText: response.bizHeader.bizResText,
       data: response.bizBody.serviceTestList,
-    };
-  }
-
-  /**
-   * 查询变更列表信息（selectChangeInfoByReqCode）
-   */
-  async selectChangeInfoByReqCode(
-    reqCode: string,
-    serviceCode: string,
-  ): Promise<SmpResponse<SmpChangeInfoItem[]>> {
-    if (this.smpConfig.demo) {
-      await this.delay();
-      const raw = demoData.selectChangeInfoByReqCode as {
-        Transaction: {
-          Body: {
-            response: {
-              bizHeader: { bizResCode: string; bizResText: string };
-              bizBody: { approvalInfoList: SmpChangeInfoItem[] };
-            };
-          };
-        };
-      };
-      const response = raw.Transaction.Body.response;
-      return {
-        bizResCode: response.bizHeader.bizResCode,
-        bizResText: response.bizHeader.bizResText,
-        data: response.bizBody.approvalInfoList,
-      };
-    }
-
-    const result = await this.postJson<typeof demoData.selectChangeInfoByReqCode>(
-      this.smpConfig.changeInfoByReqCodePath,
-      this.buildRequestBody({ reqCode, serviceCode }),
-    );
-    const response = result.Transaction.Body.response;
-    return {
-      bizResCode: response.bizHeader.bizResCode,
-      bizResText: response.bizHeader.bizResText,
-      data: response.bizBody.approvalInfoList,
     };
   }
 

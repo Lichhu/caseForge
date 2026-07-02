@@ -90,7 +90,7 @@ export class ApiDocEntity {
   })
   source: ApiDocSource;
 
-  /** 从 SMP 拉取到的文档数据（callServiceList / serviceTestList / approvalInfoList） */
+  /** 从 SMP 拉取到的文档数据（callServiceList / serviceTestList） */
   @Column({ type: "json", nullable: true, name: "smp_data" })
   smpData?: SmpDocumentData;
 
@@ -98,7 +98,7 @@ export class ApiDocEntity {
   @Column({ length: 64, nullable: true, name: "last_smp_call_service_hash" })
   lastSmpCallServiceHash?: string;
 
-  /** 上次同步 SMP 接口测试数据的 hash（用于变更检测） */
+  /** 上次同步 SMP 接口测试数据的 hash（存档） */
   @Column({ length: 64, nullable: true, name: "last_smp_test_info_hash" })
   lastSmpTestInfoHash?: string;
 

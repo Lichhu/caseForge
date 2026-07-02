@@ -231,17 +231,8 @@ onActivated(() => {
   const tid = transactionId.value;
   if (pid && tid) {
     void apiStore.syncCaseGenerateLoading(pid, tid);
-    void ensureSmpDocumentLoaded(pid, tid);
   }
 });
-
-async function ensureSmpDocumentLoaded(projectId: string, transactionId: string) {
-  const transaction = apiStore.activeTransaction;
-  if (!transaction?.reqCode) return;
-  const doc = apiStore.apiDoc;
-  if (doc?.source === 'smp' && doc?.smpData?.callServiceList?.length) return;
-  await apiStore.refreshSmpTransactionDocument(transactionId);
-}
 
 onDeactivated(() => {
   panelActive.value = false;

@@ -269,7 +269,7 @@ export class ApiCaseService {
         ep.requestNotes,
         ep.responseNotes,
       );
-      const readiness = assessDocReadiness(canonicalDoc, ep.path);
+      const readiness = assessDocReadiness(canonicalDoc, ep.path, doc.smpData);
       return {
         endpointId: ep.id,
         endpointName: ep.name,
@@ -384,6 +384,7 @@ export class ApiCaseService {
               structuredDoc,
               endpoint,
               scenarioPromptText,
+              smpData: doc.smpData,
             },
             this.logger,
           )
@@ -394,6 +395,7 @@ export class ApiCaseService {
               structuredDoc,
               endpoint,
               scenarioPromptText,
+              smpData: doc.smpData,
             },
             this.logger,
           );

@@ -18,7 +18,8 @@ const DEFAULT_PROFILE: ApiTechnicalProfile = {
 function normalizeTransport(value: string): ApiTransport {
   const text = value.trim().toUpperCase();
   if (text.includes("HTTP")) return "http";
-  if (text.includes("SOCKET") || text.includes("TCP")) return "tcp";
+  if (text.includes("SOCKET") || text.includes("TCP") || text.includes("TEP"))
+    return "tcp";
   if (text.includes("MQ") || text.includes("消息队列")) return "mq";
   if (text.includes("TUXEDO")) return "tuxedo";
   if (text) return "other";
@@ -371,5 +372,52 @@ export function buildDefaultExpected(
     statusCode: polarity === "negative" ? [400, 422, 500] : [200, 201],
     statusOnly: true,
     skipStatusCheck: false,
+  };
+}
+
+/** SMP socketWay → ApiTransport */
+export function mapSocketWayToTransport(socketWay: string): ApiTransport {
+  return normalizeTransport(socketWay);
+}
+
+/** SMP messageType → ApiMessageFormat */
+export function mapMessageTypeToFormat(messageType: string): ApiMessageFormat {
+  return normalizeMessageFormat(messageType);
+}
+
+/**
+ * 从 SMP smpData 兜底解析技术画像。
+ * 当 structuredDoc 无「技术信息」段时，用 smpData.callServiceList 的 socketWay / messageType 推断。
+ */
+export function resolveTechnicalProfileFromSmpData(
+  smpData?: {
+    callServiceList?: unknown[];
+    serviceTestList?: unknown[];
+  } | null,
+): ApiTechnicalProfile | null {
+  if (!smpData?.callServiceList?.length) return null;
+  const callItem = smpData.callServiceList[0] as Record<string, unknown>;
+  const testItem = (smpData.serviceTestList?.[0] ?? {}) as Record<
+    string,
+    unknown
+  >;
+
+  const socketWay = String(callItem.socketWay ?? "");
+  const messageType = String(
+    callItem.messageType ?? testItem.requestMessageType ?? "",
+  );
+  const messageCoding = String(
+    callItem.messageCoding ?? testItem.requestEncoding ?? "",
+  );
+
+  if (!socketWay && !messageType) return null;
+
+  return {
+    transport: mapSocketWayToTransport(socketWay),
+    messageFormat: mapMessageTypeToFormat(messageType),
+    encoding: messageCoding.trim() || DEFAULT_PROFILE.encoding,
+    invocationMode: String(callItem.callMethod ?? "").trim() || undefined,
+    maxMessageSize: String(callItem.maxMessageSize ?? "").trim() || undefined,
+    businessHeaderMark: String(callItem.headId ?? "").trim() || undefined,
   };
 }

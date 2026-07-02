@@ -17,5 +17,8 @@
   },
   "dependencies": {
     "pnpm": "^10.33.4"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
   }
 }

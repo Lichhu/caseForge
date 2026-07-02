@@ -112,6 +112,12 @@ const activeProjectKey = "case-forge:api-active-project";
 const activeTransactionKey = (projectId: string) =>
   `case-forge:api-active-transaction:${projectId}`;
 
+/** 同一交易码 SMP 刷新 in-flight 去重，避免并发重复请求 */
+const smpRefreshInflight = new Map<
+  string,
+  Promise<Awaited<ReturnType<typeof refreshSmpTransactionDocument>> | undefined>
+>();
+
 interface State {
   projects: ProjectListItem[];
   projectListPage: number;
@@ -432,28 +438,47 @@ export const useApiTestStore = defineStore("apiTest", {
     },
     async syncSmpTransactions(items: SmpTransactionCandidate[]) {
       if (!this.activeProjectId) return;
-      const result = await syncSmpTransactions(this.activeProjectId, items);
-      await this.refreshTransactions(this.activeProjectId);
-      message.success(
-        `已同步 ${result.created} 条新增、${result.updated} 条更新`,
-      );
-      return result;
+      try {
+        const result = await syncSmpTransactions(this.activeProjectId, items);
+        message.success(
+          `已同步 ${result.created} 条新增、${result.updated} 条更新`,
+        );
+        return result;
+      } finally {
+        if (this.activeProjectId) {
+          await this.refreshTransactions(this.activeProjectId);
+        }
+      }
     },
     async refreshSmpTransactionDocument(transactionId: string) {
-      if (!this.activeProjectId) return;
+      const projectId = this.activeProjectId;
+      if (!projectId) return;
+
+      const inflightKey = `${projectId}:${transactionId}`;
+      const inflight = smpRefreshInflight.get(inflightKey);
+      if (inflight) return inflight;
+
+      const task = this.runSmpDocumentRefresh(projectId, transactionId).finally(
+        () => {
+          smpRefreshInflight.delete(inflightKey);
+        },
+      );
+      smpRefreshInflight.set(inflightKey, task);
+      return task;
+    },
+    async runSmpDocumentRefresh(projectId: string, transactionId: string) {
       const result = await refreshSmpTransactionDocument(
-        this.activeProjectId,
+        projectId,
         transactionId,
       );
       if (result.changed) {
         message.warning("检测到服管数据变更，请重新生成案例并测试");
+        await this.refreshTransactions(projectId);
       }
-      await this.refreshTransactions(this.activeProjectId);
-      this.apiDoc = await getApiDocument(
-        this.activeProjectId,
-        transactionId,
-      ).catch(() => this.apiDoc);
-      await this.refreshDocReadiness(this.activeProjectId, transactionId);
+      this.apiDoc = await getApiDocument(projectId, transactionId).catch(
+        () => this.apiDoc,
+      );
+      await this.refreshDocReadiness(projectId, transactionId);
       return result;
     },
     async createTransaction(payload: {
@@ -577,21 +602,39 @@ export const useApiTestStore = defineStore("apiTest", {
       }
     },
     async loadDocumentStage(projectId: string, transactionId: string) {
+      const transaction = this.activeTransaction;
       try {
-        this.apiDoc = await getApiDocument(projectId, transactionId);
-        const transaction = this.activeTransaction;
-        if (transaction?.reqCode && this.apiDoc?.source !== "upload") {
+        if (transaction?.reqCode) {
+          let peekDoc: ApiDocDetail | null = null;
           try {
-            await this.refreshSmpTransactionDocument(transactionId);
-          } catch (error) {
-            console.error("SMP 文档刷新失败", error);
+            peekDoc = await getApiDocument(projectId, transactionId);
+          } catch {
+            peekDoc = null;
           }
+          if (peekDoc?.source === "upload") {
+            this.apiDoc = peekDoc;
+            await this.refreshDocReadiness(projectId, transactionId);
+          } else {
+            try {
+              await this.refreshSmpTransactionDocument(transactionId);
+            } catch (error) {
+              console.error("SMP 文档刷新失败", error);
+              if (!this.apiDoc && peekDoc) {
+                this.apiDoc = peekDoc;
+              }
+              if (!this.apiDoc) {
+                message.error("接口文档加载失败，请刷新页面或重启 API");
+              }
+            }
+          }
+        } else {
+          this.apiDoc = await getApiDocument(projectId, transactionId);
+          await this.refreshDocReadiness(projectId, transactionId);
         }
       } catch {
         this.apiDoc = null;
         message.error("接口文档加载失败，请刷新页面或重启 API");
       }
-      await this.refreshDocReadiness(projectId, transactionId);
       await this.loadApiScenarioLibrary().catch(() => undefined);
     },
     async refreshDocReadiness(projectId: string, transactionId: string) {

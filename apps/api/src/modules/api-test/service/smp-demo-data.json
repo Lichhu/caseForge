@@ -118,13 +118,81 @@
                 "maxMessageSize": "10K",
                 "maxResponseTime": "60",
                 "messageCoding": "UTF-8",
-                "messageType": "JSON",
+                "messageType": "XML",
+                "requestBodyList": [
+                  {
+                    "bodyType": "01",
+                    "dataLength": "30",
+                    "dataType": "01",
+                    "isNotNull": "Y",
+                    "nodeCode": "CUST_ID",
+                    "nodeName": "客户号",
+                    "nodeType": "01",
+                    "nodeUrl": "Transaction/Body/request/bizBody"
+                  }
+                ],
+                "requestHeadList": [
+                  {
+                    "dataLength": "19",
+                    "dataType": "VARCHAR2",
+                    "descBind": "交易序列号，可同msgId，请求方自编",
+                    "headType": "01",
+                    "isNotNull": "Y",
+                    "nodeCode": "transaction_sn",
+                    "nodeName": "交易流水号",
+                    "nodeType": "单节点",
+                    "nodeUrl": "Transaction/Body/request/bizHeader"
+                  },
+                  {
+                    "dataLength": "14",
+                    "dataType": "VARCHAR2",
+                    "descBind": "国结系统的服务代码",
+                    "headType": "01",
+                    "isNotNull": "Y",
+                    "nodeCode": "transaction_id",
+                    "nodeName": "服务代码",
+                    "nodeType": "单节点",
+                    "nodeUrl": "Transaction/Body/request/bizHeader"
+                  }
+                ],
+                "responseBodyList": [
+                  {
+                    "bodyType": "02",
+                    "dataLength": "22",
+                    "dataType": "02",
+                    "isNotNull": "N",
+                    "nodeCode": "FINA_AMT",
+                    "nodeName": "账面余额",
+                    "nodeUrl": "Transaction/Body/response/bizBody"
+                  }
+                ],
+                "responseHeadList": [
+                  {
+                    "dataLength": "19",
+                    "dataType": "VARCHAR2",
+                    "isNotNull": "Y",
+                    "nodeCode": "transaction_sn",
+                    "nodeName": "交易流水号",
+                    "nodeType": "单节点",
+                    "nodeUrl": "Transaction/Body/response/bizHeader"
+                  },
+                  {
+                    "dataLength": "14",
+                    "dataType": "VARCHAR2",
+                    "descBind": "国结系统交易码",
+                    "isNotNull": "Y",
+                    "nodeCode": "transaction_id",
+                    "nodeName": "ESB发布交易码",
+                    "nodeType": "单节点",
+                    "nodeUrl": "Transaction/Body/response/bizHeader"
+                  }
+                ],
                 "serviceAttribute": "查询类",
                 "serviceCname": "根据客户号查询数债融资金额--融资完成，到期记账未完成",
                 "serviceCode": "R53000080828",
                 "serviceForm": "单一服务",
                 "serviceType": "接口服务",
-                "socketWay": "HTTP",
+                "socketWay": "TEP",
                 "systemId": "530",
                 "systemName": "供应链综合服务平台",
                 "tranCode": "PCBS03901001"
@@ -156,21 +224,6 @@
                 "responstMessageType": "JSON"
               }
             ]
-          }
-        }
-      }
-    }
-  },
-  "selectChangeInfoByReqCode": {
-    "Transaction": {
-      "Body": {
-        "response": {
-          "bizHeader": {
-            "bizResCode": "000000",
-            "bizResText": "查询变更列表信息成功"
-          },
-          "bizBody": {
-            "approvalInfoList": []
           }
         }
       }

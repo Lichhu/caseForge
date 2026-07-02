@@ -23,6 +23,7 @@ import {
   buildEndpointContextForPrompt,
   buildProtocolGuidance,
   parseApiTechnicalProfile,
+  resolveTechnicalProfileFromSmpData,
 } from "./api-doc-technical-profile.util";
 import { mapCasePlanToPayload } from "./api-case-assembler.util";
 import {
@@ -288,6 +289,10 @@ export async function generateCasesWithAi(
     structuredDoc: string;
     endpoint: ApiEndpointEntity;
     scenarioPromptText?: string;
+    smpData?: {
+      callServiceList?: unknown[];
+      serviceTestList?: unknown[];
+    } | null;
   },
   logger?: Logger,
 ): Promise<ApiTestCasePayload[]> {
@@ -302,9 +307,11 @@ export async function generateCasesWithAi(
     throw new Error("读取 at-case-skill 失败，请检查 MinIO 上的技能文档");
   }
 
-  const profile = input.structuredDoc.trim()
-    ? parseApiTechnicalProfile(input.structuredDoc)
-    : deriveTechnicalProfileFromEndpoint(input.endpoint);
+  const profile = resolveTechnicalProfile(
+    input.structuredDoc,
+    input.endpoint,
+    input.smpData,
+  );
   const scenario = prepareScenarioBlock(input.scenarioPromptText, profile);
   const structuredDocForPrompt =
     input.structuredDoc.trim() ||
@@ -574,7 +581,7 @@ function deriveTechnicalProfileFromEndpoint(
   const sample = requestNotes || responseNotes;
 
   const isTcp =
-    method === "TCP" ||
+    ["TCP", "TEP", "SOCKET"].includes(method) ||
     path.startsWith("tcp://") ||
     path.startsWith("socket://");
   const transport = isTcp ? ("tcp" as const) : ("http" as const);
@@ -588,6 +595,32 @@ function deriveTechnicalProfileFromEndpoint(
     messageFormat,
     encoding: "UTF-8",
   };
+}
+
+/**
+ * 按优先级解析技术画像：
+ * 1. structuredDoc「技术信息」段（已有，最可靠）
+ * 2. smpData.callServiceList 的 socketWay / messageType（兜底，兼容未刷新的 SMP 数据）
+ * 3. endpoint method / requestNotes 启发式推断（最后兜底）
+ */
+function resolveTechnicalProfile(
+  structuredDoc: string,
+  endpoint: ApiEndpointEntity,
+  smpData?: { callServiceList?: unknown[]; serviceTestList?: unknown[] } | null,
+): ApiTechnicalProfile {
+  if (structuredDoc.trim()) {
+    const profile = parseApiTechnicalProfile(structuredDoc);
+    if (
+      profile.transport !== "http" ||
+      profile.messageFormat !== "json" ||
+      profile.encoding !== "UTF-8"
+    ) {
+      return profile;
+    }
+  }
+  const smpProfile = resolveTechnicalProfileFromSmpData(smpData);
+  if (smpProfile) return smpProfile;
+  return deriveTechnicalProfileFromEndpoint(endpoint);
 }
 
 function buildStructuredDocFromEndpointNotes(
@@ -627,6 +660,10 @@ export async function generateCasesWithPlan(
     structuredDoc: string;
     endpoint: ApiEndpointEntity;
     scenarioPromptText?: string;
+    smpData?: {
+      callServiceList?: unknown[];
+      serviceTestList?: unknown[];
+    } | null;
   },
   logger?: Logger,
 ): Promise<ApiTestCasePayload[]> {
@@ -647,7 +684,11 @@ export async function generateCasesWithPlan(
     throw new Error(readiness.message);
   }
 
-  const profile = readiness.profile;
+  const profile = resolveTechnicalProfile(
+    canonicalDoc,
+    input.endpoint,
+    input.smpData,
+  );
   const fieldCatalog = buildFieldCatalogSummary(canonicalDoc);
 
   const endpointContext = buildEndpointContextForPrompt(profile, {
