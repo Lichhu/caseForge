@@ -69,6 +69,4 @@ export default (): AppConfig => ({
       "serviceManagementGovernanceController/selectTestInfoList",
     requestTimeoutMs: Number(process.env.SMP_REQUEST_TIMEOUT_MS ?? 90000),
   },
-  apiCasePlanMode:
-    (process.env.API_CASE_PLAN_MODE ?? "plan") === "legacy" ? "legacy" : "plan",
 });

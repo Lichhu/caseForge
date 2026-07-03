@@ -22,7 +22,17 @@
       <div class="test-point-list test-point-list-panel case-list-panel">
         <div class="test-point-list-head">
           <strong>案例列表</strong>
-          <span>{{ apiStore.caseListTotal }} 条</span>
+          <div class="case-list-head-controls">
+            <a-select
+              v-if="versionOptions.length > 1"
+              v-model:value="apiStore.caseListVersionFilter"
+              :options="versionOptions"
+              size="small"
+              class="case-version-filter"
+              @change="onVersionFilterChange"
+            />
+            <span>{{ apiStore.caseListTotal }} 条</span>
+          </div>
         </div>
         <div v-if="batchMode" class="list-toolbar batch-list-toolbar case-list-toolbar">
           <a-checkbox
@@ -56,12 +66,20 @@
               <div class="test-point-card-title case-card-title">
                 <strong :title="item.title">{{ item.title || '未命名案例' }}</strong>
                 <small>{{ item.caseNo || item.transactionCode || '待分配编号' }}</small>
-                <span
-                  class="case-profile-badge case-transport-badge"
-                  :class="`profile-${caseProfileColor(resolveListItemRequest(item))}`"
-                >
-                  {{ caseProfileLabel(resolveListItemRequest(item)) }}
-                </span>
+                <div class="case-badges-row">
+                  <span
+                    class="case-profile-badge case-transport-badge"
+                    :class="`profile-${caseProfileColor(resolveListItemRequest(item))}`"
+                  >
+                    {{ caseProfileLabel(resolveListItemRequest(item)) }}
+                  </span>
+                  <a-tag
+                    v-if="item.metadata?.generateVersion != null"
+                    class="case-version-tag"
+                  >
+                    v{{ item.metadata.generateVersion }}
+                  </a-tag>
+                </div>
               </div>
               <span class="polarity-pill" :class="item.polarity">
                 {{ item.polarity === 'negative' ? '反' : '正' }}
@@ -133,15 +151,19 @@
           <div class="instruction-editor-body">
             <div class="editor-hero">
               <div class="editor-hero-main">
-                <h3>{{ isNewCase ? '新建案例' : form.title || '未命名案例' }}</h3>
-                <p>
-                  <span class="hero-case-no">{{ form.caseNo || form.transactionCode || '待分配编号' }}</span>
-                  <span v-if="!isNewCase" class="hero-divider">·</span>
-                  <span v-if="!isNewCase" class="hero-status-badge" :class="`status-${form.status}`">
-                    <span class="hero-status-dot" />
-                    {{ statusLabel(form.status) }}
-                  </span>
-                </p>
+                <div class="editor-hero-title-row">
+                  <h3>{{ isNewCase ? '新建案例' : form.title || '未命名案例' }}</h3>
+                  <template v-if="!isNewCase">
+                    <span class="hero-case-no">{{ form.caseNo || form.transactionCode || '待分配编号' }}</span>
+                    <a-tag
+                      v-if="form.metadata?.generateVersion != null"
+                      color="blue"
+                      class="hero-version-tag"
+                    >
+                      v{{ form.metadata.generateVersion }}
+                    </a-tag>
+                  </template>
+                </div>
               </div>
               <span class="polarity-pill polarity-pill--lg" :class="form.polarity">
                 {{ form.polarity === 'negative' ? '反向案例' : '正向案例' }}
@@ -212,7 +234,7 @@
                       <span v-if="tab.count" class="case-request-tab-badge">{{ tab.count }}</span>
                     </button>
                   </div>
-                  <div class="case-payload-fields">
+                  <div class="case-payload-fields case-payload-fields--body">
                     <template v-if="requestTab === 'params'">
                       <p class="case-payload-hint">Query 参数将拼接到请求 URL 后。</p>
                       <KeyValueRowsEditor v-model:rows="form.queryRows" />
@@ -255,24 +277,33 @@
                         <div class="case-body-empty">GET / HEAD 请求无 Body，请使用 Params 配置查询参数。</div>
                       </template>
                       <template v-else-if="form.bodyFormat === 'json'">
-                        <a-textarea
-                          v-model:value="form.requestBodyJson"
-                          class="editor-textarea case-json-editor case-payload-textarea"
+                        <textarea
+                          :key="`${payloadEditorKey}-body-json`"
+                          v-model="form.requestBodyJson"
+                          class="ant-input editor-textarea case-json-editor case-payload-textarea case-payload-textarea--expand"
+                          :style="payloadTextareaStyle(form.requestBodyJson)"
                           placeholder="{}"
+                          spellcheck="false"
                         />
                       </template>
                       <template v-else-if="form.bodyFormat === 'xml'">
-                        <a-textarea
-                          v-model:value="form.requestBodyXml"
-                          class="editor-textarea case-xml-editor case-payload-textarea"
+                        <textarea
+                          :key="`${payloadEditorKey}-body-xml`"
+                          v-model="form.requestBodyXml"
+                          class="ant-input editor-textarea case-xml-editor case-payload-textarea case-payload-textarea--expand"
+                          :style="payloadTextareaStyle(form.requestBodyXml)"
                           placeholder="XML 报文"
+                          spellcheck="false"
                         />
                       </template>
                       <template v-else>
-                        <a-textarea
-                          v-model:value="form.requestBodyText"
-                          class="editor-textarea case-payload-textarea"
+                        <textarea
+                          :key="`${payloadEditorKey}-body-text`"
+                          v-model="form.requestBodyText"
+                          class="ant-input editor-textarea case-payload-textarea case-payload-textarea--expand"
+                          :style="payloadTextareaStyle(form.requestBodyText)"
                           placeholder="纯文本报文"
+                          spellcheck="false"
                         />
                       </template>
                     </template>
@@ -334,7 +365,7 @@
                           <li>保持自动带出的模板，或点击下方「填入示例」</li>
                           <li>先执行一次，在执行报告里看实际响应</li>
                           <li>从响应里挑 1～3 个稳定特征（如 <code>000000</code>、<code>&lt;/Transaction&gt;</code>）写进断言</li>
-                          <li>再执行，根据断言明细逐条调整</li>
+                          <li>重新执行，根据断言明细逐条调整</li>
                         </ol>
                       </div>
                       <div class="expected-guide-section">
@@ -348,11 +379,14 @@
                       </div>
                     </a-collapse-panel>
                   </a-collapse>
-                  <div class="case-payload-fields">
-                    <a-textarea
-                      v-model:value="form.expectedJson"
-                      class="editor-textarea case-json-editor case-payload-textarea"
+                  <div class="case-payload-fields case-payload-fields--expected">
+                    <textarea
+                      :key="`${payloadEditorKey}-expected`"
+                      v-model="form.expectedJson"
+                      class="ant-input editor-textarea case-json-editor case-payload-textarea case-payload-textarea--expand"
+                      :style="payloadTextareaStyle(form.expectedJson, 6)"
                       placeholder="JSON：statusCode / bodyAssertions"
+                      spellcheck="false"
                     />
                   </div>
                 </div>
@@ -443,7 +477,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onActivated, reactive, ref, watch } from 'vue';
 import {
   DeleteOutlined,
   FormatPainterOutlined,
@@ -459,7 +493,7 @@ import {
   resolveExecutionProfile,
 } from '@case-forge/shared';
 import type { ApiCaseRequest } from '@case-forge/shared';
-import type { ApiTestCaseRow } from '@/api/apiTestClient';
+import type { ApiTestCaseRow, ApiCaseGenerateHistoryItem } from '@/api/apiTestClient';
 import { useApiTestStore } from '@/stores/apiTest';
 import KeyValueRowsEditor from '@/components/api-test/KeyValueRowsEditor.vue';
 import {
@@ -483,6 +517,23 @@ import {
 } from '@/utils/casePayloadFormat.util';
 
 const apiStore = useApiTestStore();
+
+const PAYLOAD_TEXTAREA_MIN_ROWS = 12;
+/** 与 .case-json-editor / .case-xml-editor 的 font-size(12px) × line-height(1.5~1.6) 对齐 */
+const PAYLOAD_TEXTAREA_LINE_HEIGHT_PX = 18;
+const PAYLOAD_TEXTAREA_BOX_EXTRA_PX = 12;
+
+/** 按内容行数计算像素高度，整段报文可见；由外层 instruction-editor-body 滚动 */
+function payloadTextareaStyle(text: string, minRows = PAYLOAD_TEXTAREA_MIN_ROWS) {
+  const lineCount = Math.max(minRows, (text ?? '').split('\n').length + 1);
+  const heightPx = lineCount * PAYLOAD_TEXTAREA_LINE_HEIGHT_PX + PAYLOAD_TEXTAREA_BOX_EXTRA_PX;
+  return {
+    height: `${heightPx}px`,
+    minHeight: `${heightPx}px`,
+    overflowY: 'hidden',
+  } as const;
+}
+
 const batchMode = ref(false);
 const saving = ref(false);
 const isNewCase = ref(false);
@@ -493,6 +544,51 @@ const pageSizeOptions = caseForgePageSizeOptionLabels();
 const projectId = computed(() => apiStore.activeProjectId ?? '');
 const transactionId = computed(() => apiStore.activeTransactionId ?? '');
 const selectedIds = computed(() => apiStore.selectedCaseIds);
+const allVersions = ref<number[]>([]);
+const versionOptions = computed(() => {
+  const list = [...allVersions.value].sort((a, b) => a - b);
+  const options: { value: number | null; label: string }[] = [
+    { value: null, label: '全部版本' },
+  ];
+  for (const v of list) {
+    options.push({ value: v, label: `v${v}` });
+  }
+  return options;
+});
+
+let loadVersionsReqId = 0;
+
+async function loadAvailableVersions() {
+  const pid = projectId.value;
+  const tid = transactionId.value;
+  if (!pid || !tid) return;
+  const reqId = ++loadVersionsReqId;
+  const history = await apiStore.fetchGenerateHistory(pid, tid);
+  if (reqId !== loadVersionsReqId) return;
+  if (pid !== projectId.value || tid !== transactionId.value) return;
+  const versions = new Set<number>();
+  for (const h of history) {
+    if (h.version != null && h.resultCount != null && h.resultCount > 0) {
+      versions.add(h.version);
+    }
+  }
+  allVersions.value = Array.from(versions);
+}
+
+onActivated(() => {
+  void loadAvailableVersions();
+});
+
+function onVersionFilterChange(value: number | null) {
+  const pid = projectId.value;
+  const tid = transactionId.value;
+  if (!pid || !tid) return;
+  apiStore.caseListVersionFilter = value;
+  void apiStore.refreshCases(pid, tid, {
+    resetPage: true,
+    generateVersion: value ?? undefined,
+  });
+}
 const caseLookup = computed(() => {
   const map = new Map<string, ApiTestCaseRow>();
   for (const row of [...apiStore.cases, ...apiStore.runnerCases]) {
@@ -507,6 +603,9 @@ const selectedRows = computed(() =>
 );
 const activeCase = computed(() =>
   apiStore.cases.find((item) => item.id === apiStore.activeCaseId) ?? null,
+);
+const payloadEditorKey = computed(
+  () => apiStore.activeCaseId || (isNewCase.value ? 'new-case' : 'none'),
 );
 const showEditor = computed(
   () => !batchMode.value && (Boolean(activeCase.value) || isNewCase.value),
@@ -578,6 +677,7 @@ const form = reactive({
   transactionCode: '',
   owner: '',
   createdBy: '',
+  metadata: {} as ApiTestCaseRow['metadata'],
   polarity: 'positive' as 'positive' | 'negative',
   status: 'ready',
   enabled: true,
@@ -779,6 +879,17 @@ watch(
 );
 
 watch(
+  () => transactionId.value,
+  async (tid, oldTid) => {
+    if (tid && tid !== oldTid) {
+      allVersions.value = [];
+      await loadAvailableVersions();
+    }
+  },
+  { immediate: true },
+);
+
+watch(
   () => apiStore.activeCaseId,
   () => {
     if (isNewCase.value) return;
@@ -796,12 +907,6 @@ function onCasePageChange(page: number, pageSize: number) {
     page: sizeChanged ? 1 : page,
     pageSize: size,
   });
-}
-
-function statusLabel(status: string) {
-  if (status === 'draft') return '草稿';
-  if (status === 'disabled') return '停用';
-  return '就绪';
 }
 
 function applyRequestToForm(request: ApiTestCaseRow['request']) {
@@ -833,6 +938,7 @@ function loadForm(row: ApiTestCaseRow) {
     row.transactionCode ?? apiStore.activeTransaction?.code ?? '';
   form.owner = row.owner ?? '';
   form.createdBy = row.createdBy ?? '';
+  form.metadata = row.metadata ?? {};
   form.polarity = row.polarity;
   form.status = row.status;
   form.enabled = row.enabled;
@@ -1212,9 +1318,44 @@ function onBatchDelete() {
   font-size: 12px;
 }
 
+.case-list-head-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.case-version-filter {
+  width: 88px;
+}
+
+.case-badges-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
 .case-transport-badge {
-  margin-top: 4px;
   align-self: flex-start;
+}
+
+.case-version-tag {
+  font-size: 11px;
+  line-height: 16px;
+  padding: 0 5px;
+  border-radius: 4px;
+  color: #262626;
+  background: transparent;
+  border: 1px solid #8c8c8c;
+  margin: 0;
+}
+
+.hero-version-tag {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  padding: 0 6px;
 }
 
 /* ===== 执行协议徽标 ===== */
@@ -1295,9 +1436,15 @@ function onBatchDelete() {
   font-size: 12px;
 }
 
-.hero-divider {
-  margin: 0 6px;
-  color: var(--cf-text-muted, #d0d5dd);
+.editor-hero-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.editor-hero-title-row h3 {
+  margin: 0;
 }
 
 .hero-case-no {
@@ -1306,39 +1453,6 @@ function onBatchDelete() {
   letter-spacing: 0.02em;
   color: var(--cf-text-secondary, #667085);
 }
-
-/* ===== 状态徽标 ===== */
-.hero-status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1.5;
-}
-.hero-status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.hero-status-badge.status-draft {
-  background: #f4f4f5;
-  color: #71717a;
-}
-.hero-status-badge.status-draft .hero-status-dot { background: #a1a1aa; }
-.hero-status-badge.status-ready {
-  background: #f0fdf4;
-  color: #16a34a;
-}
-.hero-status-badge.status-ready .hero-status-dot { background: #22c55e; }
-.hero-status-badge.status-disabled {
-  background: #fef2f2;
-  color: #dc2626;
-}
-.hero-status-badge.status-disabled .hero-status-dot { background: #ef4444; }
 
 /* ===== 底部操作栏 ===== */
 .case-editor-footer {
@@ -1633,6 +1747,11 @@ function onBatchDelete() {
   min-height: 320px;
 }
 
+.case-payload-fields--expected,
+.case-payload-fields--body {
+  min-height: 0;
+}
+
 .case-payload-textarea {
   flex: 1;
   min-height: 0;
@@ -1644,6 +1763,20 @@ function onBatchDelete() {
   flex: 1;
   min-height: 280px;
   resize: vertical;
+}
+
+.case-payload-textarea--expand {
+  display: block;
+  flex: none;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.case-payload-textarea--expand.case-xml-editor {
+  white-space: pre;
 }
 
 .case-payload-textarea--meta {
@@ -1683,7 +1816,6 @@ function onBatchDelete() {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   line-height: 1.5;
-  white-space: pre;
 }
 
 .request-split-label {

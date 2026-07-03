@@ -177,6 +177,11 @@ async function ensureApiDocTransactionColumn(runner: Queryable) {
     { name: "smp_data", def: "JSON NULL" },
     { name: "last_smp_call_service_hash", def: "VARCHAR(64) NULL" },
     { name: "last_smp_test_info_hash", def: "VARCHAR(64) NULL" },
+    {
+      name: "last_generated_smp_call_service_hash",
+      def: "VARCHAR(64) NULL",
+    },
+    { name: "last_generated_smp_test_info_hash", def: "VARCHAR(64) NULL" },
   ]) {
     if (!(await columnExists(runner, "api_doc", name))) {
       await runner.query(`

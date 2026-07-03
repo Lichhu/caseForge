@@ -82,6 +82,7 @@ export class ApiTestCaseEntity {
     source?: ApiCaseSource;
     inferredFields?: string[];
     promptIds?: string[];
+    generateVersion?: number;
   };
 
   @Column({ nullable: true, default: "system" })

@@ -73,12 +73,6 @@
                   {{ syncStatusText(record.syncStatus) }}
                 </span>
               </a-tooltip>
-              <span
-                v-if="record.syncStatus === 'changed'"
-                class="transaction-changed-hint"
-              >
-                需重新生成
-              </span>
             </template>
             <template v-else-if="column.key === 'description'">
               <span class="transaction-muted">{{ record.description || '—' }}</span>

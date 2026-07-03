@@ -40,10 +40,13 @@ import {
   refreshSmpTransactionDocument,
   getApiCaseGenerateStatus,
   cancelApiCaseGenerate,
+  getApiCaseGenerateHistory,
   type ApiCaseGenerateQueueStatus,
+  type ApiCaseGenerateHistoryItem,
   getApiDocument,
   getApiReportSummary,
   getApiRun,
+  deleteApiRun,
   listApiCases,
   listAllApiCases,
   listApiEnvironments,
@@ -87,17 +90,36 @@ import {
   WORKSPACE_STAGE_REGISTRY,
 } from "@/utils/workspaceStageStorage";
 
-const API_CASE_GENERATE_POLL_DELAYS_MS = [
-  2000, 3000, 5000, 8000, 10000, 15000, 20000, 30000,
-];
-const API_CASE_GENERATE_POLL_EXTENDED_DELAYS_MS = [
-  30000, 45000, 60000, 90000, 120000,
-];
+const API_CASE_GENERATE_POLL_INTERVAL_MS = 1500;
 
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
+interface CaseGeneratePollTarget {
+  projectId: string;
+  navigateToCases: boolean;
+  notifyOnComplete: boolean;
+}
+
+let caseGeneratePollTimer: ReturnType<typeof setInterval> | null = null;
+const caseGeneratePollTargets = new Map<string, CaseGeneratePollTarget>();
+
+function isTerminalCaseGeneratePhase(phase: string) {
+  return (
+    phase === "completed" || phase === "failed" || phase === "cancelled"
+  );
+}
+
+function inferRunnerEncoding(cases: ApiTestCaseRow[]): string {
+  const tcpCase = cases.find((item) => item.request.transport === "tcp");
+  if (tcpCase?.request.encoding?.toUpperCase().includes("GBK")) {
+    return "GBK";
+  }
+  if (tcpCase?.request.encoding) {
+    return tcpCase.request.encoding.toUpperCase().includes("UTF")
+      ? "UTF-8"
+      : tcpCase.request.encoding;
+  }
+  return cases.some((item) => item.request.transport === "tcp")
+    ? "GBK"
+    : "UTF-8";
 }
 
 export type ApiWorkspaceStage =
@@ -134,6 +156,7 @@ interface State {
   caseListPage: number;
   caseListPageSize: number;
   caseListTotal: number;
+  caseListVersionFilter: number | null;
   environments: ApiEnvironmentRow[];
   environmentServices: Record<string, ApiEnvironmentServiceRow[]>;
   executionSets: ApiExecutionSetRow[];
@@ -152,7 +175,6 @@ interface State {
   loading: boolean;
   stageLoading: boolean;
   generatingCaseTransactionIds: string[];
-  _caseGeneratePollers: Record<string, boolean>;
   running: boolean;
   apiScenarios: ScenarioLibraryItem[];
 }
@@ -174,6 +196,7 @@ export const useApiTestStore = defineStore("apiTest", {
     caseListPage: 1,
     caseListPageSize: DEFAULT_CASE_FORGE_PAGE_SIZE,
     caseListTotal: 0,
+    caseListVersionFilter: null,
     environments: [],
     environmentServices: {},
     executionSets: [],
@@ -192,7 +215,6 @@ export const useApiTestStore = defineStore("apiTest", {
     loading: false,
     stageLoading: false,
     generatingCaseTransactionIds: [],
-    _caseGeneratePollers: {},
     running: false,
     apiScenarios: [],
   }),
@@ -241,6 +263,10 @@ export const useApiTestStore = defineStore("apiTest", {
         }
         return true;
       });
+    },
+    /** 执行历史 / 结果报表：优先按当前执行集，否则按交易码 */
+    reportRuns(): ApiRunDetail[] {
+      return this.transactionRuns;
     },
   },
   actions: {
@@ -332,6 +358,7 @@ export const useApiTestStore = defineStore("apiTest", {
       this.caseListPage = 1;
       this.caseListPageSize = DEFAULT_CASE_FORGE_PAGE_SIZE;
       this.caseListTotal = 0;
+      this.caseListVersionFilter = null;
       this.environments = [];
       this.environmentServices = {};
       this.executionSets = [];
@@ -471,7 +498,7 @@ export const useApiTestStore = defineStore("apiTest", {
         projectId,
         transactionId,
       );
-      if (result.changed) {
+      if (result.needsRegenerate) {
         message.warning("检测到服管数据变更，请重新生成案例并测试");
         await this.refreshTransactions(projectId);
       }
@@ -555,6 +582,7 @@ export const useApiTestStore = defineStore("apiTest", {
       this.caseListPage = 1;
       this.caseListPageSize = DEFAULT_CASE_FORGE_PAGE_SIZE;
       this.caseListTotal = 0;
+      this.caseListVersionFilter = null;
       this.environments = [];
       this.environmentServices = {};
       this.executionSets = [];
@@ -651,6 +679,26 @@ export const useApiTestStore = defineStore("apiTest", {
       if (doc) {
         this.apiDoc = doc;
       }
+      if (this.caseListVersionFilter == null) {
+        const history = await getApiCaseGenerateHistory(
+          projectId,
+          transactionId,
+        ).catch(() => [] as ApiCaseGenerateHistoryItem[]);
+        const latest = history.reduce((max, h) => {
+          if (h.version != null && h.resultCount != null && h.resultCount > 0) {
+            return Math.max(max, h.version);
+          }
+          return max;
+        }, 0);
+        if (latest > 0) {
+          this.caseListVersionFilter = latest;
+          await this.refreshCases(projectId, transactionId, {
+            resetPage: true,
+            generateVersion: latest,
+          });
+          return;
+        }
+      }
       await this.refreshCases(projectId, transactionId, { resetPage: true });
     },
     async loadRunnerStage(projectId: string, transactionId: string) {
@@ -670,6 +718,7 @@ export const useApiTestStore = defineStore("apiTest", {
       this.environments = envs;
       this.ensureSelectedEnvironment();
       this.selectedEnvironmentServiceId = "";
+      await this.ensureRunnerRunsLoaded(projectId);
     },
     async loadReportStage(projectId: string) {
       const transactionId = this.activeTransactionId;
@@ -755,7 +804,12 @@ export const useApiTestStore = defineStore("apiTest", {
     async refreshCases(
       projectId: string,
       transactionId: string,
-      options?: { page?: number; pageSize?: number; resetPage?: boolean },
+      options?: {
+        page?: number;
+        pageSize?: number;
+        resetPage?: boolean;
+        generateVersion?: number;
+      },
     ) {
       if (options?.resetPage) {
         this.caseListPage = 1;
@@ -767,6 +821,8 @@ export const useApiTestStore = defineStore("apiTest", {
       const result = await listApiCases(projectId, transactionId, {
         page,
         pageSize,
+        generateVersion:
+          options?.generateVersion ?? this.caseListVersionFilter ?? undefined,
       });
       const maxPage = Math.max(1, Math.ceil(result.count / pageSize) || 1);
       if (result.count > 0 && page > maxPage) {
@@ -801,89 +857,167 @@ export const useApiTestStore = defineStore("apiTest", {
       },
     ) {
       this.markCaseGenerateStarted(transactionId);
-      if (this._caseGeneratePollers[transactionId]) {
-        return getApiCaseGenerateStatus(projectId, transactionId);
-      }
-      this._caseGeneratePollers = {
-        ...this._caseGeneratePollers,
-        [transactionId]: true,
-      };
       try {
         await generateApiCases(projectId, transactionId, options);
         await this.refreshTransactions(projectId);
-        const status = await this.pollApiCaseGenerateOutcome(
-          projectId,
-          transactionId,
-        );
-        await this.refreshTransactions(projectId);
-        if (status.phase === "completed") {
-          if (this.activeTransactionId === transactionId) {
-            this.apiDoc = await getApiDocument(projectId, transactionId).catch(
-              () => this.apiDoc,
-            );
-            await this.refreshCases(projectId, transactionId, {
-              resetPage: true,
-            });
-            if (this.cases[0]?.id) {
-              this.activeCaseId = this.cases[0].id;
+        this.scheduleCaseGeneratePoll(projectId, transactionId, {
+          navigateToCases: options?.navigateToCases,
+          notifyOnComplete: true,
+        });
+        return getApiCaseGenerateStatus(projectId, transactionId);
+      } catch (error) {
+        this.markCaseGenerateEnded(transactionId);
+        throw error;
+      }
+    },
+    scheduleCaseGeneratePoll(
+      projectId: string,
+      transactionId: string,
+      options?: {
+        navigateToCases?: boolean;
+        notifyOnComplete?: boolean;
+      },
+    ) {
+      const existing = caseGeneratePollTargets.get(transactionId);
+      caseGeneratePollTargets.set(transactionId, {
+        projectId,
+        navigateToCases:
+          (existing?.navigateToCases ?? false) ||
+          (options?.navigateToCases ?? true),
+        notifyOnComplete:
+          (existing?.notifyOnComplete ?? false) ||
+          (options?.notifyOnComplete ?? false),
+      });
+      this.startCaseGeneratePolling();
+    },
+    startCaseGeneratePolling() {
+      if (caseGeneratePollTimer) {
+        return;
+      }
+      void this.syncCaseGeneratePolling();
+      caseGeneratePollTimer = window.setInterval(() => {
+        void this.syncCaseGeneratePolling();
+      }, API_CASE_GENERATE_POLL_INTERVAL_MS);
+    },
+    async syncCaseGeneratePolling() {
+      const transactionIds = [...caseGeneratePollTargets.keys()];
+      if (!transactionIds.length) {
+        this.stopCaseGeneratePolling();
+        return;
+      }
+      for (const transactionId of transactionIds) {
+        const target = caseGeneratePollTargets.get(transactionId);
+        if (!target) {
+          continue;
+        }
+        try {
+          const status = await getApiCaseGenerateStatus(
+            target.projectId,
+            transactionId,
+          );
+          if (!isTerminalCaseGeneratePhase(status.phase)) {
+            continue;
+          }
+          caseGeneratePollTargets.delete(transactionId);
+          await this.applyCaseGenerateOutcome(
+            target.projectId,
+            transactionId,
+            status,
+            target,
+          );
+        } catch {
+          // 状态查询失败时不打断轮询
+        }
+      }
+      if (!caseGeneratePollTargets.size) {
+        this.stopCaseGeneratePolling();
+      }
+    },
+    stopCaseGeneratePolling() {
+      if (caseGeneratePollTimer) {
+        window.clearInterval(caseGeneratePollTimer);
+        caseGeneratePollTimer = null;
+      }
+    },
+    async applyCaseGenerateOutcome(
+      projectId: string,
+      transactionId: string,
+      status: ApiCaseGenerateQueueStatus,
+      target: CaseGeneratePollTarget,
+    ) {
+      this.markCaseGenerateEnded(transactionId);
+      await this.refreshTransactions(projectId).catch(() => {});
+
+      if (status.phase === "completed") {
+        const count = status.resultCount ?? 0;
+        const shouldNavigate = target.navigateToCases && count > 0;
+
+        if (this.activeTransactionId === transactionId) {
+          this.apiDoc = await getApiDocument(projectId, transactionId).catch(
+            () => this.apiDoc,
+          );
+          if (count > 0) {
+            this.caseListVersionFilter = null;
+          }
+          if (!shouldNavigate) {
+            try {
+              if (this.workspaceStage === "api-cases") {
+                await this.loadCasesStage(projectId, transactionId);
+              } else {
+                await this.refreshCases(projectId, transactionId, {
+                  resetPage: true,
+                });
+                if (this.cases[0]?.id) {
+                  this.activeCaseId = this.cases[0].id;
+                }
+              }
+            } catch {
+              if (target.notifyOnComplete) {
+                message.error(
+                  "生成结果已就绪，但刷新案例列表失败，请稍后重试",
+                );
+              }
             }
           }
-          const count = status.resultCount ?? 0;
-          const shouldNavigate =
-            (options?.navigateToCases ?? true) && count > 0;
-          if (shouldNavigate) {
-            this.setWorkspaceStage(projectId, transactionId, "api-cases");
-            if (
-              this.activeProjectId === projectId &&
-              this.activeTransactionId === transactionId
-            ) {
-              await this.loadWorkspaceStage(
-                projectId,
-                transactionId,
-                "api-cases",
-              );
-            }
+        }
+
+        if (shouldNavigate) {
+          this.setWorkspaceStage(projectId, transactionId, "api-cases");
+          if (
+            this.activeProjectId === projectId &&
+            this.activeTransactionId === transactionId
+          ) {
+            await this.loadWorkspaceStage(
+              projectId,
+              transactionId,
+              "api-cases",
+            );
+          }
+          if (target.notifyOnComplete) {
             message.success(`已生成 ${count} 条案例，已进入案例编辑`);
-          } else if (count > 0) {
+          }
+        } else if (target.notifyOnComplete) {
+          if (count > 0) {
             message.success(`已生成 ${count} 条案例`);
           } else {
             message.success("案例生成已完成");
           }
-          return status;
         }
-        if (status.phase === "failed" || status.phase === "cancelled") {
+        return;
+      }
+
+      if (status.phase === "failed" || status.phase === "cancelled") {
+        if (this.activeTransactionId === transactionId) {
+          await this.refreshCases(projectId, transactionId, {
+            resetPage: true,
+          }).catch(() => {});
+        }
+        if (target.notifyOnComplete) {
           message.error(
             status.errorMessage?.trim() || "案例生成失败，请稍后重试",
           );
         }
-        return status;
-      } finally {
-        this.markCaseGenerateEnded(transactionId);
-        const { [transactionId]: _removed, ...rest } =
-          this._caseGeneratePollers;
-        this._caseGeneratePollers = rest;
       }
-    },
-    async pollApiCaseGenerateOutcome(
-      projectId: string,
-      transactionId: string,
-    ): Promise<ApiCaseGenerateQueueStatus> {
-      const delays = [
-        ...API_CASE_GENERATE_POLL_DELAYS_MS,
-        ...API_CASE_GENERATE_POLL_EXTENDED_DELAYS_MS,
-      ];
-      for (const delay of delays) {
-        await sleep(delay);
-        const status = await getApiCaseGenerateStatus(projectId, transactionId);
-        if (
-          status.phase === "completed" ||
-          status.phase === "failed" ||
-          status.phase === "cancelled"
-        ) {
-          return status;
-        }
-      }
-      return getApiCaseGenerateStatus(projectId, transactionId);
     },
     async saveDocumentGenerationPrompts(
       projectId: string,
@@ -919,53 +1053,29 @@ export const useApiTestStore = defineStore("apiTest", {
         message.error("取消案例生成失败，请稍后重试");
       }
     },
+    async fetchGenerateHistory(
+      projectId: string,
+      transactionId: string,
+    ): Promise<ApiCaseGenerateHistoryItem[]> {
+      try {
+        return await getApiCaseGenerateHistory(projectId, transactionId);
+      } catch {
+        message.error("获取生成历史失败，请稍后重试");
+        return [];
+      }
+    },
     async syncCaseGenerateLoading(projectId: string, transactionId: string) {
       try {
         const status = await getApiCaseGenerateStatus(projectId, transactionId);
         if (status.phase === "queued" || status.phase === "running") {
           this.markCaseGenerateStarted(transactionId);
-          if (!this._caseGeneratePollers[transactionId]) {
-            void this.waitCaseGenerateFinish(projectId, transactionId);
-          }
+          this.scheduleCaseGeneratePoll(projectId, transactionId, {
+            navigateToCases: false,
+            notifyOnComplete: false,
+          });
         }
       } catch {
         // ignore status probe errors
-      }
-    },
-    async waitCaseGenerateFinish(projectId: string, transactionId: string) {
-      if (this._caseGeneratePollers[transactionId]) {
-        return;
-      }
-      this._caseGeneratePollers = {
-        ...this._caseGeneratePollers,
-        [transactionId]: true,
-      };
-      try {
-        const status = await this.pollApiCaseGenerateOutcome(
-          projectId,
-          transactionId,
-        );
-        if (
-          status.phase === "completed" &&
-          this.activeTransactionId === transactionId
-        ) {
-          this.apiDoc = await getApiDocument(projectId, transactionId).catch(
-            () => this.apiDoc,
-          );
-          await this.refreshCases(projectId, transactionId, {
-            resetPage: true,
-          });
-        } else if (status.phase === "failed" || status.phase === "cancelled") {
-          message.error(
-            status.errorMessage?.trim() || "案例生成失败，请稍后重试",
-          );
-        }
-      } finally {
-        this.markCaseGenerateEnded(transactionId);
-        const { [transactionId]: _removed, ...rest } =
-          this._caseGeneratePollers;
-        this._caseGeneratePollers = rest;
-        await this.refreshTransactions(projectId);
       }
     },
     async saveCase(
@@ -1266,13 +1376,42 @@ export const useApiTestStore = defineStore("apiTest", {
       },
     ) {
       this.running = true;
+      this.markExecutionSetRunning(setId);
       try {
-        const run = await runApiExecutionSet(projectId, transactionId, setId, {
-          environmentId: options.environmentId,
-          environmentServiceId: options.environmentServiceId,
-          encoding: options.encoding,
-          concurrency: options.concurrency ?? 5,
+        await this.refreshRunnerCases(projectId, transactionId);
+        const set = this.activeExecutionSet;
+        const originalCaseIds = set?.caseIds ?? [];
+        const validCaseIds = originalCaseIds.filter((id) => {
+          const c = this.runnerCases.find((item) => item.id === id);
+          return c && c.enabled;
         });
+        const skippedCount = originalCaseIds.length - validCaseIds.length;
+        if (skippedCount > 0) {
+          message.warning(`已跳过 ${skippedCount} 条非当前版本或未启用的案例`);
+        }
+        if (!validCaseIds.length) {
+          message.warning("当前版本下没有可执行的案例");
+          return;
+        }
+
+        let run: ApiRunDetail;
+        if (validCaseIds.length === originalCaseIds.length) {
+          run = await runApiExecutionSet(projectId, transactionId, setId, {
+            environmentId: options.environmentId,
+            environmentServiceId: options.environmentServiceId,
+            encoding: options.encoding,
+            concurrency: options.concurrency ?? 5,
+          });
+        } else {
+          run = await runApiCases(projectId, transactionId, {
+            caseIds: validCaseIds,
+            environmentId: options.environmentId,
+            environmentServiceId: options.environmentServiceId,
+            concurrency: options.concurrency ?? 5,
+            encoding: options.encoding,
+            executionSetId: setId,
+          });
+        }
         this.selectedEnvironmentId = options.environmentId;
         this.selectedEnvironmentServiceId = options.environmentServiceId ?? "";
         this.activeRun = run;
@@ -1280,6 +1419,87 @@ export const useApiTestStore = defineStore("apiTest", {
         await this.refreshExecutionSets(projectId, transactionId);
         message.success(
           `执行完成：通过 ${run.passedCount} / ${run.totalCount}`,
+        );
+        return run;
+      } finally {
+        this.running = false;
+      }
+    },
+    async rerunHistoricalRun(
+      projectId: string,
+      transactionId: string,
+      runId: string,
+      options?: {
+        encoding?: string;
+        executionSetId?: string;
+      },
+    ) {
+      if (this.running) {
+        message.warning("当前已有执行任务进行中");
+        return;
+      }
+      const detail = await getApiRun(projectId, runId);
+      const caseIds = detail.items.map((item) => item.caseId);
+      if (!caseIds.length) {
+        message.warning("该次执行没有可重跑的案例");
+        return;
+      }
+      await this.refreshRunnerCases(projectId, transactionId);
+      const validCaseIds = caseIds.filter((id) => {
+        const testCase = this.runnerCases.find((item) => item.id === id);
+        return testCase && testCase.enabled;
+      });
+      const skippedCount = caseIds.length - validCaseIds.length;
+      if (skippedCount > 0) {
+        message.warning(`已跳过 ${skippedCount} 条已删除或未启用的案例`);
+      }
+      if (!validCaseIds.length) {
+        message.warning("没有可执行的案例");
+        return;
+      }
+      let environmentId = detail.environmentId;
+      if (!this.environments.some((item) => item.id === environmentId)) {
+        environmentId = this.selectedEnvironmentId;
+      }
+      if (!environmentId) {
+        message.warning("历史执行环境不可用，请先选择环境后执行");
+        return;
+      }
+      const environmentServiceId =
+        environmentId === detail.environmentId
+          ? detail.environmentServiceId
+          : this.selectedEnvironmentServiceId || undefined;
+      const executionSetId =
+        options?.executionSetId ??
+        detail.executionSetId ??
+        this.activeExecutionSetId ??
+        undefined;
+      this.running = true;
+      if (executionSetId) {
+        this.markExecutionSetRunning(executionSetId);
+      }
+      try {
+        const targetCases = this.runnerCases.filter((item) =>
+          validCaseIds.includes(item.id),
+        );
+        const run = await runApiCases(projectId, transactionId, {
+          caseIds: validCaseIds,
+          environmentId,
+          environmentServiceId: environmentServiceId || undefined,
+          concurrency: detail.concurrency ?? 5,
+          encoding: options?.encoding ?? inferRunnerEncoding(targetCases),
+          executionSetId,
+          runId,
+        });
+        this.selectedEnvironmentId = environmentId;
+        this.selectedEnvironmentServiceId = environmentServiceId ?? "";
+        this.activeRun = run;
+        this.runs = await listApiRuns(projectId);
+        if (transactionId) {
+          await this.refreshExecutionSets(projectId, transactionId);
+        }
+        message.success(
+          `重新执行完成：通过 ${run.passedCount} / ${run.totalCount}`,
         );
         return run;
       } finally {
@@ -1315,6 +1535,35 @@ export const useApiTestStore = defineStore("apiTest", {
     },
     async loadRun(projectId: string, runId: string) {
       this.activeRun = await getApiRun(projectId, runId);
+    },
+    async deleteRun(projectId: string, transactionId: string, runId: string) {
+      await deleteApiRun(projectId, runId);
+      this.runs = await listApiRuns(projectId);
+      if (this.activeRun?.id === runId) {
+        this.activeRun = null;
+      }
+      await this.refreshExecutionSets(projectId, transactionId);
+      message.success("执行历史已删除");
+    },
+    markExecutionSetRunning(setId: string) {
+      const patch = { lastRunStatus: "running" as const };
+      if (this.activeExecutionSet?.id === setId) {
+        this.activeExecutionSet = { ...this.activeExecutionSet, ...patch };
+      }
+      const index = this.executionSets.findIndex((set) => set.id === setId);
+      if (index >= 0) {
+        this.executionSets[index] = { ...this.executionSets[index], ...patch };
+      }
+    },
+    /** 执行平台：加载历史列表；案例明细在用户展开时再拉取 */
+    async ensureRunnerRunsLoaded(projectId: string) {
+      this.runs = await listApiRuns(projectId);
+      if (
+        this.activeRun &&
+        !this.runs.some((run) => run.id === this.activeRun?.id)
+      ) {
+        this.runs = [this.activeRun, ...this.runs];
+      }
     },
     async loadReportSummary(
       projectId: string,

@@ -72,6 +72,7 @@ export interface ApiTestCasePayload {
     inferredFields?: string[];
     promptIds?: string[];
     bodyOverrides?: Record<string, unknown>;
+    generateVersion?: number;
   };
 }
 

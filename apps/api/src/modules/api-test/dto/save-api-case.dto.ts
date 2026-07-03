@@ -121,6 +121,21 @@ export class RunApiCasesDto {
   @ApiPropertyOptional({ default: 5 })
   @IsOptional()
   concurrency?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  encoding?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  executionSetId?: string;
+
+  @ApiPropertyOptional({ description: "传入则覆盖该次执行记录，不新建历史" })
+  @IsOptional()
+  @IsUUID()
+  runId?: string;
 }
 
 export class ExportApiReportDto {

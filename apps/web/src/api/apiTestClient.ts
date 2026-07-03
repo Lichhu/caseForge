@@ -111,7 +111,11 @@ export interface ApiTestCaseRow {
   expected: ApiCaseExpected;
   endpoint?: ApiEndpointRow;
   createdBy?: string;
-  metadata?: { source?: string; promptIds?: string[] };
+  metadata?: {
+    source?: string;
+    promptIds?: string[];
+    generateVersion?: number;
+  };
 }
 
 export interface ApiEnvironmentRow {
@@ -274,6 +278,8 @@ export async function syncSmpTransactions(
 
 export interface SmpDocumentRefreshResult {
   changed: boolean;
+  needsRegenerate: boolean;
+  syncStatus: string;
   callServiceList: unknown[];
   serviceTestList: unknown[];
   approvalInfoList: unknown[];
@@ -382,7 +388,7 @@ export interface ApiCaseListResult {
 export async function listApiCases(
   projectId: string,
   transactionId: string,
-  params?: { page?: number; pageSize?: number },
+  params?: { page?: number; pageSize?: number; generateVersion?: number },
 ): Promise<ApiCaseListResult> {
   const page = Math.max(1, params?.page ?? 1);
   const pageSize = normalizeCaseForgePageSize(
@@ -391,7 +397,13 @@ export async function listApiCases(
   const { data } = await http.get<ApiCaseListResult>(
     `${transactionBase(projectId, transactionId)}/cases`,
     {
-      params: { page, pageSize },
+      params: {
+        page,
+        pageSize,
+        ...(params?.generateVersion != null
+          ? { generateVersion: params.generateVersion }
+          : {}),
+      },
       headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
     },
   );
@@ -402,6 +414,7 @@ export async function listApiCases(
 export async function listAllApiCases(
   projectId: string,
   transactionId: string,
+  params?: { generateVersion?: number },
 ): Promise<ApiTestCaseRow[]> {
   const pageSize = 100;
   let page = 1;
@@ -411,6 +424,7 @@ export async function listAllApiCases(
     const result = await listApiCases(projectId, transactionId, {
       page,
       pageSize,
+      generateVersion: params?.generateVersion,
     });
     rows.push(...result.rows);
     total = result.count;
@@ -534,6 +548,33 @@ export async function cancelApiCaseGenerate(
 ) {
   const { data } = await http.post<{ ok: boolean }>(
     `${transactionBase(projectId, transactionId)}/cases/generate/cancel`,
+  );
+  return data;
+}
+
+export interface ApiCaseGenerateHistoryItem {
+  jobId: string;
+  version: number | null;
+  status: string;
+  resultCount: number | null;
+  promptIds: string[];
+  promptSummaries: Array<{
+    id: string;
+    name: string | null;
+    scenarioName: string | null;
+  }>;
+  createdBy: string | null;
+  queuedAt: string;
+  finishedAt: string | null;
+  errorMessage: string | null;
+}
+
+export async function getApiCaseGenerateHistory(
+  projectId: string,
+  transactionId: string,
+) {
+  const { data } = await http.get<ApiCaseGenerateHistoryItem[]>(
+    `${transactionBase(projectId, transactionId)}/cases/generate/history`,
   );
   return data;
 }
@@ -732,6 +773,9 @@ export async function runApiCases(
     environmentId: string;
     environmentServiceId?: string;
     concurrency?: number;
+    encoding?: string;
+    executionSetId?: string;
+    runId?: string;
   },
 ) {
   const { data } = await http.post<ApiRunDetail>(
@@ -753,6 +797,10 @@ export async function getApiRun(projectId: string, runId: string) {
     `/api-test/${projectId}/runs/${runId}`,
   );
   return data;
+}
+
+export async function deleteApiRun(projectId: string, runId: string) {
+  await http.delete(`/api-test/${projectId}/runs/${runId}`);
 }
 
 export async function getApiReportSummary(

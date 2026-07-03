@@ -4,6 +4,7 @@ export const API_DOC_SHEET_NAMES = [
   "技术信息",
   "请求报文",
   "响应报文",
+  "示例报文",
 ] as const;
 
 export const API_DOC_SECTION_SEPARATOR = "----";

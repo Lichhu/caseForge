@@ -36,6 +36,7 @@ import {
   ApiCaseGenerateJobEntity,
   ApiCaseGenerateJobStatus,
 } from "@api-test/entity/api-case-generate-job.entity";
+import { ApiDocEntity } from "@api-test/entity/api-doc.entity";
 import { ApiTransactionEntity } from "@api-test/entity/api-transaction.entity";
 import { ApiCaseService } from "./api-case.service";
 
@@ -70,6 +71,8 @@ export class ApiCaseGenerateQueueService
     private readonly jobRepo: Repository<ApiCaseGenerateJobEntity>,
     @InjectRepository(ApiTransactionEntity)
     private readonly transactionRepo: Repository<ApiTransactionEntity>,
+    @InjectRepository(ApiDocEntity)
+    private readonly apiDocRepo: Repository<ApiDocEntity>,
     @Inject(forwardRef(() => ApiCaseService))
     private readonly apiCaseService: ApiCaseService,
   ) {}
@@ -452,8 +455,22 @@ export class ApiCaseGenerateQueueService
   }
 
   private async runJob(job: ApiCaseGenerateJobEntity) {
+    let version = 0;
     await withCaseGenerateSlot(async () => {
       try {
+        version = await this.assignNextVersion(
+          job.projectId,
+          job.transactionId,
+        );
+        const latestJob = await this.jobRepo.findOne({ where: { id: job.id } });
+        if (latestJob && latestJob.status === "cancelled") {
+          return;
+        }
+        if (latestJob) {
+          latestJob.version = version;
+          await this.jobRepo.save(latestJob);
+        }
+
         const result = await RequestContext.run(
           job.createdBy || "system",
           async () =>
@@ -462,6 +479,8 @@ export class ApiCaseGenerateQueueService
               transactionId: job.transactionId,
               endpointIds: job.endpointIds ?? undefined,
               promptIds: job.promptIds ?? undefined,
+              version,
+              jobId: job.id,
             }),
         );
 
@@ -470,11 +489,22 @@ export class ApiCaseGenerateQueueService
           return;
         }
         if (latest.status === "cancelled") {
+          const deleted = await this.apiCaseService.cleanupGeneratedCases(
+            job.projectId,
+            job.transactionId,
+            version,
+          );
+          latest.resultCount = 0;
+          await this.jobRepo.save(latest);
+          this.logger.log(
+            `案例生成已取消，清理 ${deleted} 条已写入案例 (v${version})`,
+          );
           return;
         }
         latest.status = "completed";
         latest.finishedAt = new Date();
         latest.resultCount = result.count;
+        latest.version = version;
         latest.errorMessage = null;
         await this.jobRepo.save(latest);
         await this.updateTransactionSyncStatus(
@@ -482,6 +512,7 @@ export class ApiCaseGenerateQueueService
           job.transactionId,
           "success",
         );
+        await this.updateDocGeneratedHashes(job.projectId, job.transactionId);
       } catch (error) {
         const refreshed = await this.jobRepo.findOne({ where: { id: job.id } });
         const message =
@@ -493,6 +524,19 @@ export class ApiCaseGenerateQueueService
           refreshed.status = "failed";
           refreshed.finishedAt = new Date();
           refreshed.errorMessage = message;
+          await this.jobRepo.save(refreshed);
+        } else if (refreshed && isCancelled) {
+          if (version > 0) {
+            const deleted = await this.apiCaseService.cleanupGeneratedCases(
+              job.projectId,
+              job.transactionId,
+              version,
+            );
+            this.logger.log(
+              `案例生成已取消（异常路径），清理 ${deleted} 条已写入案例 (v${version})`,
+            );
+          }
+          refreshed.resultCount = 0;
           await this.jobRepo.save(refreshed);
         }
         await this.updateTransactionSyncStatus(
@@ -522,5 +566,36 @@ export class ApiCaseGenerateQueueService
         syncError: error?.trim() || undefined,
       },
     );
+  }
+
+  private async updateDocGeneratedHashes(
+    projectId: string,
+    transactionId: string,
+  ) {
+    const doc = await this.apiDocRepo.findOne({
+      where: { projectId, transactionId },
+    });
+    if (!doc) return;
+    if (!doc.lastSmpCallServiceHash) return;
+    await this.apiDocRepo.update(
+      { projectId, id: doc.id },
+      {
+        lastGeneratedSmpCallServiceHash: doc.lastSmpCallServiceHash,
+        lastGeneratedSmpTestInfoHash: doc.lastSmpTestInfoHash,
+      },
+    );
+  }
+
+  private async assignNextVersion(
+    projectId: string,
+    transactionId: string,
+  ): Promise<number> {
+    const row = await this.jobRepo
+      .createQueryBuilder("j")
+      .select("MAX(j.version)", "maxVer")
+      .where("j.projectId = :projectId", { projectId })
+      .andWhere("j.transactionId = :transactionId", { transactionId })
+      .getRawOne<{ maxVer: string | number | null }>();
+    return Number(row?.maxVer ?? 0) + 1;
   }
 }

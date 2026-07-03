@@ -22,6 +22,7 @@ export class SchemaPatchService implements OnModuleInit {
     await this.ensureTestPointInstructGenerateErrorColumn();
     await this.ensureCaseGenerateJobTable();
     await this.ensureApiCaseGenerateJobTable();
+    await this.ensureApiCaseGenerateJobVersionColumn();
     await this.ensureStructRequirementJobTable();
     await this.ensureSummaryStructDocColumn();
     await this.ensureStructDocParseMetaColumns();
@@ -187,6 +188,25 @@ export class SchemaPatchService implements OnModuleInit {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
     this.logger.log("api_case_generate_job 表已创建");
+  }
+
+  private async ensureApiCaseGenerateJobVersionColumn() {
+    const rows: Array<{ Field: string }> = await this.dataSource.query(
+      "SHOW COLUMNS FROM api_case_generate_job LIKE 'version'",
+    );
+    if (rows.length > 0) {
+      return;
+    }
+
+    this.logger.warn(
+      "检测到 api_case_generate_job 缺少 version 列，正在自动执行 schema 补丁…",
+    );
+    await this.dataSource.query(`
+      ALTER TABLE api_case_generate_job
+        ADD COLUMN version INT NULL COMMENT '生成版本号（同一交易码递增）'
+        AFTER resultCount
+    `);
+    this.logger.log("api_case_generate_job.version 列已补齐");
   }
 
   private async ensureStructRequirementJobTable() {

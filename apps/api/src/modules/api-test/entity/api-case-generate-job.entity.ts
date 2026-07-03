@@ -63,6 +63,9 @@ export class ApiCaseGenerateJobEntity {
   @Column({ type: "int", nullable: true })
   resultCount?: number | null;
 
+  @Column({ type: "int", nullable: true })
+  version?: number | null;
+
   @Column({ type: "datetime", precision: 3 })
   queuedAt: Date;
 

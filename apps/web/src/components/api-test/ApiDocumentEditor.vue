@@ -40,6 +40,10 @@
           <template #icon><ThunderboltOutlined /></template>
           AI 生成案例
         </a-button>
+        <a-button @click="historyDrawerOpen = true">
+          <template #icon><HistoryOutlined /></template>
+          生成历史
+        </a-button>
         <a-button v-if="!showSmpData" :disabled="!canSave" @click="onSave">
           <template #icon><SaveOutlined /></template>
           保存
@@ -102,7 +106,18 @@
         />
         <div v-for="(section, sectionIndex) in sections" :key="section.title" class="doc-section-block">
           <h3 class="doc-section-title">{{ section.title }}</h3>
-          <div class="api-doc-table-wrap">
+          <div v-if="section.title === '示例报文'" class="example-message-block">
+            <a-textarea
+              v-model:value="exampleMessage"
+              class="example-message-input"
+              :rows="6"
+              placeholder="可选。填写后将作为 AI 生成案例的报文样例参考。"
+              @input="onExampleMessageInput"
+              @blur="onExampleMessageBlur"
+            />
+            <p class="example-message-hint">仅请求报文体示例，不影响响应断言逻辑。</p>
+          </div>
+          <div v-else class="api-doc-table-wrap">
             <table class="api-doc-table">
               <thead>
                 <tr>
@@ -142,6 +157,12 @@
 
   <ScenarioMaintainModal v-model:open="scenarioModalOpen" scope="api" />
 
+  <ApiCaseGenerateHistoryDrawer
+    v-model:open="historyDrawerOpen"
+    :project-id="projectId"
+    :transaction-id="transactionId"
+  />
+
   <a-modal
     v-model:open="generateModalOpen"
     title="AI 生成案例"
@@ -176,6 +197,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onActivated, onDeactivated, ref, watch } from 'vue';
 import {
+  HistoryOutlined,
   SaveOutlined,
   SettingOutlined,
   ThunderboltOutlined,
@@ -186,6 +208,7 @@ import type { UploadProps } from 'ant-design-vue';
 import ScenarioMaintainModal from '@/components/ScenarioMaintainModal.vue';
 import ScenarioPromptPicker from '@/components/ScenarioPromptPicker.vue';
 import SmpDocumentViewer from '@/components/api-test/SmpDocumentViewer.vue';
+import ApiCaseGenerateHistoryDrawer from '@/components/api-test/ApiCaseGenerateHistoryDrawer.vue';
 import { useApiTestStore } from '@/stores/apiTest';
 import { filterSelectablePromptIds, collectDefaultPromptIds } from '@/utils/scenarioLibrary';
 import {
@@ -202,12 +225,14 @@ const tableScrollRef = ref<HTMLElement | null>(null);
 const apiStore = useApiTestStore();
 const sections = ref<ApiDocTableSection[]>([]);
 const sectionData = ref<Record<string, string>[][]>([]);
+const exampleMessage = ref('');
 const editorText = ref('');
 const autoSaveTimer = ref<number | null>(null);
 const syncingFromStore = ref(false);
 const panelActive = ref(true);
 const scenarioModalOpen = ref(false);
 const generateModalOpen = ref(false);
+const historyDrawerOpen = ref(false);
 const docPromptIds = ref<string[]>([]);
 const generatePromptIds = ref<string[]>([]);
 
@@ -240,11 +265,38 @@ onDeactivated(() => {
 
 function loadFromText(text: string) {
   syncingFromStore.value = true;
-  sections.value = parseApiDocTableText(text);
+  const parsed = parseApiDocTableText(text);
+  const exampleSection = parsed.find((s) => s.title === '示例报文');
+  exampleMessage.value = exampleSection?.freeText ?? '';
+  if (!exampleSection && !showSmpData.value) {
+    parsed.push({ title: '示例报文', rows: [], freeText: '' });
+  }
+  sections.value = parsed;
   sectionData.value = sections.value.map((section) => sectionTableData(section));
-  editorText.value = text;
+  editorText.value = exampleSection ? text : serializeApiDocTableText(parsed);
   syncingFromStore.value = false;
   resizeAllDocCellInputs();
+}
+
+function onExampleMessageInput() {
+  syncExampleMessageToText();
+  scheduleAutoSave();
+}
+
+function onExampleMessageBlur() {
+  syncExampleMessageToText();
+  void flushAutoSave({ notify: true });
+}
+
+function syncExampleMessageToText() {
+  const nextSections = sections.value.map((section) => {
+    if (section.title === '示例报文') {
+      return { ...section, freeText: exampleMessage.value };
+    }
+    return section;
+  });
+  sections.value = nextSections;
+  editorText.value = serializeApiDocTableText(nextSections);
 }
 
 function autoResizeTextarea(el: HTMLTextAreaElement) {
@@ -271,7 +323,7 @@ function syncTextFromTables() {
     rows: tableDataToRows(section, sectionData.value[index] ?? []),
   }));
   sections.value = nextSections;
-  editorText.value = serializeApiDocTableText(nextSections);
+  syncExampleMessageToText();
 }
 
 watch(
@@ -372,7 +424,7 @@ function onTableChange(sectionIndex: number) {
   const section = sections.value[sectionIndex];
   if (!section) return;
   section.rows = tableDataToRows(section, sectionData.value[sectionIndex] ?? []);
-  editorText.value = serializeApiDocTableText(sections.value);
+  syncTextFromTables();
   scheduleAutoSave();
 }
 
@@ -381,7 +433,7 @@ function handleCellBlur(sectionIndex: number) {
   const section = sections.value[sectionIndex];
   if (!section) return;
   section.rows = tableDataToRows(section, sectionData.value[sectionIndex] ?? []);
-  editorText.value = serializeApiDocTableText(sections.value);
+  syncTextFromTables();
   void flushAutoSave({ notify: true });
 }
 
@@ -470,7 +522,7 @@ function onConfirmGenerate() {
   void (async () => {
     try {
       await apiStore.saveDocumentGenerationPrompts(pid, tid, docPromptIds.value);
-      await runGenerate(pid, tid);
+      runGenerate(pid, tid);
     } catch {
       apiStore.markCaseGenerateEnded(tid);
       message.error('启动案例生成失败，请稍后重试');
@@ -478,8 +530,8 @@ function onConfirmGenerate() {
   })();
 }
 
-async function runGenerate(pid: string, tid: string) {
-  await apiStore.generateCases(pid, tid, {
+function runGenerate(pid: string, tid: string) {
+  void apiStore.generateCases(pid, tid, {
     promptIds: [...docPromptIds.value],
     navigateToCases: true,
   });
@@ -560,6 +612,25 @@ async function onSave() {
   font-size: 14px;
   font-weight: 600;
   line-height: 1.3;
+}
+
+.example-message-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.example-message-input {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.example-message-hint {
+  margin: 0;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .api-doc-table-wrap {

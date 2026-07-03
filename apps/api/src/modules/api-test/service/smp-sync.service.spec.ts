@@ -1,7 +1,12 @@
 import { BadRequestException } from "@nestjs/common";
+import { createHash } from "crypto";
 import { RequestContext } from "@common/audit/request-context";
 import { SmpSyncService } from "@api-test/service/smp-sync.service";
 import type { SmpTransactionCandidate } from "@api-test/service/smp-sync.service";
+
+function hashData(data: unknown) {
+  return createHash("sha256").update(JSON.stringify(data)).digest("hex");
+}
 
 function createRepoMock() {
   return {
@@ -40,7 +45,11 @@ function buildService() {
     platform: "api-test",
     createdBy: "test-user",
   });
-  const smpClient = { selectServiceInfoList: jest.fn() };
+  const smpClient = {
+    selectServiceInfoList: jest.fn(),
+    selectCallServiceInfoList: jest.fn(),
+    selectTestInfoList: jest.fn(),
+  };
 
   const {
     manager,
@@ -74,6 +83,7 @@ function buildService() {
     txRepo,
     docRepo,
     mgrProjectRepo,
+    smpClient,
   };
 }
 
@@ -88,6 +98,53 @@ function makeCandidate(
     serviceCode: "SVC001",
     reqSystemId: "SYS001",
     ...overrides,
+  };
+}
+
+function makeCallServiceResponse(data: unknown[] = [{ id: 1 }]) {
+  return {
+    bizResCode: "000000",
+    bizResText: "ok",
+    data,
+  };
+}
+
+function makeTestInfoResponse(data: unknown[] = [{ id: 2 }]) {
+  return {
+    bizResCode: "000000",
+    bizResText: "ok",
+    data,
+  };
+}
+
+function makeTransaction(
+  overrides?: Partial<{ syncStatus: string; reqCode: string | null }>,
+) {
+  return {
+    id: "tx-1",
+    code: "PCBS03901001",
+    reqCode: "REQ001",
+    taskId: "TASK001",
+    serviceCode: "SVC001",
+    reqSystemId: "SYS001",
+    syncStatus: overrides?.syncStatus ?? "pending",
+  };
+}
+
+function makeDoc(overrides?: {
+  lastSmpCallServiceHash?: string;
+  lastSmpTestInfoHash?: string;
+  lastGeneratedSmpCallServiceHash?: string;
+  lastGeneratedSmpTestInfoHash?: string;
+}) {
+  return {
+    id: "doc-1",
+    projectId: "p1",
+    transactionId: "tx-1",
+    lastSmpCallServiceHash: overrides?.lastSmpCallServiceHash,
+    lastSmpTestInfoHash: overrides?.lastSmpTestInfoHash,
+    lastGeneratedSmpCallServiceHash: overrides?.lastGeneratedSmpCallServiceHash,
+    lastGeneratedSmpTestInfoHash: overrides?.lastGeneratedSmpTestInfoHash,
   };
 }
 
@@ -235,5 +292,301 @@ describe("SmpSyncService.syncTransactions", () => {
     };
     expect(firstCreate.sortOrder).toBe(2);
     expect(secondCreate.sortOrder).toBe(3);
+  });
+});
+
+describe("SmpSyncService.refreshTransactionDocumentFromSmp", () => {
+  it("keeps pending when first refresh has no previous hash", async () => {
+    const { service, transactionRepo, apiDocRepo, smpClient } = buildService();
+    transactionRepo.findOne.mockResolvedValue(makeTransaction());
+    apiDocRepo.findOne.mockResolvedValue(makeDoc());
+    smpClient.selectCallServiceInfoList.mockResolvedValue(
+      makeCallServiceResponse(),
+    );
+    smpClient.selectTestInfoList.mockResolvedValue(makeTestInfoResponse());
+
+    const result = await RequestContext.run("test-user", () =>
+      service.refreshTransactionDocumentFromSmp("p1", "tx-1"),
+    );
+
+    expect(result.syncStatus).toBe("pending");
+    expect(result.needsRegenerate).toBe(false);
+    expect(result.changed).toBe(false);
+    expect(transactionRepo.save).not.toHaveBeenCalled();
+  });
+
+  it("keeps pending when hash changes before any successful generation", async () => {
+    const { service, transactionRepo, apiDocRepo, smpClient } = buildService();
+    transactionRepo.findOne.mockResolvedValue(makeTransaction());
+    apiDocRepo.findOne.mockResolvedValue(
+      makeDoc({ lastSmpCallServiceHash: "old-hash" }),
+    );
+    smpClient.selectCallServiceInfoList.mockResolvedValue(
+      makeCallServiceResponse([{ id: "new" }]),
+    );
+    smpClient.selectTestInfoList.mockResolvedValue(makeTestInfoResponse());
+
+    const result = await RequestContext.run("test-user", () =>
+      service.refreshTransactionDocumentFromSmp("p1", "tx-1"),
+    );
+
+    expect(result.syncStatus).toBe("pending");
+    expect(result.needsRegenerate).toBe(false);
+    expect(result.changed).toBe(true);
+    expect(transactionRepo.save).not.toHaveBeenCalled();
+  });
+
+  it("marks changed when success and hash changes", async () => {
+    const { service, transactionRepo, apiDocRepo, smpClient } = buildService();
+    transactionRepo.findOne.mockResolvedValue(
+      makeTransaction({ syncStatus: "success" }),
+    );
+    apiDocRepo.findOne.mockResolvedValue(
+      makeDoc({
+        lastSmpCallServiceHash: "old-hash",
+        lastGeneratedSmpCallServiceHash: "old-hash",
+      }),
+    );
+    smpClient.selectCallServiceInfoList.mockResolvedValue(
+      makeCallServiceResponse([{ id: "new" }]),
+    );
+    smpClient.selectTestInfoList.mockResolvedValue(makeTestInfoResponse());
+
+    const result = await RequestContext.run("test-user", () =>
+      service.refreshTransactionDocumentFromSmp("p1", "tx-1"),
+    );
+
+    expect(result.syncStatus).toBe("changed");
+    expect(result.needsRegenerate).toBe(true);
+    expect(result.changed).toBe(true);
+    expect(transactionRepo.save).toHaveBeenCalledTimes(1);
+    const saved = transactionRepo.save.mock.calls[0][0] as {
+      syncStatus: string;
+    };
+    expect(saved.syncStatus).toBe("changed");
+  });
+
+  it("keeps success when hash unchanged", async () => {
+    const { service, transactionRepo, apiDocRepo, smpClient } = buildService();
+    const data = [{ id: "same" }];
+    const hash = hashData(data);
+    const testInfoData = [{ id: "test" }];
+    const testInfoHash = hashData(testInfoData);
+    transactionRepo.findOne.mockResolvedValue(
+      makeTransaction({ syncStatus: "success" }),
+    );
+    apiDocRepo.findOne.mockResolvedValue(
+      makeDoc({
+        lastSmpCallServiceHash: hash,
+        lastSmpTestInfoHash: testInfoHash,
+        lastGeneratedSmpCallServiceHash: hash,
+        lastGeneratedSmpTestInfoHash: testInfoHash,
+      }),
+    );
+    smpClient.selectCallServiceInfoList.mockResolvedValue(
+      makeCallServiceResponse(data),
+    );
+    smpClient.selectTestInfoList.mockResolvedValue(
+      makeTestInfoResponse(testInfoData),
+    );
+
+    const result = await RequestContext.run("test-user", () =>
+      service.refreshTransactionDocumentFromSmp("p1", "tx-1"),
+    );
+
+    expect(result.syncStatus).toBe("success");
+    expect(result.needsRegenerate).toBe(false);
+    expect(result.changed).toBe(false);
+    expect(transactionRepo.save).not.toHaveBeenCalled();
+  });
+
+  it("keeps generating when hash changes during generation", async () => {
+    const { service, transactionRepo, apiDocRepo, smpClient } = buildService();
+    transactionRepo.findOne.mockResolvedValue(
+      makeTransaction({ syncStatus: "generating" }),
+    );
+    apiDocRepo.findOne.mockResolvedValue(
+      makeDoc({ lastSmpCallServiceHash: "old-hash" }),
+    );
+    smpClient.selectCallServiceInfoList.mockResolvedValue(
+      makeCallServiceResponse([{ id: "new" }]),
+    );
+    smpClient.selectTestInfoList.mockResolvedValue(makeTestInfoResponse());
+
+    const result = await RequestContext.run("test-user", () =>
+      service.refreshTransactionDocumentFromSmp("p1", "tx-1"),
+    );
+
+    expect(result.syncStatus).toBe("generating");
+    expect(result.needsRegenerate).toBe(false);
+    expect(result.changed).toBe(true);
+    expect(transactionRepo.save).not.toHaveBeenCalled();
+  });
+
+  it("keeps changed when already changed regardless of hash", async () => {
+    const { service, transactionRepo, apiDocRepo, smpClient } = buildService();
+    transactionRepo.findOne.mockResolvedValue(
+      makeTransaction({ syncStatus: "changed" }),
+    );
+    apiDocRepo.findOne.mockResolvedValue(
+      makeDoc({ lastSmpCallServiceHash: "old-hash" }),
+    );
+    smpClient.selectCallServiceInfoList.mockResolvedValue(
+      makeCallServiceResponse([{ id: "new" }]),
+    );
+    smpClient.selectTestInfoList.mockResolvedValue(makeTestInfoResponse());
+
+    const result = await RequestContext.run("test-user", () =>
+      service.refreshTransactionDocumentFromSmp("p1", "tx-1"),
+    );
+
+    expect(result.syncStatus).toBe("changed");
+    expect(result.needsRegenerate).toBe(false);
+    expect(result.changed).toBe(true);
+    expect(transactionRepo.save).not.toHaveBeenCalled();
+  });
+
+  it("keeps failed when hash changes before retry", async () => {
+    const { service, transactionRepo, apiDocRepo, smpClient } = buildService();
+    transactionRepo.findOne.mockResolvedValue(
+      makeTransaction({ syncStatus: "failed" }),
+    );
+    apiDocRepo.findOne.mockResolvedValue(
+      makeDoc({ lastSmpCallServiceHash: "old-hash" }),
+    );
+    smpClient.selectCallServiceInfoList.mockResolvedValue(
+      makeCallServiceResponse([{ id: "new" }]),
+    );
+    smpClient.selectTestInfoList.mockResolvedValue(makeTestInfoResponse());
+
+    const result = await RequestContext.run("test-user", () =>
+      service.refreshTransactionDocumentFromSmp("p1", "tx-1"),
+    );
+
+    expect(result.syncStatus).toBe("failed");
+    expect(result.needsRegenerate).toBe(false);
+    expect(result.changed).toBe(true);
+    expect(transactionRepo.save).not.toHaveBeenCalled();
+  });
+
+  it("marks changed when success and data changed but no generated hash yet", async () => {
+    const { service, transactionRepo, apiDocRepo, smpClient } = buildService();
+    transactionRepo.findOne.mockResolvedValue(
+      makeTransaction({ syncStatus: "success" }),
+    );
+    apiDocRepo.findOne.mockResolvedValue(
+      makeDoc({ lastSmpCallServiceHash: "old-hash" }),
+    );
+    smpClient.selectCallServiceInfoList.mockResolvedValue(
+      makeCallServiceResponse([{ id: "new" }]),
+    );
+    smpClient.selectTestInfoList.mockResolvedValue(makeTestInfoResponse());
+
+    const result = await RequestContext.run("test-user", () =>
+      service.refreshTransactionDocumentFromSmp("p1", "tx-1"),
+    );
+
+    expect(result.syncStatus).toBe("changed");
+    expect(result.needsRegenerate).toBe(true);
+    expect(result.changed).toBe(true);
+    expect(transactionRepo.save).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps success when generated baseline only has callService and testInfo baseline is empty", async () => {
+    const { service, transactionRepo, apiDocRepo, smpClient } = buildService();
+    const callServiceData = [{ id: "same" }];
+    const callServiceHash = hashData(callServiceData);
+    transactionRepo.findOne.mockResolvedValue(
+      makeTransaction({ syncStatus: "success" }),
+    );
+    apiDocRepo.findOne.mockResolvedValue(
+      makeDoc({
+        lastSmpCallServiceHash: callServiceHash,
+        lastSmpTestInfoHash: undefined,
+        lastGeneratedSmpCallServiceHash: callServiceHash,
+        lastGeneratedSmpTestInfoHash: undefined,
+      }),
+    );
+    smpClient.selectCallServiceInfoList.mockResolvedValue(
+      makeCallServiceResponse(callServiceData),
+    );
+    smpClient.selectTestInfoList.mockResolvedValue(
+      makeTestInfoResponse([{ id: "new-test" }]),
+    );
+
+    const result = await RequestContext.run("test-user", () =>
+      service.refreshTransactionDocumentFromSmp("p1", "tx-1"),
+    );
+
+    expect(result.syncStatus).toBe("success");
+    expect(result.needsRegenerate).toBe(false);
+    expect(result.changed).toBe(false);
+    expect(transactionRepo.save).not.toHaveBeenCalled();
+  });
+
+  it("marks changed when only testInfo changes and full generated baseline exists", async () => {
+    const { service, transactionRepo, apiDocRepo, smpClient } = buildService();
+    const callServiceData = [{ id: "same" }];
+    const callServiceHash = hashData(callServiceData);
+    const oldTestInfoData = [{ id: "old-test" }];
+    const oldTestInfoHash = hashData(oldTestInfoData);
+    transactionRepo.findOne.mockResolvedValue(
+      makeTransaction({ syncStatus: "success" }),
+    );
+    apiDocRepo.findOne.mockResolvedValue(
+      makeDoc({
+        lastSmpCallServiceHash: callServiceHash,
+        lastSmpTestInfoHash: oldTestInfoHash,
+        lastGeneratedSmpCallServiceHash: callServiceHash,
+        lastGeneratedSmpTestInfoHash: oldTestInfoHash,
+      }),
+    );
+    smpClient.selectCallServiceInfoList.mockResolvedValue(
+      makeCallServiceResponse(callServiceData),
+    );
+    smpClient.selectTestInfoList.mockResolvedValue(
+      makeTestInfoResponse([{ id: "new-test" }]),
+    );
+
+    const result = await RequestContext.run("test-user", () =>
+      service.refreshTransactionDocumentFromSmp("p1", "tx-1"),
+    );
+
+    expect(result.syncStatus).toBe("changed");
+    expect(result.needsRegenerate).toBe(true);
+    expect(result.changed).toBe(true);
+    expect(transactionRepo.save).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps pending when only testInfo changes and no successful generation", async () => {
+    const { service, transactionRepo, apiDocRepo, smpClient } = buildService();
+    const callServiceData = [{ id: "same" }];
+    const callServiceHash = hashData(callServiceData);
+    const oldTestInfoData = [{ id: "old-test" }];
+    const oldTestInfoHash = hashData(oldTestInfoData);
+    transactionRepo.findOne.mockResolvedValue(
+      makeTransaction({ syncStatus: "pending" }),
+    );
+    apiDocRepo.findOne.mockResolvedValue(
+      makeDoc({
+        lastSmpCallServiceHash: callServiceHash,
+        lastSmpTestInfoHash: oldTestInfoHash,
+      }),
+    );
+    smpClient.selectCallServiceInfoList.mockResolvedValue(
+      makeCallServiceResponse(callServiceData),
+    );
+    smpClient.selectTestInfoList.mockResolvedValue(
+      makeTestInfoResponse([{ id: "new-test" }]),
+    );
+
+    const result = await RequestContext.run("test-user", () =>
+      service.refreshTransactionDocumentFromSmp("p1", "tx-1"),
+    );
+
+    expect(result.syncStatus).toBe("pending");
+    expect(result.needsRegenerate).toBe(false);
+    expect(result.changed).toBe(true);
+    expect(transactionRepo.save).not.toHaveBeenCalled();
   });
 });

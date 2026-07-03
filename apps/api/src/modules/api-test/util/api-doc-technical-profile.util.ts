@@ -233,6 +233,7 @@ export function buildEndpointContextForPrompt(
     structuredDoc: string;
     requestNotes?: string;
     responseNotes?: string;
+    exampleMessage?: string;
   },
 ): string {
   const formatLabel =
@@ -289,6 +290,20 @@ export function buildEndpointContextForPrompt(
       "- 响应报文示例：",
       "```",
       truncateText(input.responseNotes.trim(), 3000),
+      "```",
+    );
+  }
+  if (input.exampleMessage?.trim()) {
+    lines.push(
+      "",
+      "## 示例报文（测试人员维护，生成时须优先参照）",
+      "以下为用户提供的真实报文样例。生成 bodyOverrides 时：",
+      "1. 字段名必须与「请求字段目录」中的节点代码一致",
+      "2. 取值风格、数据类型、格式须与示例报文保持一致",
+      "3. 正向案例以示例为基准；反向案例仅变更被测字段，其余参照示例",
+      "4. 禁止编造示例中不存在的字段结构",
+      "```",
+      truncateText(input.exampleMessage.trim(), 3000),
       "```",
     );
   }

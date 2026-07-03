@@ -108,3 +108,11 @@ export function buildFieldCatalogSummary(canonicalDoc: string): string {
     ...lines,
   ].join("\n");
 }
+
+export function extractExampleMessage(structuredDoc: string): string {
+  return extractApiDocSection(structuredDoc, "示例报文").trim();
+}
+
+export function hasExampleMessage(structuredDoc: string): boolean {
+  return Boolean(extractExampleMessage(structuredDoc));
+}

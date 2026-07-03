@@ -55,6 +55,4 @@ export interface AppConfig {
     /** demo 模式请求超时（毫秒） */
     requestTimeoutMs: number;
   };
-  /** 接口案例生成模式：plan（AI 只填字段覆盖值）| legacy（AI 输出完整报文） */
-  apiCasePlanMode: "plan" | "legacy";
 }

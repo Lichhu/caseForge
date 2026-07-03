@@ -1,4 +1,8 @@
-import { Injectable, BadRequestException, NotFoundException } from "@nestjs/common";
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
@@ -7,9 +11,17 @@ import {
   applyPdfCjkFont,
   formatRunItemStatus,
 } from "@common/pdf/pdf-cjk-font.util";
-import { buildApiReportHtml } from "@api-test/util/api-report-html.util";
+import {
+  buildApiReportHtml,
+  type ApiReportContext,
+  type ReportAssertionMeta,
+  type ReportCaseMeta,
+} from "@api-test/util/api-report-html.util";
 import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
 import { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
+import { ApiTestEnvironmentEntity } from "@api-test/entity/api-test-environment.entity";
+import { ApiTestExecutionSetEntity } from "@api-test/entity/api-test-execution-set.entity";
+import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { ApiExecutionService } from "./api-execution.service";
 
 type RunDetail = Awaited<ReturnType<ApiExecutionService["getRunDetail"]>>;
@@ -22,6 +34,12 @@ export class ApiReportService {
     private readonly caseRepo: Repository<ApiTestCaseEntity>,
     @InjectRepository(ApiEndpointEntity)
     private readonly endpointRepo: Repository<ApiEndpointEntity>,
+    @InjectRepository(ApiTestEnvironmentEntity)
+    private readonly envRepo: Repository<ApiTestEnvironmentEntity>,
+    @InjectRepository(ApiTestExecutionSetEntity)
+    private readonly execSetRepo: Repository<ApiTestExecutionSetEntity>,
+    @InjectRepository(CaseProjectEntity)
+    private readonly projectRepo: Repository<CaseProjectEntity>,
   ) {}
 
   async summary(projectId: string, runId?: string, transactionId?: string) {
@@ -89,7 +107,8 @@ export class ApiReportService {
       };
     }
     if (format === "html") {
-      const html = buildApiReportHtml(run);
+      const context = await this.buildReportContext(run);
+      const html = buildApiReportHtml(run, context);
       return {
         buffer: Buffer.from(html, "utf-8"),
         fileName: `api-test-run-${runId}.html`,
@@ -142,6 +161,104 @@ export class ApiReportService {
       passedCount,
       failedCount,
       errorCount,
+    };
+  }
+
+  private async buildReportContext(
+    run: RunDetail,
+  ): Promise<Partial<ApiReportContext>> {
+    const [env, execSet, project] = await Promise.all([
+      run.environmentId
+        ? this.envRepo.findOne({
+            where: { id: run.environmentId },
+            select: ["id", "name"],
+          })
+        : null,
+      run.executionSetId
+        ? this.execSetRepo.findOne({
+            where: { id: run.executionSetId },
+            select: ["id", "name"],
+          })
+        : null,
+      this.projectRepo.findOne({
+        where: { id: run.projectId },
+        select: ["id", "title", "requirementNo"],
+      }),
+    ]);
+
+    const caseIds = (run.items ?? [])
+      .map((item) => item.caseId)
+      .filter(Boolean);
+    const cases = caseIds.length
+      ? await this.caseRepo.find({
+          where: { id: In(caseIds) },
+          select: [
+            "id",
+            "caseNo",
+            "transactionCode",
+            "description",
+            "expected",
+          ],
+        })
+      : [];
+
+    const caseMeta: Record<string, ReportCaseMeta> = {};
+    const transactionCodes = new Set<string>();
+
+    for (const c of cases) {
+      if (c.transactionCode) transactionCodes.add(c.transactionCode);
+      const assertionMeta: Record<string, ReportAssertionMeta> = {};
+
+      if (c.expected?.bodyAssertions?.length) {
+        for (const ba of c.expected.bodyAssertions) {
+          const name =
+            ba.description || `${ba.type}${ba.path ? ` ${ba.path}` : ""}`;
+          const operatorMap: Record<string, string> = {
+            equals: "eq",
+            jsonPath: "eq",
+            contains: "contains",
+            matches: "matches",
+          };
+          assertionMeta[name] = {
+            type: ba.type,
+            operator: operatorMap[ba.type] ?? "eq",
+            expression: ba.path ?? "",
+          };
+        }
+      }
+
+      assertionMeta["HTTP 状态码"] = {
+        type: "status",
+        operator: "eq",
+        expression: "statusCode",
+      };
+      if (c.expected?.maxDurationMs) {
+        assertionMeta["响应时间"] = {
+          type: "duration",
+          operator: "lte",
+          expression: "maxDurationMs",
+        };
+      }
+
+      caseMeta[c.id] = {
+        caseNo: c.caseNo,
+        transactionCode: c.transactionCode,
+        description: c.description,
+        assertionMeta,
+      };
+    }
+
+    const reportCode =
+      project?.requirementNo ||
+      project?.title ||
+      run.id.slice(0, 8).toUpperCase();
+
+    return {
+      reportCode,
+      setName: execSet?.name ?? "—",
+      envName: env?.name ?? "—",
+      transactionCount: transactionCodes.size,
+      caseMeta,
     };
   }
 
@@ -204,7 +321,8 @@ export class ApiReportService {
         run.totalCount > 0
           ? ((run.passedCount / run.totalCount) * 100).toFixed(1)
           : "0";
-      const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+      const pageWidth =
+        doc.page.width - doc.page.margins.left - doc.page.margins.right;
 
       doc.fontSize(20).text("接口测试执行报告", { align: "center" });
       doc.moveDown(0.8);
@@ -217,7 +335,10 @@ export class ApiReportService {
       this.drawPdfStatusBars(doc, pageWidth, run);
       doc.moveDown(1.2);
 
-      doc.fillColor("#101828").fontSize(13).text("案例明细", { underline: true });
+      doc
+        .fillColor("#101828")
+        .fontSize(13)
+        .text("案例明细", { underline: true });
       doc.moveDown(0.6);
       doc.fontSize(10);
       for (const item of run.items) {
@@ -233,11 +354,16 @@ export class ApiReportService {
             : item.status === "failed"
               ? "#dc2626"
               : "#d97706";
-        doc.fillColor("#101828").text(`• ${item.caseTitle}`, { continued: true });
-        doc.fillColor(statusColor).text(`  [${statusLabel}]  ${item.durationMs}ms`);
-        doc.fillColor("#667085").fontSize(9).text(
-          `  请求：${String(item.requestSnapshot.url ?? "—")}`,
-        );
+        doc
+          .fillColor("#101828")
+          .text(`• ${item.caseTitle}`, { continued: true });
+        doc
+          .fillColor(statusColor)
+          .text(`  [${statusLabel}]  ${item.durationMs}ms`);
+        doc
+          .fillColor("#667085")
+          .fontSize(9)
+          .text(`  请求：${String(item.requestSnapshot.url ?? "—")}`);
         if (item.status !== "passed") {
           const failed = item.assertions.filter((a) => !a.passed);
           for (const assertion of failed.slice(0, 3)) {
@@ -273,13 +399,21 @@ export class ApiReportService {
     ];
     cards.forEach((card, index) => {
       const x = startX + index * (cardWidth + gap);
-      doc.roundedRect(x, startY, cardWidth, cardHeight, 6).fillAndStroke("#f9fafb", "#eaecf0");
-      doc.fillColor("#667085").fontSize(9).text(card.label, x + 10, startY + 10, {
-        width: cardWidth - 20,
-      });
-      doc.fillColor(card.color).fontSize(16).text(card.value, x + 10, startY + 26, {
-        width: cardWidth - 20,
-      });
+      doc
+        .roundedRect(x, startY, cardWidth, cardHeight, 6)
+        .fillAndStroke("#f9fafb", "#eaecf0");
+      doc
+        .fillColor("#667085")
+        .fontSize(9)
+        .text(card.label, x + 10, startY + 10, {
+          width: cardWidth - 20,
+        });
+      doc
+        .fillColor(card.color)
+        .fontSize(16)
+        .text(card.value, x + 10, startY + 26, {
+          width: cardWidth - 20,
+        });
     });
     doc.y = startY + cardHeight;
   }
@@ -301,9 +435,12 @@ export class ApiReportService {
     doc.moveDown(0.5);
     for (const row of rows) {
       const y = doc.y;
-      doc.fillColor("#475467").fontSize(10).text(row.label, doc.page.margins.left, y, {
-        width: labelWidth,
-      });
+      doc
+        .fillColor("#475467")
+        .fontSize(10)
+        .text(row.label, doc.page.margins.left, y, {
+          width: labelWidth,
+        });
       const ratio = run.totalCount > 0 ? row.value / run.totalCount : 0;
       const barWidth = Math.max(ratio > 0 ? 8 : 0, barMaxWidth * ratio);
       const barX = doc.page.margins.left + labelWidth;
@@ -311,9 +448,11 @@ export class ApiReportService {
       if (barWidth > 0) {
         doc.roundedRect(barX, y + 1, barWidth, barHeight, 3).fill(row.color);
       }
-      doc.fillColor("#344054").text(String(row.value), barX + barMaxWidth + 8, y + 2, {
-        width: 40,
-      });
+      doc
+        .fillColor("#344054")
+        .text(String(row.value), barX + barMaxWidth + 8, y + 2, {
+          width: 40,
+        });
       doc.y = y + barHeight + 10;
     }
   }

@@ -24,7 +24,6 @@ import { ApiTransactionEntity } from "@api-test/entity/api-transaction.entity";
 import { SaveApiCaseDto } from "@api-test/dto/save-api-case.dto";
 import { ListApiCasesDto } from "@api-test/dto/list-api-cases.dto";
 import {
-  generateCasesWithAi,
   generateCasesWithPlan,
   nextCaseNo,
 } from "@api-test/util/api-case-ai.util";
@@ -38,8 +37,7 @@ import {
   normalizeCaseForgePageSize,
 } from "@case-forge/shared";
 import { ApiCaseGenerateQueueService } from "./api-case-generate-queue.service";
-import { ConfigService } from "@nestjs/config";
-import type { AppConfig } from "@config/app-config.types";
+import { ApiCaseGenerateJobEntity } from "@api-test/entity/api-case-generate-job.entity";
 
 @Injectable()
 export class ApiCaseService {
@@ -61,7 +59,8 @@ export class ApiCaseService {
     private readonly aiWorkflow: AiWorkflowService,
     @Inject(forwardRef(() => ApiCaseGenerateQueueService))
     private readonly generateQueueService: ApiCaseGenerateQueueService,
-    private readonly config: ConfigService<AppConfig>,
+    @InjectRepository(ApiCaseGenerateJobEntity)
+    private readonly generateJobRepo: Repository<ApiCaseGenerateJobEntity>,
   ) {}
 
   async listCases(
@@ -81,12 +80,20 @@ export class ApiCaseService {
       .andWhere("c.createdBy = :userName", {
         userName: RequestContext.getUserName(),
       })
-      .andWhere("e.transactionId = :transactionId", { transactionId })
+      .andWhere("e.transactionId = :transactionId", { transactionId });
+
+    if (query.generateVersion != null) {
+      qb.andWhere(
+        "JSON_EXTRACT(c.metadata, '$.generateVersion') = :generateVersion",
+        { generateVersion: query.generateVersion },
+      );
+    }
+
+    const [rows, count] = await qb
       .orderBy("c.updatedAt", "DESC")
       .skip((page - 1) * pageSize)
-      .take(pageSize);
-
-    const [rows, count] = await qb.getManyAndCount();
+      .take(pageSize)
+      .getManyAndCount();
     return {
       rows: rows.map(toPublicApiCase),
       count,
@@ -229,16 +236,83 @@ export class ApiCaseService {
     return this.generateQueueService.cancel(projectId, transactionId);
   }
 
+  async listGenerateHistory(projectId: string, transactionId: string) {
+    await this.requireTransaction(projectId, transactionId);
+    const jobs = await this.generateJobRepo.find({
+      where: { projectId, transactionId },
+      order: { queuedAt: "DESC" },
+      take: 50,
+    });
+    if (!jobs.length) return [];
+
+    const allPromptIds = [...new Set(jobs.flatMap((j) => j.promptIds ?? []))];
+    const prompts = allPromptIds.length
+      ? await this.promptRepo.find({
+          where: scopedWhereWithSystem({ id: In(allPromptIds) }),
+          relations: ["scenario"],
+        })
+      : [];
+    const promptMap = new Map(prompts.map((p) => [p.id, p]));
+
+    return jobs.map((job) => ({
+      jobId: job.id,
+      version: job.version ?? null,
+      status: job.status,
+      resultCount: job.resultCount ?? null,
+      promptIds: job.promptIds ?? [],
+      promptSummaries: (job.promptIds ?? []).map((id) => {
+        const p = promptMap.get(id);
+        return {
+          id,
+          name: p?.name?.trim() || null,
+          scenarioName: p?.scenario?.name?.trim() || null,
+        };
+      }),
+      createdBy: job.createdBy ?? null,
+      queuedAt: job.queuedAt,
+      finishedAt: job.finishedAt ?? null,
+      errorMessage: job.errorMessage ?? null,
+    }));
+  }
+
   async runQueuedGenerateJob(input: {
     projectId: string;
     transactionId: string;
     endpointIds?: string[];
     promptIds?: string[];
+    version?: number;
+    jobId?: string;
   }) {
     return this.generateCasesInternal(input.projectId, input.transactionId, {
       endpointIds: input.endpointIds,
       promptIds: input.promptIds,
+      version: input.version,
+      jobId: input.jobId,
     });
+  }
+
+  async cleanupGeneratedCases(
+    projectId: string,
+    transactionId: string,
+    version: number,
+  ) {
+    const endpoints = await this.endpointRepo.find({
+      where: { projectId, transactionId },
+      select: ["id"],
+    });
+    if (!endpoints.length) return 0;
+    const endpointIds = endpoints.map((e) => e.id);
+    const cases = await this.caseRepo.find({
+      where: { projectId, endpointId: In(endpointIds) },
+    });
+    const toDelete = cases.filter(
+      (c) => c.metadata?.generateVersion === version,
+    );
+    if (!toDelete.length) return 0;
+    const caseIds = toDelete.map((c) => c.id);
+    await this.setCaseRepo.delete({ caseId: In(caseIds) });
+    await this.caseRepo.delete({ id: In(caseIds), projectId });
+    return toDelete.length;
   }
 
   async checkDocReadiness(projectId: string, transactionId: string) {
@@ -334,7 +408,12 @@ export class ApiCaseService {
   private async generateCasesInternal(
     projectId: string,
     transactionId: string,
-    options?: { endpointIds?: string[]; promptIds?: string[] },
+    options?: {
+      endpointIds?: string[];
+      promptIds?: string[];
+      version?: number;
+      jobId?: string;
+    },
   ) {
     const transaction = await this.requireTransaction(projectId, transactionId);
     const endpointIds = options?.endpointIds;
@@ -374,31 +453,39 @@ export class ApiCaseService {
           "AI Chat 或 at-case-skill 未配置，请检查 AI_CHAT_URL 与 AT_CASE_SKILL_URL",
         );
       }
-      const usePlanMode =
-        this.config.get("apiCasePlanMode", { infer: true }) !== "legacy";
-      const payloads = usePlanMode
-        ? await generateCasesWithPlan(
-            this.aiWorkflow,
-            {
-              transactionCode: transaction.code,
-              structuredDoc,
-              endpoint,
-              scenarioPromptText,
-              smpData: doc.smpData,
-            },
-            this.logger,
-          )
-        : await generateCasesWithAi(
-            this.aiWorkflow,
-            {
-              transactionCode: transaction.code,
-              structuredDoc,
-              endpoint,
-              scenarioPromptText,
-              smpData: doc.smpData,
-            },
-            this.logger,
+      if (options?.jobId) {
+        const job = await this.generateJobRepo.findOne({
+          where: { id: options.jobId },
+        });
+        if (job?.status === "cancelled") {
+          this.logger.log(`案例生成已取消，跳过端点 ${endpoint.id} 的案例保存`);
+          continue;
+        }
+      }
+
+      const payloads = await generateCasesWithPlan(
+        this.aiWorkflow,
+        {
+          transactionCode: transaction.code,
+          structuredDoc,
+          endpoint,
+          scenarioPromptText,
+          smpData: doc.smpData,
+        },
+        this.logger,
+      );
+
+      if (options?.jobId) {
+        const job = await this.generateJobRepo.findOne({
+          where: { id: options.jobId },
+        });
+        if (job?.status === "cancelled") {
+          this.logger.log(
+            `案例生成已取消，丢弃端点 ${endpoint.id} 的 ${payloads.length} 条生成结果`,
           );
+          continue;
+        }
+      }
 
       for (const payload of payloads) {
         const entity = this.caseRepo.create({
@@ -410,6 +497,7 @@ export class ApiCaseService {
           metadata: {
             source: "ai",
             promptIds: [...promptIds],
+            generateVersion: options?.version,
           },
           ...auditFieldsForCreate(),
         });

@@ -348,6 +348,15 @@ export class ApiTestController {
     return this.apiCaseService.cancelGenerate(projectId, transactionId);
   }
 
+  @Get(":projectId/transactions/:transactionId/cases/generate/history")
+  @ApiOperation({ summary: "查询接口案例生成历史（含版本号与场景提示词）" })
+  listGenerateHistory(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+  ) {
+    return this.apiCaseService.listGenerateHistory(projectId, transactionId);
+  }
+
   @Get(":projectId/environments")
   listEnvironments(@Param("projectId") projectId: string) {
     return this.apiEnvironmentService.listEnvironments(projectId);
@@ -552,6 +561,9 @@ export class ApiTestController {
       environmentServiceId: body.environmentServiceId,
       transactionId,
       concurrency: body.concurrency,
+      encoding: body.encoding,
+      executionSetId: body.executionSetId,
+      runId: body.runId,
     });
   }
 
@@ -563,6 +575,11 @@ export class ApiTestController {
   @Get(":projectId/runs/:runId")
   getRun(@Param("projectId") projectId: string, @Param("runId") runId: string) {
     return this.apiExecutionService.getRunDetail(projectId, runId);
+  }
+
+  @Delete(":projectId/runs/:runId")
+  deleteRun(@Param("projectId") projectId: string, @Param("runId") runId: string) {
+    return this.apiExecutionService.deleteRun(projectId, runId);
   }
 
   @Get(":projectId/transactions/:transactionId/reports/summary")

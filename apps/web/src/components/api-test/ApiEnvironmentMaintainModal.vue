@@ -324,7 +324,9 @@ const envEditingId = ref('');
 const serviceModalOpen = ref(false);
 const serviceEditingId = ref('');
 const envSearchKeyword = ref('');
-const collapsedScopes = reactive(new Set<ApiEnvironmentScope>());
+const collapsedScopes = reactive(
+  new Set<ApiEnvironmentScope>(API_ENVIRONMENT_SCOPES),
+);
 
 const envForm = reactive({
   scope: 'system' as ApiEnvironmentScope,
@@ -465,6 +467,7 @@ function removeEnv() {
   Modal.confirm({
     title: '删除环境？',
     content: '将同时无法使用该环境下的服务配置。',
+    centered: true,
     okText: '删除',
     cancelText: '取消',
     okType: 'danger',

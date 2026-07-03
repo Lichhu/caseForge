@@ -69,6 +69,7 @@ export class ApiExecutionService {
     transactionId?: string;
     concurrency?: number;
     encoding?: string;
+    runId?: string;
   }) {
     if (!input.caseIds.length) {
       throw new BadRequestException("请至少选择一条案例");
@@ -94,19 +95,43 @@ export class ApiExecutionService {
       throw new BadRequestException("未找到可执行的启用案例");
     }
 
-    const run = await this.runRepo.save(
-      this.runRepo.create({
-        projectId: input.projectId,
-        environmentId: env.id,
-        environmentServiceId: input.environmentServiceId,
-        executionSetId: input.executionSetId,
-        transactionId: input.transactionId,
-        status: "running",
-        totalCount: cases.length,
-        concurrency,
-        ...auditFieldsForCreate(),
-      }),
-    );
+    let run: ApiTestRunEntity;
+    if (input.runId) {
+      const existing = await this.runRepo.findOne({
+        where: scopedWhere({ projectId: input.projectId, id: input.runId }),
+      });
+      if (!existing) {
+        throw new BadRequestException("执行记录不存在");
+      }
+      await this.runItemRepo.delete({ runId: existing.id });
+      existing.environmentId = env.id;
+      existing.environmentServiceId = input.environmentServiceId;
+      existing.executionSetId =
+        input.executionSetId ?? existing.executionSetId;
+      existing.transactionId = input.transactionId ?? existing.transactionId;
+      existing.status = "running";
+      existing.totalCount = cases.length;
+      existing.passedCount = 0;
+      existing.failedCount = 0;
+      existing.errorCount = 0;
+      existing.concurrency = concurrency;
+      existing.finishedAt = undefined;
+      run = await this.runRepo.save(existing);
+    } else {
+      run = await this.runRepo.save(
+        this.runRepo.create({
+          projectId: input.projectId,
+          environmentId: env.id,
+          environmentServiceId: input.environmentServiceId,
+          executionSetId: input.executionSetId,
+          transactionId: input.transactionId,
+          status: "running",
+          totalCount: cases.length,
+          concurrency,
+          ...auditFieldsForCreate(),
+        }),
+      );
+    }
 
     const vars = buildRuntimeVariables(env.variables, env.secrets);
     const items: ApiTestRunItemEntity[] = [];
@@ -136,7 +161,16 @@ export class ApiExecutionService {
     run.finishedAt = new Date();
     await this.runRepo.save(run);
 
-    return this.getRunDetail(input.projectId, run.id);
+    const detail = await this.getRunDetail(input.projectId, run.id);
+    if (input.executionSetId) {
+      await this.executionSetService.updateLastRun(input.executionSetId, {
+        runId: detail.id,
+        status: detail.status,
+        passedCount: detail.passedCount,
+        totalCount: detail.totalCount,
+      });
+    }
+    return detail;
   }
 
   async runExecutionSet(input: {
@@ -202,6 +236,31 @@ export class ApiExecutionService {
       order: { createdAt: "ASC" },
     });
     return toPublicApiRun(run, items);
+  }
+
+  async deleteRun(projectId: string, runId: string) {
+    const run = await this.runRepo.findOne({
+      where: scopedWhere({ projectId, id: runId }),
+    });
+    if (!run) {
+      throw new BadRequestException("执行记录不存在");
+    }
+    const executionSetId = run.executionSetId;
+    await this.runItemRepo.delete({ runId: run.id });
+    await this.runRepo.delete(run.id);
+    if (executionSetId) {
+      const [nextRun] = await this.runRepo.find({
+        where: scopedWhere({ projectId, executionSetId }),
+        order: { createdAt: "DESC" },
+        take: 1,
+      });
+      await this.executionSetService.clearLastRunIfMatches(
+        projectId,
+        executionSetId,
+        runId,
+        nextRun ?? null,
+      );
+    }
   }
 
   private async executeSingleCase(input: {

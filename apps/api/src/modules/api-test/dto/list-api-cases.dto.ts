@@ -17,4 +17,11 @@ export class ListApiCasesDto {
   @IsInt()
   @IsIn([...CASE_FORGE_PAGE_SIZE_OPTIONS])
   pageSize?: number;
+
+  @ApiPropertyOptional({ description: "按生成版本号筛选" })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  generateVersion?: number;
 }

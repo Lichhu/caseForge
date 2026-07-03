@@ -132,7 +132,7 @@ function canOpenStage(stage: ApiWorkspaceStage | string) {
   if (stage === 'api-cases') return Boolean(apiStore.canEnterCases);
   if (stage === 'api-runner') return Boolean(apiStore.canEnterRunner);
   if (stage === 'api-report') {
-    return Boolean(apiStore.canEnterCases) || apiStore.transactionRuns.length > 0;
+    return Boolean(apiStore.canEnterCases) || apiStore.reportRuns.length > 0;
   }
   return false;
 }

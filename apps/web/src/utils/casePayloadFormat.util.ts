@@ -477,6 +477,46 @@ function beautifyPayloadValue(value: unknown): unknown {
   return value;
 }
 
+/** 执行结果快照字段：展开 \\n \\t，XML 自动缩进 */
+export function formatRunSnapshotField(value: unknown): string {
+  if (value == null) return "—";
+  const formatted = beautifyPayloadValue(value);
+  if (typeof formatted === "string") return formatted;
+  if (typeof formatted === "object") {
+    return JSON.stringify(formatted, null, 2);
+  }
+  return String(formatted);
+}
+
+/** 执行结果快照整体 JSON 展示 */
+export function formatRunSnapshotForDisplay(value: unknown): string {
+  if (value == null) return "—";
+  if (typeof value === "string") {
+    try {
+      return JSON.stringify(
+        beautifyPayloadValue(JSON.parse(value)),
+        null,
+        2,
+      );
+    } catch {
+      return formatRunSnapshotField(value);
+    }
+  }
+  return JSON.stringify(beautifyPayloadValue(value), null, 2);
+}
+
+/** 将请求/响应快照拆成元信息与 Body，Body 单独完整展示 */
+export function splitRunSnapshotForDisplay(
+  snapshot: Record<string, unknown> | null | undefined,
+): { meta: string; body: string | null } {
+  if (!snapshot) return { meta: "—", body: null };
+  const { body, ...rest } = snapshot;
+  const meta = JSON.stringify(beautifyPayloadValue(rest), null, 2);
+  const bodyText =
+    body == null || body === "" ? null : formatRunSnapshotField(body);
+  return { meta, body: bodyText };
+}
+
 /** 美化案例请求/预期 JSON：缩进 JSON，并格式化内嵌 XML 字符串 */
 export function beautifyCasePayloadJson(text: string): string {
   const parsed: unknown = JSON.parse(text.trim());

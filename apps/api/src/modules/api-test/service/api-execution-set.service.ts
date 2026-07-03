@@ -191,6 +191,43 @@ export class ApiExecutionSetService {
     });
   }
 
+  async clearLastRunIfMatches(
+    projectId: string,
+    setId: string,
+    runId: string,
+    nextRun?: {
+      id: string;
+      status: "running" | "completed" | "failed";
+      passedCount: number;
+      totalCount: number;
+      finishedAt?: Date;
+      createdAt: Date;
+    } | null,
+  ) {
+    const set = await this.setRepo.findOne({
+      where: scopedWhere({ projectId, id: setId }),
+    });
+    if (!set || set.lastRunId !== runId) {
+      return;
+    }
+    if (nextRun) {
+      await this.setRepo.update(setId, {
+        lastRunId: nextRun.id,
+        lastRunStatus: nextRun.status,
+        lastRunAt: nextRun.finishedAt ?? nextRun.createdAt,
+        lastPassedCount: nextRun.passedCount,
+        lastTotalCount: nextRun.totalCount,
+      });
+      return;
+    }
+    set.lastRunId = undefined;
+    set.lastRunStatus = undefined;
+    set.lastRunAt = undefined;
+    set.lastPassedCount = 0;
+    set.lastTotalCount = 0;
+    await this.setRepo.save(set);
+  }
+
   async requireSet(projectId: string, transactionId: string, setId: string) {
     const set = await this.setRepo.findOne({
       where: scopedWhere({ projectId, transactionId, id: setId }),

@@ -193,7 +193,15 @@ export class SmpSyncService {
     projectId: string,
     transactionId: string,
   ): Promise<{
+    /**
+     * 本次 SMP 拉取的数据 hash 是否相对于上次刷新发生了变化。
+     * 注意：仅表示数据变化，不代表 UI 需要提示用户重新生成。
+     */
     changed: boolean;
+    /** 是否已将交易码 syncStatus 升级为 "changed"，前端应据此提示重新生成。 */
+    needsRegenerate: boolean;
+    /** 刷新后交易码的 syncStatus。 */
+    syncStatus: ApiTransactionSyncStatus;
     callServiceList: SmpCallServiceInfoItem[];
     serviceTestList: SmpTestInfoItem[];
     approvalInfoList: unknown[];
@@ -254,11 +262,27 @@ export class SmpSyncService {
     }
 
     const previousCallServiceHash = doc.lastSmpCallServiceHash;
+    const previousTestInfoHash = doc.lastSmpTestInfoHash;
     const hasPreviousHash = Boolean(previousCallServiceHash);
-    const changed =
+    const callServiceChanged =
       hasPreviousHash && previousCallServiceHash !== callServiceHash;
+    const testInfoChanged =
+      Boolean(previousTestInfoHash) && previousTestInfoHash !== testInfoHash;
+    const dataChanged = callServiceChanged || testInfoChanged;
+    const generatedCallServiceHash = doc.lastGeneratedSmpCallServiceHash;
+    const generatedTestInfoHash = doc.lastGeneratedSmpTestInfoHash;
+    const hasGeneratedHash = Boolean(generatedCallServiceHash);
+    const generatedCallServiceChanged =
+      hasGeneratedHash && generatedCallServiceHash !== callServiceHash;
+    const generatedTestInfoChanged =
+      Boolean(generatedTestInfoHash) && generatedTestInfoHash !== testInfoHash;
+    const generatedChanged =
+      generatedCallServiceChanged || generatedTestInfoChanged;
+    const shouldMarkChanged =
+      transaction.syncStatus === "success" &&
+      (hasGeneratedHash ? generatedChanged : dataChanged);
 
-    if (changed) {
+    if (shouldMarkChanged) {
       transaction.syncStatus = "changed";
       transaction.syncError = undefined;
       await this.transactionRepo.save(transaction);
@@ -288,7 +312,9 @@ export class SmpSyncService {
     );
 
     return {
-      changed,
+      changed: dataChanged,
+      needsRegenerate: shouldMarkChanged,
+      syncStatus: transaction.syncStatus ?? "pending",
       callServiceList: callService.data,
       serviceTestList: testInfo.data,
       approvalInfoList: [],

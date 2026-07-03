@@ -29,7 +29,7 @@
             </template>
             <a-descriptions :column="2" size="small" bordered>
               <a-descriptions-item
-                v-for="key in callServiceKeys(item as Record<string, unknown>)"
+                v-for="key in callServiceMetaKeys(item as Record<string, unknown>)"
                 :key="key"
                 :label="key"
               >
@@ -39,6 +39,41 @@
                 <span v-else class="smp-text-value">{{ formatValue((item as Record<string, unknown>)[key]) }}</span>
               </a-descriptions-item>
             </a-descriptions>
+            <div
+              v-if="hasCallServiceFieldLists(item as Record<string, unknown>)"
+              class="smp-field-lists"
+            >
+              <a-row :gutter="16" class="smp-field-list-row">
+                <a-col
+                  v-for="fieldKey in CALL_SERVICE_REQUEST_LIST_KEYS"
+                  :key="fieldKey"
+                  :xs="24"
+                  :lg="12"
+                >
+                  <div class="smp-field-list-block">
+                    <div class="smp-field-list-title">{{ callServiceListLabel(fieldKey) }}</div>
+                    <pre class="smp-json-body">{{
+                      formatJson((item as Record<string, unknown>)[fieldKey])
+                    }}</pre>
+                  </div>
+                </a-col>
+              </a-row>
+              <a-row :gutter="16" class="smp-field-list-row">
+                <a-col
+                  v-for="fieldKey in CALL_SERVICE_RESPONSE_LIST_KEYS"
+                  :key="fieldKey"
+                  :xs="24"
+                  :lg="12"
+                >
+                  <div class="smp-field-list-block">
+                    <div class="smp-field-list-title">{{ callServiceListLabel(fieldKey) }}</div>
+                    <pre class="smp-json-body">{{
+                      formatJson((item as Record<string, unknown>)[fieldKey])
+                    }}</pre>
+                  </div>
+                </a-col>
+              </a-row>
+            </div>
           </a-card>
         </div>
       </section>
@@ -59,16 +94,14 @@
               <a-tag color="blue">{{ (item as Record<string, unknown>).requestMethod || '—' }}</a-tag>
               <span class="smp-test-info-url">{{ (item as Record<string, unknown>).requestUrl || '—' }}</span>
             </div>
-            <a-row :gutter="16">
-              <a-col :span="24">
+            <a-row :gutter="16" class="smp-test-payload-row">
+              <a-col :xs="24" :lg="12">
                 <div class="smp-json-block">
                   <div class="smp-json-block-title">请求报文</div>
                   <pre class="smp-json-body">{{ formatJsonBody((item as Record<string, unknown>).requestBody) }}</pre>
                 </div>
               </a-col>
-            </a-row>
-            <a-row :gutter="16">
-              <a-col :span="24">
+              <a-col :xs="24" :lg="12">
                 <div class="smp-json-block">
                   <div class="smp-json-block-title">响应报文</div>
                   <pre class="smp-json-body">{{ formatJsonBody((item as Record<string, unknown>).responseBody) }}</pre>
@@ -130,11 +163,58 @@ const approvalColumns = computed(() => {
   return keys.map((key) => ({ title: key, key, dataIndex: key }));
 });
 
-function callServiceKeys(item: Record<string, unknown>): string[] {
-  const priority = ['serviceCode', 'tranCode', 'serviceCname', 'descript', 'systemName', 'callMethod', 'messageType', 'serviceType', 'serviceAttribute', 'systemId', 'bus'];
-  const ordered = priority.filter((key) => key in item);
-  const rest = Object.keys(item).filter((key) => !priority.includes(key));
+const CALL_SERVICE_LIST_KEYS = [
+  'requestHeadList',
+  'requestBodyList',
+  'responseHeadList',
+  'responseBodyList',
+] as const;
+
+const CALL_SERVICE_REQUEST_LIST_KEYS = [
+  'requestHeadList',
+  'requestBodyList',
+] as const;
+
+const CALL_SERVICE_RESPONSE_LIST_KEYS = [
+  'responseHeadList',
+  'responseBodyList',
+] as const;
+
+const CALL_SERVICE_LIST_KEY_SET = new Set<string>(CALL_SERVICE_LIST_KEYS);
+
+function callServiceMetaKeys(item: Record<string, unknown>): string[] {
+  const priority = [
+    'serviceCode',
+    'tranCode',
+    'serviceCname',
+    'descript',
+    'systemName',
+    'callMethod',
+    'messageType',
+    'serviceType',
+    'serviceAttribute',
+    'systemId',
+    'bus',
+  ];
+  const ordered = priority.filter((key) => key in item && !CALL_SERVICE_LIST_KEY_SET.has(key));
+  const rest = Object.keys(item).filter(
+    (key) => !priority.includes(key) && !CALL_SERVICE_LIST_KEY_SET.has(key),
+  );
   return [...ordered, ...rest];
+}
+
+function hasCallServiceFieldLists(item: Record<string, unknown>): boolean {
+  return CALL_SERVICE_LIST_KEYS.some((key) => key in item);
+}
+
+function callServiceListLabel(key: (typeof CALL_SERVICE_LIST_KEYS)[number]): string {
+  const labels: Record<(typeof CALL_SERVICE_LIST_KEYS)[number], string> = {
+    requestHeadList: 'requestHeadList',
+    requestBodyList: 'requestBodyList',
+    responseHeadList: 'responseHeadList',
+    responseBodyList: 'responseBodyList',
+  };
+  return labels[key];
 }
 
 function isNested(value: unknown): boolean {
@@ -217,8 +297,22 @@ function formatJsonBody(value: unknown): string {
   word-break: break-all;
 }
 
-.smp-json-block {
+.smp-test-payload-row {
   margin-bottom: 16px;
+  row-gap: 16px;
+}
+
+.smp-test-payload-row :deep(.ant-col) {
+  display: flex;
+  min-width: 0;
+}
+
+.smp-json-block {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  margin-bottom: 0;
 }
 
 .smp-json-block-title {
@@ -229,10 +323,9 @@ function formatJsonBody(value: unknown): string {
 }
 
 .smp-json-body {
-  max-height: 240px;
+  flex: 1;
   margin: 0;
   padding: 12px;
-  overflow: auto;
   border-radius: 6px;
   background: #f9fafb;
   color: #344054;
@@ -248,12 +341,18 @@ function formatJsonBody(value: unknown): string {
   word-break: break-word;
 }
 
+.smp-nested-value {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
 .smp-nested-value pre {
-  max-width: 360px;
-  max-height: 200px;
+  width: 100%;
+  max-width: none;
   margin: 0;
   padding: 8px;
-  overflow: auto;
+  overflow: visible;
   border-radius: 4px;
   background: #f9fafb;
   color: #667085;
@@ -261,6 +360,50 @@ function formatJsonBody(value: unknown): string {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.smp-call-service-card :deep(.ant-descriptions-item-content),
+.smp-call-service-card :deep(.ant-descriptions-item-label) {
+  vertical-align: top;
+}
+
+.smp-field-lists {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #f2f4f7;
+}
+
+.smp-field-list-row {
+  row-gap: 16px;
+}
+
+.smp-field-list-row + .smp-field-list-row {
+  margin-top: 16px;
+}
+
+.smp-field-list-row :deep(.ant-col) {
+  display: flex;
+  min-width: 0;
+}
+
+.smp-field-list-block {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.smp-field-list-title {
+  margin-bottom: 8px;
+  color: #344054;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.smp-field-list-block .smp-json-body {
+  flex: 1;
+  max-height: none;
+  overflow: visible;
 }
 
 .smp-test-meta {

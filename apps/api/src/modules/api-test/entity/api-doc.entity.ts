@@ -102,6 +102,22 @@ export class ApiDocEntity {
   @Column({ length: 64, nullable: true, name: "last_smp_test_info_hash" })
   lastSmpTestInfoHash?: string;
 
+  /** 上次案例生成成功时 SMP 服务调用数据的 hash（用于精确判断是否需要重新生成） */
+  @Column({
+    length: 64,
+    nullable: true,
+    name: "last_generated_smp_call_service_hash",
+  })
+  lastGeneratedSmpCallServiceHash?: string;
+
+  /** 上次案例生成成功时 SMP 接口测试数据的 hash（存档） */
+  @Column({
+    length: 64,
+    nullable: true,
+    name: "last_generated_smp_test_info_hash",
+  })
+  lastGeneratedSmpTestInfoHash?: string;
+
   @OneToMany(() => ApiEndpointEntity, (endpoint) => endpoint.apiDoc)
   endpoints: ApiEndpointEntity[];
 
