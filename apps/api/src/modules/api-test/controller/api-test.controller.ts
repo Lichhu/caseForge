@@ -300,7 +300,12 @@ export class ApiTestController {
     @Param("caseId") caseId: string,
     @Body() body: SaveApiCaseDto,
   ) {
-    return this.apiCaseService.updateCase(projectId, caseId, body);
+    return this.apiCaseService.updateCase(
+      projectId,
+      transactionId,
+      caseId,
+      body,
+    );
   }
 
   @Delete(":projectId/transactions/:transactionId/cases/:caseId")

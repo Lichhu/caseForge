@@ -95,9 +95,6 @@ export class ApiReportService {
     if (transactionId) {
       run = await this.filterRunByTransaction(projectId, transactionId, run);
     }
-    if (!run.items?.length) {
-      throw new NotFoundException("执行记录无明细，无法导出");
-    }
     if (format === "xlsx") {
       return {
         buffer: await this.toExcel(run),
@@ -130,6 +127,9 @@ export class ApiReportService {
     transactionId: string,
     run: RunDetail,
   ) {
+    if (run.transactionId && run.transactionId === transactionId) {
+      return run;
+    }
     const endpoints = await this.endpointRepo.find({
       where: { projectId, transactionId },
       select: ["id"],

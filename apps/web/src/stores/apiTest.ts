@@ -1114,6 +1114,7 @@ export const useApiTestStore = defineStore("apiTest", {
       transactionId: string,
       payload: Record<string, unknown>,
       caseId?: string,
+      options?: { silent?: boolean },
     ) {
       const saved = caseId
         ? await updateApiCase(projectId, transactionId, caseId, payload)
@@ -1127,7 +1128,9 @@ export const useApiTestStore = defineStore("apiTest", {
       if (!caseId) {
         this.activeCaseId = saved.id;
       }
-      message.success("案例已保存");
+      if (!options?.silent) {
+        message.success("案例已保存");
+      }
       return saved;
     },
     async removeCase(projectId: string, transactionId: string, caseId: string) {

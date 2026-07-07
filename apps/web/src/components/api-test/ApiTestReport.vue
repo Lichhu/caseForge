@@ -13,8 +13,12 @@
           :options="runOptions"
           placeholder="选择执行批次"
         />
-        <a-dropdown v-model:open="exportMenuOpen" trigger="click" :disabled="!selectedRunId">
-          <a-button :disabled="!selectedRunId">
+        <a-dropdown
+          v-model:open="exportMenuOpen"
+          trigger="click"
+          :disabled="!selectedRunId || !canExportReport"
+        >
+          <a-button :disabled="!selectedRunId || !canExportReport">
             <ExportOutlined />
             导出方式
             <DownOutlined
@@ -311,6 +315,8 @@ const passOutcomeLabel = computed(() => {
   return `通过 ${passed} 条，未通过 ${failed + error} 条`;
 });
 
+const canExportReport = computed(() => (summary.value?.total ?? 0) > 0);
+
 const passRingStyle = computed(() => {
   if (!summary.value) return {};
   const rate = Math.max(0, Math.min(100, summary.value.passRate));
@@ -465,6 +471,10 @@ async function exportXlsx() {
   const projectId = apiStore.activeProjectId;
   const transactionId = apiStore.activeTransactionId;
   if (!projectId || !transactionId || !selectedRunId.value) return;
+  if (!canExportReport.value) {
+    message.warning('当前批次在本交易码下无执行明细，无法导出');
+    return;
+  }
   try {
     await apiStore.exportReport(projectId, transactionId, selectedRunId.value, 'xlsx');
   } catch (error) {
@@ -476,6 +486,10 @@ async function exportPdf() {
   const projectId = apiStore.activeProjectId;
   const transactionId = apiStore.activeTransactionId;
   if (!projectId || !transactionId || !selectedRunId.value) return;
+  if (!canExportReport.value) {
+    message.warning('当前批次在本交易码下无执行明细，无法导出');
+    return;
+  }
   try {
     await apiStore.exportReport(projectId, transactionId, selectedRunId.value, 'pdf');
   } catch (error) {
@@ -487,6 +501,10 @@ async function exportHtml() {
   const projectId = apiStore.activeProjectId;
   const transactionId = apiStore.activeTransactionId;
   if (!projectId || !transactionId || !selectedRunId.value) return;
+  if (!canExportReport.value) {
+    message.warning('当前批次在本交易码下无执行明细，无法导出');
+    return;
+  }
   try {
     await apiStore.exportReport(projectId, transactionId, selectedRunId.value, 'html');
   } catch (error) {

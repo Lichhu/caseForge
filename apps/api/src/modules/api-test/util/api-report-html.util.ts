@@ -154,15 +154,15 @@ function stringifyValue(value: unknown): string {
   }
 }
 
-function requestUrl(snapshot: Record<string, unknown>): string {
-  const url = snapshot.url ?? snapshot.target ?? "";
+function requestUrl(snapshot?: Record<string, unknown>): string {
+  const url = snapshot?.url ?? snapshot?.target ?? "";
   return String(url || "—");
 }
 
-function requestMethodLabel(snapshot: Record<string, unknown>): string {
-  const transport = String(snapshot.transport ?? "http").toLowerCase();
+function requestMethodLabel(snapshot?: Record<string, unknown>): string {
+  const transport = String(snapshot?.transport ?? "http").toLowerCase();
   if (transport === "tcp") return "TCP请求";
-  const method = String(snapshot.method ?? "POST").toUpperCase();
+  const method = String(snapshot?.method ?? "POST").toUpperCase();
   return `${method}请求`;
 }
 

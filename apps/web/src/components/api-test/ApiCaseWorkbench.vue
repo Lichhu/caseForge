@@ -221,15 +221,6 @@
                       <label class="case-basic-label">创建人</label>
                       <a-input v-model:value="form.createdBy" size="small" disabled />
                     </div>
-                    <div class="case-basic-field case-basic-field--full">
-                      <label class="case-basic-label">绑定接口</label>
-                      <a-select
-                        v-model:value="form.endpointId"
-                        size="small"
-                        :options="endpointOptions"
-                        placeholder="选择接口"
-                      />
-                    </div>
                   </div>
                   <div class="case-basic-meta">
                     <div class="case-basic-meta-item">
@@ -432,29 +423,27 @@
                       </a-button>
                     </div>
                     <div class="case-assertion-toolbar-actions">
-                      <template v-if="debugResult">
-                        <div class="case-debug-response-meta">
-                          <span
-                            class="case-debug-status"
-                            :class="{ 'status-ok': debugResult.statusCode >= 200 && debugResult.statusCode < 300, 'status-err': debugResult.statusCode === 0 || debugResult.statusCode >= 400, 'status-tcp': debugResult.statusCode === -1 }"
-                          >
-                            {{ debugResult.error ? '请求失败' : debugResult.statusCode === -1 ? 'Socket 响应' : `${debugResult.statusCode}` }}
-                          </span>
-                          <span class="case-debug-duration">{{ debugResult.durationMs }}ms</span>
-                          <span class="case-debug-size">{{ debugResult.bodySize }} bytes</span>
-                        </div>
-                        <a-button
-                          type="primary"
-                          size="small"
-                          :loading="generatingAssertions"
-                          :disabled="!!debugResult.error"
-                          @click="onGenerateAssertions"
+                      <div v-if="debugResult" class="case-debug-response-meta">
+                        <span
+                          class="case-debug-status"
+                          :class="{ 'status-ok': debugResult.statusCode >= 200 && debugResult.statusCode < 300, 'status-err': debugResult.statusCode === 0 || debugResult.statusCode >= 400, 'status-tcp': debugResult.statusCode === -1 }"
                         >
-                          <template #icon><RobotOutlined /></template>
-                          AI 生成断言
-                        </a-button>
-                      </template>
-                      <span v-else class="case-panel-hint">选择环境并调试执行，再使用 AI 生成断言</span>
+                          {{ debugResult.error ? '请求失败' : debugResult.statusCode === -1 ? 'Socket 响应' : `${debugResult.statusCode}` }}
+                        </span>
+                        <span class="case-debug-duration">{{ debugResult.durationMs }}ms</span>
+                        <span class="case-debug-size">{{ debugResult.bodySize }} bytes</span>
+                      </div>
+                      <a-button
+                        type="primary"
+                        size="small"
+                        :loading="generatingAssertions"
+                        :disabled="!canGenerateAssertions"
+                        @click="onGenerateAssertions"
+                      >
+                        <template #icon><RobotOutlined /></template>
+                        AI 生成断言
+                      </a-button>
+                      <span v-if="!debugResult" class="case-panel-hint">选择环境并调试执行，再使用 AI 生成断言</span>
                     </div>
                   </div>
                   <div class="case-debug-response case-debug-response--full">
@@ -656,12 +645,53 @@ const batchMode = ref(false);
 const saving = ref(false);
 const isNewCase = ref(false);
 const syncingForm = ref(false);
-const debugRunning = ref(false);
-const generatingAssertions = ref(false);
+const debugRunningCaseKey = ref<string | null>(null);
+const generatingAssertionsCaseKey = ref<string | null>(null);
 const debugResult = ref<DebugRunResult | null>(null);
 const debugServiceId = ref<string>('');
 const loadedCaseId = ref('');
 const debugResponseTab = ref<'expected' | 'body' | 'assert' | 'headers'>('expected');
+
+function activeCaseKey() {
+  return isNewCase.value ? 'new-case' : (apiStore.activeCaseId || '');
+}
+
+function isStillOnCase(caseKey: string) {
+  return activeCaseKey() === caseKey;
+}
+
+function releaseCaseTask(taskKey: typeof debugRunningCaseKey, caseKey: string) {
+  if (taskKey.value === caseKey) {
+    taskKey.value = null;
+  }
+}
+
+const debugRunning = computed(
+  () => debugRunningCaseKey.value !== null && debugRunningCaseKey.value === activeCaseKey(),
+);
+
+const generatingAssertions = computed(
+  () =>
+    generatingAssertionsCaseKey.value !== null &&
+    generatingAssertionsCaseKey.value === activeCaseKey(),
+);
+
+function getDebugResponseIssue(result: DebugRunResult | null): string | null {
+  if (!result) {
+    return '请先调试执行并获取响应结果';
+  }
+  if (result.error) {
+    return '当前调试请求失败，请重新调试后再生成断言';
+  }
+  if (result.statusCode === 0) {
+    return '未获取到有效响应，请先调试执行';
+  }
+  return null;
+}
+
+const canGenerateAssertions = computed(
+  () => getDebugResponseIssue(debugResult.value) === null,
+);
 
 const debugEnvironmentOptions = computed(() =>
   apiStore.environments
@@ -1023,11 +1053,33 @@ const statusOptions = [
   { label: '停用', value: 'disabled' },
 ];
 
-const endpointOptions = computed(() =>
-  (apiStore.apiDoc?.endpoints ?? []).map((e) => ({
-    label: `${e.method} ${e.path}`,
-    value: e.id,
-  })),
+function findEndpointById(endpointId: string) {
+  const fromDoc = apiStore.apiDoc?.endpoints?.find((item) => item.id === endpointId);
+  if (fromDoc) return fromDoc;
+  const bound = activeCase.value?.endpoint;
+  if (bound?.id === endpointId) return bound;
+  return null;
+}
+
+function applyEndpointBinding(endpointId: string) {
+  const endpoint = findEndpointById(endpointId);
+  if (!endpoint || form.protocol !== 'http') return;
+  const method = (endpoint.method || 'POST').toUpperCase() as HttpMethod;
+  if (HTTP_METHODS.includes(method)) {
+    form.httpMethod = method;
+  }
+  form.httpPath = endpoint.path || '';
+  if (!httpMethodHasBody(form.httpMethod) && requestTab.value === 'body') {
+    requestTab.value = 'params';
+  }
+}
+
+watch(
+  () => form.endpointId,
+  (endpointId, oldEndpointId) => {
+    if (syncingForm.value || !endpointId || endpointId === oldEndpointId) return;
+    applyEndpointBinding(endpointId);
+  },
 );
 
 watch(
@@ -1362,7 +1414,78 @@ function onCreate() {
   requestTab.value = 'body';
   editorMainTab.value = 'basic';
   form.assertionRows = [];
+  debugResult.value = null;
+  debugResponseTab.value = 'expected';
   syncingForm.value = false;
+}
+
+function buildSavePayload(): Record<string, unknown> | null {
+  if (!form.title.trim()) return null;
+  const expected = buildExpectedFromRows(form.assertionRows);
+  const payload: Record<string, unknown> = {
+    endpointId: form.endpointId,
+    title: form.title.trim(),
+    caseNo: form.caseNo.trim() || undefined,
+    description: form.description,
+    remark: form.remark,
+    transactionCode: form.transactionCode,
+    owner: form.owner,
+    polarity: form.polarity,
+    status: form.status,
+    enabled: form.status !== 'disabled',
+    request: mergeRequestFromEditor({
+      mode: requestEditorMode.value,
+      protocol: form.protocol,
+      bodyFormat: form.bodyFormat,
+      httpMethod: form.httpMethod,
+      httpPath: form.httpPath,
+      headerRows: form.headerRows,
+      queryRows: form.queryRows,
+      socketEncoding: form.socketEncoding,
+      requestBodyText: form.requestBodyText,
+      requestBodyJson: form.requestBodyJson,
+      requestJson: form.requestJson,
+      requestMetaJson: form.requestMetaJson,
+      requestTcpMeta: form.requestTcpMeta,
+      requestBodyXml: form.requestBodyXml,
+    }),
+    expected,
+    debugEnvironmentId: apiStore.selectedEnvironmentId || undefined,
+    debugEnvironmentServiceId: debugServiceId.value || undefined,
+  };
+  if (isNewCase.value && apiStore.caseListVersionFilter != null) {
+    payload.generateVersion = apiStore.caseListVersionFilter;
+  }
+  if (debugResult.value) {
+    payload.lastDebugRun = toLastDebugRunSnapshot(debugResult.value);
+  }
+  return payload;
+}
+
+async function persistCase(options?: { silent?: boolean }): Promise<boolean> {
+  if (!projectId.value || !transactionId.value) return false;
+  const payload = buildSavePayload();
+  if (!payload) return false;
+  const caseId = isNewCase.value ? undefined : apiStore.activeCaseId;
+  saving.value = true;
+  try {
+    await apiStore.saveCase(
+      projectId.value,
+      transactionId.value,
+      payload,
+      caseId || undefined,
+      options,
+    );
+    isNewCase.value = false;
+    return true;
+  } catch (error) {
+    if (!options?.silent) {
+      message.error((error as Error)?.message || '保存失败，请检查请求报文/预期结果 JSON 格式');
+    }
+    return false;
+  } finally {
+    saving.value = false;
+  }
 }
 
 async function onSave() {
@@ -1371,54 +1494,7 @@ async function onSave() {
     message.warning('请填写案例名称');
     return;
   }
-  saving.value = true;
-  try {
-    const caseId = isNewCase.value ? undefined : apiStore.activeCaseId;
-    const expected = buildExpectedFromRows(form.assertionRows);
-    const payload: Record<string, unknown> = {
-      endpointId: form.endpointId,
-      title: form.title.trim(),
-      caseNo: form.caseNo.trim() || undefined,
-      description: form.description,
-      remark: form.remark,
-      transactionCode: form.transactionCode,
-      owner: form.owner,
-      polarity: form.polarity,
-      status: form.status,
-      enabled: form.status !== 'disabled',
-      request: mergeRequestFromEditor({
-        mode: requestEditorMode.value,
-        protocol: form.protocol,
-        bodyFormat: form.bodyFormat,
-        httpMethod: form.httpMethod,
-        httpPath: form.httpPath,
-        headerRows: form.headerRows,
-        queryRows: form.queryRows,
-        socketEncoding: form.socketEncoding,
-        requestBodyText: form.requestBodyText,
-        requestBodyJson: form.requestBodyJson,
-        requestJson: form.requestJson,
-        requestMetaJson: form.requestMetaJson,
-        requestTcpMeta: form.requestTcpMeta,
-        requestBodyXml: form.requestBodyXml,
-      }),
-      expected,
-      debugEnvironmentId: apiStore.selectedEnvironmentId || undefined,
-      debugEnvironmentServiceId: debugServiceId.value || undefined,
-    };
-    if (isNewCase.value && apiStore.caseListVersionFilter != null) {
-      payload.generateVersion = apiStore.caseListVersionFilter;
-    }
-    if (debugResult.value) {
-      payload.lastDebugRun = toLastDebugRunSnapshot(debugResult.value);
-    }
-    await apiStore.saveCase(projectId.value, transactionId.value, payload, caseId);
-    isNewCase.value = false;
-  } catch (error) {
-    message.error((error as Error)?.message || '保存失败，请检查请求报文/预期结果 JSON 格式');
-  } finally {
-    saving.value = false;
-  }
+  await persistCase();
 }
 
 const debugResponseBodyText = computed(() => {
@@ -1467,7 +1543,9 @@ async function onDebugRun() {
     message.warning('请选择调试环境');
     return;
   }
-  debugRunning.value = true;
+  const caseKey = activeCaseKey();
+  const caseIdAtStart = isNewCase.value ? undefined : apiStore.activeCaseId || undefined;
+  debugRunningCaseKey.value = caseKey;
   debugResult.value = null;
   debugResponseTab.value = 'expected';
   try {
@@ -1480,25 +1558,55 @@ async function onDebugRun() {
         polarity: form.polarity,
         environmentId: apiStore.selectedEnvironmentId,
         environmentServiceId: debugServiceId.value || apiStore.selectedEnvironmentServiceId || undefined,
-        caseId: isNewCase.value ? undefined : apiStore.activeCaseId || undefined,
+        caseId: caseIdAtStart,
       },
     );
+    if (!isStillOnCase(caseKey)) {
+      if (caseIdAtStart) {
+        const row = apiStore.cases.find((item) => item.id === caseIdAtStart);
+        if (row) {
+          row.metadata = {
+            ...row.metadata,
+            lastDebugRun: toLastDebugRunSnapshot(result),
+          };
+        }
+      }
+      return;
+    }
     debugResult.value = result;
     debugResponseTab.value = result.error ? 'expected' : 'body';
     editorMainTab.value = 'assertion';
-    if (!isNewCase.value && apiStore.activeCaseId) {
+    if (caseIdAtStart) {
       patchActiveCaseLastDebugRun(toLastDebugRunSnapshot(result));
     }
-    message.success('调试完成，请查看响应并生成断言');
+    const saved = await persistCase({ silent: true });
+    if (saved) {
+      message.success('调试完成并已保存');
+    } else if (!form.title.trim()) {
+      message.warning('调试完成，请填写案例名称后保存');
+    } else {
+      message.warning('调试完成，但自动保存失败，请手动点击保存');
+    }
   } catch {
-    message.error('调试执行失败，请检查环境配置和请求报文');
+    if (isStillOnCase(caseKey)) {
+      message.error('调试执行失败，请检查环境配置和请求报文');
+    }
   } finally {
-    debugRunning.value = false;
+    releaseCaseTask(debugRunningCaseKey, caseKey);
   }
 }
 
 async function onGenerateAssertions() {
-  if (!projectId.value || !transactionId.value || !debugResult.value) return;
+  if (!projectId.value || !transactionId.value) return;
+
+  const responseIssue = getDebugResponseIssue(debugResult.value);
+  if (responseIssue) {
+    message.warning(responseIssue);
+    return;
+  }
+  const result = debugResult.value!;
+  const caseKey = activeCaseKey();
+  const caseIdAtStart = isNewCase.value ? undefined : apiStore.activeCaseId || undefined;
 
   const hasExisting = form.assertionRows.some((row) => Boolean(row.type && row.operator));
 
@@ -1517,7 +1625,7 @@ async function onGenerateAssertions() {
     if (!confirmed) return;
   }
 
-  generatingAssertions.value = true;
+  generatingAssertionsCaseKey.value = caseKey;
   try {
     const transport = form.protocol === 'socket' ? 'tcp' : 'http';
     const messageFormat = form.bodyFormat === 'xml' ? 'xml' : form.bodyFormat === 'text' ? 'text' : 'json';
@@ -1528,22 +1636,66 @@ async function onGenerateAssertions() {
         transport,
         messageFormat,
         polarity: form.polarity,
-        statusCode: debugResult.value.statusCode,
-        headers: debugResult.value.headers,
-        body: debugResult.value.body,
+        statusCode: result.statusCode,
+        headers: result.headers,
+        body: result.body,
       },
     );
     if (!assertions.length) {
-      message.warning('AI 未生成有效断言，请手动编辑');
+      if (isStillOnCase(caseKey)) {
+        message.warning('AI 未生成有效断言，请手动编辑');
+      }
+      return;
+    }
+    if (!isStillOnCase(caseKey)) {
+      if (caseIdAtStart) {
+        const row = apiStore.cases.find((item) => item.id === caseIdAtStart);
+        if (row) {
+          const expected = buildExpectedFromRows(assertionsToRows(assertions));
+          await apiStore.saveCase(
+            projectId.value,
+            transactionId.value,
+            {
+              endpointId: row.endpointId,
+              title: row.title,
+              caseNo: row.caseNo,
+              description: row.description,
+              remark: row.remark,
+              transactionCode: row.transactionCode,
+              owner: row.owner,
+              polarity: row.polarity,
+              status: row.status,
+              enabled: row.enabled,
+              request: row.request,
+              expected,
+              debugEnvironmentId: row.metadata?.debugEnvironmentId,
+              debugEnvironmentServiceId: row.metadata?.debugEnvironmentServiceId,
+              lastDebugRun: row.metadata?.lastDebugRun,
+            },
+            caseIdAtStart,
+            { silent: true },
+          );
+          message.success(`案例「${row.title || row.caseNo || '未命名'}」的断言已生成`);
+        }
+      }
       return;
     }
     form.assertionRows = assertionsToRows(assertions);
     debugResponseTab.value = 'expected';
-    message.success(`AI 生成了 ${assertions.length} 条断言，可在断言内容中编辑`);
+    const saved = await persistCase({ silent: true });
+    if (saved) {
+      message.success(`AI 生成了 ${assertions.length} 条断言并已保存`);
+    } else if (!form.title.trim()) {
+      message.warning(`AI 生成了 ${assertions.length} 条断言，请填写案例名称后保存`);
+    } else {
+      message.warning(`AI 生成了 ${assertions.length} 条断言，但自动保存失败，请手动点击保存`);
+    }
   } catch {
-    message.error('AI 生成断言失败，请稍后重试');
+    if (isStillOnCase(caseKey)) {
+      message.error('AI 生成断言失败，请稍后重试');
+    }
   } finally {
-    generatingAssertions.value = false;
+    releaseCaseTask(generatingAssertionsCaseKey, caseKey);
   }
 }
 
@@ -1998,6 +2150,13 @@ function onBatchDelete() {
 .case-basic-shell {
   border: 1px solid #eaecf0;
   background: #fff;
+}
+
+.case-basic-panel .case-basic-shell {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .case-assertion-panel .case-assertion-shell {

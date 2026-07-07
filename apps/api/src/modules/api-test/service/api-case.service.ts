@@ -166,7 +166,12 @@ export class ApiCaseService {
     );
   }
 
-  async updateCase(projectId: string, caseId: string, payload: SaveApiCaseDto) {
+  async updateCase(
+    projectId: string,
+    transactionId: string,
+    caseId: string,
+    payload: SaveApiCaseDto,
+  ) {
     this.validateCasePayload(payload);
     const existing = await this.caseRepo.findOne({
       where: scopedWhere({ projectId, id: caseId }),
@@ -175,7 +180,11 @@ export class ApiCaseService {
       throw new NotFoundException("案例不存在");
     }
     if (payload.endpointId && payload.endpointId !== existing.endpointId) {
-      await this.requireEndpoint(projectId, payload.endpointId);
+      await this.requireEndpoint(
+        projectId,
+        payload.endpointId,
+        transactionId,
+      );
       existing.endpointId = payload.endpointId;
     }
     existing.title = payload.title;
