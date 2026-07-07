@@ -302,7 +302,8 @@ function buildStructuredMarkdown(
   const rows = transactions
     .flatMap((tx) =>
       tx.endpoints.map(
-        (ep) => `| ${tx.code} | ${ep.name} | ${ep.method} | ${ep.path} | ${ep.summary} |`,
+        (ep) =>
+          `| ${tx.code} | ${ep.name} | ${ep.method} | ${ep.path} | ${ep.summary} |`,
       ),
     )
     .join("\n");
@@ -356,7 +357,17 @@ function buildCaseRows(
       priority: "P0",
       polarity: "positive",
       request: buildCaseRequest(endpoint.method, endpoint.path),
-      expected: JSON.stringify({ statusCode: [200, 201, 204], statusOnly: true }),
+      expected: JSON.stringify({
+        assertions: [
+          {
+            description: "HTTP 状态码",
+            type: "status_code",
+            operator: "eq",
+            expression: "",
+            expected: "200",
+          },
+        ],
+      }),
       metadata: JSON.stringify({ source: "ai", inferredFields: ["body"] }),
     },
     {
@@ -369,8 +380,15 @@ function buildCaseRows(
       polarity: "negative",
       request: buildCaseRequest(endpoint.method, endpoint.path),
       expected: JSON.stringify({
-        statusCode: [400, 401, 403, 404, 422],
-        statusOnly: true,
+        assertions: [
+          {
+            description: "HTTP 状态码",
+            type: "status_code",
+            operator: "eq",
+            expression: "",
+            expected: "400",
+          },
+        ],
       }),
       metadata: JSON.stringify({ source: "ai" }),
     },
@@ -398,29 +416,51 @@ async function clearSeedProjects(connection: mysql.Connection) {
       [projectId],
     );
     for (const run of runs) {
-      await connection.query(`DELETE FROM api_test_run_item WHERE runId = ?`, [run.id]);
+      await connection.query(`DELETE FROM api_test_run_item WHERE runId = ?`, [
+        run.id,
+      ]);
     }
-    await connection.query(`DELETE FROM api_test_run WHERE projectId = ?`, [projectId]);
+    await connection.query(`DELETE FROM api_test_run WHERE projectId = ?`, [
+      projectId,
+    ]);
 
     const [sets] = await connection.query<mysql.RowDataPacket[]>(
       `SELECT id FROM api_test_execution_set WHERE projectId = ?`,
       [projectId],
     );
     for (const set of sets) {
-      await connection.query(`DELETE FROM api_test_execution_set_case WHERE executionSetId = ?`, [
-        set.id,
-      ]);
+      await connection.query(
+        `DELETE FROM api_test_execution_set_case WHERE executionSetId = ?`,
+        [set.id],
+      );
     }
-    await connection.query(`DELETE FROM api_test_execution_set WHERE projectId = ?`, [projectId]);
-    await connection.query(`DELETE FROM api_test_case WHERE projectId = ?`, [projectId]);
-    await connection.query(`DELETE FROM api_test_environment_service WHERE projectId = ?`, [
+    await connection.query(
+      `DELETE FROM api_test_execution_set WHERE projectId = ?`,
+      [projectId],
+    );
+    await connection.query(`DELETE FROM api_test_case WHERE projectId = ?`, [
       projectId,
     ]);
-    await connection.query(`DELETE FROM api_test_environment WHERE projectId = ?`, [projectId]);
-    await connection.query(`DELETE FROM api_endpoint WHERE projectId = ?`, [projectId]);
-    await connection.query(`DELETE FROM api_doc WHERE projectId = ?`, [projectId]);
-    await connection.query(`DELETE FROM api_transaction WHERE projectId = ?`, [projectId]);
-    await connection.query(`DELETE FROM case_project WHERE id = ?`, [projectId]);
+    await connection.query(
+      `DELETE FROM api_test_environment_service WHERE projectId = ?`,
+      [projectId],
+    );
+    await connection.query(
+      `DELETE FROM api_test_environment WHERE projectId = ?`,
+      [projectId],
+    );
+    await connection.query(`DELETE FROM api_endpoint WHERE projectId = ?`, [
+      projectId,
+    ]);
+    await connection.query(`DELETE FROM api_doc WHERE projectId = ?`, [
+      projectId,
+    ]);
+    await connection.query(`DELETE FROM api_transaction WHERE projectId = ?`, [
+      projectId,
+    ]);
+    await connection.query(`DELETE FROM case_project WHERE id = ?`, [
+      projectId,
+    ]);
   }
 
   console.log(`已清理 ${rows.length} 个旧调试项目`);
@@ -525,7 +565,11 @@ async function seedProject(
     const tx = transactions[txIndex];
     const transactionId = randomUUID();
     const apiDocId = randomUUID();
-    const markdown = buildStructuredMarkdown(requirementNo, domainTemplate.domain, [tx]);
+    const markdown = buildStructuredMarkdown(
+      requirementNo,
+      domainTemplate.domain,
+      [tx],
+    );
 
     await connection.query(
       `INSERT INTO api_transaction (
@@ -595,7 +639,13 @@ async function seedProject(
       const ep = tx.endpoints[epIndex];
       const caseNoPrefix = `${requirementNo.replace(/-/g, "")}-${tx.code.slice(0, 6).toUpperCase()}-${epIndex + 1}`;
       allCases.push(
-        ...buildCaseRows(projectId, endpointIds[epIndex], ep, tx.code, caseNoPrefix),
+        ...buildCaseRows(
+          projectId,
+          endpointIds[epIndex],
+          ep,
+          tx.code,
+          caseNoPrefix,
+        ),
       );
     }
 
@@ -700,10 +750,21 @@ async function seedProject(
     for (let i = 0; i < setCases.length; i += 1) {
       const c = setCases[i];
       const status = statuses[i] ?? "passed";
-      const req = JSON.parse(c.request) as { method: string; path: string; body?: unknown };
+      const req = JSON.parse(c.request) as {
+        method: string;
+        path: string;
+        body?: unknown;
+      };
       const assertions =
         status === "passed"
-          ? [{ name: "HTTP 状态码", passed: true, expected: [200, 201, 204], actual: 200 }]
+          ? [
+              {
+                name: "HTTP 状态码",
+                passed: true,
+                expected: [200, 201, 204],
+                actual: 200,
+              },
+            ]
           : [
               {
                 name: "HTTP 状态码",
@@ -774,13 +835,17 @@ async function main() {
     connection = await mysql.createConnection(dbConfig);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`\n无法连接数据库 (${dbConfig.host}:${dbConfig.port}): ${message}`);
+    console.error(
+      `\n无法连接数据库 (${dbConfig.host}:${dbConfig.port}): ${message}`,
+    );
     if (dbConfig.host !== "localhost" && dbConfig.host !== "127.0.0.1") {
       console.error(
         "提示：seed 脚本默认读取 env/.local.env（NODE_ENV=local）。若需连远程库，请显式指定：NODE_ENV=development pnpm seed:api-test",
       );
     } else {
-      console.error("提示：请确认本地 MySQL 已启动，且 env/.local.env 中的账号密码正确。");
+      console.error(
+        "提示：请确认本地 MySQL 已启动，且 env/.local.env 中的账号密码正确。",
+      );
     }
     process.exit(1);
   }
@@ -808,13 +873,19 @@ async function main() {
     console.log("\n接口测试批量调试数据写入完成：");
     console.log(`  用户:         ${SEED_USER}`);
     console.log(`  项目数量:     ${summaries.length}`);
-    console.log(`  需求编号范围: ${formatRequirementNo(1)} ~ ${formatRequirementNo(SEED_PROJECT_COUNT)}`);
+    console.log(
+      `  需求编号范围: ${formatRequirementNo(1)} ~ ${formatRequirementNo(SEED_PROJECT_COUNT)}`,
+    );
     console.log(`  交易码总数:   ${totals.transactions}`);
     console.log(`  端点总数:     ${totals.endpoints}`);
     console.log(`  案例总数:     ${totals.cases}`);
     console.log(`  执行记录:     ${totals.runs}`);
-    console.log(`  示例项目:     ${summaries[0]?.projectTitle} (${summaries[0]?.projectId})`);
-    console.log("\n前端：项目列表 → 平台「接口测试」→ 可测试分页与交易码切换。\n");
+    console.log(
+      `  示例项目:     ${summaries[0]?.projectTitle} (${summaries[0]?.projectId})`,
+    );
+    console.log(
+      "\n前端：项目列表 → 平台「接口测试」→ 可测试分页与交易码切换。\n",
+    );
   } finally {
     await connection.end();
   }

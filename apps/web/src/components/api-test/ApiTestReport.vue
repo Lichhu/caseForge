@@ -13,9 +13,31 @@
           :options="runOptions"
           placeholder="选择执行批次"
         />
-        <a-button :disabled="!selectedRunId" @click="exportXlsx">导出 Excel</a-button>
-        <a-button :disabled="!selectedRunId" @click="exportPdf">导出 PDF</a-button>
-        <a-button :disabled="!selectedRunId" @click="exportHtml">导出 HTML</a-button>
+        <a-dropdown v-model:open="exportMenuOpen" trigger="click" :disabled="!selectedRunId">
+          <a-button :disabled="!selectedRunId">
+            <ExportOutlined />
+            导出方式
+            <DownOutlined
+              :class="['dropdown-trigger-chevron', { 'is-open': exportMenuOpen }]"
+            />
+          </a-button>
+          <template #overlay>
+            <a-menu @click="onExportMenuClick">
+              <a-menu-item key="xlsx">
+                <FileExcelOutlined />
+                Excel
+              </a-menu-item>
+              <a-menu-item key="pdf">
+                <FilePdfOutlined />
+                PDF
+              </a-menu-item>
+              <a-menu-item key="html">
+                <FileTextOutlined />
+                HTML
+              </a-menu-item>
+            </a-menu>
+          </template>
+        </a-dropdown>
       </a-space>
     </div>
 
@@ -198,6 +220,14 @@
 <script setup lang="ts">
 import { computed, onActivated, ref, watch } from 'vue';
 import { message } from 'ant-design-vue';
+import type { MenuProps } from 'ant-design-vue';
+import {
+  DownOutlined,
+  ExportOutlined,
+  FileExcelOutlined,
+  FilePdfOutlined,
+  FileTextOutlined,
+} from '@ant-design/icons-vue';
 import { useApiTestStore } from '@/stores/apiTest';
 
 type ChartMode = 'bar' | 'line' | 'progress';
@@ -213,6 +243,7 @@ type ReportSummary = {
 
 const apiStore = useApiTestStore();
 const selectedRunId = ref('');
+const exportMenuOpen = ref(false);
 const chartMode = ref<ChartMode>('progress');
 const summary = ref<ReportSummary | null>(null);
 const summaryLoading = ref(false);
@@ -462,6 +493,12 @@ async function exportHtml() {
     message.error((error as Error)?.message || '导出 HTML 失败');
   }
 }
+
+const onExportMenuClick: MenuProps['onClick'] = ({ key }) => {
+  if (key === 'xlsx') void exportXlsx();
+  else if (key === 'pdf') void exportPdf();
+  else if (key === 'html') void exportHtml();
+};
 </script>
 
 <style scoped>

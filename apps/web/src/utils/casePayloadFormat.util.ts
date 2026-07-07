@@ -2,9 +2,14 @@ import {
   looksLikeXml,
   prettyPrintXml,
   unescapeLiteralXmlEscapes,
+  buildDefaultExpected as sharedBuildDefaultExpected,
 } from "@case-forge/shared";
 import type {
+  ApiAssertion,
+  ApiCaseExpected,
+  ApiCasePolarity,
   ApiCaseRequest,
+  ApiMessageFormat,
   ApiMessageFraming,
   ApiTransport,
 } from "@case-forge/shared";
@@ -104,78 +109,27 @@ export function buildDefaultHeaderRows(
   });
 }
 
+function mapProtocolToTransport(protocol: CaseProtocol): ApiTransport {
+  if (protocol === "socket") return "tcp";
+  return protocol;
+}
+
+function mapBodyFormatToMessageFormat(
+  bodyFormat: CaseBodyFormat,
+): ApiMessageFormat {
+  return bodyFormat;
+}
+
 export function buildDefaultExpected(
   protocol: CaseProtocol,
   bodyFormat: CaseBodyFormat,
   polarity: "positive" | "negative" = "positive",
-) {
-  const isNegative = polarity === "negative";
-  if (protocol === "http") {
-    if (bodyFormat === "json") {
-      return {
-        statusCode: isNegative ? [400, 422, 500] : [200, 201],
-        statusOnly: true,
-        skipStatusCheck: false,
-      };
-    }
-    return {
-      statusCode: isNegative ? [400, 422, 500] : [200, 201],
-      statusOnly: false,
-      skipStatusCheck: false,
-      bodyAssertions: [
-        {
-          type: "contains" as const,
-          expected: isNegative ? "error" : "success",
-          description: "响应体关键内容",
-        },
-      ],
-    };
-  }
-  if (protocol === "socket" && bodyFormat === "xml") {
-    return {
-      skipStatusCheck: true,
-      statusOnly: false,
-      bodyAssertions: isNegative
-        ? [
-            {
-              type: "contains" as const,
-              expected: "bizResCode",
-              description: "响应报文含业务返回码",
-            },
-          ]
-        : [
-            {
-              type: "contains" as const,
-              expected: "000000",
-              description: "响应 bizResCode 成功",
-            },
-            {
-              type: "contains" as const,
-              expected: "</Transaction>",
-              description: "响应为完整 XML",
-            },
-          ],
-    };
-  }
-  return {
-    skipStatusCheck: true,
-    statusOnly: false,
-    bodyAssertions: isNegative
-      ? [
-          {
-            type: "contains" as const,
-            expected: "bizResCode",
-            description: "响应报文含业务返回码",
-          },
-        ]
-      : [
-          {
-            type: "contains" as const,
-            expected: "000000",
-            description: "响应业务码成功",
-          },
-        ],
-  };
+): ApiCaseExpected {
+  return sharedBuildDefaultExpected(
+    mapProtocolToTransport(protocol),
+    mapBodyFormatToMessageFormat(bodyFormat),
+    polarity as ApiCasePolarity,
+  );
 }
 
 export function buildDefaultExpectedJson(
@@ -212,7 +166,8 @@ function inferBodyFormat(request: ApiCaseRequest): CaseBodyFormat {
   if (request.contentType?.includes("xml")) return "xml";
   if (request.contentType?.includes("json")) return "json";
   if (request.contentType?.includes("text/plain")) return "text";
-  if (typeof request.body === "string" && looksLikeXml(request.body)) return "xml";
+  if (typeof request.body === "string" && looksLikeXml(request.body))
+    return "xml";
   if (request.body && typeof request.body === "object") return "json";
   if (typeof request.body === "string" && request.body.trim()) return "text";
   return "json";
@@ -267,9 +222,7 @@ export function defaultContentType(format: CaseBodyFormat): string {
   }
 }
 
-function defaultSocketFraming(
-  encoding: string,
-): ApiMessageFraming | undefined {
+function defaultSocketFraming(encoding: string): ApiMessageFraming | undefined {
   if (!encoding.toUpperCase().includes("GBK")) return undefined;
   return {
     type: "length-prefix",
@@ -332,7 +285,9 @@ export function splitRequestForEditor(request: ApiCaseRequest) {
       requestBodyText:
         bodyFormat === "text" ? formatBodyForEditor(request.body, "text") : "",
       requestBodyJson:
-        bodyFormat === "json" ? formatBodyForEditor(request.body, "json") : "{}",
+        bodyFormat === "json"
+          ? formatBodyForEditor(request.body, "json")
+          : "{}",
       requestJson: "",
       requestMetaJson: "",
       requestTcpMeta: {
@@ -340,8 +295,7 @@ export function splitRequestForEditor(request: ApiCaseRequest) {
         encoding: request.encoding,
         contentType: request.contentType,
         framing:
-          request.framing ??
-          defaultSocketFraming(request.encoding || "UTF-8"),
+          request.framing ?? defaultSocketFraming(request.encoding || "UTF-8"),
       },
       requestBodyXml:
         bodyFormat === "xml" ? formatBodyForEditor(request.body, "xml") : "",
@@ -406,10 +360,9 @@ export function mergeRequestFromEditor(input: {
 }): ApiCaseRequest {
   const headers = keyValueRowsToRecord(input.headerRows);
   const contentType = defaultContentType(input.bodyFormat);
-  const hasBody = input.protocol !== "http" || httpMethodHasBody(input.httpMethod);
-  const body = hasBody
-    ? parseBodyFromEditor(input.mode, input)
-    : undefined;
+  const hasBody =
+    input.protocol !== "http" || httpMethodHasBody(input.httpMethod);
+  const body = hasBody ? parseBodyFromEditor(input.mode, input) : undefined;
 
   if (input.protocol === "http") {
     if (!headers["Content-Type"] && !headers["content-type"]) {
@@ -432,7 +385,7 @@ export function mergeRequestFromEditor(input: {
     const encoding = input.socketEncoding || "UTF-8";
     const framing =
       input.bodyFormat === "xml" && encoding.toUpperCase().includes("GBK")
-        ? input.requestTcpMeta?.framing ?? defaultSocketFraming(encoding)
+        ? (input.requestTcpMeta?.framing ?? defaultSocketFraming(encoding))
         : input.requestTcpMeta?.framing;
     return {
       method: "",
@@ -493,11 +446,7 @@ export function formatRunSnapshotForDisplay(value: unknown): string {
   if (value == null) return "—";
   if (typeof value === "string") {
     try {
-      return JSON.stringify(
-        beautifyPayloadValue(JSON.parse(value)),
-        null,
-        2,
-      );
+      return JSON.stringify(beautifyPayloadValue(JSON.parse(value)), null, 2);
     } catch {
       return formatRunSnapshotField(value);
     }
@@ -525,6 +474,35 @@ export function beautifyCasePayloadJson(text: string): string {
 
 export function beautifyRequestBodyXml(text: string): string {
   return formatXmlForEditor(text);
+}
+
+/** 保存前解析预期结果：允许空断言，过滤未填完整的断言项 */
+export function parseExpectedForSave(raw: string): ApiCaseExpected {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw.trim() || '{"assertions":[]}');
+  } catch {
+    throw new Error("预期结果 JSON 格式不正确");
+  }
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("预期结果必须是 JSON 对象");
+  }
+  const source = parsed as { assertions?: unknown };
+  const assertions = Array.isArray(source.assertions)
+    ? source.assertions.filter(isValidAssertionForSave)
+    : [];
+  return { assertions };
+}
+
+function isValidAssertionForSave(item: unknown): item is ApiAssertion {
+  if (!item || typeof item !== "object") return false;
+  const assertion = item as ApiAssertion;
+  return (
+    typeof assertion.type === "string" &&
+    assertion.type.trim() !== "" &&
+    typeof assertion.operator === "string" &&
+    assertion.operator.trim() !== ""
+  );
 }
 
 export function defaultEditorState(

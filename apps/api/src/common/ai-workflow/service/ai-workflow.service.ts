@@ -170,6 +170,11 @@ export class AiWorkflowService {
     );
   }
 
+  /** 是否已配置 AI Chat（仅需 Chat URL，不依赖 skill 文档） */
+  canUseAiChat() {
+    return Boolean(this.config.aiChat.url?.trim());
+  }
+
   /** AI Chat 与 Skill 是否至少配置了一类能力 */
   isAiConfigured() {
     return (

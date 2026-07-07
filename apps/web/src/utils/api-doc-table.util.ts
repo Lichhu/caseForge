@@ -31,12 +31,13 @@ export function parseApiDocTableText(text: string): ApiDocTableSection[] {
       `${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\r?\\n${API_DOC_SECTION_SEPARATOR}\\r?\\n([\\s\\S]*?)(?=\\r?\\n(?:${sectionPattern})\\r?\\n${API_DOC_SECTION_SEPARATOR}|$)`,
     );
     const match = trimmed.match(pattern);
-    if (!match?.[1]?.trim()) continue;
-    const sectionText = match[1].trim();
     if (title === "示例报文") {
-      sections.push({ title, rows: [], freeText: sectionText });
+      if (!match) continue;
+      sections.push({ title, rows: [], freeText: match[1] ?? "" });
       continue;
     }
+    if (!match?.[1]?.trim()) continue;
+    const sectionText = match[1].trim();
     const rows = sectionText
       .split("\n")
       .map((line) => line.split("|").map((cell) => cell.trim()));

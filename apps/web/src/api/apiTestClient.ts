@@ -4,6 +4,7 @@ import {
   normalizeCaseForgePageSize,
 } from "@case-forge/shared";
 import type {
+  ApiAssertion,
   ApiCaseExpected,
   ApiCasePolarity,
   ApiCasePriority,
@@ -115,6 +116,9 @@ export interface ApiTestCaseRow {
     source?: string;
     promptIds?: string[];
     generateVersion?: number;
+    debugEnvironmentId?: string;
+    debugEnvironmentServiceId?: string;
+    lastDebugRun?: DebugRunResult & { executedAt?: string };
   };
 }
 
@@ -780,6 +784,54 @@ export async function runApiCases(
 ) {
   const { data } = await http.post<ApiRunDetail>(
     `${transactionBase(projectId, transactionId)}/runs`,
+    payload,
+  );
+  return data;
+}
+
+export interface DebugRunResult {
+  statusCode: number;
+  headers: Record<string, string>;
+  body: unknown;
+  bodySize: number;
+  durationMs: number;
+  error?: string;
+  assertions: AssertionResult[];
+}
+
+export async function debugRunCase(
+  projectId: string,
+  transactionId: string,
+  payload: {
+    request: ApiCaseRequest;
+    expected?: ApiCaseExpected;
+    polarity?: "positive" | "negative";
+    environmentId: string;
+    environmentServiceId?: string;
+    caseId?: string;
+  },
+) {
+  const { data } = await http.post<DebugRunResult>(
+    `${transactionBase(projectId, transactionId)}/cases/debug-run`,
+    payload,
+  );
+  return data;
+}
+
+export async function generateAssertions(
+  projectId: string,
+  transactionId: string,
+  payload: {
+    transport: string;
+    messageFormat: string;
+    polarity: "positive" | "negative";
+    statusCode: number;
+    headers: Record<string, string>;
+    body: unknown;
+  },
+) {
+  const { data } = await http.post<{ assertions: ApiAssertion[] }>(
+    `${transactionBase(projectId, transactionId)}/cases/generate-assertions`,
     payload,
   );
   return data;

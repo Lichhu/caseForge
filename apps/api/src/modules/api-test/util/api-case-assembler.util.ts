@@ -9,7 +9,11 @@ import type {
   ApiTechnicalProfile,
   ApiTestCasePayload,
 } from "@case-forge/shared";
-import { prettyPrintXml, unescapeLiteralXmlEscapes } from "@case-forge/shared";
+import {
+  buildDefaultExpected as sharedBuildDefaultExpected,
+  prettyPrintXml,
+  unescapeLiteralXmlEscapes,
+} from "@case-forge/shared";
 import type { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
 import { extractApiDocSection, getApiDocFieldValue } from "./api-doc.parser";
 import {
@@ -311,103 +315,11 @@ function buildExpectedFromPlan(
   polarity: ApiCasePolarity,
   profile: ApiTechnicalProfile,
 ): ApiCaseExpected {
-  const content = (plan.expectedResult ?? "").trim();
-  const isHttp = profile.transport === "http";
-
-  if (plan.assertions?.length) {
-    const bodyAssertions = plan.assertions.map((a) => ({
-      type: "contains" as const,
-      expected: a.expected,
-      description: content,
-    }));
-    if (!isHttp) {
-      return {
-        skipStatusCheck: true,
-        statusOnly: false,
-        bodyAssertions,
-      };
-    }
-    return {
-      statusCode: polarity === "negative" ? [400, 422, 500] : [200, 201],
-      skipStatusCheck: false,
-      statusOnly: false,
-      bodyAssertions,
-    };
-  }
-
-  if (!isHttp) {
-    const resCodeMatch = content.match(
-      /(?:bizResCode|resCode|retCode)[=为:：\s]+(\w+)/i,
-    );
-    const bodyAssertions = content
-      ? [
-          {
-            type: "contains" as const,
-            expected: resCodeMatch?.[1] ?? content.slice(0, 80),
-            description: content,
-          },
-        ]
-      : polarity === "negative"
-        ? [
-            {
-              type: "contains" as const,
-              expected: "bizResCode",
-              description: "响应报文含业务返回码",
-            },
-          ]
-        : [
-            {
-              type: "contains" as const,
-              expected: "000000",
-              description: "响应报文 bizResCode 为成功",
-            },
-          ];
-    return {
-      skipStatusCheck: true,
-      statusOnly: false,
-      bodyAssertions,
-    };
-  }
-
-  const statusMatch = content.match(/\b(20\d|40\d|50\d)\b/);
-  if (statusMatch) {
-    return {
-      statusCode: Number(statusMatch[1]),
-      skipStatusCheck: false,
-      statusOnly:
-        !content.includes("字段") &&
-        !content.includes("retCode") &&
-        !content.includes("bizResCode") &&
-        !content.includes("resCode"),
-      bodyAssertions:
-        content.includes("字段") ||
-        content.includes("retCode") ||
-        content.includes("bizResCode") ||
-        content.includes("resCode")
-          ? [
-              {
-                type: "contains",
-                expected: content.slice(0, 80),
-                description: content,
-              },
-            ]
-          : undefined,
-    };
-  }
-  return {
-    statusCode: polarity === "negative" ? [400, 422, 500] : [200, 201],
-    skipStatusCheck: false,
-    statusOnly: !content,
-    bodyAssertions: content
-      ? [
-          {
-            type: "contains",
-            expected: content.slice(0, 80),
-            description: content,
-          },
-        ]
-      : undefined,
-  };
+  return sharedBuildDefaultExpected(
+    profile.transport,
+    profile.messageFormat,
+    polarity,
+  );
 }
 
 function inferBodyFields(body: unknown, messageFormat: ApiMessageFormat) {

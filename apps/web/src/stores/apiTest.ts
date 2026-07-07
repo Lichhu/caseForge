@@ -672,6 +672,22 @@ export const useApiTestStore = defineStore("apiTest", {
         this.docReadiness = null;
       }
     },
+    async pickLatestCaseGenerateVersion(
+      projectId: string,
+      transactionId: string,
+    ): Promise<number | null> {
+      const rows = await listAllApiCases(projectId, transactionId).catch(
+        () => [],
+      );
+      let latest = 0;
+      for (const row of rows) {
+        const version = row.metadata?.generateVersion;
+        if (version != null && version > latest) {
+          latest = version;
+        }
+      }
+      return latest > 0 ? latest : null;
+    },
     async loadCasesStage(projectId: string, transactionId: string) {
       const doc = this.apiDoc
         ? this.apiDoc
@@ -680,17 +696,11 @@ export const useApiTestStore = defineStore("apiTest", {
         this.apiDoc = doc;
       }
       if (this.caseListVersionFilter == null) {
-        const history = await getApiCaseGenerateHistory(
+        const latest = await this.pickLatestCaseGenerateVersion(
           projectId,
           transactionId,
-        ).catch(() => [] as ApiCaseGenerateHistoryItem[]);
-        const latest = history.reduce((max, h) => {
-          if (h.version != null && h.resultCount != null && h.resultCount > 0) {
-            return Math.max(max, h.version);
-          }
-          return max;
-        }, 0);
-        if (latest > 0) {
+        );
+        if (latest != null) {
           this.caseListVersionFilter = latest;
           await this.refreshCases(projectId, transactionId, {
             resetPage: true,
@@ -824,6 +834,27 @@ export const useApiTestStore = defineStore("apiTest", {
         generateVersion:
           options?.generateVersion ?? this.caseListVersionFilter ?? undefined,
       });
+      const activeVersion =
+        options?.generateVersion ?? this.caseListVersionFilter ?? undefined;
+      if (result.count === 0 && activeVersion != null) {
+        const latest = await this.pickLatestCaseGenerateVersion(
+          projectId,
+          transactionId,
+        );
+        if (latest != null && latest !== activeVersion) {
+          this.caseListVersionFilter = latest;
+          await this.refreshCases(projectId, transactionId, {
+            ...options,
+            page: 1,
+            resetPage: true,
+            generateVersion: latest,
+          });
+          return;
+        }
+        if (latest == null) {
+          this.caseListVersionFilter = null;
+        }
+      }
       const maxPage = Math.max(1, Math.ceil(result.count / pageSize) || 1);
       if (result.count > 0 && page > maxPage) {
         await this.refreshCases(projectId, transactionId, {
@@ -1084,16 +1115,20 @@ export const useApiTestStore = defineStore("apiTest", {
       payload: Record<string, unknown>,
       caseId?: string,
     ) {
-      if (caseId) {
-        await updateApiCase(projectId, transactionId, caseId, payload);
-      } else {
-        await createApiCase(projectId, transactionId, payload);
-      }
+      const saved = caseId
+        ? await updateApiCase(projectId, transactionId, caseId, payload)
+        : await createApiCase(projectId, transactionId, payload);
       await Promise.all([
-        this.refreshCases(projectId, transactionId),
+        this.refreshCases(projectId, transactionId, {
+          resetPage: !caseId,
+        }),
         this.refreshRunnerCases(projectId, transactionId),
       ]);
+      if (!caseId) {
+        this.activeCaseId = saved.id;
+      }
       message.success("案例已保存");
+      return saved;
     },
     async removeCase(projectId: string, transactionId: string, caseId: string) {
       await deleteApiCase(projectId, transactionId, caseId);
@@ -1106,6 +1141,7 @@ export const useApiTestStore = defineStore("apiTest", {
         this.refreshRunnerCases(projectId, transactionId),
         this.refreshExecutionSets(projectId, transactionId),
       ]);
+      await this.syncCaseListVersionFilter(projectId, transactionId);
     },
     async removeCases(
       projectId: string,
@@ -1128,6 +1164,31 @@ export const useApiTestStore = defineStore("apiTest", {
         this.refreshExecutionSets(projectId, transactionId),
       ]);
       message.success(`已删除 ${caseIds.length} 条案例`);
+      await this.syncCaseListVersionFilter(projectId, transactionId);
+    },
+    async syncCaseListVersionFilter(
+      projectId: string,
+      transactionId: string,
+    ) {
+      const rows = await listAllApiCases(projectId, transactionId).catch(
+        () => [],
+      );
+      const versions = new Set<number>();
+      for (const row of rows) {
+        const version = row.metadata?.generateVersion;
+        if (version != null) {
+          versions.add(version);
+        }
+      }
+      const filter = this.caseListVersionFilter;
+      if (filter != null && !versions.has(filter)) {
+        const latest = versions.size ? Math.max(...versions) : null;
+        this.caseListVersionFilter = latest;
+        await this.refreshCases(projectId, transactionId, {
+          resetPage: true,
+          generateVersion: latest ?? undefined,
+        });
+      }
     },
     toggleCaseSelection(caseId: string, checked: boolean) {
       if (checked) {

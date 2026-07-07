@@ -54,6 +54,8 @@ import { BatchDeleteTransactionsDto } from "@api-test/dto/batch-delete-transacti
 import { SmpSyncTransactionsDto } from "@api-test/dto/smp-sync-transactions.dto";
 import { ListApiCasesDto } from "@api-test/dto/list-api-cases.dto";
 import { ListApiExecutionSetsDto } from "@api-test/dto/list-api-execution-sets.dto";
+import { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
+import { generateAssertionsFromResponse } from "@api-test/util/api-case-ai.util";
 
 const UPLOAD_EXTENSIONS = ["xls", "xlsx"];
 
@@ -70,6 +72,7 @@ export class ApiTestController {
     private readonly apiTransactionService: ApiTransactionService,
     private readonly smpSyncService: SmpSyncService,
     private readonly minio: MinioStorageService,
+    private readonly aiWorkflow: AiWorkflowService,
     @InjectRepository(CaseProjectEntity)
     private readonly projectRepo: Repository<CaseProjectEntity>,
   ) {}
@@ -548,6 +551,67 @@ export class ApiTestController {
     });
   }
 
+  @Post(":projectId/transactions/:transactionId/cases/debug-run")
+  @ApiOperation({ summary: "调试执行单案例（不保存执行记录）" })
+  async debugRunCase(
+    @Param("projectId") projectId: string,
+    @Body()
+    body: {
+      request: Record<string, unknown>;
+      expected?: Record<string, unknown>;
+      polarity?: "positive" | "negative";
+      environmentId: string;
+      environmentServiceId?: string;
+      caseId?: string;
+    },
+  ) {
+    const result = await this.apiExecutionService.debugRun({
+      projectId,
+      request: body.request as any,
+      expected: body.expected as any,
+      polarity: body.polarity,
+      environmentId: body.environmentId,
+      environmentServiceId: body.environmentServiceId,
+    });
+    if (body.caseId) {
+      await this.apiCaseService.persistLastDebugRun(projectId, body.caseId, {
+        statusCode: result.statusCode,
+        headers: result.headers,
+        body: result.body,
+        bodySize: result.bodySize,
+        durationMs: result.durationMs,
+        error: result.error,
+        assertions: result.assertions,
+        executedAt: new Date().toISOString(),
+      });
+    }
+    return result;
+  }
+
+  @Post(":projectId/transactions/:transactionId/cases/generate-assertions")
+  @ApiOperation({ summary: "AI 根据响应报文生成断言" })
+  async generateAssertions(
+    @Param("projectId") projectId: string,
+    @Body()
+    body: {
+      transport: string;
+      messageFormat: string;
+      polarity: "positive" | "negative";
+      statusCode: number;
+      headers: Record<string, string>;
+      body: unknown;
+    },
+  ) {
+    if (!this.aiWorkflow.canUseAiChat()) {
+      throw new BadRequestException("AI Chat 未配置，请检查 AI_CHAT_URL");
+    }
+    const assertions = await generateAssertionsFromResponse(
+      this.aiWorkflow,
+      body,
+    );
+    return { assertions };
+  }
+
   @Post(":projectId/transactions/:transactionId/runs")
   runCases(
     @Param("projectId") projectId: string,
@@ -578,7 +642,10 @@ export class ApiTestController {
   }
 
   @Delete(":projectId/runs/:runId")
-  deleteRun(@Param("projectId") projectId: string, @Param("runId") runId: string) {
+  deleteRun(
+    @Param("projectId") projectId: string,
+    @Param("runId") runId: string,
+  ) {
     return this.apiExecutionService.deleteRun(projectId, runId);
   }
 

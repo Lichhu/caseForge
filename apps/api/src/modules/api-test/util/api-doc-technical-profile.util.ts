@@ -1,3 +1,4 @@
+import { buildDefaultExpected as sharedBuildDefaultExpected } from "@case-forge/shared";
 import type {
   ApiCaseExpected,
   ApiCasePolarity,
@@ -68,6 +69,85 @@ export function parseApiTechnicalProfile(
     maxMessageSize,
     businessHeaderMark,
   };
+}
+
+export interface TechnicalProfileEndpointHint {
+  method?: string | null;
+  path?: string | null;
+  requestNotes?: string | null;
+  responseNotes?: string | null;
+}
+
+/** 文档「技术信息」段是否已填写通讯方式或报文类型（非空即视为用户/上传文档的明确配置） */
+export function hasExplicitTechnicalInfoSection(
+  structuredDoc: string,
+): boolean {
+  const section = extractApiDocSection(structuredDoc, "技术信息");
+  if (!section.trim()) {
+    return false;
+  }
+  return (
+    getApiDocFieldValue(section, "通讯方式").trim().length > 0 ||
+    getApiDocFieldValue(section, "报文类型").trim().length > 0
+  );
+}
+
+function deriveTechnicalProfileFromEndpoint(
+  endpoint: TechnicalProfileEndpointHint,
+): ApiTechnicalProfile {
+  const method = (endpoint.method || "").toUpperCase();
+  const path = (endpoint.path || "").toLowerCase();
+  const requestNotes = (endpoint.requestNotes || "").trim();
+  const responseNotes = (endpoint.responseNotes || "").trim();
+  const sample = requestNotes || responseNotes;
+
+  const isTcp =
+    ["TCP", "TEP", "SOCKET"].includes(method) ||
+    path.startsWith("tcp://") ||
+    path.startsWith("socket://");
+  const transport = isTcp ? ("tcp" as const) : ("http" as const);
+
+  const isXml =
+    sample.startsWith("<") || sample.includes("</") || sample.includes("<?xml");
+  const messageFormat = isXml ? ("xml" as const) : ("json" as const);
+
+  return {
+    transport,
+    messageFormat,
+    encoding: DEFAULT_PROFILE.encoding,
+  };
+}
+
+/**
+ * 按优先级解析技术画像：
+ * 1. structuredDoc「技术信息」段（含明确填写时，即使为 HTTP/JSON/UTF-8 也优先）
+ * 2. smpData.callServiceList（无技术信息段时的兜底）
+ * 3. endpoint method / requestNotes 启发式推断
+ */
+export function resolveApiTechnicalProfile(
+  structuredDoc: string,
+  options?: {
+    endpoint?: TechnicalProfileEndpointHint | null;
+    smpData?: {
+      callServiceList?: unknown[];
+      serviceTestList?: unknown[];
+    } | null;
+  },
+): ApiTechnicalProfile {
+  if (hasExplicitTechnicalInfoSection(structuredDoc)) {
+    return parseApiTechnicalProfile(structuredDoc);
+  }
+
+  const smpProfile = resolveTechnicalProfileFromSmpData(options?.smpData);
+  if (smpProfile) {
+    return smpProfile;
+  }
+
+  if (options?.endpoint) {
+    return deriveTechnicalProfileFromEndpoint(options.endpoint);
+  }
+
+  return parseApiTechnicalProfile(structuredDoc);
 }
 
 export function resolveContentType(profile: ApiTechnicalProfile): string {
@@ -361,33 +441,11 @@ export function buildDefaultExpected(
   profile: ApiTechnicalProfile,
   polarity: ApiCasePolarity,
 ): ApiCaseExpected {
-  if (profile.transport !== "http") {
-    return {
-      skipStatusCheck: true,
-      statusOnly: false,
-      bodyAssertions:
-        polarity === "negative"
-          ? [
-              {
-                type: "contains",
-                expected: "bizResCode",
-                description: "响应报文含业务返回码",
-              },
-            ]
-          : [
-              {
-                type: "contains",
-                expected: "000000",
-                description: "响应报文 bizResCode 为成功",
-              },
-            ],
-    };
-  }
-  return {
-    statusCode: polarity === "negative" ? [400, 422, 500] : [200, 201],
-    statusOnly: true,
-    skipStatusCheck: false,
-  };
+  return sharedBuildDefaultExpected(
+    profile.transport,
+    profile.messageFormat,
+    polarity,
+  );
 }
 
 /** SMP socketWay → ApiTransport */

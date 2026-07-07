@@ -3,6 +3,7 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  IsInt,
   IsObject,
   IsOptional,
   IsString,
@@ -14,6 +15,7 @@ import type {
   ApiCasePriority,
   ApiCaseRequest,
   ApiCaseStatus,
+  CaseLastDebugRun,
 } from "@case-forge/shared";
 
 export class SaveApiCaseDto {
@@ -81,6 +83,26 @@ export class SaveApiCaseDto {
   @IsArray()
   @IsString({ each: true })
   promptIds?: string[];
+
+  @ApiPropertyOptional({ description: "归入指定 AI 生成版本，便于版本筛选" })
+  @IsOptional()
+  @IsInt()
+  generateVersion?: number;
+
+  @ApiPropertyOptional({ description: "案例调试默认环境" })
+  @IsOptional()
+  @IsUUID()
+  debugEnvironmentId?: string;
+
+  @ApiPropertyOptional({ description: "案例调试默认环境服务" })
+  @IsOptional()
+  @IsUUID()
+  debugEnvironmentServiceId?: string;
+
+  @ApiPropertyOptional({ description: "最近一次调试执行快照" })
+  @IsOptional()
+  @IsObject()
+  lastDebugRun?: CaseLastDebugRun;
 
   @ApiProperty()
   @IsObject()

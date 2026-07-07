@@ -83,6 +83,24 @@ export class ApiTestCaseEntity {
     inferredFields?: string[];
     promptIds?: string[];
     generateVersion?: number;
+    debugEnvironmentId?: string;
+    debugEnvironmentServiceId?: string;
+    lastDebugRun?: {
+      statusCode: number;
+      headers: Record<string, string>;
+      body: unknown;
+      bodySize: number;
+      durationMs: number;
+      error?: string;
+      assertions: Array<{
+        name: string;
+        passed: boolean;
+        expected: unknown;
+        actual: unknown;
+        message?: string;
+      }>;
+      executedAt?: string;
+    };
   };
 
   @Column({ nullable: true, default: "system" })

@@ -1,22 +1,28 @@
 <template>
   <section class="panel document-panel">
-    <div class="panel-header">
-      <div>
+    <div class="panel-header document-panel-header">
+      <div class="document-panel-intro">
         <h2>接口文档</h2>
         <p class="document-panel-desc">上传并结构化接口文档，可 AI 生成测试案例</p>
-        <div v-if="apiStore.apiDoc?.sourceDocName" class="doc-links">
+        <div v-if="sourceDocName" class="doc-source-row">
           <a
-            v-if="apiStore.apiDoc.sourceDocUrl"
+            v-if="apiStore.apiDoc?.sourceDocUrl"
+            class="doc-source-link"
             :href="apiStore.apiDoc.sourceDocUrl"
             target="_blank"
             rel="noopener"
+            :title="sourceDocName"
           >
-            接口文档：{{ apiStore.apiDoc.sourceDocName }}
+            当前文档：{{ sourceDocName }}
           </a>
+          <span v-else class="doc-source-name" :title="sourceDocName">
+            当前文档：{{ sourceDocName }}
+          </span>
         </div>
       </div>
-      <div class="toolbar action-toolbar">
+      <div class="toolbar action-toolbar document-panel-toolbar">
         <a-upload
+          v-if="!showSmpData"
           :show-upload-list="false"
           :before-upload="onUpload"
           :disabled="apiStore.loading"
@@ -24,13 +30,9 @@
         >
           <a-button :loading="apiStore.loading" :disabled="apiStore.loading">
             <template #icon><UploadOutlined /></template>
-            上传
+            {{ sourceDocName ? '重新上传' : '上传文档' }}
           </a-button>
         </a-upload>
-        <a-button @click="openScenarioModal">
-          <template #icon><SettingOutlined /></template>
-          场景
-        </a-button>
         <a-button
           type="primary"
           :disabled="!apiStore.canGenerateCases || apiStore.docReadiness?.ok === false"
@@ -44,10 +46,26 @@
           <template #icon><HistoryOutlined /></template>
           生成历史
         </a-button>
-        <a-button v-if="!showSmpData" :disabled="!canSave" @click="onSave">
-          <template #icon><SaveOutlined /></template>
-          保存
-        </a-button>
+        <a-dropdown v-model:open="moreMenuOpen" trigger="click">
+          <a-button>
+            更多
+            <DownOutlined
+              :class="['dropdown-trigger-chevron', { 'is-open': moreMenuOpen }]"
+            />
+          </a-button>
+          <template #overlay>
+            <a-menu @click="onMoreMenuClick">
+              <a-menu-item key="scenario">
+                <SettingOutlined />
+                场景配置
+              </a-menu-item>
+              <a-menu-item v-if="!showSmpData" key="save" :disabled="!canSave">
+                <SaveOutlined />
+                手动保存
+              </a-menu-item>
+            </a-menu>
+          </template>
+        </a-dropdown>
       </div>
     </div>
 
@@ -107,15 +125,14 @@
         <div v-for="(section, sectionIndex) in sections" :key="section.title" class="doc-section-block">
           <h3 class="doc-section-title">{{ section.title }}</h3>
           <div v-if="section.title === '示例报文'" class="example-message-block">
-            <a-textarea
-              v-model:value="exampleMessage"
+            <textarea
+              v-model="exampleMessage"
               class="example-message-input"
-              :rows="6"
+              rows="6"
               placeholder="可选。填写后将作为 AI 生成案例的报文样例参考。"
               @input="onExampleMessageInput"
               @blur="onExampleMessageBlur"
             />
-            <p class="example-message-hint">仅请求报文体示例，不影响响应断言逻辑。</p>
           </div>
           <div v-else class="api-doc-table-wrap">
             <table class="api-doc-table">
@@ -197,6 +214,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onActivated, onDeactivated, ref, watch } from 'vue';
 import {
+  DownOutlined,
   HistoryOutlined,
   SaveOutlined,
   SettingOutlined,
@@ -204,7 +222,7 @@ import {
   UploadOutlined,
 } from '@ant-design/icons-vue';
 import { Modal, message } from 'ant-design-vue';
-import type { UploadProps } from 'ant-design-vue';
+import type { MenuProps, UploadProps } from 'ant-design-vue';
 import ScenarioMaintainModal from '@/components/ScenarioMaintainModal.vue';
 import ScenarioPromptPicker from '@/components/ScenarioPromptPicker.vue';
 import SmpDocumentViewer from '@/components/api-test/SmpDocumentViewer.vue';
@@ -233,6 +251,7 @@ const panelActive = ref(true);
 const scenarioModalOpen = ref(false);
 const generateModalOpen = ref(false);
 const historyDrawerOpen = ref(false);
+const moreMenuOpen = ref(false);
 const docPromptIds = ref<string[]>([]);
 const generatePromptIds = ref<string[]>([]);
 
@@ -249,6 +268,8 @@ const showSmpData = computed(() =>
   Boolean(apiStore.apiDoc?.smpData?.callServiceList?.length),
 );
 
+const sourceDocName = computed(() => apiStore.apiDoc?.sourceDocName ?? '');
+
 onActivated(() => {
   panelActive.value = true;
   void ensureScenarioLibrary();
@@ -261,19 +282,21 @@ onActivated(() => {
 
 onDeactivated(() => {
   panelActive.value = false;
+  syncExampleMessageToText();
+  void flushAutoSave();
 });
 
 function loadFromText(text: string) {
   syncingFromStore.value = true;
   const parsed = parseApiDocTableText(text);
-  const exampleSection = parsed.find((s) => s.title === '示例报文');
-  exampleMessage.value = exampleSection?.freeText ?? '';
-  if (!exampleSection && !showSmpData.value) {
+  if (!parsed.some((section) => section.title === '示例报文') && !showSmpData.value) {
     parsed.push({ title: '示例报文', rows: [], freeText: '' });
   }
+  const exampleSection = parsed.find((section) => section.title === '示例报文');
+  exampleMessage.value = exampleSection?.freeText ?? '';
   sections.value = parsed;
   sectionData.value = sections.value.map((section) => sectionTableData(section));
-  editorText.value = exampleSection ? text : serializeApiDocTableText(parsed);
+  editorText.value = serializeApiDocTableText(parsed);
   syncingFromStore.value = false;
   resizeAllDocCellInputs();
 }
@@ -289,12 +312,20 @@ function onExampleMessageBlur() {
 }
 
 function syncExampleMessageToText() {
-  const nextSections = sections.value.map((section) => {
-    if (section.title === '示例报文') {
-      return { ...section, freeText: exampleMessage.value };
-    }
-    return section;
-  });
+  const hasExampleSection = sections.value.some(
+    (section) => section.title === '示例报文',
+  );
+  const nextSections = hasExampleSection
+    ? sections.value.map((section) => {
+        if (section.title === '示例报文') {
+          return { ...section, freeText: exampleMessage.value };
+        }
+        return section;
+      })
+    : [
+        ...sections.value,
+        { title: '示例报文', rows: [], freeText: exampleMessage.value },
+      ];
   sections.value = nextSections;
   editorText.value = serializeApiDocTableText(nextSections);
 }
@@ -451,6 +482,16 @@ function openScenarioModal() {
   });
 }
 
+const onMoreMenuClick: MenuProps['onClick'] = ({ key }) => {
+  if (key === 'scenario') {
+    openScenarioModal();
+    return;
+  }
+  if (key === 'save') {
+    void onSave();
+  }
+};
+
 const onUpload: UploadProps['beforeUpload'] = (file) => {
   const pid = projectId.value;
   const tid = transactionId.value;
@@ -547,18 +588,43 @@ async function onSave() {
 </script>
 
 <style scoped>
+.document-panel-header {
+  align-items: flex-start;
+}
+
+.document-panel-intro {
+  min-width: 0;
+}
+
+.document-panel-toolbar {
+  flex-shrink: 0;
+}
+
 .document-panel-desc {
   margin: 4px 0 0;
   color: #667085;
   font-size: 13px;
 }
 
-.doc-links {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.doc-source-row {
   margin-top: 8px;
+  min-width: 0;
+  max-width: 100%;
   font-size: 12px;
+  line-height: 1.5;
+}
+
+.doc-source-link,
+.doc-source-name {
+  display: block;
+  overflow: hidden;
+  color: #667085;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-source-link:hover {
+  color: var(--cf-brand, #b60f2d);
 }
 
 .generate-modal-alert {
@@ -621,9 +687,22 @@ async function onSave() {
 }
 
 .example-message-input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  background: #fff;
   font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
   font-size: 13px;
   line-height: 1.5;
+  resize: vertical;
+}
+
+.example-message-input:focus {
+  outline: none;
+  border-color: var(--cf-brand, #b60f2d);
+  background: #fffbeb;
 }
 
 .example-message-hint {

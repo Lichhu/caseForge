@@ -25,6 +25,8 @@ import { SaveApiCaseDto } from "@api-test/dto/save-api-case.dto";
 import { ListApiCasesDto } from "@api-test/dto/list-api-cases.dto";
 import {
   generateCasesWithPlan,
+  maxCaseNoSuffix,
+  formatCaseNo,
   nextCaseNo,
 } from "@api-test/util/api-case-ai.util";
 import {
@@ -142,6 +144,16 @@ export class ApiCaseService {
       metadata: {
         source: "manual",
         promptIds: payload.promptIds ?? [],
+        ...(payload.generateVersion != null
+          ? { generateVersion: payload.generateVersion }
+          : {}),
+        ...(payload.debugEnvironmentId
+          ? { debugEnvironmentId: payload.debugEnvironmentId }
+          : {}),
+        ...(payload.debugEnvironmentServiceId
+          ? { debugEnvironmentServiceId: payload.debugEnvironmentServiceId }
+          : {}),
+        ...(payload.lastDebugRun ? { lastDebugRun: payload.lastDebugRun } : {}),
       },
       ...auditFieldsForCreate(),
     });
@@ -188,6 +200,11 @@ export class ApiCaseService {
         payload.promptIds !== undefined
           ? payload.promptIds
           : (existing.metadata?.promptIds ?? []),
+      debugEnvironmentId: payload.debugEnvironmentId,
+      debugEnvironmentServiceId: payload.debugEnvironmentServiceId,
+      ...(payload.lastDebugRun !== undefined
+        ? { lastDebugRun: payload.lastDebugRun }
+        : {}),
     };
     const saved = await this.caseRepo.save({
       ...existing,
@@ -199,6 +216,25 @@ export class ApiCaseService {
         relations: ["endpoint"],
       })) ?? saved,
     );
+  }
+
+  async persistLastDebugRun(
+    projectId: string,
+    caseId: string,
+    snapshot: NonNullable<ApiTestCaseEntity["metadata"]>["lastDebugRun"],
+  ) {
+    const existing = await this.caseRepo.findOne({
+      where: scopedWhere({ projectId, id: caseId }),
+    });
+    if (!existing) return;
+    existing.metadata = {
+      ...existing.metadata,
+      lastDebugRun: snapshot,
+    };
+    await this.caseRepo.save({
+      ...existing,
+      ...auditFieldsForUpdate(),
+    });
   }
 
   async deleteCase(projectId: string, caseId: string) {
@@ -487,7 +523,15 @@ export class ApiCaseService {
         }
       }
 
+      let seq = await maxCaseNoSuffix(
+        this.caseRepo,
+        projectId,
+        endpoint.id,
+        transaction.code,
+      );
       for (const payload of payloads) {
+        seq += 1;
+        payload.caseNo = formatCaseNo(transaction.code, seq);
         const entity = this.caseRepo.create({
           projectId,
           endpointId: endpoint.id,
@@ -548,13 +592,6 @@ export class ApiCaseService {
     if (transport === "http") {
       if (!payload.request?.method?.trim() || !payload.request?.path?.trim()) {
         throw new BadRequestException("HTTP 案例请求必须包含 method 与 path");
-      }
-      if (
-        !payload.expected?.skipStatusCheck &&
-        (payload.expected?.statusCode === undefined ||
-          payload.expected?.statusCode === null)
-      ) {
-        throw new BadRequestException("HTTP 案例必须配置预期状态码");
       }
       return;
     }

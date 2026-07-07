@@ -431,7 +431,7 @@ describe("mapCasePlanToPayload", () => {
     expect(payload.priority).toBe("P2");
   });
 
-  it("wires plan.assertions into bodyAssertions", () => {
+  it("buildExpectedFromPlan uses default template (no plan.assertions)", () => {
     const plan: AiCasePlanItem = {
       caseName: "正向-断言",
       caseDesc: "结构化断言",
@@ -439,10 +439,6 @@ describe("mapCasePlanToPayload", () => {
       priority: "高",
       bodyOverrides: { custNo: "123" },
       expectedResult: "成功",
-      assertions: [
-        { type: "contains", expected: "bizResCode" },
-        { type: "contains", expected: "000000" },
-      ],
     };
 
     const payload = mapCasePlanToPayload(
@@ -454,9 +450,8 @@ describe("mapCasePlanToPayload", () => {
       SAMPLE_DOC,
     );
 
-    expect(payload.expected.bodyAssertions).toHaveLength(2);
-    expect(payload.expected.bodyAssertions![0].expected).toBe("bizResCode");
-    expect(payload.expected.bodyAssertions![1].expected).toBe("000000");
+    expect(payload.expected.assertions).toBeDefined();
+    expect(payload.expected.assertions!.length).toBeGreaterThan(0);
   });
 
   it("drops unknown bodyOverrides keys not in field catalog", () => {

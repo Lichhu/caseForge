@@ -6,6 +6,7 @@ export interface ReportAssertionMeta {
   type: string;
   operator: string;
   expression: string;
+  expected?: string;
 }
 
 export interface ReportCaseMeta {

@@ -1,6 +1,7 @@
 import {
   mapSocketWayToTransport,
   mapMessageTypeToFormat,
+  resolveApiTechnicalProfile,
   resolveTechnicalProfileFromSmpData,
 } from "./api-doc-technical-profile.util";
 
@@ -119,5 +120,59 @@ describe("resolveTechnicalProfileFromSmpData", () => {
     expect(profile!.invocationMode).toBe("异步");
     expect(profile!.maxMessageSize).toBe("20K");
     expect(profile!.businessHeaderMark).toBe("H001");
+  });
+});
+
+describe("resolveApiTechnicalProfile", () => {
+  const httpJsonDoc = [
+    "技术信息",
+    "----",
+    "通讯方式|HTTP",
+    "报文类型|JSON",
+    "报文编码|UTF-8",
+  ].join("\n");
+
+  it("prefers explicit HTTP/JSON from doc over smpData TCP/XML", () => {
+    const profile = resolveApiTechnicalProfile(httpJsonDoc, {
+      smpData: {
+        callServiceList: [{ socketWay: "TEP", messageType: "XML" }],
+      },
+      endpoint: {
+        method: "TCP",
+        path: "/addCtmSealInfo",
+        requestNotes: "<Transaction></Transaction>",
+      },
+    });
+    expect(profile.transport).toBe("http");
+    expect(profile.messageFormat).toBe("json");
+    expect(profile.encoding).toBe("UTF-8");
+  });
+
+  it("falls back to smpData when doc has no 技术信息 section", () => {
+    const legacyDoc = [
+      "请求报文",
+      "----",
+      "| 节点代码 | 是否必填 |",
+      "| custNo | Y |",
+    ].join("\n");
+    const profile = resolveApiTechnicalProfile(legacyDoc, {
+      smpData: {
+        callServiceList: [{ socketWay: "TEP", messageType: "XML" }],
+      },
+    });
+    expect(profile.transport).toBe("tcp");
+    expect(profile.messageFormat).toBe("xml");
+  });
+
+  it("falls back to endpoint heuristic when no doc tech info and no smpData", () => {
+    const profile = resolveApiTechnicalProfile("", {
+      endpoint: {
+        method: "POST",
+        path: "/api/test",
+        requestNotes: "<Transaction></Transaction>",
+      },
+    });
+    expect(profile.transport).toBe("http");
+    expect(profile.messageFormat).toBe("xml");
   });
 });

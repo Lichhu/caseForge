@@ -18,7 +18,7 @@
       </div>
     </div>
 
-    <div v-if="apiStore.caseListTotal > 0 || apiStore.cases.length" class="dynamic-layout">
+    <div v-if="showCaseWorkspace" class="dynamic-layout">
       <div class="test-point-list test-point-list-panel case-list-panel">
         <div class="test-point-list-head">
           <strong>案例列表</strong>
@@ -34,7 +34,7 @@
             <span>{{ apiStore.caseListTotal }} 条</span>
           </div>
         </div>
-        <div v-if="batchMode" class="list-toolbar batch-list-toolbar case-list-toolbar">
+        <div v-if="batchMode && apiStore.cases.length" class="list-toolbar batch-list-toolbar case-list-toolbar">
           <a-checkbox
             :checked="allSelected"
             :indeterminate="selectionIndeterminate"
@@ -44,7 +44,11 @@
           </a-checkbox>
           <span class="case-list-selection">已选 {{ selectedIds.length }} / {{ apiStore.caseListTotal }}</span>
         </div>
-        <div class="test-point-list-scroll">
+        <div v-if="!apiStore.cases.length" class="case-list-empty">
+          <InboxOutlined class="case-list-empty-icon" />
+          <p>{{ caseListEmptyHint }}</p>
+        </div>
+        <div v-else class="test-point-list-scroll">
           <article
             v-for="item in apiStore.cases"
             :key="item.id"
@@ -171,56 +175,127 @@
             </div>
 
             <div class="editor-block case-payload-block">
-              <div class="case-protocol-bar">
-                <div class="case-protocol-field">
-                  <span class="case-protocol-label">通讯协议</span>
-                  <a-select
-                    v-model:value="form.protocol"
-                    :options="protocolOptions"
-                    class="case-protocol-select"
-                  />
-                </div>
-                <template v-if="form.protocol === 'http'">
-                  <div class="case-protocol-field">
-                    <span class="case-protocol-label">请求方法</span>
-                    <a-select
-                      v-model:value="form.httpMethod"
-                      :options="httpMethodOptions"
-                      class="case-protocol-select"
-                    />
-                  </div>
-                  <div class="case-protocol-field case-protocol-field--grow">
-                    <span class="case-protocol-label">路径</span>
-                    <a-input
-                      v-model:value="form.httpPath"
-                      placeholder="请输入相对路径，系统根据环境和服务名进行 URL 拼接"
-                    />
-                  </div>
-                </template>
-                <div v-if="form.protocol === 'socket'" class="case-protocol-field">
-                  <span class="case-protocol-label">编码</span>
-                  <a-select
-                    v-model:value="form.socketEncoding"
-                    :options="encodingOptions"
-                    class="case-protocol-select"
-                  />
+              <div class="editor-block-title-row case-editor-main-tabs-row">
+                <div class="case-editor-main-tabs">
+                  <button
+                    v-for="tab in editorMainTabs"
+                    :key="tab.key"
+                    type="button"
+                    class="case-editor-main-tab"
+                    :class="{ active: editorMainTab === tab.key }"
+                    @click="editorMainTab = tab.key"
+                  >
+                    {{ tab.label }}
+                  </button>
                 </div>
               </div>
 
-              <div class="case-payload-grid">
-                <div class="case-payload-item">
-                  <div class="editor-block-title-row">
-                    <div class="editor-block-title">请求报文</div>
-                    <a-button
-                      v-if="requestTab === 'body' && canBeautifyBody"
-                      type="link"
-                      size="small"
-                      @click="beautifyRequestJson"
-                    >
-                      <template #icon><FormatPainterOutlined /></template>
-                      美化
-                    </a-button>
+              <div v-show="editorMainTab === 'basic'" class="case-editor-panel case-basic-panel">
+                <div class="case-basic-shell">
+                  <div class="case-basic-form">
+                    <div class="case-basic-field case-basic-field--full">
+                      <label class="case-basic-label case-basic-label--required">案例名称</label>
+                      <a-input v-model:value="form.title" size="small" placeholder="案例名称" />
+                    </div>
+                    <div class="case-basic-field">
+                      <label class="case-basic-label case-basic-label--required">案例类型</label>
+                      <a-select v-model:value="form.polarity" size="small" :options="polarityOptions" />
+                    </div>
+                    <div class="case-basic-field">
+                      <label class="case-basic-label">状态</label>
+                      <a-select v-model:value="form.status" size="small" :options="statusOptions" />
+                    </div>
+                    <div class="case-basic-field">
+                      <label class="case-basic-label">案例编号</label>
+                      <a-input v-model:value="form.caseNo" size="small" placeholder="如 PCBS03901001-001" />
+                    </div>
+                    <div class="case-basic-field">
+                      <label class="case-basic-label">交易码</label>
+                      <a-input v-model:value="form.transactionCode" size="small" disabled />
+                    </div>
+                    <div class="case-basic-field">
+                      <label class="case-basic-label">负责人</label>
+                      <a-input v-model:value="form.owner" size="small" placeholder="负责人" />
+                    </div>
+                    <div class="case-basic-field">
+                      <label class="case-basic-label">创建人</label>
+                      <a-input v-model:value="form.createdBy" size="small" disabled />
+                    </div>
+                    <div class="case-basic-field case-basic-field--full">
+                      <label class="case-basic-label">绑定接口</label>
+                      <a-select
+                        v-model:value="form.endpointId"
+                        size="small"
+                        :options="endpointOptions"
+                        placeholder="选择接口"
+                      />
+                    </div>
                   </div>
+                  <div class="case-basic-meta">
+                    <div class="case-basic-meta-item">
+                      <label class="case-basic-label">案例描述</label>
+                      <a-textarea
+                        v-model:value="form.description"
+                        class="case-basic-textarea"
+                        :rows="3"
+                        placeholder="案例描述"
+                      />
+                    </div>
+                    <div class="case-basic-meta-item">
+                      <label class="case-basic-label">备注</label>
+                      <a-textarea
+                        v-model:value="form.remark"
+                        class="case-basic-textarea"
+                        :rows="3"
+                        placeholder="备注"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div v-show="editorMainTab === 'request'" class="case-editor-panel case-request-panel">
+                <div class="case-request-shell">
+                <div class="case-protocol-bar">
+                  <div class="case-protocol-field">
+                    <span class="case-protocol-label">通讯协议</span>
+                    <a-select
+                      v-model:value="form.protocol"
+                      :options="protocolOptions"
+                      size="small"
+                      class="case-protocol-select"
+                    />
+                  </div>
+                  <template v-if="form.protocol === 'http'">
+                    <div class="case-protocol-field">
+                      <span class="case-protocol-label">请求方法</span>
+                      <a-select
+                        v-model:value="form.httpMethod"
+                        :options="httpMethodOptions"
+                        size="small"
+                        class="case-protocol-select"
+                      />
+                    </div>
+                    <div class="case-protocol-field case-protocol-field--grow">
+                      <span class="case-protocol-label">路径</span>
+                      <a-input
+                        v-model:value="form.httpPath"
+                        size="small"
+                        placeholder="相对路径，按环境与服务拼接 URL"
+                      />
+                    </div>
+                  </template>
+                  <div v-if="form.protocol === 'socket'" class="case-protocol-field">
+                    <span class="case-protocol-label">编码</span>
+                    <a-select
+                      v-model:value="form.socketEncoding"
+                      :options="encodingOptions"
+                      size="small"
+                      class="case-protocol-select"
+                    />
+                  </div>
+                </div>
+                <div class="case-request-toolbar">
                   <div class="case-request-tabs">
                     <button
                       v-for="tab in requestTabs"
@@ -234,210 +309,245 @@
                       <span v-if="tab.count" class="case-request-tab-badge">{{ tab.count }}</span>
                     </button>
                   </div>
-                  <div class="case-payload-fields case-payload-fields--body">
-                    <template v-if="requestTab === 'params'">
-                      <p class="case-payload-hint">Query 参数将拼接到请求 URL 后。</p>
-                      <KeyValueRowsEditor v-model:rows="form.queryRows" />
-                    </template>
-                    <template v-else-if="requestTab === 'headers'">
-                      <p class="case-payload-hint">{{ headersTabHint }}</p>
-                      <KeyValueRowsEditor v-model:rows="form.headerRows" />
-                    </template>
-                    <template v-else>
-                      <div v-if="form.protocol === 'http'" class="case-body-format-bar">
-                        <button
-                          v-for="item in bodyFormatOptions"
-                          :key="item.value"
-                          type="button"
-                          class="case-body-format-btn"
-                          :class="{
-                            active: form.bodyFormat === item.value,
-                            disabled: !httpMethodHasBody(form.httpMethod),
-                          }"
-                          :disabled="!httpMethodHasBody(form.httpMethod)"
-                          @click="form.bodyFormat = item.value"
-                        >
-                          {{ item.label }}
-                        </button>
-                      </div>
-                      <div v-else class="case-body-format-bar">
-                        <button
-                          v-for="item in bodyFormatOptions"
-                          :key="item.value"
-                          type="button"
-                          class="case-body-format-btn"
-                          :class="{ active: form.bodyFormat === item.value }"
-                          @click="form.bodyFormat = item.value"
-                        >
-                          {{ item.label }}
-                        </button>
-                      </div>
-                      <p class="case-payload-hint">{{ bodyTabHint }}</p>
-                      <template v-if="!httpMethodHasBody(form.httpMethod) && form.protocol === 'http'">
-                        <div class="case-body-empty">GET / HEAD 请求无 Body，请使用 Params 配置查询参数。</div>
-                      </template>
-                      <template v-else-if="form.bodyFormat === 'json'">
-                        <textarea
-                          :key="`${payloadEditorKey}-body-json`"
-                          v-model="form.requestBodyJson"
-                          class="ant-input editor-textarea case-json-editor case-payload-textarea case-payload-textarea--expand"
-                          :style="payloadTextareaStyle(form.requestBodyJson)"
-                          placeholder="{}"
-                          spellcheck="false"
-                        />
-                      </template>
-                      <template v-else-if="form.bodyFormat === 'xml'">
-                        <textarea
-                          :key="`${payloadEditorKey}-body-xml`"
-                          v-model="form.requestBodyXml"
-                          class="ant-input editor-textarea case-xml-editor case-payload-textarea case-payload-textarea--expand"
-                          :style="payloadTextareaStyle(form.requestBodyXml)"
-                          placeholder="XML 报文"
-                          spellcheck="false"
-                        />
-                      </template>
-                      <template v-else>
-                        <textarea
-                          :key="`${payloadEditorKey}-body-text`"
-                          v-model="form.requestBodyText"
-                          class="ant-input editor-textarea case-payload-textarea case-payload-textarea--expand"
-                          :style="payloadTextareaStyle(form.requestBodyText)"
-                          placeholder="纯文本报文"
-                          spellcheck="false"
-                        />
-                      </template>
-                    </template>
-                  </div>
                 </div>
-                <div class="case-payload-item">
-                  <div class="editor-block-title-row">
-                    <div class="editor-block-title">预期结果</div>
-                    <a-button type="link" size="small" @click="beautifyExpectedJson">
-                      <template #icon><FormatPainterOutlined /></template>
-                      美化
-                    </a-button>
-                  </div>
-                  <p class="case-payload-hint">{{ expectedPayloadHint }}</p>
-                  <a-collapse :bordered="false" class="expected-guide-collapse">
-                    <a-collapse-panel key="guide" header="断言说明">
-                      <p class="expected-guide-lead">
-                        切换协议时会自动带出模板；一般只需改
-                        <code>expected</code> 里的具体值，或先执行一次再对照实际响应微调。
-                      </p>
-                      <div class="expected-guide-section">
-                        <div class="expected-guide-label">平台支持的检查项</div>
-                        <ul class="expected-guide-list">
-                          <li>
-                            <code>statusCode</code>：HTTP 状态码，可写单个数字或数组（如
-                            <code>200</code> 或 <code>[200, 201]</code>）
-                          </li>
-                          <li><code>statusOnly: true</code>：只检查状态码，不检查响应体</li>
-                          <li>
-                            <code>skipStatusCheck: true</code>：跳过状态码（Socket / MQ 用这个）
-                          </li>
-                          <li><code>maxDurationMs</code>：可选，响应时间上限（毫秒）</li>
-                          <li><code>bodyAssertions</code>：响应体断言列表，可写多条</li>
-                        </ul>
+                <div class="case-payload-fields case-payload-fields--body">
+                  <template v-if="requestTab === 'params'">
+                    <KeyValueRowsEditor
+                      v-model:rows="form.queryRows"
+                      hint="Query 参数将拼接到请求 URL 后"
+                    />
+                  </template>
+                  <template v-else-if="requestTab === 'headers'">
+                    <KeyValueRowsEditor
+                      v-model:rows="form.headerRows"
+                      :hint="headersTabHint"
+                    />
+                  </template>
+                  <template v-else>
+                    <div class="case-body-panel">
+                      <div
+                        v-if="httpMethodHasBody(form.httpMethod) || form.protocol !== 'http'"
+                        class="case-body-hint-row"
+                      >
+                        <span class="case-body-hint">{{ bodyTabHint }}</span>
                       </div>
-                      <div class="expected-guide-section">
-                        <div class="expected-guide-label">bodyAssertions 支持的类型</div>
-                        <ul class="expected-guide-list">
-                          <li>
-                            <code>contains</code>：响应里<strong>包含</strong>某段文字（XML / 文本最常用）
-                          </li>
-                          <li><code>equals</code>：与期望值<strong>完全相等</strong></li>
-                          <li>
-                            <code>jsonPath</code>：按路径取值后相等（JSON 响应，如
-                            <code>path: "$.code"</code>）
-                          </li>
-                          <li><code>matches</code>：符合正则表达式</li>
-                        </ul>
-                      </div>
-                      <div class="expected-guide-section">
-                        <div class="expected-guide-label">通过规则</div>
-                        <p class="expected-guide-text">
-                          配置了哪几条，就要<strong>全部通过</strong>才算案例成功；不是整包响应一一对比。
-                        </p>
-                      </div>
-                      <div class="expected-guide-section">
-                        <div class="expected-guide-label">推荐步骤</div>
-                        <ol class="expected-guide-steps">
-                          <li>保持自动带出的模板，或点击下方「填入示例」</li>
-                          <li>先执行一次，在执行报告里看实际响应</li>
-                          <li>从响应里挑 1～3 个稳定特征（如 <code>000000</code>、<code>&lt;/Transaction&gt;</code>）写进断言</li>
-                          <li>重新执行，根据断言明细逐条调整</li>
-                        </ol>
-                      </div>
-                      <div class="expected-guide-section">
-                        <div class="expected-guide-label-row">
-                          <span class="expected-guide-label">当前协议示例（可直接用）</span>
-                          <a-button type="link" size="small" @click="applyExpectedExample">
-                            填入示例
+                      <div class="case-editor-surface">
+                        <div
+                          v-if="httpMethodHasBody(form.httpMethod) || form.protocol !== 'http'"
+                          class="case-editor-chrome"
+                        >
+                          <div class="case-body-format-bar">
+                            <button
+                              v-for="item in bodyFormatOptions"
+                              :key="item.value"
+                              type="button"
+                              class="case-body-format-btn"
+                              :class="{
+                                active: form.bodyFormat === item.value,
+                                disabled: form.protocol === 'http' && !httpMethodHasBody(form.httpMethod),
+                              }"
+                              :disabled="form.protocol === 'http' && !httpMethodHasBody(form.httpMethod)"
+                              @click="form.bodyFormat = item.value"
+                            >
+                              {{ item.label }}
+                            </button>
+                          </div>
+                          <a-button
+                            v-if="canBeautifyBody"
+                            type="link"
+                            size="small"
+                            class="case-editor-beautify-btn"
+                            @click="beautifyRequestJson"
+                          >
+                            <template #icon><FormatPainterOutlined /></template>
+                            美化
                           </a-button>
                         </div>
-                        <pre class="expected-guide-example">{{ expectedExampleJson }}</pre>
+                        <div class="case-editor-content">
+                        <template v-if="form.bodyFormat === 'json'">
+                          <textarea
+                            :key="`${payloadEditorKey}-body-json`"
+                            v-model="form.requestBodyJson"
+                            class="ant-input editor-textarea case-json-editor case-payload-textarea case-payload-textarea--expand case-payload-textarea--in-surface"
+                            placeholder="{}"
+                            spellcheck="false"
+                          />
+                        </template>
+                        <template v-else-if="form.bodyFormat === 'xml'">
+                          <textarea
+                            :key="`${payloadEditorKey}-body-xml`"
+                            v-model="form.requestBodyXml"
+                            class="ant-input editor-textarea case-xml-editor case-payload-textarea case-payload-textarea--expand case-payload-textarea--in-surface"
+                            placeholder="XML 报文"
+                            spellcheck="false"
+                          />
+                        </template>
+                        <template v-else>
+                          <textarea
+                            :key="`${payloadEditorKey}-body-text`"
+                            v-model="form.requestBodyText"
+                            class="ant-input editor-textarea case-payload-textarea case-payload-textarea--expand case-payload-textarea--in-surface"
+                            placeholder="纯文本报文"
+                            spellcheck="false"
+                          />
+                        </template>
+                        </div>
                       </div>
-                    </a-collapse-panel>
-                  </a-collapse>
-                  <div class="case-payload-fields case-payload-fields--expected">
-                    <textarea
-                      :key="`${payloadEditorKey}-expected`"
-                      v-model="form.expectedJson"
-                      class="ant-input editor-textarea case-json-editor case-payload-textarea case-payload-textarea--expand"
-                      :style="payloadTextareaStyle(form.expectedJson, 6)"
-                      placeholder="JSON：statusCode / bodyAssertions"
-                      spellcheck="false"
-                    />
+                    </div>
+                  </template>
+                </div>
+                </div>
+              </div>
+
+              <div v-show="editorMainTab === 'assertion'" class="case-editor-panel case-assertion-panel">
+                <div class="case-assertion-shell">
+                  <div class="case-assertion-toolbar">
+                    <div class="case-debug-bar">
+                      <a-select
+                        v-model:value="apiStore.selectedEnvironmentId"
+                        size="small"
+                        placeholder="选择环境"
+                        :options="debugEnvironmentOptions"
+                        class="case-debug-env-select"
+                        allow-clear
+                      />
+                      <a-select
+                        v-if="hasDebugServices"
+                        v-model:value="debugServiceId"
+                        size="small"
+                        placeholder="选择服务（可选）"
+                        :options="debugServiceOptions"
+                        class="case-debug-service-select"
+                        allow-clear
+                      />
+                      <a-button
+                        type="primary"
+                        size="small"
+                        :loading="debugRunning"
+                        :disabled="!apiStore.selectedEnvironmentId"
+                        @click="onDebugRun"
+                      >
+                        <template #icon><ThunderboltOutlined /></template>
+                        调试执行
+                      </a-button>
+                    </div>
+                    <div class="case-assertion-toolbar-actions">
+                      <template v-if="debugResult">
+                        <div class="case-debug-response-meta">
+                          <span
+                            class="case-debug-status"
+                            :class="{ 'status-ok': debugResult.statusCode >= 200 && debugResult.statusCode < 300, 'status-err': debugResult.statusCode === 0 || debugResult.statusCode >= 400, 'status-tcp': debugResult.statusCode === -1 }"
+                          >
+                            {{ debugResult.error ? '请求失败' : debugResult.statusCode === -1 ? 'Socket 响应' : `${debugResult.statusCode}` }}
+                          </span>
+                          <span class="case-debug-duration">{{ debugResult.durationMs }}ms</span>
+                          <span class="case-debug-size">{{ debugResult.bodySize }} bytes</span>
+                        </div>
+                        <a-button
+                          type="primary"
+                          size="small"
+                          :loading="generatingAssertions"
+                          :disabled="!!debugResult.error"
+                          @click="onGenerateAssertions"
+                        >
+                          <template #icon><RobotOutlined /></template>
+                          AI 生成断言
+                        </a-button>
+                      </template>
+                      <span v-else class="case-panel-hint">选择环境并调试执行，再使用 AI 生成断言</span>
+                    </div>
                   </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="editor-block">
-              <div class="editor-block-title">基础信息</div>
-              <div class="editor-form-grid editor-form-grid--wide">
-                <label class="field-label field-label--required">案例名称</label>
-                <a-input v-model:value="form.title" placeholder="案例名称" />
-                <label class="field-label field-label--required">案例类型</label>
-                <a-select v-model:value="form.polarity" :options="polarityOptions" />
-                <label class="field-label">案例编号</label>
-                <a-input v-model:value="form.caseNo" placeholder="如 PCBS03901001-001" />
-                <label class="field-label">交易码</label>
-                <a-input v-model:value="form.transactionCode" disabled />
-                <label class="field-label">状态</label>
-                <a-select v-model:value="form.status" :options="statusOptions" />
-                <label class="field-label">创建人</label>
-                <a-input v-model:value="form.createdBy" disabled />
-                <label class="field-label">负责人</label>
-                <a-input v-model:value="form.owner" placeholder="负责人" />
-                <label class="field-label">绑定接口</label>
-                <a-select
-                  v-model:value="form.endpointId"
-                  :options="endpointOptions"
-                  placeholder="选择接口"
-                />
-              </div>
-            </div>
-
-            <div class="editor-block case-meta-block">
-              <div class="case-meta-grid">
-                <div class="case-meta-item">
-                  <div class="editor-block-title">案例描述</div>
-                  <a-textarea
-                    v-model:value="form.description"
-                    class="editor-textarea"
-                    :rows="3"
-                    placeholder="案例描述"
-                  />
-                </div>
-                <div class="case-meta-item">
-                  <div class="editor-block-title">备注</div>
-                  <a-textarea
-                    v-model:value="form.remark"
-                    class="editor-textarea"
-                    :rows="3"
-                    placeholder="备注"
-                  />
+                  <div class="case-debug-response case-debug-response--full">
+                    <div v-if="debugResult?.error" class="case-debug-error">
+                      {{ debugResult.error }}
+                    </div>
+                    <div class="case-debug-tabs">
+                      <button
+                        type="button"
+                        class="case-debug-tab"
+                        :class="{ active: debugResponseTab === 'expected' }"
+                        @click="debugResponseTab = 'expected'"
+                      >
+                        断言内容
+                      </button>
+                      <template v-if="debugResult && !debugResult.error">
+                        <button
+                          type="button"
+                          class="case-debug-tab"
+                          :class="{ active: debugResponseTab === 'body' }"
+                          @click="debugResponseTab = 'body'"
+                        >
+                          响应体
+                        </button>
+                        <button
+                          type="button"
+                          class="case-debug-tab"
+                          :class="{ active: debugResponseTab === 'assert' }"
+                          @click="debugResponseTab = 'assert'"
+                        >
+                          断言比对 ({{ debugResult.assertions.length }})
+                        </button>
+                        <button
+                          type="button"
+                          class="case-debug-tab"
+                          :class="{ active: debugResponseTab === 'headers' }"
+                          @click="debugResponseTab = 'headers'"
+                        >
+                          响应头 ({{ Object.keys(debugResult.headers).length }})
+                        </button>
+                      </template>
+                    </div>
+                    <div class="case-debug-panel">
+                      <AssertionRowsEditor
+                        v-if="debugResponseTab === 'expected'"
+                        :key="`${payloadEditorKey}-expected`"
+                        v-model:rows="form.assertionRows"
+                        :protocol="form.protocol"
+                        class="case-debug-assertion-editor"
+                        hint="可手动添加断言，或调试后使用 AI 生成"
+                      />
+                      <pre
+                        v-else-if="debugResponseTab === 'body' && debugResult"
+                        class="case-debug-body-pre"
+                      >{{ debugResponseBodyText }}</pre>
+                      <table
+                        v-else-if="debugResponseTab === 'assert' && debugResult"
+                        class="case-debug-assert-table"
+                      >
+                        <thead>
+                          <tr>
+                            <th>断言</th>
+                            <th>断言值</th>
+                            <th>实际值</th>
+                            <th style="width: 64px">结果</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr
+                            v-for="(assertion, idx) in debugResult.assertions"
+                            :key="idx"
+                            :class="assertion.passed ? 'assert-pass' : 'assert-fail'"
+                          >
+                            <td>{{ assertion.name }}</td>
+                            <td class="case-debug-assert-value">{{ formatAssertValue(assertion.expected) }}</td>
+                            <td class="case-debug-assert-value">{{ formatAssertValue(assertion.actual) }}</td>
+                            <td>
+                              <span
+                                class="case-debug-assert-status"
+                                :class="assertion.passed ? 'pass' : 'fail'"
+                              >
+                                {{ assertion.passed ? '通过' : '失败' }}
+                              </span>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                      <pre
+                        v-else-if="debugResponseTab === 'headers' && debugResult"
+                        class="case-debug-headers-pre"
+                      >{{ JSON.stringify(debugResult.headers, null, 2) }}</pre>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -483,7 +593,9 @@ import {
   FormatPainterOutlined,
   InboxOutlined,
   PlusOutlined,
+  RobotOutlined,
   SaveOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
 import {
@@ -493,13 +605,19 @@ import {
   resolveExecutionProfile,
 } from '@case-forge/shared';
 import type { ApiCaseRequest } from '@case-forge/shared';
-import type { ApiTestCaseRow, ApiCaseGenerateHistoryItem } from '@/api/apiTestClient';
+import type { ApiTestCaseRow, DebugRunResult } from '@/api/apiTestClient';
+import { listAllApiCases, debugRunCase, generateAssertions } from '@/api/apiTestClient';
 import { useApiTestStore } from '@/stores/apiTest';
 import KeyValueRowsEditor from '@/components/api-test/KeyValueRowsEditor.vue';
+import AssertionRowsEditor from '@/components/api-test/AssertionRowsEditor.vue';
+import {
+  assertionsToRows,
+  buildExpectedFromRows,
+  type AssertionRow,
+} from '@/utils/assertionRows.util';
 import {
   beautifyCasePayloadJson,
   beautifyRequestBodyXml,
-  buildDefaultExpectedJson,
   buildDefaultHeaderRows,
   createEmptyKeyValueRow,
   defaultContentType,
@@ -520,17 +638,17 @@ const apiStore = useApiTestStore();
 
 const PAYLOAD_TEXTAREA_MIN_ROWS = 12;
 /** 与 .case-json-editor / .case-xml-editor 的 font-size(12px) × line-height(1.5~1.6) 对齐 */
-const PAYLOAD_TEXTAREA_LINE_HEIGHT_PX = 18;
-const PAYLOAD_TEXTAREA_BOX_EXTRA_PX = 12;
+const PAYLOAD_TEXTAREA_LINE_HEIGHT_PX = 19;
+const PAYLOAD_TEXTAREA_BOX_EXTRA_PX = 28;
 
-/** 按内容行数计算像素高度，整段报文可见；由外层 instruction-editor-body 滚动 */
+/** 按内容行数计算像素高度；外层滚动，编辑器内保留 auto 以防裁切 */
 function payloadTextareaStyle(text: string, minRows = PAYLOAD_TEXTAREA_MIN_ROWS) {
   const lineCount = Math.max(minRows, (text ?? '').split('\n').length + 1);
   const heightPx = lineCount * PAYLOAD_TEXTAREA_LINE_HEIGHT_PX + PAYLOAD_TEXTAREA_BOX_EXTRA_PX;
   return {
     height: `${heightPx}px`,
     minHeight: `${heightPx}px`,
-    overflowY: 'hidden',
+    overflowY: 'auto',
   } as const;
 }
 
@@ -538,6 +656,64 @@ const batchMode = ref(false);
 const saving = ref(false);
 const isNewCase = ref(false);
 const syncingForm = ref(false);
+const debugRunning = ref(false);
+const generatingAssertions = ref(false);
+const debugResult = ref<DebugRunResult | null>(null);
+const debugServiceId = ref<string>('');
+const loadedCaseId = ref('');
+const debugResponseTab = ref<'expected' | 'body' | 'assert' | 'headers'>('expected');
+
+const debugEnvironmentOptions = computed(() =>
+  apiStore.environments
+    .filter((env) => env.enabled)
+    .map((env) => ({
+      label: env.isDefault ? `${env.name}（默认）` : env.name,
+      value: env.id,
+    })),
+);
+
+const debugServiceOptions = computed(() => {
+  const envId = apiStore.selectedEnvironmentId;
+  if (!envId) return [];
+  const services = apiStore.environmentServices[envId] ?? [];
+  const expectedTransport = resolveDebugExpectedTransport();
+  return services
+    .filter((s) => s.enabled)
+    .map((s) => {
+      const transport = s.transport ?? 'http';
+      const mismatch = transport !== expectedTransport;
+      return {
+        label: mismatch
+          ? `${s.name} (${transport.toUpperCase()} · 协议不符)`
+          : `${s.name} (${transport.toUpperCase()})`,
+        value: s.id,
+        disabled: mismatch,
+      };
+    });
+});
+
+const hasDebugServices = computed(() => debugServiceOptions.value.length > 0);
+
+function resolveDebugExpectedTransport(): 'http' | 'tcp' {
+  return form.protocol === 'socket' ? 'tcp' : 'http';
+}
+
+function syncDebugServiceSelection() {
+  const compatible = debugServiceOptions.value.filter((item) => !item.disabled);
+  if (
+    debugServiceId.value &&
+    compatible.some((item) => item.value === debugServiceId.value)
+  ) {
+    return;
+  }
+  debugServiceId.value = compatible[0]?.value ?? '';
+}
+const editorMainTab = ref<'basic' | 'request' | 'assertion'>('request');
+const editorMainTabs = [
+  { key: 'basic' as const, label: '基础信息' },
+  { key: 'request' as const, label: '请求报文' },
+  { key: 'assertion' as const, label: '断言' },
+];
 const requestTab = ref<'params' | 'body' | 'headers'>('body');
 const pageSizeOptions = caseForgePageSizeOptionLabels();
 
@@ -545,6 +721,18 @@ const projectId = computed(() => apiStore.activeProjectId ?? '');
 const transactionId = computed(() => apiStore.activeTransactionId ?? '');
 const selectedIds = computed(() => apiStore.selectedCaseIds);
 const allVersions = ref<number[]>([]);
+const showCaseWorkspace = computed(
+  () =>
+    apiStore.caseListTotal > 0 ||
+    apiStore.cases.length > 0 ||
+    allVersions.value.length > 0 ||
+    apiStore.caseListVersionFilter != null,
+);
+const caseListEmptyHint = computed(() =>
+  apiStore.caseListVersionFilter != null
+    ? `v${apiStore.caseListVersionFilter} 暂无案例，请切换其他版本`
+    : '当前暂无案例',
+);
 const versionOptions = computed(() => {
   const list = [...allVersions.value].sort((a, b) => a - b);
   const options: { value: number | null; label: string }[] = [
@@ -563,31 +751,62 @@ async function loadAvailableVersions() {
   const tid = transactionId.value;
   if (!pid || !tid) return;
   const reqId = ++loadVersionsReqId;
-  const history = await apiStore.fetchGenerateHistory(pid, tid);
+  const rows = await listAllApiCases(pid, tid).catch(() => [] as ApiTestCaseRow[]);
   if (reqId !== loadVersionsReqId) return;
   if (pid !== projectId.value || tid !== transactionId.value) return;
+
   const versions = new Set<number>();
-  for (const h of history) {
-    if (h.version != null && h.resultCount != null && h.resultCount > 0) {
-      versions.add(h.version);
+  for (const row of rows) {
+    const version = row.metadata?.generateVersion;
+    if (version != null) {
+      versions.add(version);
     }
   }
   allVersions.value = Array.from(versions);
+
+  const filter = apiStore.caseListVersionFilter;
+  if (filter != null && !versions.has(filter)) {
+    const latest = allVersions.value.length
+      ? Math.max(...allVersions.value)
+      : null;
+    apiStore.caseListVersionFilter = latest;
+    await apiStore.refreshCases(pid, tid, {
+      resetPage: true,
+      generateVersion: latest ?? undefined,
+    });
+  }
 }
 
 onActivated(() => {
   void loadAvailableVersions();
+  void ensureDebugEnvironments();
 });
+
+async function ensureDebugEnvironments() {
+  const pid = projectId.value;
+  if (!pid) return;
+  await apiStore.refreshEnvironments(pid);
+}
 
 function onVersionFilterChange(value: number | null) {
   const pid = projectId.value;
   const tid = transactionId.value;
   if (!pid || !tid) return;
   apiStore.caseListVersionFilter = value;
-  void apiStore.refreshCases(pid, tid, {
-    resetPage: true,
-    generateVersion: value ?? undefined,
-  });
+  void (async () => {
+    await apiStore.refreshCases(pid, tid, {
+      resetPage: true,
+      generateVersion: value ?? undefined,
+    });
+    if (
+      value != null &&
+      apiStore.caseListTotal === 0 &&
+      allVersions.value.length > 0 &&
+      !allVersions.value.includes(value)
+    ) {
+      await loadAvailableVersions();
+    }
+  })();
 }
 const caseLookup = computed(() => {
   const map = new Map<string, ApiTestCaseRow>();
@@ -694,7 +913,7 @@ const form = reactive({
   requestMetaJson: '',
   requestTcpMeta: null as SocketRequestMeta | null,
   requestBodyXml: '',
-  expectedJson: '{}',
+  assertionRows: [] as AssertionRow[],
 });
 
 const requestEditorMode = computed(() =>
@@ -729,11 +948,14 @@ function countFilledRows(rows: KeyValueRow[]) {
 
 const requestTabs = computed(() => {
   if (form.protocol === 'http') {
-    return [
-      { key: 'params' as const, label: 'Params', count: countFilledRows(form.queryRows) },
-      { key: 'body' as const, label: 'Body', count: httpMethodHasBody(form.httpMethod) ? 1 : 0 },
-      { key: 'headers' as const, label: 'Headers', count: countFilledRows(form.headerRows) },
+    const tabs: Array<{ key: 'params' | 'body' | 'headers'; label: string; count: number }> = [
+      { key: 'params', label: 'Params', count: countFilledRows(form.queryRows) },
     ];
+    if (httpMethodHasBody(form.httpMethod)) {
+      tabs.push({ key: 'body', label: 'Body', count: 1 });
+    }
+    tabs.push({ key: 'headers', label: 'Headers', count: countFilledRows(form.headerRows) });
+    return tabs;
   }
   return [
     { key: 'headers' as const, label: 'Headers', count: countFilledRows(form.headerRows) },
@@ -747,48 +969,50 @@ const canBeautifyBody = computed(
 );
 
 const headersTabHint = computed(() => {
-  if (form.protocol === 'http') return '配置请求头，如 Content-Type、Authorization 等。';
-  if (form.protocol === 'socket') return '配置 Socket 通讯头信息（键值对）。';
-  return '配置 MQ 消息头信息（键值对）。';
+  if (form.protocol === 'http') return '配置请求头，如 Content-Type、Authorization 等';
+  if (form.protocol === 'socket') return '配置 Socket 通讯头信息';
+  return '配置 MQ 消息头信息';
 });
 
 const bodyTabHint = computed(() => {
   if (form.protocol === 'http') {
-    return `${form.httpMethod} 请求 Body，格式选择 JSON / XML / Text。`;
+    return `${form.httpMethod} 请求 Body，格式选择 JSON / XML / Text`;
   }
   if (form.protocol === 'socket') {
     return form.bodyFormat === 'xml'
-      ? 'Socket 报文体；GBK 编码时自动附加 8 位长度前缀。'
-      : `Socket 报文体，格式为 ${form.bodyFormat.toUpperCase()}。`;
+      ? 'Socket 报文体，GBK 编码时自动附加 8 位长度前缀'
+      : `Socket 报文体，格式为 ${form.bodyFormat.toUpperCase()}`;
   }
-  return `MQ 消息体，格式为 ${form.bodyFormat.toUpperCase()}。`;
+  return `MQ 消息体，格式为 ${form.bodyFormat.toUpperCase()}`;
 });
 
-const expectedPayloadHint = computed(() => {
-  if (form.protocol === 'http') {
-    if (form.bodyFormat === 'xml') {
-      return '可配置 statusCode 与 bodyAssertions，断言响应 XML 节点或文本内容。';
+watch(
+  () => [form.protocol, form.bodyFormat] as const,
+  ([protocol, bodyFormat], oldValue) => {
+    if (syncingForm.value || !oldValue) return;
+    const [oldProtocol, oldBodyFormat] = oldValue;
+    if (protocol === oldProtocol && protocol === 'http' && bodyFormat !== oldBodyFormat) {
+      const rows = [...form.headerRows];
+      const ctIndex = rows.findIndex(
+        (row) => row.key.trim().toLowerCase() === 'content-type',
+      );
+      if (ctIndex >= 0) {
+        rows[ctIndex] = {
+          ...rows[ctIndex],
+          value: defaultContentType(bodyFormat),
+        };
+        form.headerRows = rows;
+      }
+      return;
     }
-    return '可配置 statusCode 与 bodyAssertions，断言响应 JSON 字段或 HTTP 状态。';
-  }
-  if (form.protocol === 'socket' || form.protocol === 'mq') {
-    if (form.bodyFormat === 'xml') {
-      return '断言响应 XML 中的 bizResCode / bizResText 等节点，无需配置 HTTP 状态码。';
+    form.headerRows = buildDefaultHeaderRows(protocol, bodyFormat);
+    if (protocol === 'socket' && bodyFormat === 'xml') {
+      form.socketEncoding = 'GBK';
+    } else if (protocol === 'socket') {
+      form.socketEncoding = 'UTF-8';
     }
-    return '断言响应报文业务码或关键字段，无需配置 HTTP 状态码。';
-  }
-  return '可配置 statusCode 与 bodyAssertions。';
-});
-
-const expectedExampleJson = computed(() =>
-  buildDefaultExpectedJson(form.protocol, form.bodyFormat, form.polarity),
+  },
 );
-
-function applyExpectedExample() {
-  form.expectedJson = expectedExampleJson.value;
-  message.success('已填入当前协议的断言示例');
-}
-
 const polarityOptions = [
   { label: '正', value: 'positive' },
   { label: '反', value: 'negative' },
@@ -808,47 +1032,9 @@ const endpointOptions = computed(() =>
 
 watch(
   () => form.protocol,
-  (protocol) => {
+  () => {
     if (syncingForm.value) return;
     requestTab.value = 'body';
-  },
-);
-
-watch(
-  () => [form.protocol, form.bodyFormat] as const,
-  ([protocol, bodyFormat], oldValue) => {
-    if (syncingForm.value || !oldValue) return;
-    const [oldProtocol, oldBodyFormat] = oldValue;
-    if (protocol === oldProtocol && protocol === 'http' && bodyFormat !== oldBodyFormat) {
-      const rows = [...form.headerRows];
-      const ctIndex = rows.findIndex(
-        (row) => row.key.trim().toLowerCase() === 'content-type',
-      );
-      if (ctIndex >= 0) {
-        rows[ctIndex] = {
-          ...rows[ctIndex],
-          value: defaultContentType(bodyFormat),
-        };
-        form.headerRows = rows;
-      }
-      form.expectedJson = buildDefaultExpectedJson(
-        protocol,
-        bodyFormat,
-        form.polarity,
-      );
-      return;
-    }
-    form.headerRows = buildDefaultHeaderRows(protocol, bodyFormat);
-    form.expectedJson = buildDefaultExpectedJson(
-      protocol,
-      bodyFormat,
-      form.polarity,
-    );
-    if (protocol === 'socket' && bodyFormat === 'xml') {
-      form.socketEncoding = 'GBK';
-    } else if (protocol === 'socket') {
-      form.socketEncoding = 'UTF-8';
-    }
   },
 );
 
@@ -879,6 +1065,13 @@ watch(
 );
 
 watch(
+  () => apiStore.caseListTotal,
+  () => {
+    void loadAvailableVersions();
+  },
+);
+
+watch(
   () => transactionId.value,
   async (tid, oldTid) => {
     if (tid && tid !== oldTid) {
@@ -894,6 +1087,34 @@ watch(
   () => {
     if (isNewCase.value) return;
     syncFormFromActiveCase();
+  },
+);
+
+watch(
+  () => projectId.value,
+  (pid) => {
+    if (pid) {
+      void ensureDebugEnvironments();
+    }
+  },
+  { immediate: true },
+);
+
+watch(
+  () => apiStore.selectedEnvironmentId,
+  async (envId) => {
+    if (!envId || !projectId.value) return;
+    await apiStore.refreshEnvironmentServices(projectId.value, envId);
+    if (syncingForm.value) return;
+    debugServiceId.value = '';
+    syncDebugServiceSelection();
+  },
+);
+
+watch(
+  () => form.protocol,
+  () => {
+    syncDebugServiceSelection();
   },
 );
 
@@ -924,11 +1145,52 @@ function applyRequestToForm(request: ApiTestCaseRow['request']) {
   form.requestMetaJson = split.requestMetaJson;
   form.requestTcpMeta = split.requestTcpMeta;
   form.requestBodyXml = split.requestBodyXml;
-  requestTab.value = 'body';
+  requestTab.value =
+    split.protocol !== 'http' || httpMethodHasBody(split.httpMethod) ? 'body' : 'params';
+}
+
+function restoreLastDebugRun(row: ApiTestCaseRow, sameCase: boolean) {
+  if (sameCase && debugResult.value) return;
+  const snapshot = row.metadata?.lastDebugRun;
+  if (snapshot) {
+    debugResult.value = snapshot;
+    debugResponseTab.value = snapshot.error ? 'expected' : 'body';
+  } else if (!sameCase) {
+    debugResult.value = null;
+    debugResponseTab.value = 'expected';
+  }
+}
+
+function toLastDebugRunSnapshot(result: DebugRunResult) {
+  return {
+    statusCode: result.statusCode,
+    headers: result.headers,
+    body: result.body,
+    bodySize: result.bodySize,
+    durationMs: result.durationMs,
+    error: result.error,
+    assertions: result.assertions,
+    executedAt: new Date().toISOString(),
+  };
+}
+
+function patchActiveCaseLastDebugRun(snapshot: ReturnType<typeof toLastDebugRunSnapshot>) {
+  const caseId = apiStore.activeCaseId;
+  if (!caseId) return;
+  const row = apiStore.cases.find((item) => item.id === caseId);
+  if (!row) return;
+  row.metadata = { ...row.metadata, lastDebugRun: snapshot };
 }
 
 function loadForm(row: ApiTestCaseRow) {
+  const sameCase = loadedCaseId.value === row.id;
   syncingForm.value = true;
+  if (!sameCase) {
+    editorMainTab.value = row.metadata?.lastDebugRun ? 'assertion' : 'request';
+    restoreLastDebugRun(row, false);
+  } else {
+    restoreLastDebugRun(row, true);
+  }
   form.endpointId = row.endpointId;
   form.title = row.title;
   form.caseNo = row.caseNo ?? '';
@@ -943,7 +1205,30 @@ function loadForm(row: ApiTestCaseRow) {
   form.status = row.status;
   form.enabled = row.enabled;
   applyRequestToForm(row.request);
-  form.expectedJson = JSON.stringify(row.expected, null, 2);
+  form.assertionRows = assertionsToRows(row.expected?.assertions);
+  loadedCaseId.value = row.id;
+  syncingForm.value = false;
+  void restoreCaseDebugEnvironment(row);
+}
+
+async function restoreCaseDebugEnvironment(row: ApiTestCaseRow) {
+  const pid = projectId.value;
+  const envId = row.metadata?.debugEnvironmentId;
+  const serviceId = row.metadata?.debugEnvironmentServiceId;
+  if (!pid || !envId) return;
+  if (!apiStore.environments.length) {
+    await apiStore.refreshEnvironments(pid);
+  }
+  if (!apiStore.environments.some((item) => item.id === envId)) return;
+  syncingForm.value = true;
+  apiStore.selectedEnvironmentId = envId;
+  await apiStore.refreshEnvironmentServices(pid, envId);
+  const services = apiStore.environmentServices[envId] ?? [];
+  if (serviceId && services.some((item) => item.id === serviceId)) {
+    debugServiceId.value = serviceId;
+  } else {
+    syncDebugServiceSelection();
+  }
   syncingForm.value = false;
 }
 
@@ -1007,15 +1292,6 @@ function onToggleSelect(caseId: string, checked: boolean) {
   apiStore.toggleCaseSelection(caseId, checked);
 }
 
-function beautifyJsonField(field: 'requestJson' | 'expectedJson', label: string) {
-  try {
-    form[field] = beautifyCasePayloadJson(form[field]);
-    message.success(`${label}已美化`);
-  } catch {
-    message.error(`${label}不是合法 JSON，无法美化`);
-  }
-}
-
 function beautifyRequestJson() {
   if (form.bodyFormat === 'xml') {
     form.requestBodyXml = beautifyRequestBodyXml(form.requestBodyXml);
@@ -1034,13 +1310,10 @@ function beautifyRequestJson() {
   message.info('纯文本报文无需美化');
 }
 
-function beautifyExpectedJson() {
-  beautifyJsonField('expectedJson', '预期结果');
-}
-
 function onCreate() {
   batchMode.value = false;
   isNewCase.value = true;
+  loadedCaseId.value = '';
   apiStore.activeCaseId = '';
   syncingForm.value = true;
   const first = apiStore.apiDoc?.endpoints?.[0];
@@ -1087,11 +1360,8 @@ function onCreate() {
     form.requestBodyXml = split.requestBodyXml;
   }
   requestTab.value = 'body';
-  form.expectedJson = buildDefaultExpectedJson(
-    form.protocol,
-    form.bodyFormat,
-    form.polarity,
-  );
+  editorMainTab.value = 'basic';
+  form.assertionRows = [];
   syncingForm.value = false;
 }
 
@@ -1103,7 +1373,9 @@ async function onSave() {
   }
   saving.value = true;
   try {
-    const payload = {
+    const caseId = isNewCase.value ? undefined : apiStore.activeCaseId;
+    const expected = buildExpectedFromRows(form.assertionRows);
+    const payload: Record<string, unknown> = {
       endpointId: form.endpointId,
       title: form.title.trim(),
       caseNo: form.caseNo.trim() || undefined,
@@ -1130,18 +1402,148 @@ async function onSave() {
         requestTcpMeta: form.requestTcpMeta,
         requestBodyXml: form.requestBodyXml,
       }),
-      expected: JSON.parse(form.expectedJson),
+      expected,
+      debugEnvironmentId: apiStore.selectedEnvironmentId || undefined,
+      debugEnvironmentServiceId: debugServiceId.value || undefined,
     };
-    const caseId = isNewCase.value ? undefined : apiStore.activeCaseId;
+    if (isNewCase.value && apiStore.caseListVersionFilter != null) {
+      payload.generateVersion = apiStore.caseListVersionFilter;
+    }
+    if (debugResult.value) {
+      payload.lastDebugRun = toLastDebugRunSnapshot(debugResult.value);
+    }
     await apiStore.saveCase(projectId.value, transactionId.value, payload, caseId);
     isNewCase.value = false;
-    if (!caseId && apiStore.cases[0]) {
-      apiStore.activeCaseId = apiStore.cases[0].id;
-    }
-  } catch {
-    message.error('保存失败，请检查请求报文/预期结果 JSON 格式');
+  } catch (error) {
+    message.error((error as Error)?.message || '保存失败，请检查请求报文/预期结果 JSON 格式');
   } finally {
     saving.value = false;
+  }
+}
+
+const debugResponseBodyText = computed(() => {
+  if (!debugResult.value?.body) return '';
+  const body = debugResult.value.body;
+  if (typeof body === 'string') return body;
+  try {
+    return JSON.stringify(body, null, 2);
+  } catch {
+    return String(body);
+  }
+});
+
+function formatAssertValue(value: unknown): string {
+  if (value === undefined || value === null) return '—';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function buildDebugRequest(): ApiCaseRequest {
+  return mergeRequestFromEditor({
+    mode: requestEditorMode.value,
+    protocol: form.protocol,
+    bodyFormat: form.bodyFormat,
+    httpMethod: form.httpMethod,
+    httpPath: form.httpPath,
+    headerRows: form.headerRows,
+    queryRows: form.queryRows,
+    socketEncoding: form.socketEncoding,
+    requestBodyText: form.requestBodyText,
+    requestBodyJson: form.requestBodyJson,
+    requestJson: form.requestJson,
+    requestMetaJson: form.requestMetaJson,
+    requestTcpMeta: form.requestTcpMeta,
+    requestBodyXml: form.requestBodyXml,
+  });
+}
+
+async function onDebugRun() {
+  if (!projectId.value || !transactionId.value) return;
+  if (!apiStore.selectedEnvironmentId) {
+    message.warning('请选择调试环境');
+    return;
+  }
+  debugRunning.value = true;
+  debugResult.value = null;
+  debugResponseTab.value = 'expected';
+  try {
+    const result = await debugRunCase(
+      projectId.value,
+      transactionId.value,
+      {
+        request: buildDebugRequest(),
+        expected: buildExpectedFromRows(form.assertionRows),
+        polarity: form.polarity,
+        environmentId: apiStore.selectedEnvironmentId,
+        environmentServiceId: debugServiceId.value || apiStore.selectedEnvironmentServiceId || undefined,
+        caseId: isNewCase.value ? undefined : apiStore.activeCaseId || undefined,
+      },
+    );
+    debugResult.value = result;
+    debugResponseTab.value = result.error ? 'expected' : 'body';
+    editorMainTab.value = 'assertion';
+    if (!isNewCase.value && apiStore.activeCaseId) {
+      patchActiveCaseLastDebugRun(toLastDebugRunSnapshot(result));
+    }
+    message.success('调试完成，请查看响应并生成断言');
+  } catch {
+    message.error('调试执行失败，请检查环境配置和请求报文');
+  } finally {
+    debugRunning.value = false;
+  }
+}
+
+async function onGenerateAssertions() {
+  if (!projectId.value || !transactionId.value || !debugResult.value) return;
+
+  const hasExisting = form.assertionRows.some((row) => Boolean(row.type && row.operator));
+
+  if (hasExisting) {
+    const confirmed = await new Promise<boolean>((resolve) => {
+      Modal.confirm({
+        title: '覆盖已有断言？',
+        content: '当前已有断言，AI 生成的断言将整段替换。确定继续？',
+        okText: '替换',
+        cancelText: '取消',
+        centered: true,
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      });
+    });
+    if (!confirmed) return;
+  }
+
+  generatingAssertions.value = true;
+  try {
+    const transport = form.protocol === 'socket' ? 'tcp' : 'http';
+    const messageFormat = form.bodyFormat === 'xml' ? 'xml' : form.bodyFormat === 'text' ? 'text' : 'json';
+    const { assertions } = await generateAssertions(
+      projectId.value,
+      transactionId.value,
+      {
+        transport,
+        messageFormat,
+        polarity: form.polarity,
+        statusCode: debugResult.value.statusCode,
+        headers: debugResult.value.headers,
+        body: debugResult.value.body,
+      },
+    );
+    if (!assertions.length) {
+      message.warning('AI 未生成有效断言，请手动编辑');
+      return;
+    }
+    form.assertionRows = assertionsToRows(assertions);
+    debugResponseTab.value = 'expected';
+    message.success(`AI 生成了 ${assertions.length} 条断言，可在断言内容中编辑`);
+  } catch {
+    message.error('AI 生成断言失败，请稍后重试');
+  } finally {
+    generatingAssertions.value = false;
   }
 }
 
@@ -1193,6 +1595,14 @@ function onBatchDelete() {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+}
+
+.api-case-panel .instruction-editor-body {
+  overflow: hidden;
+}
+
+.api-case-panel .editor-hero {
+  flex-shrink: 0;
 }
 
 .case-list-toolbar {
@@ -1326,6 +1736,30 @@ function onBatchDelete() {
 
 .case-version-filter {
   width: 88px;
+}
+
+.case-list-empty {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 180px;
+  padding: 24px 16px;
+  color: #667085;
+  text-align: center;
+}
+
+.case-list-empty-icon {
+  color: #98a2b3;
+  font-size: 28px;
+}
+
+.case-list-empty p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .case-badges-row {
@@ -1484,41 +1918,166 @@ function onBatchDelete() {
   color: var(--cf-text-muted, #98a2b3);
 }
 
-.editor-form-grid--wide {
-  grid-template-columns: 96px minmax(0, 1fr) 96px minmax(0, 1fr);
-  gap: 12px 20px;
+.case-payload-block {
+  padding-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
-@media (max-width: 1100px) {
-  .editor-form-grid--wide {
-    grid-template-columns: 96px minmax(0, 1fr);
-  }
+.case-payload-block > .case-editor-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.case-meta-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+.case-editor-main-tabs-row {
+  margin-bottom: 12px;
 }
 
-.case-meta-item {
+.case-editor-main-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  border-bottom: 1px solid #eaecf0;
+}
+
+.case-editor-main-tab {
+  position: relative;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: #667085;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.case-editor-main-tab.active {
+  color: #7f1d1d;
+  font-weight: 600;
+}
+
+.case-editor-main-tab.active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: #7f1d1d;
+  border-radius: 2px 2px 0 0;
+}
+
+.case-editor-panel {
   min-width: 0;
 }
 
-.case-payload-block {
-  padding-bottom: 18px;
+.case-request-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.case-request-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid #eaecf0;
+  background: #fff;
+}
+
+.case-assertion-shell,
+.case-basic-shell {
+  border: 1px solid #eaecf0;
+  background: #fff;
+}
+
+.case-assertion-panel .case-assertion-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.case-basic-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  padding: 12px;
+  border-bottom: 1px solid #f2f4f7;
+}
+
+.case-basic-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.case-basic-field--full {
+  grid-column: 1 / -1;
+}
+
+.case-basic-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #667085;
+  line-height: 1.4;
+}
+
+.case-basic-label--required::after {
+  margin-left: 2px;
+  color: #d92d20;
+  content: '*';
+}
+
+.case-basic-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 12px;
+}
+
+.case-basic-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.case-basic-textarea {
+  border-radius: 0 !important;
+  font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .case-basic-form,
+  .case-basic-meta {
+    grid-template-columns: 1fr;
+  }
 }
 
 .case-protocol-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px 16px;
-  margin-bottom: 16px;
-  padding: 12px 14px;
-  border: 1px solid #eaecf0;
-  border-radius: 8px;
-  background: #f9fafb;
+  gap: 10px 14px;
+  margin-bottom: 0;
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 1px solid #f2f4f7;
+  border-radius: 0;
+  background: transparent;
+  flex-shrink: 0;
 }
 
 .case-protocol-field {
@@ -1564,104 +2123,30 @@ function onBatchDelete() {
   color: #667085;
 }
 
-.expected-guide-collapse {
-  margin-bottom: 8px;
-  background: #f9fafb;
-  border-radius: 6px;
-}
-
-.expected-guide-collapse :deep(.ant-collapse-header) {
-  padding: 8px 12px !important;
-  font-size: 12px;
-  color: #475467;
-}
-
-.expected-guide-collapse :deep(.ant-collapse-content-box) {
-  padding: 0 12px 12px !important;
-}
-
-.expected-guide-lead {
-  margin: 0 0 10px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: #475467;
-}
-
-.expected-guide-section + .expected-guide-section {
-  margin-top: 10px;
-}
-
-.expected-guide-label,
-.expected-guide-label-row .expected-guide-label {
-  margin-bottom: 4px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #344054;
-}
-
-.expected-guide-label-row {
+.case-request-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-}
-
-.expected-guide-list,
-.expected-guide-steps {
-  margin: 0;
-  padding-left: 18px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: #475467;
-}
-
-.expected-guide-list li + li,
-.expected-guide-steps li + li {
-  margin-top: 4px;
-}
-
-.expected-guide-text {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.6;
-  color: #475467;
-}
-
-.expected-guide-example {
-  margin: 0;
-  padding: 10px 12px;
-  overflow: auto;
-  font-size: 11px;
-  line-height: 1.5;
-  color: #344054;
-  background: #fff;
-  border: 1px solid #eaecf0;
-  border-radius: 6px;
-}
-
-.expected-guide-lead code,
-.expected-guide-list code,
-.expected-guide-steps code {
-  padding: 1px 4px;
-  font-size: 11px;
-  background: #f2f4f7;
-  border-radius: 4px;
+  gap: 12px;
+  margin-bottom: 0;
+  padding: 0 12px;
+  border-bottom: 1px solid #f2f4f7;
+  flex-shrink: 0;
 }
 
 .case-request-tabs {
   display: flex;
-  gap: 4px;
-  margin-bottom: 12px;
-  border-bottom: 1px solid #eaecf0;
+  gap: 2px;
+  min-width: 0;
 }
 
 .case-request-tab {
   position: relative;
-  padding: 8px 12px;
+  padding: 7px 10px;
   border: none;
   background: transparent;
   color: #667085;
-  font-size: 13px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -1696,25 +2181,49 @@ function onBatchDelete() {
   font-weight: 500;
 }
 
-.case-body-format-bar {
+.case-body-panel {
+  min-width: 0;
+  flex: 1;
+  min-height: 280px;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 6px;
-  margin-bottom: 8px;
+}
+
+.case-body-hint-row {
+  min-height: 20px;
+}
+
+.case-body-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #98a2b3;
+}
+
+.case-body-format-bar {
+  display: inline-flex;
+  border: 1px solid #d0d5dd;
+  overflow: hidden;
+  background: #fff;
 }
 
 .case-body-format-btn {
-  padding: 4px 10px;
-  border: 1px solid #d0d5dd;
-  border-radius: 6px;
+  padding: 2px 10px;
+  border: none;
+  border-right: 1px solid #d0d5dd;
+  border-radius: 0;
   background: #fff;
   color: #475467;
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 20px;
   cursor: pointer;
 }
 
+.case-body-format-btn:last-child {
+  border-right: none;
+}
+
 .case-body-format-btn.active {
-  border-color: #7f1d1d;
   background: #7f1d1d;
   color: #fff;
 }
@@ -1725,16 +2234,129 @@ function onBatchDelete() {
   cursor: not-allowed;
 }
 
+.case-editor-surface {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 280px;
+  border: 1px solid #eaecf0;
+  background: #fff;
+}
+
+.case-editor-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid #f2f4f7;
+  background: #fafbfc;
+  flex-shrink: 0;
+}
+
+.case-editor-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.case-editor-beautify-btn {
+  flex-shrink: 0;
+  height: auto;
+  padding: 0 4px;
+  font-size: 12px;
+}
+
+.case-editor-surface .case-payload-textarea--in-surface {
+  width: 100%;
+  flex: 1;
+  min-height: 240px;
+  height: 100% !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 8px 10px 16px;
+  overflow-y: auto !important;
+  resize: vertical;
+}
+
+.case-editor-surface .case-payload-textarea--expand:not(.case-payload-textarea--in-surface) {
+  width: 100%;
+  flex: 1;
+  min-height: 248px;
+  border: none !important;
+  box-shadow: none !important;
+  padding-top: 0;
+}
+
+.case-editor-surface .case-body-empty {
+  min-height: 280px;
+  border: none;
+  border-radius: 0;
+}
+
+.case-assertion-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #f2f4f7;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.case-assertion-toolbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.case-assertion-shell .case-debug-response {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: #fafbfc;
+}
+
+.case-assertion-shell .case-debug-response--full {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 8px 12px 12px;
+}
+
+.case-panel-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #98a2b3;
+}
+
+.case-debug-panel:has(.case-debug-assertion-editor) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.case-debug-assertion-editor {
+  flex: 1;
+  min-height: 0;
+}
+
 .case-body-empty {
   display: flex;
   align-items: center;
   justify-content: center;
   flex: 1;
-  min-height: 240px;
-  border: 1px dashed #d0d5dd;
-  border-radius: 8px;
-  color: #667085;
-  font-size: 13px;
+  min-height: 200px;
+  color: #98a2b3;
+  font-size: 12px;
   text-align: center;
   padding: 16px;
 }
@@ -1743,12 +2365,26 @@ function onBatchDelete() {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  min-height: 320px;
+  gap: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.case-payload-fields--expected,
 .case-payload-fields--body {
+  padding: 12px;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.case-payload-fields--body:has(.kv-rows-editor) {
+  padding: 12px;
+}
+
+.case-payload-fields--body :deep(.kv-rows-editor) {
+  flex: 1;
   min-height: 0;
 }
 
@@ -1767,12 +2403,12 @@ function onBatchDelete() {
 
 .case-payload-textarea--expand {
   display: block;
-  flex: none;
   width: 100%;
   box-sizing: border-box;
   resize: vertical;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: auto;
+  border-radius: 0 !important;
 }
 
 .case-payload-textarea--expand.case-xml-editor {
@@ -1833,9 +2469,186 @@ function onBatchDelete() {
 }
 
 @media (max-width: 1100px) {
-  .case-meta-grid,
   .case-payload-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.case-debug-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 4px 0;
+}
+
+.case-debug-env-select {
+  width: 140px;
+}
+
+.case-debug-service-select {
+  width: 220px;
+}
+
+.case-debug-response {
+  display: flex;
+  flex-direction: column;
+  max-height: 320px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.case-debug-response-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.case-debug-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid #eaecf0;
+  flex-shrink: 0;
+}
+
+.case-debug-tab {
+  position: relative;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: #667085;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.case-debug-tab.active {
+  color: #7f1d1d;
+  font-weight: 600;
+}
+
+.case-debug-tab.active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: #7f1d1d;
+}
+
+.case-debug-panel {
+  flex: 1;
+  min-height: 0;
+  margin-top: 8px;
+  overflow-y: auto;
+}
+
+.case-debug-body-pre,
+.case-debug-headers-pre {
+  margin: 0;
+  padding: 8px 10px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #344054;
+  background: #fff;
+  border: 1px solid #eaecf0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.case-debug-assert-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  background: #fff;
+  border: 1px solid #eaecf0;
+}
+
+.case-debug-response-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.case-debug-status {
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #f0f0f0;
+}
+
+.case-debug-status.status-ok {
+  color: #52c41a;
+  background: #f6ffed;
+}
+
+.case-debug-status.status-err {
+  color: #ff4d4f;
+  background: #fff2f0;
+}
+
+.case-debug-status.status-tcp {
+  color: #1890ff;
+  background: #e6f7ff;
+}
+
+.case-debug-duration,
+.case-debug-size {
+  color: #888;
+  font-size: 12px;
+}
+
+.case-debug-error {
+  color: #ff4d4f;
+  padding: 8px 12px;
+  background: #fff2f0;
+  border-radius: 0;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.case-debug-assert-table th {
+  text-align: left;
+  padding: 4px 8px;
+  background: #f0f0f0;
+  border: 1px solid #e8e8e8;
+  font-weight: 600;
+}
+
+.case-debug-assert-table td {
+  padding: 4px 8px;
+  border: 1px solid #e8e8e8;
+  vertical-align: top;
+}
+
+.case-debug-assert-table tr.assert-pass td {
+  background: #f6ffed;
+}
+
+.case-debug-assert-table tr.assert-fail td {
+  background: #fff2f0;
+}
+
+.case-debug-assert-status {
+  font-weight: 600;
+}
+
+.case-debug-assert-status.pass {
+  color: #52c41a;
+}
+
+.case-debug-assert-status.fail {
+  color: #ff4d4f;
+}
+
+.case-debug-assert-value {
+  word-break: break-all;
+  max-width: 200px;
+  overflow-wrap: break-word;
 }
 </style>

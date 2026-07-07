@@ -1,51 +1,262 @@
 import type {
-  ApiBodyAssertion,
+  ApiAssertion,
   ApiCaseExpected,
   AssertionResult,
 } from "@case-forge/shared";
+import { JSONPath } from "jsonpath-plus";
+import jmespath from "jmespath";
+import { select } from "xpath";
+import { DOMParser } from "@xmldom/xmldom";
 
-function readJsonPath(body: unknown, path?: string) {
-  if (!path || body === null || body === undefined) return body;
-  const segments = path
-    .replace(/^\$\.?/, "")
-    .split(".")
-    .filter(Boolean);
-  let current: unknown = body;
-  for (const segment of segments) {
-    if (current === null || current === undefined) return undefined;
-    if (typeof current !== "object") return undefined;
-    current = (current as Record<string, unknown>)[segment];
-  }
-  return current;
+export interface AssertionRunInput {
+  expected: ApiCaseExpected;
+  statusCode: number;
+  headers: Record<string, string>;
+  body: unknown;
+  bodySize: number;
+  /** 响应耗时（毫秒），预留用于未来 duration 断言类型 */
+  durationMs: number;
+  polarity?: "positive" | "negative";
 }
 
-function runBodyAssertion(
-  assertion: ApiBodyAssertion,
-  body: unknown,
+function compareValues(
+  actual: unknown,
+  expected: unknown,
+  operator: string,
+): boolean {
+  const actualStr = String(actual ?? "");
+  const expectedStr = String(expected ?? "");
+
+  switch (operator) {
+    case "eq":
+      return actualStr === expectedStr;
+    case "nq":
+      return actualStr !== expectedStr;
+    case "gt":
+      return Number(actualStr) > Number(expectedStr);
+    case "lt":
+      return Number(actualStr) < Number(expectedStr);
+    case "gte":
+      return Number(actualStr) >= Number(expectedStr);
+    case "lte":
+      return Number(actualStr) <= Number(expectedStr);
+    default:
+      return false;
+  }
+}
+
+/** 将字符串响应体尽量解析为 JSON，便于 jsonpath / jmespath 取值 */
+export function coerceAssertionBody(body: unknown): unknown {
+  if (typeof body !== "string") return body;
+  const trimmed = body.trim();
+  if (!trimmed) return body;
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return body;
+    }
+  }
+  return body;
+}
+
+/** 修正 AI 常见的无效 JMESPath 写法，如 length(@.data)、length(@[*]) */
+export function normalizeJmespathExpression(expression: string): string {
+  let expr = expression.trim();
+  expr = expr.replace(
+    /length\(\s*@\.([A-Za-z_][A-Za-z0-9_]*)\s*\)/g,
+    "length($1)",
+  );
+  expr = expr.replace(/length\(\s*@\[\*\]\s*\)/g, "length(@)");
+  return expr;
+}
+
+function evaluateJmespath(body: unknown, expression: string): unknown {
+  const candidates = [
+    expression,
+    normalizeJmespathExpression(expression),
+  ].filter((item, index, arr) => item && arr.indexOf(item) === index);
+
+  for (const expr of candidates) {
+    try {
+      return jmespath.search(body, expr);
+    } catch {
+      // try next normalized variant
+    }
+  }
+  return undefined;
+}
+
+function runSingleAssertion(
+  assertion: ApiAssertion,
+  input: AssertionRunInput,
 ): AssertionResult {
   const name =
     assertion.description ||
-    `${assertion.type}${assertion.path ? ` ${assertion.path}` : ""}`;
-  const actual = assertion.path
-    ? readJsonPath(body, assertion.path)
-    : body;
+    `${assertion.type} ${assertion.operator} ${assertion.expected ?? ""}`;
+  const { type, operator, expression, expected } = assertion;
 
   let passed = false;
-  switch (assertion.type) {
-    case "equals":
-      passed =
-        JSON.stringify(actual) === JSON.stringify(assertion.expected);
+  let actual: unknown = undefined;
+  let expectedDisplay: unknown = expected ?? expression;
+
+  switch (type) {
+    case "status_code": {
+      actual = input.statusCode;
+      expectedDisplay = expected ?? "200";
+      passed = compareValues(actual, expectedDisplay, operator);
       break;
-    case "contains":
-      passed = String(actual ?? "").includes(String(assertion.expected ?? ""));
+    }
+
+    case "headers": {
+      const headerKey = expression;
+      const headerVal =
+        input.headers[headerKey] ??
+        input.headers[headerKey.toLowerCase()] ??
+        input.headers[headerKey.replace(/\b\w/g, (c) => c.toUpperCase())];
+      actual = headerVal ?? "";
+      expectedDisplay = expected ?? "";
+      passed = compareValues(actual, expectedDisplay, operator);
       break;
-    case "matches":
-      passed = new RegExp(String(assertion.expected)).test(String(actual ?? ""));
+    }
+
+    case "jsonpath": {
+      try {
+        const jsonBody = coerceAssertionBody(input.body);
+        actual = JSONPath({ path: expression, json: jsonBody as object });
+        actual = Array.isArray(actual) ? actual[0] : actual;
+      } catch {
+        actual = undefined;
+      }
+      expectedDisplay = expected ?? "";
+      passed = compareValues(actual, expectedDisplay, operator);
       break;
-    case "jsonPath":
-      passed =
-        JSON.stringify(actual) === JSON.stringify(assertion.expected);
+    }
+
+    case "jmespath": {
+      const jsonBody = coerceAssertionBody(input.body);
+      actual = evaluateJmespath(jsonBody, expression);
+      if (expected !== undefined && expected !== "") {
+        expectedDisplay = expected;
+        passed = compareValues(actual, expectedDisplay, operator);
+      } else {
+        passed = Boolean(actual);
+      }
       break;
+    }
+
+    case "xpath": {
+      const bodyStr =
+        typeof input.body === "string"
+          ? input.body
+          : JSON.stringify(input.body ?? "");
+      try {
+        const doc = new DOMParser().parseFromString(bodyStr, "text/xml");
+        const nodes = select(expression, doc as any);
+        const nodeArr = Array.isArray(nodes) ? nodes : nodes ? [nodes] : [];
+        if (expected !== undefined && expected !== "") {
+          actual =
+            nodeArr.length > 0
+              ? ((nodeArr[0] as any)?.nodeValue ?? String(nodeArr[0]))
+              : "";
+          expectedDisplay = expected;
+          passed = compareValues(actual, expectedDisplay, operator);
+        } else {
+          actual = nodeArr.length > 0;
+          passed = Boolean(actual);
+        }
+      } catch {
+        actual = undefined;
+        passed = false;
+      }
+      break;
+    }
+
+    case "raw": {
+      const bodyStr =
+        typeof input.body === "string"
+          ? input.body
+          : JSON.stringify(input.body ?? "");
+      actual = bodyStr;
+      expectedDisplay = expected ?? expression;
+      passed = compareValues(actual, expectedDisplay, operator);
+      break;
+    }
+
+    case "string": {
+      const bodyStr =
+        typeof input.body === "string"
+          ? input.body
+          : JSON.stringify(input.body ?? "");
+      actual = bodyStr;
+      expectedDisplay = expression;
+      if (operator === "eq") {
+        passed = bodyStr.includes(expression);
+      } else if (operator === "nq") {
+        passed = !bodyStr.includes(expression);
+      } else {
+        passed = compareValues(bodyStr, expression, operator);
+      }
+      break;
+    }
+
+    case "re": {
+      const bodyStr =
+        typeof input.body === "string"
+          ? input.body
+          : JSON.stringify(input.body ?? "");
+      actual = bodyStr;
+      expectedDisplay = expression;
+      try {
+        const regex = new RegExp(expression);
+        const matched = regex.test(bodyStr);
+        passed = operator === "nq" ? !matched : matched;
+      } catch {
+        passed = false;
+      }
+      break;
+    }
+
+    case "response_size": {
+      actual = input.bodySize;
+      expectedDisplay = expected ?? "0";
+      passed = compareValues(actual, expectedDisplay, operator);
+      break;
+    }
+
+    case "default": {
+      const bodyStr =
+        typeof input.body === "string"
+          ? input.body
+          : JSON.stringify(input.body ?? "");
+      actual = bodyStr;
+      if (input.polarity === "negative") {
+        passed = true;
+      } else {
+        const successPatterns = ["000000", "00000", "成功", "success"];
+        passed = successPatterns.some((p) => bodyStr.includes(p));
+      }
+      break;
+    }
+
+    case "rsp_download": {
+      const contentType =
+        input.headers["content-type"] ?? input.headers["Content-Type"] ?? "";
+      actual = contentType;
+      expectedDisplay = expected ?? expression;
+      const isDownload =
+        contentType.includes("application/octet-stream") ||
+        contentType.includes("attachment") ||
+        contentType.includes("multipart/form-data");
+      if (expression) {
+        passed = isDownload && bodyIncludesPattern(input.body, expression);
+      } else {
+        passed = isDownload;
+      }
+      if (operator === "nq") passed = !passed;
+      break;
+    }
+
     default:
       passed = false;
   }
@@ -53,52 +264,31 @@ function runBodyAssertion(
   return {
     name,
     passed,
-    expected: assertion.expected,
+    expected: expectedDisplay,
     actual,
     message: passed ? undefined : "断言未通过",
   };
 }
 
-export function runAssertions(input: {
-  expected: ApiCaseExpected;
-  statusCode: number;
-  body: unknown;
-  durationMs: number;
-}): AssertionResult[] {
-  const results: AssertionResult[] = [];
+function bodyIncludesPattern(body: unknown, pattern: string): boolean {
+  const bodyStr = typeof body === "string" ? body : JSON.stringify(body ?? "");
+  return bodyStr.includes(pattern);
+}
 
-  if (!input.expected.skipStatusCheck) {
-    const codes = Array.isArray(input.expected.statusCode)
-      ? input.expected.statusCode
-      : input.expected.statusCode !== undefined
-        ? [input.expected.statusCode]
-        : [200];
-
-    results.push({
-      name: "HTTP 状态码",
-      passed: codes.includes(input.statusCode),
-      expected: codes,
-      actual: input.statusCode,
-      message: codes.includes(input.statusCode) ? undefined : "状态码不匹配",
-    });
+export function runAssertions(input: AssertionRunInput): AssertionResult[] {
+  const assertions = input.expected.assertions;
+  if (!assertions?.length) {
+    return [
+      {
+        name: "断言检查",
+        passed: false,
+        expected: "至少一条断言",
+        actual: "未配置断言",
+        message: "未配置任何断言，请在 expected.assertions 中添加至少一条断言",
+      },
+    ];
   }
-
-  if (input.expected.maxDurationMs) {
-    results.push({
-      name: "响应时间",
-      passed: input.durationMs <= input.expected.maxDurationMs,
-      expected: input.expected.maxDurationMs,
-      actual: input.durationMs,
-    });
-  }
-
-  if (!input.expected.statusOnly && input.expected.bodyAssertions?.length) {
-    for (const assertion of input.expected.bodyAssertions) {
-      results.push(runBodyAssertion(assertion, input.body));
-    }
-  }
-
-  return results;
+  return assertions.map((a) => runSingleAssertion(a, input));
 }
 
 export function isAllPassed(assertions: AssertionResult[]) {

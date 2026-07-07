@@ -4,9 +4,9 @@
     title="环境维护"
     width="1280px"
     :footer="null"
+    :z-index="IMMERSIVE_OVERLAY_Z_INDEX"
     destroy-on-close
     class="env-maintain-modal"
-    @after-open="onOpen"
   >
     <div class="env-maintain-layout">
       <!-- 左侧：环境列表 -->
@@ -130,7 +130,12 @@
               </template>
               <template v-else-if="column.key === 'name'">
                 <a-tooltip :title="record.name" placement="topLeft" :mouse-enter-delay="0.3">
-                  <a-button type="link" class="service-name-link" @click="openServiceEdit(record)">
+                  <a-button
+                    type="link"
+                    class="service-name-link"
+                    title="编辑服务"
+                    @click="openServiceEdit(record)"
+                  >
                     {{ record.name }}
                   </a-button>
                 </a-tooltip>
@@ -140,7 +145,13 @@
                   <template #title>
                     <span class="service-cell-tooltip">{{ record.serverAddress }}</span>
                   </template>
-                  <span class="service-cell-text">{{ record.serverAddress }}</span>
+                  <button
+                    type="button"
+                    class="service-editable-cell"
+                    @click="openServiceEdit(record)"
+                  >
+                    {{ record.serverAddress }}
+                  </button>
                 </a-tooltip>
                 <span v-else class="service-cell-text service-cell-empty">—</span>
               </template>
@@ -182,6 +193,14 @@
               </template>
               <template v-else-if="column.key === 'actions'">
                 <a-space :size="2">
+                  <a-button
+                    type="text"
+                    size="small"
+                    title="编辑"
+                    @click="openServiceEdit(record)"
+                  >
+                    <EditOutlined />
+                  </a-button>
                   <a-button
                     type="text"
                     size="small"
@@ -234,60 +253,64 @@
         </div>
       </section>
     </div>
+  </a-modal>
 
-    <a-modal
-      v-model:open="envModalOpen"
-      :title="envEditingId ? '编辑环境' : '新增环境'"
-      @ok="saveEnv"
-    >
-      <a-form layout="vertical">
-        <a-form-item label="环境类型" required>
-          <a-radio-group v-model:value="envForm.scope" :options="scopeOptions" />
-        </a-form-item>
-        <a-form-item label="环境名称" required>
-          <a-auto-complete
-            v-model:value="envForm.name"
-            :options="nameOptions"
-            placeholder="请输入或选择环境名称"
-            allow-clear
-          />
-        </a-form-item>
-      </a-form>
-    </a-modal>
+  <a-modal
+    v-model:open="envModalOpen"
+    :title="envEditingId ? '编辑环境' : '新增环境'"
+    :z-index="NESTED_OVERLAY_Z_INDEX"
+    destroy-on-close
+    @ok="saveEnv"
+  >
+    <a-form layout="vertical">
+      <a-form-item label="环境类型" required>
+        <a-radio-group v-model:value="envForm.scope" :options="scopeOptions" />
+      </a-form-item>
+      <a-form-item label="环境名称" required>
+        <a-auto-complete
+          v-model:value="envForm.name"
+          :options="nameOptions"
+          placeholder="请输入或选择环境名称"
+          allow-clear
+        />
+      </a-form-item>
+    </a-form>
+  </a-modal>
 
-    <a-modal
-      v-model:open="serviceModalOpen"
-      :title="serviceEditingId ? '编辑服务' : '新增服务'"
-      width="720px"
-      @ok="saveService"
-    >
-      <a-form layout="vertical">
-        <a-form-item label="服务名" required>
-          <a-input v-model:value="serviceForm.name" placeholder="如 default、ESBJSON" />
-        </a-form-item>
-        <a-form-item label="服务器地址" required>
-          <a-input
-            v-model:value="serviceForm.serverAddress"
-            placeholder="http://host:port/path 或 socket2://host:port"
-          />
-        </a-form-item>
-        <a-form-item label="数据库连接">
-          <a-input
-            v-model:value="serviceForm.jdbcUrl"
-            placeholder="jdbc:oracle:thin:@host:port:sid"
-          />
-        </a-form-item>
-        <a-form-item label="远程连接">
-          <a-input v-model:value="serviceForm.remoteConnection" />
-        </a-form-item>
-        <a-form-item label="对象存储">
-          <a-input v-model:value="serviceForm.objectStorage" />
-        </a-form-item>
-        <a-form-item label="备注">
-          <a-textarea v-model:value="serviceForm.remark" :rows="2" />
-        </a-form-item>
-      </a-form>
-    </a-modal>
+  <a-modal
+    v-model:open="serviceModalOpen"
+    :title="serviceEditingId ? '编辑服务' : '新增服务'"
+    width="720px"
+    :z-index="NESTED_OVERLAY_Z_INDEX"
+    destroy-on-close
+    @ok="saveService"
+  >
+    <a-form layout="vertical">
+      <a-form-item label="服务名" required>
+        <a-input v-model:value="serviceForm.name" placeholder="如 default、ESBJSON" />
+      </a-form-item>
+      <a-form-item label="服务器地址" required>
+        <a-input
+          v-model:value="serviceForm.serverAddress"
+          placeholder="http://host:port/path 或 socket2://host:port"
+        />
+      </a-form-item>
+      <a-form-item label="数据库连接">
+        <a-input
+          v-model:value="serviceForm.jdbcUrl"
+          placeholder="jdbc:oracle:thin:@host:port:sid"
+        />
+      </a-form-item>
+      <a-form-item label="远程连接">
+        <a-input v-model:value="serviceForm.remoteConnection" />
+      </a-form-item>
+      <a-form-item label="对象存储">
+        <a-input v-model:value="serviceForm.objectStorage" />
+      </a-form-item>
+      <a-form-item label="备注">
+        <a-textarea v-model:value="serviceForm.remark" :rows="2" />
+      </a-form-item>
+    </a-form>
   </a-modal>
 </template>
 
@@ -314,6 +337,10 @@ import {
   type ApiEnvironmentScope,
 } from '@case-forge/shared';
 import type { ApiEnvironmentServiceRow } from '@/api/apiTestClient';
+import {
+  IMMERSIVE_OVERLAY_Z_INDEX,
+  NESTED_OVERLAY_Z_INDEX,
+} from '@/constants/overlay-z-index';
 import { useApiTestStore } from '@/stores/apiTest';
 
 const open = defineModel<boolean>('open', { default: false });
@@ -357,7 +384,7 @@ const serviceColumns = [
   { title: '远程连接', key: 'remoteConnection', width: 120, ellipsis: true },
   { title: '对象存储', key: 'objectStorage', width: 120, ellipsis: true },
   { title: '备注', key: 'remark', width: 160, ellipsis: true },
-  { title: '操作', key: 'actions', width: 140, fixed: 'right' as const },
+  { title: '操作', key: 'actions', width: 168, fixed: 'right' as const },
 ];
 
 const services = computed(
@@ -399,26 +426,41 @@ function toggleScope(scope: ApiEnvironmentScope) {
   }
 }
 
-watch(
-  () => apiStore.selectedEnvironmentId,
-  (id) => {
-    if (id && !activeEnvId.value) activeEnvId.value = id;
-  },
-);
-
-async function onOpen() {
-  const projectId = apiStore.activeProjectId;
-  if (!projectId) return;
-  await apiStore.refreshEnvironments(projectId);
-  activeEnvId.value =
-    apiStore.selectedEnvironmentId || apiStore.environments[0]?.id || '';
-  if (activeEnvId.value) {
-    await apiStore.refreshEnvironmentServices(projectId, activeEnvId.value);
+function revealActiveEnvScope(environmentId: string) {
+  const env = apiStore.environments.find((item) => item.id === environmentId);
+  if (env?.scope) {
+    collapsedScopes.delete(env.scope);
   }
 }
 
+async function bootstrapEnvMaintainModal() {
+  const projectId = apiStore.activeProjectId;
+  if (!projectId) return;
+  await apiStore.refreshEnvironments(projectId);
+  const envStillValid =
+    activeEnvId.value &&
+    apiStore.environments.some((env) => env.id === activeEnvId.value);
+  activeEnvId.value = envStillValid
+    ? activeEnvId.value
+    : apiStore.selectedEnvironmentId ||
+      apiStore.environments.find((env) => env.isDefault)?.id ||
+      apiStore.environments[0]?.id ||
+      '';
+  if (activeEnvId.value) {
+    await apiStore.refreshEnvironmentServices(projectId, activeEnvId.value);
+    revealActiveEnvScope(activeEnvId.value);
+  }
+}
+
+watch(open, (isOpen) => {
+  if (isOpen) {
+    void bootstrapEnvMaintainModal();
+  }
+});
+
 async function selectEnv(environmentId: string) {
   activeEnvId.value = environmentId;
+  revealActiveEnvScope(environmentId);
   const projectId = apiStore.activeProjectId;
   if (projectId) {
     await apiStore.refreshEnvironmentServices(projectId, environmentId);
@@ -471,6 +513,7 @@ function removeEnv() {
     okText: '删除',
     cancelText: '取消',
     okType: 'danger',
+    zIndex: NESTED_OVERLAY_Z_INDEX,
     onOk: async () => {
       await apiStore.removeEnvironment(projectId, activeEnvId.value);
       activeEnvId.value = apiStore.environments[0]?.id ?? '';
@@ -814,6 +857,24 @@ async function moveService(serviceId: string, direction: 'up' | 'down' | 'top') 
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.service-editable-cell {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--cf-text-body, #344054);
+  cursor: pointer;
+}
+.service-editable-cell:hover {
+  color: var(--cf-brand, #b60f2d);
+  text-decoration: underline;
 }
 .service-cell-text {
   display: block;

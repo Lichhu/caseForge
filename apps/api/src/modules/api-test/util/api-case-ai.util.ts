@@ -1,5 +1,6 @@
 import type {
   AiCasePlanItem,
+  ApiAssertion,
   ApiTechnicalProfile,
   ApiTestCasePayload,
 } from "@case-forge/shared";
@@ -10,8 +11,7 @@ import type { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
 import {
   appendScenarioProtocolAdaptation,
   buildEndpointContextForPrompt,
-  parseApiTechnicalProfile,
-  resolveTechnicalProfileFromSmpData,
+  resolveApiTechnicalProfile,
 } from "./api-doc-technical-profile.util";
 import { mapCasePlanToPayload } from "./api-case-assembler.util";
 import {
@@ -95,58 +95,6 @@ export function prepareScenarioBlock(
   };
 }
 
-function deriveTechnicalProfileFromEndpoint(
-  endpoint: ApiEndpointEntity,
-): ApiTechnicalProfile {
-  const method = (endpoint.method || "").toUpperCase();
-  const path = (endpoint.path || "").toLowerCase();
-  const requestNotes = (endpoint.requestNotes || "").trim();
-  const responseNotes = (endpoint.responseNotes || "").trim();
-  const sample = requestNotes || responseNotes;
-
-  const isTcp =
-    ["TCP", "TEP", "SOCKET"].includes(method) ||
-    path.startsWith("tcp://") ||
-    path.startsWith("socket://");
-  const transport = isTcp ? ("tcp" as const) : ("http" as const);
-
-  const isXml =
-    sample.startsWith("<") || sample.includes("</") || sample.includes("<?xml");
-  const messageFormat = isXml ? ("xml" as const) : ("json" as const);
-
-  return {
-    transport,
-    messageFormat,
-    encoding: "UTF-8",
-  };
-}
-
-/**
- * 按优先级解析技术画像：
- * 1. structuredDoc「技术信息」段（已有，最可靠）
- * 2. smpData.callServiceList 的 socketWay / messageType（兜底，兼容未刷新的 SMP 数据）
- * 3. endpoint method / requestNotes 启发式推断（最后兜底）
- */
-function resolveTechnicalProfile(
-  structuredDoc: string,
-  endpoint: ApiEndpointEntity,
-  smpData?: { callServiceList?: unknown[]; serviceTestList?: unknown[] } | null,
-): ApiTechnicalProfile {
-  if (structuredDoc.trim()) {
-    const profile = parseApiTechnicalProfile(structuredDoc);
-    if (
-      profile.transport !== "http" ||
-      profile.messageFormat !== "json" ||
-      profile.encoding !== "UTF-8"
-    ) {
-      return profile;
-    }
-  }
-  const smpProfile = resolveTechnicalProfileFromSmpData(smpData);
-  if (smpProfile) return smpProfile;
-  return deriveTechnicalProfileFromEndpoint(endpoint);
-}
-
 const PLAN_MODE_PROMPT_FALLBACK = `作为资深接口测试专家，请根据以下接口信息与字段目录，设计接口测试案例计划。
 
 ## bodyOverrides 规则
@@ -158,7 +106,7 @@ const PLAN_MODE_PROMPT_FALLBACK = `作为资深接口测试专家，请根据以
 ## 输出要求
 1. **仅输出 JSON 数组**，不要 Markdown 代码块或说明文字
 2. caseType：正 / 反；priority：高 / 中 / 低
-3. expectedResult：HTTP 接口写状态码；TCP/MQ 接口写响应报文业务返回码
+3. expectedResult：简要描述预期结果
 4. 至少 6 条，建议配比：正 2～3 条 / 反 3～4 条
 
 JSON 字段：caseNo, caseName, caseDesc, caseType, priority, remark, bodyOverrides, expectedResult`;
@@ -189,16 +137,19 @@ export async function generateCasesWithPlan(
     input.endpoint.responseNotes,
   );
 
-  const readiness = assessDocReadiness(canonicalDoc, input.endpoint.path);
+  const readiness = assessDocReadiness(
+    canonicalDoc,
+    input.endpoint.path,
+    input.smpData,
+  );
   if (!readiness.ok) {
     throw new Error(readiness.message);
   }
 
-  const profile = resolveTechnicalProfile(
-    canonicalDoc,
-    input.endpoint,
-    input.smpData,
-  );
+  const profile = resolveApiTechnicalProfile(canonicalDoc, {
+    endpoint: input.endpoint,
+    smpData: input.smpData,
+  });
   const fieldCatalog = buildFieldCatalogSummary(canonicalDoc);
   const exampleMessage = extractExampleMessage(canonicalDoc);
 
@@ -269,12 +220,166 @@ export async function generateCasesWithPlan(
   );
 }
 
+export async function maxCaseNoSuffix(
+  caseRepo: {
+    find(options: object): Promise<Array<{ caseNo?: string | null }>>;
+  },
+  projectId: string,
+  endpointId: string,
+  transactionCode: string,
+): Promise<number> {
+  const cases = await caseRepo.find({
+    where: { projectId, endpointId },
+    select: ["caseNo"],
+  });
+  return maxCaseNoSuffixFromRows(cases, transactionCode);
+}
+
+export function maxCaseNoSuffixFromRows(
+  cases: Array<{ caseNo?: string | null }>,
+  transactionCode: string,
+): number {
+  const prefix = `${transactionCode}-`;
+  let max = 0;
+  for (const item of cases) {
+    const caseNo = item.caseNo?.trim();
+    if (!caseNo?.startsWith(prefix)) {
+      continue;
+    }
+    const suffix = caseNo.slice(prefix.length);
+    const num = Number.parseInt(suffix, 10);
+    if (!Number.isNaN(num) && num > max) {
+      max = num;
+    }
+  }
+  return max;
+}
+
+export function formatCaseNo(
+  transactionCode: string,
+  sequence: number,
+): string {
+  return `${transactionCode}-${String(sequence).padStart(3, "0")}`;
+}
+
 export async function nextCaseNo(
-  caseRepo: { count(options: object): Promise<number> },
+  caseRepo: {
+    find(options: object): Promise<Array<{ caseNo?: string | null }>>;
+  },
   projectId: string,
   endpointId: string,
   transactionCode: string,
 ) {
-  const count = await caseRepo.count({ where: { projectId, endpointId } });
-  return `${transactionCode}-${String(count + 1).padStart(3, "0")}`;
+  const max = await maxCaseNoSuffix(
+    caseRepo,
+    projectId,
+    endpointId,
+    transactionCode,
+  );
+  return formatCaseNo(transactionCode, max + 1);
+}
+
+const ASSERTION_GEN_PROMPT_HTTP = `你是接口测试专家。根据以下 HTTP 响应报文，为该接口测试案例生成断言列表。
+
+## 通讯信息
+- 协议: HTTP
+- 报文格式: {messageFormat}
+- 案例极性: {polarity}
+
+## 响应信息
+- 状态码: {statusCode}
+- 响应头: {headers}
+- 响应体:
+{responseBody}
+
+## 断言规则
+生成 assertions 数组，每条字段：type, operator, expression, expected, description
+- type: status_code | headers | jsonpath | jmespath | xpath | raw | string | re | response_size | default
+- operator: eq | nq | gt | lt | gte | lte
+- 正向案例：检查 HTTP 状态码 200 + 响应体中代表成功的字段
+- 反向案例：检查错误状态码（4xx/5xx）或错误码字段
+- 检查列表/数组非空：优先用 jmespath，expression 写 length(实际数组字段名) 或 length(@)，operator 用 gt，expected 写 0；禁止写 length(@.field) 或 length(@[*])
+- 也可用 response_size + gt + 0 检查响应体非空
+
+仅输出 JSON 数组，不要 Markdown 代码块或说明文字。示例：
+[{"description":"HTTP 状态码","type":"status_code","operator":"eq","expression":"","expected":"200"},{"description":"响应包含成功","type":"string","operator":"eq","expression":"success"}]`;
+
+const ASSERTION_GEN_PROMPT_TCP = `你是接口测试专家。根据以下 TCP/Socket 响应报文，为该接口测试案例生成断言列表。
+
+## 通讯信息
+- 协议: TCP/Socket
+- 报文格式: {messageFormat}
+- 案例极性: {polarity}
+
+## 响应信息
+- 响应体:
+{responseBody}
+
+## 断言规则
+生成 assertions 数组，每条字段：type, operator, expression, expected, description
+- type: jsonpath | jmespath | xpath | raw | string | re | response_size | default
+- operator: eq | nq | gt | lt | gte | lte
+- 注意：TCP 协议没有 HTTP 状态码，不要生成 status_code 类型的断言
+- 正向案例：检查响应体中代表成功的业务码或字段（如 bizResCode=000000）
+- 反向案例：检查响应体中代表错误的业务码或字段
+
+仅输出 JSON 数组，不要 Markdown 代码块或说明文字。示例：
+[{"description":"业务返回码","type":"string","operator":"eq","expression":"000000"},{"description":"响应包含成功标志","type":"string","operator":"eq","expression":"success"}]`;
+
+const ASSERTION_RESPONSE_MAX_CHARS = 2000;
+
+export async function generateAssertionsFromResponse(
+  aiWorkflow: AiWorkflowService,
+  input: {
+    transport: string;
+    messageFormat: string;
+    polarity: "positive" | "negative";
+    statusCode: number;
+    headers: Record<string, string>;
+    body: unknown;
+  },
+): Promise<ApiAssertion[]> {
+  const bodyStr =
+    typeof input.body === "string"
+      ? input.body
+      : JSON.stringify(input.body ?? "", null, 2);
+
+  const truncatedBody =
+    bodyStr.length > ASSERTION_RESPONSE_MAX_CHARS
+      ? bodyStr.slice(0, ASSERTION_RESPONSE_MAX_CHARS) + "\n...（已截断）"
+      : bodyStr;
+
+  const headersStr = JSON.stringify(input.headers).slice(0, 500);
+
+  const isTcp = input.transport === "tcp";
+  const template = isTcp ? ASSERTION_GEN_PROMPT_TCP : ASSERTION_GEN_PROMPT_HTTP;
+
+  let prompt = template
+    .replace("{messageFormat}", input.messageFormat)
+    .replace("{polarity}", input.polarity === "negative" ? "反向" : "正向")
+    .replace("{responseBody}", truncatedBody);
+
+  if (!isTcp) {
+    prompt = prompt
+      .replace("{statusCode}", String(input.statusCode))
+      .replace("{headers}", headersStr);
+  }
+
+  const { text } = await aiWorkflow.runWithAiChat(prompt);
+  const assertions = aiWorkflow.parseJsonArray<ApiAssertion>(text) ?? [];
+
+  return assertions
+    .filter((a) => a && a.type && a.operator)
+    .map((assertion) => ({
+      ...assertion,
+      expression:
+        assertion.type === "jmespath" && assertion.expression
+          ? assertion.expression
+              .replace(
+                /length\(\s*@\.([A-Za-z_][A-Za-z0-9_]*)\s*\)/g,
+                "length($1)",
+              )
+              .replace(/length\(\s*@\[\*\]\s*\)/g, "length(@)")
+          : assertion.expression,
+    }));
 }

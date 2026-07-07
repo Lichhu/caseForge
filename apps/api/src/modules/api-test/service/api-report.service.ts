@@ -209,35 +209,18 @@ export class ApiReportService {
       if (c.transactionCode) transactionCodes.add(c.transactionCode);
       const assertionMeta: Record<string, ReportAssertionMeta> = {};
 
-      if (c.expected?.bodyAssertions?.length) {
-        for (const ba of c.expected.bodyAssertions) {
+      if (c.expected?.assertions?.length) {
+        for (const a of c.expected.assertions) {
           const name =
-            ba.description || `${ba.type}${ba.path ? ` ${ba.path}` : ""}`;
-          const operatorMap: Record<string, string> = {
-            equals: "eq",
-            jsonPath: "eq",
-            contains: "contains",
-            matches: "matches",
-          };
+            a.description ||
+            `${a.type} ${a.operator} ${a.expected ?? a.expression}`;
           assertionMeta[name] = {
-            type: ba.type,
-            operator: operatorMap[ba.type] ?? "eq",
-            expression: ba.path ?? "",
+            type: a.type,
+            operator: a.operator,
+            expression: a.expression,
+            expected: a.expected,
           };
         }
-      }
-
-      assertionMeta["HTTP 状态码"] = {
-        type: "status",
-        operator: "eq",
-        expression: "statusCode",
-      };
-      if (c.expected?.maxDurationMs) {
-        assertionMeta["响应时间"] = {
-          type: "duration",
-          operator: "lte",
-          expression: "maxDurationMs",
-        };
       }
 
       caseMeta[c.id] = {

@@ -147,17 +147,19 @@ function buildAssertionHint(
   transport: ApiTransport,
   expected?: ApiCaseExpected,
 ): string {
-  if (transport === "mq") {
-    return "断言 MQ 响应报文业务码或关键节点";
+  const assertions = expected?.assertions ?? [];
+  if (!assertions.length) {
+    return transport === "http"
+      ? "断言 HTTP 状态码与响应体"
+      : "断言响应报文业务码或关键节点";
   }
-  if (expected?.skipStatusCheck) {
+  const types = assertions.map((a) => a.type);
+  if (types.includes("status_code")) {
+    const sc = assertions.find((a) => a.type === "status_code");
+    return `断言 HTTP 状态码 ${sc?.expected ?? "200"}`;
+  }
+  if (transport !== "http") {
     return "断言响应报文业务码（bizResCode / resCode），不校验 HTTP 状态码";
-  }
-  if (expected?.statusCode !== undefined) {
-    const codes = Array.isArray(expected.statusCode)
-      ? expected.statusCode.join(" / ")
-      : String(expected.statusCode);
-    return `断言 HTTP 状态码 ${codes}`;
   }
   return "断言 HTTP 状态码与响应体";
 }

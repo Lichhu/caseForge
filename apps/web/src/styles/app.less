@@ -1113,6 +1113,18 @@ body.cf-immersive-active .platform-topbar {
   min-width: 0;
 }
 
+/* 下拉触发按钮：展开时箭头旋转 */
+.dropdown-trigger-chevron {
+  display: inline-block;
+  margin-inline-start: 6px;
+  font-size: 10px;
+  transition: transform 0.2s ease;
+
+  &.is-open {
+    transform: rotate(180deg);
+  }
+}
+
 .document-panel-tabs.ant-tabs {
   display: flex;
   flex: 1 1 auto;

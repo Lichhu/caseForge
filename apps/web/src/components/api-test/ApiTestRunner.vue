@@ -8,10 +8,6 @@
         </div>
       </div>
       <div class="toolbar dynamic-panel-toolbar action-toolbar">
-        <a-button @click="envModalOpen = true">
-          <template #icon><SettingOutlined /></template>
-          环境维护
-        </a-button>
         <a-button type="primary" @click="openCreateSet">
           <template #icon><PlusOutlined /></template>
           新建执行集
@@ -19,6 +15,22 @@
         <a-button :type="batchDeleteMode ? 'primary' : 'default'" @click="toggleBatchDeleteMode">
           {{ batchDeleteMode ? '退出批量' : '批量删除' }}
         </a-button>
+        <a-dropdown v-model:open="moreMenuOpen" trigger="click">
+          <a-button>
+            更多
+            <DownOutlined
+              :class="['dropdown-trigger-chevron', { 'is-open': moreMenuOpen }]"
+            />
+          </a-button>
+          <template #overlay>
+            <a-menu @click="onRunnerMoreMenuClick">
+              <a-menu-item key="environment">
+                <SettingOutlined />
+                环境维护
+              </a-menu-item>
+            </a-menu>
+          </template>
+        </a-dropdown>
       </div>
     </div>
 
@@ -198,7 +210,10 @@
                     <span class="linked-case-title" :title="record.title">{{ record.title || '未命名案例' }}</span>
                   </template>
                   <template v-if="column.key === 'caseNo'">
-                    <span class="linked-case-no">{{ record.caseNo || record.transactionCode || '—' }}</span>
+                    <span
+                      class="linked-case-no"
+                      :title="record.caseNo || record.transactionCode || '—'"
+                    >{{ record.caseNo || record.transactionCode || '—' }}</span>
                   </template>
                   <template v-if="column.key === 'version'">
                     <a-tag
@@ -210,7 +225,11 @@
                     <span v-else>—</span>
                   </template>
                   <template v-if="column.key === 'profile'">
-                    <span class="case-profile-badge" :class="`profile-${caseProfileColor(record.request)}`">
+                    <span
+                      class="case-profile-badge linked-case-profile-badge"
+                      :class="`profile-${caseProfileColor(record.request)}`"
+                      :title="caseProfileLabel(record.request)"
+                    >
                       {{ caseProfileLabel(record.request) }}
                     </span>
                   </template>
@@ -520,7 +539,7 @@
         </div>
         <div v-else class="manage-case-empty">
           <InboxOutlined class="manage-case-empty-icon" />
-          <p>暂无案例，请先在案例编辑中创建</p>
+          <p>{{ manageCasesEmptyHint }}</p>
         </div>
       </a-spin>
       <div v-if="manageCasesTotal > 0" class="manage-cases-pagination">
@@ -581,6 +600,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue';
 import { message, Modal } from 'ant-design-vue';
+import type { MenuProps } from 'ant-design-vue';
 import {
   DeleteOutlined,
   DownOutlined,
@@ -610,6 +630,14 @@ import {
 const apiStore = useApiTestStore();
 const pageSizeOptions = caseForgePageSizeOptionLabels();
 const envModalOpen = ref(false);
+const moreMenuOpen = ref(false);
+
+const onRunnerMoreMenuClick: MenuProps['onClick'] = ({ key }) => {
+  if (key === 'environment') {
+    envModalOpen.value = true;
+  }
+};
+
 const createSetOpen = ref(false);
 const manageCasesOpen = ref(false);
 const runModalOpen = ref(false);
@@ -630,6 +658,11 @@ const manageCasesLoading = ref(false);
 const manageCasesSaving = ref(false);
 const manageCasesVersionFilter = ref<number | null>(null);
 const manageCasesVersionOptions = ref<Array<{ value: number | null; label: string }>>([]);
+const manageCasesEmptyHint = computed(() =>
+  manageCasesVersionFilter.value != null
+    ? `v${manageCasesVersionFilter.value} 暂无案例，请切换其他版本`
+    : '暂无案例，请先在案例编辑中创建',
+);
 const detailTab = ref<'cases' | 'result'>('cases');
 const detailTabOptions = [
   { label: '关联案例', value: 'cases' },
@@ -777,18 +810,29 @@ const itemColumns = [
 
 const linkedCaseColumns = [
   { title: '案例', dataIndex: 'title', key: 'title', ellipsis: true },
-  { title: '编号', dataIndex: 'caseNo', key: 'caseNo', width: 180 },
-  { title: '版本', key: 'version', width: 80 },
-  { title: '协议', key: 'profile', width: 120 },
-  { title: '方向', key: 'polarity', width: 72 },
-  { title: '操作', key: 'actions', width: 72 },
+  {
+    title: '编号',
+    dataIndex: 'caseNo',
+    key: 'caseNo',
+    width: 188,
+    customCell: () => ({ class: 'exec-linked-caseno-cell' }),
+  },
+  { title: '版本', key: 'version', width: 68, align: 'center' as const },
+  {
+    title: '协议',
+    key: 'profile',
+    width: 188,
+    customCell: () => ({ class: 'exec-linked-profile-cell' }),
+  },
+  { title: '方向', key: 'polarity', width: 64, align: 'center' as const },
+  { title: '操作', key: 'actions', width: 72, align: 'center' as const },
 ];
 
 const assertionColumns = [
   { title: '断言', dataIndex: 'name', key: 'name', width: 120 },
+  { title: '断言值', dataIndex: 'expected', key: 'expected' },
+  { title: '实际值', dataIndex: 'actual', key: 'actual' },
   { title: '结果', key: 'passed', width: 72 },
-  { title: '期望', dataIndex: 'expected', key: 'expected' },
-  { title: '实际', dataIndex: 'actual', key: 'actual' },
 ];
 
 function splitSnapshot(value: unknown) {
@@ -1016,11 +1060,14 @@ async function loadManageCasesVersions() {
   const projectId = apiStore.activeProjectId;
   const transactionId = apiStore.activeTransactionId;
   if (!projectId || !transactionId) return;
-  const history = await apiStore.fetchGenerateHistory(projectId, transactionId);
+  const rows = await listAllApiCases(projectId, transactionId).catch(
+    () => [] as ApiTestCaseRow[],
+  );
   const versions = new Set<number>();
-  for (const item of history) {
-    if (item.version != null && item.resultCount != null && item.resultCount > 0) {
-      versions.add(item.version);
+  for (const row of rows) {
+    const version = row.metadata?.generateVersion;
+    if (version != null) {
+      versions.add(version);
     }
   }
   const sorted = Array.from(versions).sort((a, b) => a - b);
@@ -1028,7 +1075,13 @@ async function loadManageCasesVersions() {
     { value: null, label: '全部版本' },
     ...sorted.map((version) => ({ value: version, label: `v${version}` })),
   ];
-  if (sorted.length > 0) {
+
+  const current = manageCasesVersionFilter.value;
+  if (current != null && !versions.has(current)) {
+    manageCasesVersionFilter.value = sorted.length
+      ? (sorted[sorted.length - 1] ?? null)
+      : null;
+  } else if (current == null && sorted.length > 0) {
     manageCasesVersionFilter.value = sorted[sorted.length - 1] ?? null;
   }
 }
@@ -1049,6 +1102,20 @@ async function loadManageCasesList() {
       pageSize: manageCasesPageSize.value,
       generateVersion: manageCasesVersionFilter.value ?? undefined,
     });
+    if (
+      result.count === 0 &&
+      manageCasesVersionFilter.value != null &&
+      manageCasesVersionOptions.value.some(
+        (item) =>
+          item.value != null && item.value !== manageCasesVersionFilter.value,
+      )
+    ) {
+      await loadManageCasesVersions();
+      if (manageCasesVersionFilter.value != null) {
+        await loadManageCasesList();
+        return;
+      }
+    }
     const maxPage = Math.max(1, Math.ceil(result.count / result.pageSize) || 1);
     if (result.count > 0 && result.page > maxPage) {
       manageCasesPage.value = maxPage;
@@ -1516,6 +1583,11 @@ function onExpand(expanded: boolean, record: { id: string }) {
 .exec-linked-table :deep(.ant-table-tbody > tr > td) {
   font-size: 13px;
 }
+.exec-linked-table :deep(.exec-linked-profile-cell),
+.exec-linked-table :deep(.exec-linked-caseno-cell) {
+  overflow: visible;
+  white-space: nowrap;
+}
 .exec-linked-table :deep(.ant-table-tbody > tr:hover > td) {
   background: #fafbfc;
 }
@@ -1528,6 +1600,9 @@ function onExpand(expanded: boolean, record: { id: string }) {
   font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
   color: var(--cf-text-secondary, #667085);
   letter-spacing: 0.02em;
+}
+.linked-case-profile-badge {
+  vertical-align: middle;
 }
 
 /* ===== 空状态 ===== */

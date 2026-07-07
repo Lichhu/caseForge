@@ -1,5 +1,8 @@
 import {
   AT_CASE_SCENARIO_MAX_CHARS,
+  formatCaseNo,
+  generateAssertionsFromResponse,
+  maxCaseNoSuffixFromRows,
   prepareScenarioBlock,
   truncateScenarioPromptText,
 } from "./api-case-ai.util";
@@ -7,6 +10,31 @@ import {
   buildResponseAssertionSummary,
   compressApiStructuredDoc,
 } from "./api-doc.parser";
+
+describe("maxCaseNoSuffixFromRows", () => {
+  it("returns max numeric suffix for transaction code prefix", () => {
+    expect(
+      maxCaseNoSuffixFromRows(
+        [
+          { caseNo: "addCtmSealInfo-001" },
+          { caseNo: "addCtmSealInfo-006" },
+          { caseNo: "OTHER-099" },
+        ],
+        "addCtmSealInfo",
+      ),
+    ).toBe(6);
+  });
+
+  it("returns 0 when no matching cases", () => {
+    expect(maxCaseNoSuffixFromRows([], "addCtmSealInfo")).toBe(0);
+  });
+});
+
+describe("formatCaseNo", () => {
+  it("pads sequence to three digits", () => {
+    expect(formatCaseNo("addCtmSealInfo", 7)).toBe("addCtmSealInfo-007");
+  });
+});
 
 describe("truncateScenarioPromptText", () => {
   it("returns empty for blank input", () => {
@@ -30,11 +58,12 @@ describe("truncateScenarioPromptText", () => {
 
 describe("prepareScenarioBlock", () => {
   it("returns zero block when scenario is empty", () => {
-    expect(prepareScenarioBlock("", { transport: "http", messageFormat: "json" }))
-      .toMatchObject({
-        block: "",
-        blockChars: 0,
-      });
+    expect(
+      prepareScenarioBlock("", { transport: "http", messageFormat: "json" }),
+    ).toMatchObject({
+      block: "",
+      blockChars: 0,
+    });
   });
 
   it("includes section prefix in blockChars", () => {
@@ -86,5 +115,112 @@ describe("compressApiStructuredDoc requestOnly", () => {
     const summary = buildResponseAssertionSummary(sampleDoc);
     expect(summary).toContain("bizResCode");
     expect(summary).toContain("bizResText");
+  });
+});
+
+function createMockAiWorkflow(
+  capturedPrompt: { value: string },
+  responseText: string,
+) {
+  return {
+    runWithAiChat: jest.fn(async (prompt: string) => {
+      capturedPrompt.value = prompt;
+      return { text: responseText };
+    }),
+    parseJsonArray: jest.fn(<T>(text: string): T[] | null => {
+      try {
+        return JSON.parse(text) as T[];
+      } catch {
+        return null;
+      }
+    }),
+  } as any;
+}
+
+describe("generateAssertionsFromResponse", () => {
+  it("HTTP prompt contains status_code rule and passes statusCode", async () => {
+    const captured = { value: "" };
+    const mockResponse = JSON.stringify([
+      {
+        type: "status_code",
+        operator: "eq",
+        expression: "",
+        expected: "200",
+        description: "HTTP 状态码",
+      },
+      {
+        type: "string",
+        operator: "eq",
+        expression: "success",
+        description: "响应包含成功",
+      },
+    ]);
+    const ai = createMockAiWorkflow(captured, mockResponse);
+
+    const assertions = await generateAssertionsFromResponse(ai, {
+      transport: "http",
+      messageFormat: "json",
+      polarity: "positive",
+      statusCode: 200,
+      headers: { "content-type": "application/json" },
+      body: { code: "000000" },
+    });
+
+    expect(captured.value).toContain("HTTP");
+    expect(captured.value).toContain("状态码: 200");
+    expect(captured.value).toContain("status_code");
+    expect(assertions).toHaveLength(2);
+    expect(assertions[0].type).toBe("status_code");
+  });
+
+  it("TCP prompt omits status_code rule and does not include statusCode", async () => {
+    const captured = { value: "" };
+    const mockResponse = JSON.stringify([
+      {
+        type: "string",
+        operator: "eq",
+        expression: "000000",
+        description: "业务返回码",
+      },
+    ]);
+    const ai = createMockAiWorkflow(captured, mockResponse);
+
+    const assertions = await generateAssertionsFromResponse(ai, {
+      transport: "tcp",
+      messageFormat: "xml",
+      polarity: "positive",
+      statusCode: -1,
+      headers: {},
+      body: "<root><code>000000</code></root>",
+    });
+
+    expect(captured.value).toContain("TCP/Socket");
+    expect(captured.value).toContain("不要生成 status_code");
+    expect(captured.value).not.toMatch(/状态码: \d/);
+    expect(assertions).toHaveLength(1);
+    expect(assertions[0].type).toBe("string");
+  });
+
+  it("filters out assertions missing type or operator", async () => {
+    const captured = { value: "" };
+    const mockResponse = JSON.stringify([
+      { type: "status_code", operator: "eq", expected: "200" },
+      { type: "string", operator: "", expression: "ok" },
+      { type: "", operator: "eq", expression: "bad" },
+      { type: "raw", operator: "eq", expression: "ok" },
+    ]);
+    const ai = createMockAiWorkflow(captured, mockResponse);
+
+    const assertions = await generateAssertionsFromResponse(ai, {
+      transport: "http",
+      messageFormat: "json",
+      polarity: "positive",
+      statusCode: 200,
+      headers: {},
+      body: "ok",
+    });
+
+    expect(assertions).toHaveLength(2);
+    expect(assertions.every((a) => a.type && a.operator)).toBe(true);
   });
 });

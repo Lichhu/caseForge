@@ -14,8 +14,15 @@ import {
   buildRuntimeVariables,
   substituteDeep,
 } from "@api-test/util/variable-substitute.util";
-import { isAllPassed, runAssertions } from "@api-test/util/assertion-runner.util";
-import type { ApiCaseRequest, ApiRunItemStatus } from "@case-forge/shared";
+import {
+  isAllPassed,
+  runAssertions,
+} from "@api-test/util/assertion-runner.util";
+import type {
+  ApiCaseExpected,
+  ApiCaseRequest,
+  ApiRunItemStatus,
+} from "@case-forge/shared";
 import { toPublicApiRun } from "@common/http/public-response.util";
 
 const DEFAULT_CONCURRENCY = 5;
@@ -106,8 +113,7 @@ export class ApiExecutionService {
       await this.runItemRepo.delete({ runId: existing.id });
       existing.environmentId = env.id;
       existing.environmentServiceId = input.environmentServiceId;
-      existing.executionSetId =
-        input.executionSetId ?? existing.executionSetId;
+      existing.executionSetId = input.executionSetId ?? existing.executionSetId;
       existing.transactionId = input.transactionId ?? existing.transactionId;
       existing.status = "running";
       existing.totalCount = cases.length;
@@ -335,16 +341,20 @@ export class ApiExecutionService {
       } catch {
         body = text;
       }
+      const responseHeaders = Object.fromEntries(response.headers.entries());
       const responseSnapshot = {
         status: response.status,
-        headers: Object.fromEntries(response.headers.entries()),
+        headers: responseHeaders,
         body: truncateBody(body),
       };
       const assertions = runAssertions({
         expected: input.testCase.expected,
         statusCode: response.status,
+        headers: responseHeaders,
         body,
+        bodySize: text.length,
         durationMs,
+        polarity: input.testCase.polarity,
       });
       const status: ApiRunItemStatus = isAllPassed(assertions)
         ? "passed"
@@ -423,15 +433,18 @@ export class ApiExecutionService {
       );
       const durationMs = Date.now() - started;
       const responseSnapshot = {
-        status: 200,
+        status: -1,
         headers: {},
         body: truncateBody(responseText),
       };
       const assertions = runAssertions({
         expected: input.testCase.expected,
-        statusCode: 200,
+        statusCode: -1,
+        headers: {},
         body: responseText,
+        bodySize: responseText.length,
         durationMs,
+        polarity: input.testCase.polarity,
       });
       const status: ApiRunItemStatus = isAllPassed(assertions)
         ? "passed"
@@ -470,6 +483,171 @@ export class ApiExecutionService {
           },
         ],
       });
+    }
+  }
+
+  async debugRun(input: {
+    projectId: string;
+    request: ApiCaseRequest;
+    expected?: ApiCaseExpected;
+    polarity?: "positive" | "negative";
+    environmentId: string;
+    environmentServiceId?: string;
+  }): Promise<DebugRunResult> {
+    const env = (await this.environmentService.getRuntimeEnvironment(
+      input.projectId,
+      input.environmentId,
+      input.environmentServiceId,
+    )) as RuntimeEnvironment;
+    const vars = buildRuntimeVariables(env.variables, env.secrets);
+    const request = substituteDeep(input.request, vars) as ApiCaseRequest;
+    const transport = request.transport ?? (request.framing ? "tcp" : "http");
+
+    if (transport === "tcp") {
+      return this.debugRunTcp({
+        request,
+        env,
+        vars,
+        expected: input.expected,
+        polarity: input.polarity,
+      });
+    }
+    return this.debugRunHttp({
+      request,
+      env,
+      vars,
+      expected: input.expected,
+      polarity: input.polarity,
+    });
+  }
+
+  private async debugRunHttp(input: {
+    request: ApiCaseRequest;
+    env: RuntimeEnvironment;
+    vars: Record<string, string>;
+    expected?: ApiCaseExpected;
+    polarity?: "positive" | "negative";
+  }): Promise<DebugRunResult> {
+    const service = this.resolveRuntimeService(input.env, "http");
+    const baseUrl = this.resolveHttpBaseUrl(input.env, service);
+    const path = substituteVariablesPath(input.request.path, input.vars);
+    const url = new URL(path.replace(/^\//, ""), `${baseUrl}/`);
+    if (input.request.query) {
+      for (const [key, value] of Object.entries(input.request.query)) {
+        url.searchParams.set(key, String(value));
+      }
+    }
+    const headers = applyTransportEncoding(
+      {
+        ...input.env.headers,
+        ...(service?.headers ?? {}),
+        ...(input.request.headers ?? {}),
+      },
+      input.request.encoding,
+    );
+
+    const started = Date.now();
+    try {
+      const response = await fetch(url.toString(), {
+        method: input.request.method,
+        headers,
+        body: buildRequestBody(input.request),
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+      });
+      const durationMs = Date.now() - started;
+      const text = await response.text();
+      let body: unknown = text;
+      try {
+        body = text ? JSON.parse(text) : null;
+      } catch {
+        body = text;
+      }
+      const responseHeaders = Object.fromEntries(response.headers.entries());
+      const assertions = runAssertions({
+        expected: input.expected ?? {},
+        statusCode: response.status,
+        headers: responseHeaders,
+        body,
+        bodySize: text.length,
+        durationMs,
+        polarity: input.polarity,
+      });
+      return {
+        statusCode: response.status,
+        headers: responseHeaders,
+        body: truncateBody(body),
+        bodySize: text.length,
+        durationMs,
+        assertions,
+      };
+    } catch (err) {
+      const durationMs = Date.now() - started;
+      return {
+        statusCode: 0,
+        headers: {},
+        body: null,
+        bodySize: 0,
+        durationMs,
+        error: err instanceof Error ? err.message : "请求失败",
+        assertions: [],
+      };
+    }
+  }
+
+  private async debugRunTcp(input: {
+    request: ApiCaseRequest;
+    env: RuntimeEnvironment;
+    vars: Record<string, string>;
+    expected?: ApiCaseExpected;
+    polarity?: "positive" | "negative";
+  }): Promise<DebugRunResult> {
+    const service = this.resolveRuntimeService(input.env, "tcp");
+    const target = this.resolveTcpTarget(input.env, service);
+    const encoding =
+      input.request.encoding ??
+      service?.encoding ??
+      input.request.framing?.encoding ??
+      "GBK";
+    const framing = input.request.framing ?? service?.framing;
+    const payload = buildTcpPayload(input.request, encoding, framing);
+
+    const started = Date.now();
+    try {
+      const responseText = await sendTcpPayload(
+        target.host,
+        target.port,
+        payload,
+        encoding,
+      );
+      const durationMs = Date.now() - started;
+      const assertions = runAssertions({
+        expected: input.expected ?? {},
+        statusCode: -1,
+        headers: {},
+        body: responseText,
+        bodySize: responseText.length,
+        durationMs,
+        polarity: input.polarity,
+      });
+      return {
+        statusCode: -1,
+        headers: {},
+        body: truncateBody(responseText),
+        bodySize: responseText.length,
+        durationMs,
+        assertions,
+      };
+    } catch (err) {
+      const durationMs = Date.now() - started;
+      return {
+        statusCode: 0,
+        headers: {},
+        body: null,
+        bodySize: 0,
+        durationMs,
+        error: err instanceof Error ? err.message : "TCP 请求失败",
+        assertions: [],
+      };
     }
   }
 
@@ -663,4 +841,20 @@ function truncateBody(body: unknown, max = 32_000) {
   const text = typeof body === "string" ? body : JSON.stringify(body);
   if (text.length <= max) return body;
   return `${text.slice(0, max)}...(truncated)`;
+}
+
+export interface DebugRunResult {
+  statusCode: number;
+  headers: Record<string, string>;
+  body: unknown;
+  bodySize: number;
+  durationMs: number;
+  error?: string;
+  assertions: Array<{
+    name: string;
+    passed: boolean;
+    expected: unknown;
+    actual: unknown;
+    message?: string;
+  }>;
 }
