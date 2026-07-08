@@ -17,8 +17,14 @@ import {
 import type { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
 import { extractApiDocSection, getApiDocFieldValue } from "./api-doc.parser";
 import {
+  extractExampleMessage,
+  assessDocReadiness,
+  buildFieldCatalogSummary,
+} from "./api-canonical-doc.util";
+import {
   buildTransactionXmlScaffold,
   parseApiDocMessageFields,
+  parseXmlExampleDefaults,
   type ApiDocMessageField,
 } from "./api-xml-request-template.util";
 import {
@@ -262,11 +268,19 @@ export function assembleCaseRequest(input: {
     input.profile.messageFormat === "soap"
   ) {
     const allOverrides = { ...bodyOverrides, ...headerOverrides };
+
+    // Extract defaults from example message
+    const exampleMessage = extractExampleMessage(input.canonicalDoc);
+    const exampleDefaults = exampleMessage
+      ? parseXmlExampleDefaults(exampleMessage)
+      : undefined;
+
     body = buildTransactionXmlScaffold({
       structuredDoc: input.canonicalDoc,
       transactionCode: input.transactionCode,
       bizBodyValues: allOverrides,
       compact: false,
+      exampleDefaults,
     });
     body = prettyPrintXml(unescapeLiteralXmlEscapes(body as string));
   } else {

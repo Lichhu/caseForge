@@ -222,13 +222,19 @@ export function buildTransactionXmlScaffold(input: {
   transactionCode: string;
   bizBodyValues?: Record<string, string | undefined>;
   compact?: boolean;
+  exampleDefaults?: Record<string, string>;
 }) {
   const meta = extractXmlDocMeta(input.structuredDoc, input.transactionCode);
   const requestSection = extractApiDocSection(input.structuredDoc, "请求报文");
   const fields = parseApiDocMessageFields(requestSection);
   const grouped = groupFieldsBySection(fields);
   const traceId = sampleTraceId(meta.clientCd);
+
+  // Use example defaults as base, then override with provided values
+  const baseDefaults = input.exampleDefaults || {};
+
   const sysHeaderValues = {
+    ...baseDefaults,
     ...buildSysHeaderValues(meta, traceId),
     ...Object.fromEntries(
       grouped.sysHeader.map((field) => [
@@ -238,6 +244,7 @@ export function buildTransactionXmlScaffold(input: {
     ),
   };
   const bizHeaderValues = {
+    ...baseDefaults,
     ...buildBizHeaderValues(meta, traceId),
     ...Object.fromEntries(
       grouped.bizHeader.map((field) => [
@@ -247,7 +254,12 @@ export function buildTransactionXmlScaffold(input: {
     ),
   };
   const bizBodyValues = {
-    ...Object.fromEntries(grouped.bizBody.map((field) => [field.code, ""])),
+    ...Object.fromEntries(
+      grouped.bizBody.map((field) => [
+        field.code,
+        baseDefaults[field.code] || "",
+      ]),
+    ),
     ...input.bizBodyValues,
   };
 
@@ -295,7 +307,52 @@ export function buildTransactionXmlScaffold(input: {
   return `${xml}\n`;
 }
 
-export { minifyXml, prettyPrintXml };
+export { minifyXml, prettyPrintXml, parseXmlExampleDefaults };
+
+function parseXmlExampleDefaults(exampleXml: string): Record<string, string> {
+  const defaults: Record<string, string> = {};
+
+  // Parse sysHeader values
+  const sysHeaderMatch = exampleXml.match(/<sysHeader>([\s\S]*?)<\/sysHeader>/);
+  if (sysHeaderMatch) {
+    const sysHeaderContent = sysHeaderMatch[1];
+    SYS_HEADER_FIELDS.forEach((field) => {
+      const fieldMatch = sysHeaderContent.match(
+        new RegExp(`<${field}>([^<]*)</${field}>`),
+      );
+      if (fieldMatch) {
+        defaults[field] = fieldMatch[1];
+      }
+    });
+  }
+
+  // Parse bizHeader values
+  const bizHeaderMatch = exampleXml.match(/<bizHeader>([\s\S]*?)<\/bizHeader>/);
+  if (bizHeaderMatch) {
+    const bizHeaderContent = bizHeaderMatch[1];
+    BIZ_HEADER_FIELDS.forEach((field) => {
+      const fieldMatch = bizHeaderContent.match(
+        new RegExp(`<${field}>([^<]*)</${field}>`),
+      );
+      if (fieldMatch) {
+        defaults[field] = fieldMatch[1];
+      }
+    });
+  }
+
+  // Parse bizBody values
+  const bizBodyMatch = exampleXml.match(/<bizBody>([\s\S]*?)<\/bizBody>/);
+  if (bizBodyMatch) {
+    const bizBodyContent = bizBodyMatch[1];
+    // Extract all field values from bizBody
+    const fieldMatches = bizBodyContent.matchAll(/<([^>]+)>([^<]*)<\/\1>/g);
+    for (const match of fieldMatches) {
+      defaults[match[1]] = match[2];
+    }
+  }
+
+  return defaults;
+}
 
 export function buildXmlProtocolScaffoldExample(
   structuredDoc: string,
