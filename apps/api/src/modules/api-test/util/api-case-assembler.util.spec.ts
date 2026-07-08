@@ -175,27 +175,6 @@ describe("checkDocReadiness integration", () => {
     expect(result.ok).toBe(true);
     expect(result.fieldCount).toBeGreaterThan(0);
   });
-
-  it("returns ok=true when only 示例报文 exists without field table", () => {
-    const doc = [
-      "技术信息",
-      "----",
-      "通讯方式|Socket",
-      "报文类型|XML",
-      "",
-      "基础信息",
-      "----",
-      "服务URL|32.114.71.6:60030",
-      "",
-      "示例报文",
-      "----",
-      "<Transaction><Body><request><bizHeader><interfaceId>idc_SNYF0001</interfaceId></bizHeader></request></Body></Transaction>",
-    ].join("\n");
-    const result = assessDocReadiness(doc);
-    expect(result.ok).toBe(true);
-    expect(result.message).toContain("示例报文");
-    expect(result.fieldCount).toBe(0);
-  });
 });
 
 describe("buildFieldCatalogSummary", () => {
@@ -521,83 +500,5 @@ describe("mapCasePlanToPayload", () => {
     const txn = (payload.request.body as any).Transaction;
     expect(txn.Body.request.bizHeader.pageNum).toBe("-1");
     expect(txn.Body.request.bizHeader).not.toHaveProperty("fakeField");
-  });
-});
-
-const EXAMPLE_XML_REQUEST = `<Transaction>
-<Header><sysHeader>
-<msgId>0022202607080236339997157</msgId>
-<serviceCd>P00001082124</serviceCd>
-<operation>idc_SNYF0001</operation>
-<clientCd>022</clientCd>
-<serverCd>261</serverCd>
-</sysHeader></Header>
-<Body><request>
-<bizHeader>
-<interfaceId>idc_SNYF0001</interfaceId>
-<userName>ypxt</userName>
-<userkey>cac779cbc328453792e8a95e6e1263d6</userkey>
-<ver>1</ver>
-</bizHeader>
-<bizBody><model>3</model><org_code>041</org_code></bizBody>
-</request></Body>
-</Transaction>`;
-
-describe("assembleCaseRequest with requestBody (示例报文模式)", () => {
-  const profile = {
-    transport: "tcp" as const,
-    messageFormat: "xml" as const,
-    encoding: "UTF-8",
-  };
-
-  it("uses AI requestBody directly and preserves custom bizHeader fields", () => {
-    const plan: AiCasePlanItem = {
-      caseName: "正向-核心成功",
-      caseDesc: "标准二-正向",
-      caseType: "正",
-      priority: "高",
-      requestBody: EXAMPLE_XML_REQUEST,
-      expectedResult: "bizResCode=000000",
-    };
-
-    const { body } = assembleCaseRequest({
-      canonicalDoc: SAMPLE_DOC,
-      transactionCode: "idc_SNYF0001",
-      profile,
-      endpoint: FAKE_ENDPOINT,
-      plan,
-    });
-
-    const xml = String(body);
-    expect(xml).toContain("<interfaceId>idc_SNYF0001</interfaceId>");
-    expect(xml).toContain("<userName>ypxt</userName>");
-    expect(xml).toContain("<userkey>");
-    expect(xml).toContain("<ver>1</ver>");
-    expect(xml).not.toContain("<pageNum>");
-    expect(xml).not.toContain("<tranCode>");
-  });
-
-  it("throws when requestBody JSON is invalid", () => {
-    const plan: AiCasePlanItem = {
-      caseName: "正向",
-      caseDesc: "test",
-      caseType: "正",
-      requestBody: "{not-json",
-      expectedResult: "ok",
-    };
-
-    expect(() =>
-      assembleCaseRequest({
-        canonicalDoc: SAMPLE_DOC_JSON,
-        transactionCode: "TEST001",
-        profile: {
-          transport: "tcp",
-          messageFormat: "json",
-          encoding: "UTF-8",
-        },
-        endpoint: FAKE_ENDPOINT,
-        plan,
-      }),
-    ).toThrow(/不是合法 JSON/);
   });
 });

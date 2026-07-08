@@ -47,27 +47,6 @@ export function assessDocReadiness(
   const fields = parseApiDocMessageFields(requestSection);
 
   if (!fields.length) {
-    if (hasExampleMessage(canonicalDoc)) {
-      if (profile.transport === "tcp") {
-        const basicSection = extractApiDocSection(canonicalDoc, "基础信息");
-        const serviceUrl = getApiDocFieldValue(basicSection, "服务URL").trim();
-        if (!serviceUrl && !endpointPath) {
-          return {
-            ok: false,
-            message:
-              "TCP 接口缺少「服务URL」，请在文档基础信息中补充或设置接口路径",
-            fieldCount: 0,
-            profile,
-          };
-        }
-      }
-      return {
-        ok: true,
-        message: "文档就绪（基于示例报文）",
-        fieldCount: 0,
-        profile,
-      };
-    }
     return {
       ok: false,
       message: "文档「请求报文」段未解析到字段，请检查文档格式或补充字段表",

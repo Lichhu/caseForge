@@ -1,52 +1,15 @@
 import {
   AT_CASE_SCENARIO_MAX_CHARS,
-  buildExampleMessagePromptBlock,
   formatCaseNo,
   generateAssertionsFromResponse,
   maxCaseNoSuffixFromRows,
-  PLAN_MODE_SKILL_WITH_EXAMPLE,
   prepareScenarioBlock,
-  resolvePlanModeSkillBody,
   truncateScenarioPromptText,
 } from "./api-case-ai.util";
 import {
   buildResponseAssertionSummary,
   compressApiStructuredDoc,
 } from "./api-doc.parser";
-
-describe("resolvePlanModeSkillBody", () => {
-  it("uses requestBody skill when example message exists", () => {
-    const skill = resolvePlanModeSkillBody("remote skill body", true);
-    expect(skill).toBe(PLAN_MODE_SKILL_WITH_EXAMPLE);
-    expect(skill).toContain("requestBody");
-    expect(skill).toContain("不要**输出 bodyOverrides");
-  });
-
-  it("uses remote skill when no example message", () => {
-    expect(resolvePlanModeSkillBody("remote skill body", false)).toBe(
-      "remote skill body",
-    );
-  });
-
-  it("falls back to field-catalog skill when remote skill empty", () => {
-    const skill = resolvePlanModeSkillBody("", false);
-    expect(skill).toContain("bodyOverrides");
-    expect(skill).not.toContain("{{#HAS_EXAMPLE_MESSAGE}}");
-  });
-});
-
-describe("buildExampleMessagePromptBlock", () => {
-  it("wraps example XML in fenced block", () => {
-    const block = buildExampleMessagePromptBlock("<Transaction/>");
-    expect(block).toContain("示例报文");
-    expect(block).toContain("```");
-    expect(block).toContain("<Transaction/>");
-  });
-
-  it("returns empty string for blank example", () => {
-    expect(buildExampleMessagePromptBlock("  ")).toBe("");
-  });
-});
 
 describe("maxCaseNoSuffixFromRows", () => {
   it("returns max numeric suffix for transaction code prefix", () => {

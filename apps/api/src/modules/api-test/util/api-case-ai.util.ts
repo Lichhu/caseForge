@@ -18,7 +18,6 @@ import {
   assessDocReadiness,
   buildFieldCatalogSummary,
   extractExampleMessage,
-  hasExampleMessage,
   resolveCanonicalDoc,
 } from "./api-canonical-doc.util";
 import { stripTcpLengthPrefix } from "./assertion-runner.util";
@@ -97,84 +96,21 @@ export function prepareScenarioBlock(
   };
 }
 
-/** 有示例报文时使用的 Plan 模式 skill（输出完整 requestBody） */
-export const PLAN_MODE_SKILL_WITH_EXAMPLE = `作为资深接口测试专家，请根据以下接口信息与示例报文，设计接口测试案例计划。
-
-## 重要：本接口已提供示例报文
-你必须为每条案例输出完整的 **requestBody**（XML 或 JSON 字符串），**不要**输出 bodyOverrides / headerOverrides。
-
-## requestBody 规则
-1. **结构必须与示例报文一致**：保留示例中的 sysHeader、bizHeader、bizBody 层级与字段名（如 interfaceId、userName、userkey、ver）
-2. **禁止编造**示例报文中不存在的字段或节点
-3. **正向案例**：所有字段填合法典型值，风格与示例一致
-4. **反向案例**：仅变更 1～2 个被测字段，其余字段保持与示例一致
-5. XML 报文输出完整 XML 字符串；JSON 报文输出完整 JSON 对象或 JSON 字符串
-
-## 测试设计标准（标准二 · 非涉帐接口）
-单次生成约 6 条案例，保持「单案例单验证点」。
-- 正向至少 1 条：caseType=正，priority=高
-- 反向覆盖：必填缺失、非法值、边界值（按示例字段择要）
-- expectedResult：HTTP 写状态码；TCP/MQ 写响应报文 bizResCode/关键节点
-
-## 输出要求
-1. **仅输出 JSON 数组**，不要 Markdown 代码块或说明文字
-2. caseType：正 / 反；priority：高 / 中 / 低
-3. caseDesc 建议格式：标准二-{维度}-{子项}
-4. 至少 6 条，建议配比：正 2～3 条 / 反 3～4 条
-
-JSON 字段：caseNo, caseName, caseDesc, caseType, priority, remark, requestBody, expectedResult`;
-
-/** 无示例报文时的 Plan 模式 fallback skill（bodyOverrides 拼装） */
-export const PLAN_MODE_SKILL_WITHOUT_EXAMPLE = `作为资深接口测试专家，请根据以下接口信息与字段目录，设计接口测试案例计划。
+const PLAN_MODE_PROMPT_FALLBACK = `作为资深接口测试专家，请根据以下接口信息与字段目录，设计接口测试案例计划。
 
 ## bodyOverrides 规则
 1. **只填需要覆盖的业务字段**，未列出的字段由平台填默认值
 2. **key 必须使用字段目录中的节点代码**
 3. 正向：填合法值；反向必填缺失：设为空串；反向非法值：只改被测字段
 4. **禁止输出完整报文结构**（Transaction/Header/Body 由平台拼装）
-5. bizBody 字段用 bodyOverrides；bizHeader/sysHeader 字段用 headerOverrides
 
 ## 输出要求
 1. **仅输出 JSON 数组**，不要 Markdown 代码块或说明文字
 2. caseType：正 / 反；priority：高 / 中 / 低
-3. expectedResult：HTTP 写状态码；TCP/MQ 写响应报文业务返回码
+3. expectedResult：简要描述预期结果
 4. 至少 6 条，建议配比：正 2～3 条 / 反 3～4 条
 
-JSON 字段：caseNo, caseName, caseDesc, caseType, priority, remark, bodyOverrides, headerOverrides, expectedResult`;
-
-/** 按是否有示例报文选择 Plan 模式 skill 正文 */
-export function resolvePlanModeSkillBody(
-  skillTemplate: string,
-  hasExample: boolean,
-): string {
-  if (hasExample) {
-    return PLAN_MODE_SKILL_WITH_EXAMPLE;
-  }
-  return skillTemplate.trim() || PLAN_MODE_SKILL_WITHOUT_EXAMPLE;
-}
-
-/** 拼接示例报文 prompt 块（附在接口信息之后） */
-export function buildExampleMessagePromptBlock(
-  exampleMessage: string,
-  maxChars = EXAMPLE_MESSAGE_MAX_CHARS,
-): string {
-  if (!exampleMessage.trim()) {
-    return "";
-  }
-  return [
-    "",
-    "## 示例报文（测试人员维护，生成时须优先参照）",
-    "以下为用户提供的真实报文样例。生成 requestBody 时：",
-    "1. **必须使用示例报文中的字段名和结构**，禁止编造示例中不存在的字段",
-    "2. **取值风格、数据类型、格式须与示例报文保持一致**",
-    "3. **正向案例**：所有字段填合法值，保持示例报文的结构和风格",
-    "4. **反向案例**：仅变更被测字段，其余字段保持与示例一致",
-    "```",
-    exampleMessage.slice(0, maxChars),
-    exampleMessage.length > maxChars ? "...（已截断）" : "",
-    "```",
-  ].join("\n");
-}
+JSON 字段：caseNo, caseName, caseDesc, caseType, priority, remark, bodyOverrides, expectedResult`;
 
 export async function generateCasesWithPlan(
   aiWorkflow: AiWorkflowService,
@@ -217,7 +153,6 @@ export async function generateCasesWithPlan(
   });
   const fieldCatalog = buildFieldCatalogSummary(canonicalDoc);
   const exampleMessage = extractExampleMessage(canonicalDoc);
-  const useExampleMessage = hasExampleMessage(canonicalDoc);
 
   const endpointContext = buildEndpointContextForPrompt(profile, {
     endpointMethod: input.endpoint.method,
@@ -226,13 +161,27 @@ export async function generateCasesWithPlan(
   });
 
   const skillTemplate = await loadAtCaseSkillText(aiWorkflow);
-  const skillBody = resolvePlanModeSkillBody(skillTemplate, useExampleMessage);
+  const skillBody = skillTemplate.trim() || PLAN_MODE_PROMPT_FALLBACK;
 
   const scenario = prepareScenarioBlock(input.scenarioPromptText, profile);
   const scenarioBlockText = scenario.block || "";
 
-  const exampleMessageBlock = useExampleMessage
-    ? buildExampleMessagePromptBlock(exampleMessage)
+  const exampleMessageBlock = exampleMessage
+    ? [
+        "",
+        "## 示例报文（测试人员维护，生成时须优先参照）",
+        "以下为用户提供的真实报文样例。生成 bodyOverrides 时：",
+        "1. 字段名必须与「请求字段目录」中的节点代码一致",
+        "2. 取值风格、数据类型、格式须与示例报文保持一致",
+        "3. 正向案例以示例为基准；反向案例仅变更被测字段，其余参照示例",
+        "4. 禁止编造示例中不存在的字段结构",
+        "```",
+        exampleMessage.slice(0, EXAMPLE_MESSAGE_MAX_CHARS),
+        exampleMessage.length > EXAMPLE_MESSAGE_MAX_CHARS
+          ? "...（已截断）"
+          : "",
+        "```",
+      ].join("\n")
     : "";
 
   const technicalContext = [
@@ -240,9 +189,9 @@ export async function generateCasesWithPlan(
     `- 交易码：${input.transactionCode}`,
     `- 接口名称：${input.endpoint.name}`,
     endpointContext,
-    ...(useExampleMessage
-      ? []
-      : ["", `## 请求字段目录`, fieldCatalog]),
+    "",
+    `## 请求字段目录`,
+    fieldCatalog,
     exampleMessageBlock,
   ].join("\n");
 
@@ -251,7 +200,7 @@ export async function generateCasesWithPlan(
   );
 
   logger?.log(
-    `接口案例生成提示词：总长 ${prompt.length}，模式 ${useExampleMessage ? "示例报文/requestBody" : "字段目录/bodyOverrides"}，字段 ${readiness.fieldCount} 个，场景 ${scenario.scenarioTextChars}${scenario.truncated ? "（已截断）" : ""}`,
+    `接口案例生成提示词：总长 ${prompt.length}，字段 ${readiness.fieldCount} 个，场景 ${scenario.scenarioTextChars}${scenario.truncated ? "（已截断）" : ""}`,
   );
 
   const { text } = await aiWorkflow.runWithAiChat(prompt);
