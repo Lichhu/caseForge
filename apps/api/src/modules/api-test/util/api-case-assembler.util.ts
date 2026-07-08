@@ -245,6 +245,24 @@ function buildTransactionJsonScaffold(input: {
   };
 }
 
+function parsePlanRequestBody(
+  requestBody: string | object,
+  messageFormat: ApiMessageFormat,
+): unknown {
+  if (typeof requestBody !== "string") {
+    return requestBody;
+  }
+  if (messageFormat === "xml" || messageFormat === "soap") {
+    return prettyPrintXml(unescapeLiteralXmlEscapes(requestBody));
+  }
+  try {
+    return JSON.parse(requestBody);
+  } catch {
+    const preview = requestBody.trim().slice(0, 120);
+    throw new Error(`AI 返回的 requestBody 不是合法 JSON：${preview}`);
+  }
+}
+
 export function assembleCaseRequest(input: {
   canonicalDoc: string;
   transactionCode: string;
@@ -252,6 +270,22 @@ export function assembleCaseRequest(input: {
   endpoint: ApiEndpointEntity;
   plan: AiCasePlanItem;
 }): { request: ApiCaseRequest; body: unknown } {
+  if (input.plan.requestBody) {
+    const body = parsePlanRequestBody(
+      input.plan.requestBody,
+      input.profile.messageFormat,
+    );
+
+    const request = buildCaseRequestFromProfile(
+      input.endpoint,
+      input.profile,
+      body,
+    );
+
+    return { request, body };
+  }
+
+  // Fallback to original scaffold-based assembly (no example message)
   const bodyOverrides = normalizeOverrides(input.plan.bodyOverrides);
   const headerOverrides = normalizeOverrides(input.plan.headerOverrides);
 
@@ -365,6 +399,11 @@ function sanitizePlanOverrides(
   plan: AiCasePlanItem,
   canonicalDoc: string,
 ): void {
+  // If plan has requestBody (from example message), skip field filtering
+  if (plan.requestBody) {
+    return;
+  }
+
   const requestSection = extractApiDocSection(canonicalDoc, "请求报文");
   const fields = parseApiDocMessageFields(requestSection);
   const validCodes = new Set(fields.map((f) => f.code));

@@ -163,6 +163,7 @@ export interface AiCasePlanItem {
   remark?: string;
   bodyOverrides?: Record<string, string | number | boolean | null>;
   headerOverrides?: Record<string, string>;
+  requestBody?: string | object; // Complete request body when example message exists
   expectedResult: string;
   assertions?: ApiAssertion[];
 }

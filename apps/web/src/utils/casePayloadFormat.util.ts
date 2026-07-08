@@ -223,11 +223,10 @@ export function defaultContentType(format: CaseBodyFormat): string {
 }
 
 function defaultSocketFraming(encoding: string): ApiMessageFraming | undefined {
-  if (!encoding.toUpperCase().includes("GBK")) return undefined;
   return {
     type: "length-prefix",
     width: 8,
-    encoding: "GBK",
+    encoding,
   };
 }
 
@@ -384,7 +383,7 @@ export function mergeRequestFromEditor(input: {
   if (input.protocol === "socket") {
     const encoding = input.socketEncoding || "UTF-8";
     const framing =
-      input.bodyFormat === "xml" && encoding.toUpperCase().includes("GBK")
+      input.bodyFormat === "xml"
         ? (input.requestTcpMeta?.framing ?? defaultSocketFraming(encoding))
         : input.requestTcpMeta?.framing;
     return {

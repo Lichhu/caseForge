@@ -362,6 +362,7 @@
                             class="ant-input editor-textarea case-json-editor case-payload-textarea case-payload-textarea--expand case-payload-textarea--in-surface"
                             placeholder="{}"
                             spellcheck="false"
+                            @paste="onPayloadTextareaPaste"
                           />
                         </template>
                         <template v-else-if="form.bodyFormat === 'xml'">
@@ -371,6 +372,7 @@
                             class="ant-input editor-textarea case-xml-editor case-payload-textarea case-payload-textarea--expand case-payload-textarea--in-surface"
                             placeholder="XML 报文"
                             spellcheck="false"
+                            @paste="onPayloadTextareaPaste"
                           />
                         </template>
                         <template v-else>
@@ -380,6 +382,7 @@
                             class="ant-input editor-textarea case-payload-textarea case-payload-textarea--expand case-payload-textarea--in-surface"
                             placeholder="纯文本报文"
                             spellcheck="false"
+                            @paste="onPayloadTextareaPaste"
                           />
                         </template>
                         </div>
@@ -597,7 +600,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onActivated, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, reactive, ref, watch } from 'vue';
 import {
   DeleteOutlined,
   FormatPainterOutlined,
@@ -647,20 +650,15 @@ import {
 
 const apiStore = useApiTestStore();
 
-const PAYLOAD_TEXTAREA_MIN_ROWS = 12;
-/** 与 .case-json-editor / .case-xml-editor 的 font-size(12px) × line-height(1.5~1.6) 对齐 */
-const PAYLOAD_TEXTAREA_LINE_HEIGHT_PX = 19;
-const PAYLOAD_TEXTAREA_BOX_EXTRA_PX = 28;
-
-/** 按内容行数计算像素高度；外层滚动，编辑器内保留 auto 以防裁切 */
-function payloadTextareaStyle(text: string, minRows = PAYLOAD_TEXTAREA_MIN_ROWS) {
-  const lineCount = Math.max(minRows, (text ?? '').split('\n').length + 1);
-  const heightPx = lineCount * PAYLOAD_TEXTAREA_LINE_HEIGHT_PX + PAYLOAD_TEXTAREA_BOX_EXTRA_PX;
-  return {
-    height: `${heightPx}px`,
-    minHeight: `${heightPx}px`,
-    overflowY: 'auto',
-  } as const;
+/** 清除 resize / 旧版动态高度残留的内联样式，粘贴后回到顶部 */
+function onPayloadTextareaPaste(event: Event) {
+  const el = event.target;
+  if (!(el instanceof HTMLTextAreaElement)) return;
+  el.style.height = '';
+  el.style.minHeight = '';
+  void nextTick(() => {
+    el.scrollTop = 0;
+  });
 }
 
 const batchMode = ref(false);
@@ -2410,10 +2408,11 @@ function onBatchDelete() {
 .case-body-panel {
   min-width: 0;
   flex: 1;
-  min-height: 280px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  overflow: hidden;
 }
 
 .case-body-hint-row {
@@ -2464,9 +2463,10 @@ function onBatchDelete() {
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-height: 280px;
+  min-height: 0;
   border: 1px solid #eaecf0;
   background: #fff;
+  overflow: hidden;
 }
 
 .case-editor-chrome {
@@ -2497,14 +2497,17 @@ function onBatchDelete() {
 
 .case-editor-surface .case-payload-textarea--in-surface {
   width: 100%;
-  flex: 1;
-  min-height: 240px;
-  height: 100% !important;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  height: auto;
   border: none !important;
   box-shadow: none !important;
-  padding: 8px 10px 16px;
+  padding: 8px 10px;
   overflow-y: auto !important;
-  resize: vertical;
+  overflow-x: auto;
+  resize: none;
+  box-sizing: border-box;
 }
 
 .case-editor-surface .case-payload-textarea--expand:not(.case-payload-textarea--in-surface) {
@@ -2623,18 +2626,21 @@ function onBatchDelete() {
 
 .case-payload-textarea:deep(textarea.ant-input) {
   flex: 1;
-  min-height: 280px;
-  resize: vertical;
+  min-height: 0;
+  resize: none;
 }
 
 .case-payload-textarea--expand {
   display: block;
   width: 100%;
   box-sizing: border-box;
-  resize: vertical;
   overflow-x: auto;
   overflow-y: auto;
   border-radius: 0 !important;
+}
+
+.case-payload-textarea--expand.case-payload-textarea--in-surface {
+  resize: none;
 }
 
 .case-payload-textarea--expand.case-xml-editor {

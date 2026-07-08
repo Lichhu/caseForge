@@ -413,13 +413,14 @@ export class ApiExecutionService {
       input.request.framing?.encoding ??
       "GBK";
     const framing = input.request.framing ?? service?.framing;
-    const payload = buildTcpPayload(input.request, encoding, framing);
+    const resolvedFraming = framing ? { ...framing, encoding } : undefined;
+    const payload = buildTcpPayload(input.request, encoding, resolvedFraming);
     const requestSnapshot = {
       method: input.request.method,
       target: `${target.host}:${target.port}`,
       body: input.request.body,
       encoding,
-      framing,
+      framing: resolvedFraming,
       transport: "tcp",
       service: service?.name,
     };
@@ -430,6 +431,7 @@ export class ApiExecutionService {
         target.port,
         payload,
         encoding,
+        !resolvedFraming,
       );
       const durationMs = Date.now() - started;
       const responseSnapshot = {
@@ -615,7 +617,8 @@ export class ApiExecutionService {
       input.request.framing?.encoding ??
       "GBK";
     const framing = input.request.framing ?? service?.framing;
-    const payload = buildTcpPayload(input.request, encoding, framing);
+    const resolvedFraming = framing ? { ...framing, encoding } : undefined;
+    const payload = buildTcpPayload(input.request, encoding, resolvedFraming);
 
     const started = Date.now();
     try {
@@ -624,6 +627,7 @@ export class ApiExecutionService {
         target.port,
         payload,
         encoding,
+        !resolvedFraming,
       );
       const durationMs = Date.now() - started;
       const assertions = runAssertions({
@@ -781,6 +785,7 @@ function sendTcpPayload(
   port: number,
   payload: Buffer,
   encoding: string,
+  halfClose: boolean,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const socket = new Socket();
@@ -796,10 +801,16 @@ function sendTcpPayload(
     socket.on("data", (chunk) => chunks.push(chunk));
     socket.once("end", () => {
       clearTimeout(timer);
-      resolve(decodeText(Buffer.concat(chunks), encoding));
+      const buf = Buffer.concat(chunks);
+      const responseEncoding = detectResponseEncoding(buf, encoding);
+      resolve(decodeText(buf, responseEncoding));
     });
     socket.connect(port, host, () => {
-      socket.write(payload);
+      if (halfClose) {
+        socket.end(payload);
+      } else {
+        socket.write(payload);
+      }
     });
   });
 }
@@ -813,6 +824,23 @@ function decodeText(buffer: Buffer, encoding: string): string {
     return iconv.decode(buffer, normalized);
   }
   return buffer.toString("utf8");
+}
+
+function detectResponseEncoding(buffer: Buffer, fallback: string): string {
+  if (
+    buffer.length >= 3 &&
+    buffer[0] === 0xef &&
+    buffer[1] === 0xbb &&
+    buffer[2] === 0xbf
+  ) {
+    return "UTF-8";
+  }
+  const head = buffer
+    .subarray(0, Math.min(buffer.length, 200))
+    .toString("latin1");
+  const xmlDecl = head.match(/<\?xml[^>]*encoding\s*=\s*["']([^"']+)["']/i);
+  if (xmlDecl) return xmlDecl[1];
+  return fallback;
 }
 
 function applyTransportEncoding(

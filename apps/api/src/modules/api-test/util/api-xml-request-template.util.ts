@@ -319,7 +319,10 @@ export function buildXmlGuidanceExtra(
   const bizBodyFields = fields
     .filter((field) => sectionPathPrefix(field.path) === "bizBody")
     .map((field) => field.code);
-  const example = buildXmlProtocolScaffoldExample(structuredDoc, transactionCode);
+  const example = buildXmlProtocolScaffoldExample(
+    structuredDoc,
+    transactionCode,
+  );
 
   return [
     "",
