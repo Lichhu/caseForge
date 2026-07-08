@@ -118,6 +118,7 @@ export interface ApiTestCasePayload {
     generateVersion?: number;
     debugEnvironmentId?: string;
     debugEnvironmentServiceId?: string;
+    debugEncoding?: string;
     lastDebugRun?: CaseLastDebugRun;
   };
 }

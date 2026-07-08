@@ -20,6 +20,7 @@ import {
   extractExampleMessage,
   resolveCanonicalDoc,
 } from "./api-canonical-doc.util";
+import { stripTcpLengthPrefix } from "./assertion-runner.util";
 
 const EXAMPLE_MESSAGE_MAX_CHARS = 3000;
 
@@ -300,6 +301,8 @@ const ASSERTION_GEN_PROMPT_HTTP = `你是接口测试专家。根据以下 HTTP 
 - 反向案例：检查错误状态码（4xx/5xx）或错误码字段
 - 检查列表/数组非空：优先用 jmespath，expression 写 length(实际数组字段名) 或 length(@)，operator 用 gt，expected 写 0；禁止写 length(@.field) 或 length(@[*])
 - 也可用 response_size + gt + 0 检查响应体非空
+- 报文格式为 xml 时：必须用 xpath 提取节点文本，expression 写 //节点名/text() 或 //节点名，expected 写节点文本值（如 0000），不要用 raw 或 jmespath 比对整段 XML
+- 包含文本断言：type=string 时 expression 写要匹配的片段（如 0000 或 <bizcode>0000</bizcode>），不要只写在 expected 里
 
 仅输出 JSON 数组，不要 Markdown 代码块或说明文字。示例：
 [{"description":"HTTP 状态码","type":"status_code","operator":"eq","expression":"","expected":"200"},{"description":"响应包含成功","type":"string","operator":"eq","expression":"success"}]`;
@@ -320,11 +323,87 @@ const ASSERTION_GEN_PROMPT_TCP = `你是接口测试专家。根据以下 TCP/So
 - type: jsonpath | jmespath | xpath | raw | string | re | response_size | default
 - operator: eq | nq | gt | lt | gte | lte
 - 注意：TCP 协议没有 HTTP 状态码，不要生成 status_code 类型的断言
-- 正向案例：检查响应体中代表成功的业务码或字段（如 bizResCode=000000）
+- 正向案例：检查响应体中代表成功的业务码或字段（如 bizcode=0000）
 - 反向案例：检查响应体中代表错误的业务码或字段
+- TCP 响应可能在 XML 前有数字长度头（如 00009732<xml>...</xml>），断言时只针对 XML 节点，优先 xpath：//节点名/text()，expected 写节点文本值
+- 报文格式为 xml 时：禁止用 raw 对整段报文做精确比对；业务码用 xpath + expected 文本值
+- 包含文本断言：type=string 时 expression 写要匹配的片段
 
 仅输出 JSON 数组，不要 Markdown 代码块或说明文字。示例：
 [{"description":"业务返回码","type":"string","operator":"eq","expression":"000000"},{"description":"响应包含成功标志","type":"string","operator":"eq","expression":"success"}]`;
+
+function formatAssertionResponseBody(
+  body: unknown,
+  messageFormat: string,
+  transport: string,
+): string {
+  let bodyStr =
+    typeof body === "string"
+      ? body
+      : JSON.stringify(body ?? "", null, 2);
+  if (transport === "tcp" || messageFormat === "xml") {
+    bodyStr = stripTcpLengthPrefix(bodyStr);
+  }
+  return bodyStr;
+}
+
+function normalizeGeneratedAssertions(
+  assertions: ApiAssertion[],
+  input: { messageFormat: string; transport: string },
+): ApiAssertion[] {
+  const isXml = input.messageFormat === "xml";
+  const isTcp = input.transport === "tcp";
+  return assertions.map((assertion) => {
+    let next: ApiAssertion = { ...assertion };
+
+    if (next.type === "jmespath" && (isXml || isTcp)) {
+      next = {
+        ...next,
+        type: "xpath",
+        expression: next.expression?.includes("/")
+          ? next.expression
+          : `//${(next.expression || "bizcode").replace(/^\//, "")}/text()`,
+      };
+    }
+
+    if (isXml && next.type === "xpath" && next.expression?.trim()) {
+      const expr = next.expression.trim();
+      if (
+        next.expected !== undefined &&
+        next.expected !== "" &&
+        !/\/text\(\)\s*$/.test(expr) &&
+        !expr.includes("@")
+      ) {
+        next.expression = `${expr}/text()`;
+      }
+    }
+
+    if (next.type === "string") {
+      const expr = next.expression?.trim() ?? "";
+      const expected = String(next.expected ?? "").trim();
+      if (!expr && expected) {
+        next.expression = expected;
+        next.expected = "";
+      }
+    }
+
+    if ((isXml || isTcp) && next.type === "raw" && next.expected) {
+      const code = String(next.expected).trim();
+      if (/^\d{3,8}$/.test(code)) {
+        next = {
+          ...next,
+          type: "xpath",
+          operator: "eq",
+          expression: "//bizcode/text() | //BizCode/text() | //code/text()",
+          expected: code,
+          description: next.description || "业务返回码",
+        };
+      }
+    }
+
+    return next;
+  });
+}
 
 const ASSERTION_RESPONSE_MAX_CHARS = 2000;
 
@@ -339,10 +418,11 @@ export async function generateAssertionsFromResponse(
     body: unknown;
   },
 ): Promise<ApiAssertion[]> {
-  const bodyStr =
-    typeof input.body === "string"
-      ? input.body
-      : JSON.stringify(input.body ?? "", null, 2);
+  const bodyStr = formatAssertionResponseBody(
+    input.body,
+    input.messageFormat,
+    input.transport,
+  );
 
   const truncatedBody =
     bodyStr.length > ASSERTION_RESPONSE_MAX_CHARS
@@ -368,18 +448,24 @@ export async function generateAssertionsFromResponse(
   const { text } = await aiWorkflow.runWithAiChat(prompt);
   const assertions = aiWorkflow.parseJsonArray<ApiAssertion>(text) ?? [];
 
-  return assertions
-    .filter((a) => a && a.type && a.operator)
-    .map((assertion) => ({
-      ...assertion,
-      expression:
-        assertion.type === "jmespath" && assertion.expression
-          ? assertion.expression
-              .replace(
-                /length\(\s*@\.([A-Za-z_][A-Za-z0-9_]*)\s*\)/g,
-                "length($1)",
-              )
-              .replace(/length\(\s*@\[\*\]\s*\)/g, "length(@)")
-          : assertion.expression,
-    }));
+  return normalizeGeneratedAssertions(
+    assertions
+      .filter((a) => a && a.type && a.operator)
+      .map((assertion) => ({
+        ...assertion,
+        expression:
+          assertion.type === "jmespath" && assertion.expression
+            ? assertion.expression
+                .replace(
+                  /length\(\s*@\.([A-Za-z_][A-Za-z0-9_]*)\s*\)/g,
+                  "length($1)",
+                )
+                .replace(/length\(\s*@\[\*\]\s*\)/g, "length(@)")
+            : assertion.expression,
+      })),
+    {
+      messageFormat: input.messageFormat,
+      transport: input.transport,
+    },
+  );
 }

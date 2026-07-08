@@ -306,6 +306,33 @@ describe("runAssertions – xpath", () => {
     );
     expect(r.passed).toBe(false);
   });
+
+  it("returns element text for //bizcode instead of markup", () => {
+    const r = runSingle(
+      {
+        type: "xpath",
+        operator: "eq",
+        expression: "//bizcode",
+        expected: "0000",
+      },
+      { body: "<xml><bizcode>0000</bizcode></xml>" },
+    );
+    expect(r.actual).toBe("0000");
+    expect(r.passed).toBe(true);
+  });
+
+  it("strips TCP length prefix before xpath evaluation", () => {
+    const r = runSingle(
+      {
+        type: "xpath",
+        operator: "eq",
+        expression: "//bizcode/text()",
+        expected: "0000",
+      },
+      { body: "00000045<root><bizcode>0000</bizcode></root>" },
+    );
+    expect(r.passed).toBe(true);
+  });
 });
 
 describe("runAssertions – raw", () => {

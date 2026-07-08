@@ -118,6 +118,7 @@ export interface ApiTestCaseRow {
     generateVersion?: number;
     debugEnvironmentId?: string;
     debugEnvironmentServiceId?: string;
+    debugEncoding?: string;
     lastDebugRun?: DebugRunResult & { executedAt?: string };
   };
 }
@@ -809,6 +810,7 @@ export async function debugRunCase(
     environmentId: string;
     environmentServiceId?: string;
     caseId?: string;
+    encoding?: string;
   },
 ) {
   const { data } = await http.post<DebugRunResult>(

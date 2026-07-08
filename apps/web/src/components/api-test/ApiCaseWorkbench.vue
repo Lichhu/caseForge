@@ -411,6 +411,13 @@
                         class="case-debug-service-select"
                         allow-clear
                       />
+                      <a-select
+                        v-model:value="debugEncoding"
+                        size="small"
+                        placeholder="编码"
+                        :options="debugEncodingOptions"
+                        class="case-debug-encoding-select"
+                      />
                       <a-button
                         type="primary"
                         size="small"
@@ -495,10 +502,24 @@
                         class="case-debug-assertion-editor"
                         hint="可手动添加断言，或调试后使用 AI 生成"
                       />
-                      <pre
+                      <div
                         v-else-if="debugResponseTab === 'body' && debugResult"
-                        class="case-debug-body-pre"
-                      >{{ debugResponseBodyText }}</pre>
+                        class="case-debug-body-shell"
+                      >
+                        <div class="case-debug-body-toolbar">
+                          <a-button
+                            type="link"
+                            size="small"
+                            class="case-editor-beautify-btn"
+                            :disabled="!hasDebugResponseBody"
+                            @click="beautifyDebugResponseBody"
+                          >
+                            <template #icon><FormatPainterOutlined /></template>
+                            美化
+                          </a-button>
+                        </div>
+                        <pre class="case-debug-body-pre">{{ debugResponseBodyText }}</pre>
+                      </div>
                       <table
                         v-else-if="debugResponseTab === 'assert' && debugResult"
                         class="case-debug-assert-table"
@@ -607,6 +628,7 @@ import {
 import {
   beautifyCasePayloadJson,
   beautifyRequestBodyXml,
+  formatRunSnapshotForDisplay,
   buildDefaultHeaderRows,
   createEmptyKeyValueRow,
   defaultContentType,
@@ -649,6 +671,8 @@ const debugRunningCaseKey = ref<string | null>(null);
 const generatingAssertionsCaseKey = ref<string | null>(null);
 const debugResult = ref<DebugRunResult | null>(null);
 const debugServiceId = ref<string>('');
+const debugEncoding = ref('UTF-8');
+const debugResponseBodyOverride = ref<string | null>(null);
 const loadedCaseId = ref('');
 const debugResponseTab = ref<'expected' | 'body' | 'assert' | 'headers'>('expected');
 
@@ -692,6 +716,20 @@ function getDebugResponseIssue(result: DebugRunResult | null): string | null {
 const canGenerateAssertions = computed(
   () => getDebugResponseIssue(debugResult.value) === null,
 );
+
+watch(
+  () => debugResult.value,
+  () => {
+    debugResponseBodyOverride.value = null;
+  },
+);
+
+const hasDebugResponseBody = computed(() => {
+  const body = debugResult.value?.body;
+  if (body === undefined || body === null) return false;
+  if (typeof body === 'string') return body.trim().length > 0;
+  return true;
+});
 
 const debugEnvironmentOptions = computed(() =>
   apiStore.environments
@@ -971,6 +1009,15 @@ const encodingOptions = [
   { label: 'UTF-8', value: 'UTF-8' },
   { label: 'GBK', value: 'GBK' },
 ];
+
+const debugEncodingOptions = encodingOptions;
+
+function inferDebugEncoding() {
+  if (form.protocol === 'socket') {
+    return form.socketEncoding || 'GBK';
+  }
+  return 'UTF-8';
+}
 
 function countFilledRows(rows: KeyValueRow[]) {
   return rows.filter((row) => row.key.trim()).length;
@@ -1260,6 +1307,7 @@ function loadForm(row: ApiTestCaseRow) {
   form.assertionRows = assertionsToRows(row.expected?.assertions);
   loadedCaseId.value = row.id;
   syncingForm.value = false;
+  debugEncoding.value = row.metadata?.debugEncoding ?? inferDebugEncoding();
   void restoreCaseDebugEnvironment(row);
 }
 
@@ -1416,6 +1464,7 @@ function onCreate() {
   form.assertionRows = [];
   debugResult.value = null;
   debugResponseTab.value = 'expected';
+  debugEncoding.value = inferDebugEncoding();
   syncingForm.value = false;
 }
 
@@ -1450,9 +1499,10 @@ function buildSavePayload(): Record<string, unknown> | null {
       requestBodyXml: form.requestBodyXml,
     }),
     expected,
-    debugEnvironmentId: apiStore.selectedEnvironmentId || undefined,
-    debugEnvironmentServiceId: debugServiceId.value || undefined,
-  };
+      debugEnvironmentId: apiStore.selectedEnvironmentId || undefined,
+      debugEnvironmentServiceId: debugServiceId.value || undefined,
+      debugEncoding: debugEncoding.value || undefined,
+    };
   if (isNewCase.value && apiStore.caseListVersionFilter != null) {
     payload.generateVersion = apiStore.caseListVersionFilter;
   }
@@ -1498,8 +1548,11 @@ async function onSave() {
 }
 
 const debugResponseBodyText = computed(() => {
-  if (!debugResult.value?.body) return '';
-  const body = debugResult.value.body;
+  if (debugResponseBodyOverride.value !== null) {
+    return debugResponseBodyOverride.value;
+  }
+  const body = debugResult.value?.body;
+  if (body === undefined || body === null) return '';
   if (typeof body === 'string') return body;
   try {
     return JSON.stringify(body, null, 2);
@@ -1507,6 +1560,19 @@ const debugResponseBodyText = computed(() => {
     return String(body);
   }
 });
+
+function beautifyDebugResponseBody() {
+  if (!debugResult.value || !hasDebugResponseBody.value) {
+    message.info('暂无响应体');
+    return;
+  }
+  try {
+    debugResponseBodyOverride.value = formatRunSnapshotForDisplay(debugResult.value.body);
+    message.success('响应体已美化');
+  } catch {
+    message.error('无法美化当前响应体');
+  }
+}
 
 function formatAssertValue(value: unknown): string {
   if (value === undefined || value === null) return '—';
@@ -1558,6 +1624,7 @@ async function onDebugRun() {
         polarity: form.polarity,
         environmentId: apiStore.selectedEnvironmentId,
         environmentServiceId: debugServiceId.value || apiStore.selectedEnvironmentServiceId || undefined,
+        encoding: debugEncoding.value,
         caseId: caseIdAtStart,
       },
     );
@@ -2649,6 +2716,10 @@ function onBatchDelete() {
   width: 220px;
 }
 
+.case-debug-encoding-select {
+  width: 96px;
+}
+
 .case-debug-response {
   display: flex;
   flex-direction: column;
@@ -2703,6 +2774,27 @@ function onBatchDelete() {
   min-height: 0;
   margin-top: 8px;
   overflow-y: auto;
+}
+
+.case-debug-body-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.case-debug-body-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 8px;
+  background: #fff;
+  border: 1px solid #eaecf0;
+  border-bottom: none;
+}
+
+.case-debug-body-shell .case-debug-body-pre {
+  flex: 1;
+  min-height: 80px;
+  border-top: none;
 }
 
 .case-debug-body-pre,

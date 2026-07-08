@@ -45,19 +45,53 @@ function compareValues(
   }
 }
 
+/** 剥离 TCP 响应常见的数字长度头，如 00009732<xml>...</xml> */
+export function stripTcpLengthPrefix(body: string): string {
+  const trimmed = body.trim();
+  const matched = trimmed.match(/^(\d{4,8})(<[\s\S]+)$/);
+  return matched ? matched[2] : trimmed;
+}
+
+function resolveAssertionBodyText(body: unknown): string {
+  if (body == null) return "";
+  if (typeof body === "string") return stripTcpLengthPrefix(body);
+  try {
+    return stripTcpLengthPrefix(JSON.stringify(body));
+  } catch {
+    return stripTcpLengthPrefix(String(body));
+  }
+}
+
+function extractXPathText(node: unknown): string {
+  if (!node) return "";
+  const current = node as {
+    nodeType?: number;
+    nodeValue?: string | null;
+    textContent?: string | null;
+  };
+  if (current.nodeType === 3 && current.nodeValue != null) {
+    return current.nodeValue.trim();
+  }
+  if (current.textContent != null && current.textContent !== "") {
+    return current.textContent.trim();
+  }
+  if (current.nodeValue != null) return String(current.nodeValue).trim();
+  return String(node).trim();
+}
+
 /** 将字符串响应体尽量解析为 JSON，便于 jsonpath / jmespath 取值 */
 export function coerceAssertionBody(body: unknown): unknown {
   if (typeof body !== "string") return body;
-  const trimmed = body.trim();
+  const trimmed = stripTcpLengthPrefix(body.trim());
   if (!trimmed) return body;
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
     try {
       return JSON.parse(trimmed);
     } catch {
-      return body;
+      return trimmed;
     }
   }
-  return body;
+  return trimmed;
 }
 
 /** 修正 AI 常见的无效 JMESPath 写法，如 length(@.data)、length(@[*]) */
@@ -146,19 +180,13 @@ function runSingleAssertion(
     }
 
     case "xpath": {
-      const bodyStr =
-        typeof input.body === "string"
-          ? input.body
-          : JSON.stringify(input.body ?? "");
+      const bodyStr = resolveAssertionBodyText(input.body);
       try {
         const doc = new DOMParser().parseFromString(bodyStr, "text/xml");
         const nodes = select(expression, doc as any);
         const nodeArr = Array.isArray(nodes) ? nodes : nodes ? [nodes] : [];
         if (expected !== undefined && expected !== "") {
-          actual =
-            nodeArr.length > 0
-              ? ((nodeArr[0] as any)?.nodeValue ?? String(nodeArr[0]))
-              : "";
+          actual = nodeArr.length > 0 ? extractXPathText(nodeArr[0]) : "";
           expectedDisplay = expected;
           passed = compareValues(actual, expectedDisplay, operator);
         } else {
@@ -173,10 +201,7 @@ function runSingleAssertion(
     }
 
     case "raw": {
-      const bodyStr =
-        typeof input.body === "string"
-          ? input.body
-          : JSON.stringify(input.body ?? "");
+      const bodyStr = resolveAssertionBodyText(input.body);
       actual = bodyStr;
       expectedDisplay = expected ?? expression;
       passed = compareValues(actual, expectedDisplay, operator);
@@ -184,10 +209,7 @@ function runSingleAssertion(
     }
 
     case "string": {
-      const bodyStr =
-        typeof input.body === "string"
-          ? input.body
-          : JSON.stringify(input.body ?? "");
+      const bodyStr = resolveAssertionBodyText(input.body);
       actual = bodyStr;
       expectedDisplay = expression;
       if (operator === "eq") {
@@ -201,10 +223,7 @@ function runSingleAssertion(
     }
 
     case "re": {
-      const bodyStr =
-        typeof input.body === "string"
-          ? input.body
-          : JSON.stringify(input.body ?? "");
+      const bodyStr = resolveAssertionBodyText(input.body);
       actual = bodyStr;
       expectedDisplay = expression;
       try {
@@ -225,10 +244,7 @@ function runSingleAssertion(
     }
 
     case "default": {
-      const bodyStr =
-        typeof input.body === "string"
-          ? input.body
-          : JSON.stringify(input.body ?? "");
+      const bodyStr = resolveAssertionBodyText(input.body);
       actual = bodyStr;
       if (input.polarity === "negative") {
         passed = true;
@@ -271,7 +287,7 @@ function runSingleAssertion(
 }
 
 function bodyIncludesPattern(body: unknown, pattern: string): boolean {
-  const bodyStr = typeof body === "string" ? body : JSON.stringify(body ?? "");
+  const bodyStr = resolveAssertionBodyText(body);
   return bodyStr.includes(pattern);
 }
 

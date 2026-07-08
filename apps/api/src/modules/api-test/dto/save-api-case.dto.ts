@@ -99,6 +99,11 @@ export class SaveApiCaseDto {
   @IsUUID()
   debugEnvironmentServiceId?: string;
 
+  @ApiPropertyOptional({ description: "案例调试传输编码" })
+  @IsOptional()
+  @IsString()
+  debugEncoding?: string;
+
   @ApiPropertyOptional({ description: "最近一次调试执行快照" })
   @IsOptional()
   @IsObject()

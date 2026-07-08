@@ -153,6 +153,7 @@ export class ApiCaseService {
         ...(payload.debugEnvironmentServiceId
           ? { debugEnvironmentServiceId: payload.debugEnvironmentServiceId }
           : {}),
+        ...(payload.debugEncoding ? { debugEncoding: payload.debugEncoding } : {}),
         ...(payload.lastDebugRun ? { lastDebugRun: payload.lastDebugRun } : {}),
       },
       ...auditFieldsForCreate(),
@@ -211,6 +212,7 @@ export class ApiCaseService {
           : (existing.metadata?.promptIds ?? []),
       debugEnvironmentId: payload.debugEnvironmentId,
       debugEnvironmentServiceId: payload.debugEnvironmentServiceId,
+      debugEncoding: payload.debugEncoding,
       ...(payload.lastDebugRun !== undefined
         ? { lastDebugRun: payload.lastDebugRun }
         : {}),

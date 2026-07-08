@@ -85,6 +85,7 @@ export class ApiTestCaseEntity {
     generateVersion?: number;
     debugEnvironmentId?: string;
     debugEnvironmentServiceId?: string;
+    debugEncoding?: string;
     lastDebugRun?: {
       statusCode: number;
       headers: Record<string, string>;

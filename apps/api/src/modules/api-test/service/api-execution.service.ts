@@ -493,6 +493,7 @@ export class ApiExecutionService {
     polarity?: "positive" | "negative";
     environmentId: string;
     environmentServiceId?: string;
+    encoding?: string;
   }): Promise<DebugRunResult> {
     const env = (await this.environmentService.getRuntimeEnvironment(
       input.projectId,
@@ -510,6 +511,7 @@ export class ApiExecutionService {
         vars,
         expected: input.expected,
         polarity: input.polarity,
+        encoding: input.encoding,
       });
     }
     return this.debugRunHttp({
@@ -518,6 +520,7 @@ export class ApiExecutionService {
       vars,
       expected: input.expected,
       polarity: input.polarity,
+      encoding: input.encoding,
     });
   }
 
@@ -527,6 +530,7 @@ export class ApiExecutionService {
     vars: Record<string, string>;
     expected?: ApiCaseExpected;
     polarity?: "positive" | "negative";
+    encoding?: string;
   }): Promise<DebugRunResult> {
     const service = this.resolveRuntimeService(input.env, "http");
     const baseUrl = this.resolveHttpBaseUrl(input.env, service);
@@ -543,7 +547,7 @@ export class ApiExecutionService {
         ...(service?.headers ?? {}),
         ...(input.request.headers ?? {}),
       },
-      input.request.encoding,
+      input.encoding ?? input.request.encoding,
     );
 
     const started = Date.now();
@@ -600,10 +604,12 @@ export class ApiExecutionService {
     vars: Record<string, string>;
     expected?: ApiCaseExpected;
     polarity?: "positive" | "negative";
+    encoding?: string;
   }): Promise<DebugRunResult> {
     const service = this.resolveRuntimeService(input.env, "tcp");
     const target = this.resolveTcpTarget(input.env, service);
     const encoding =
+      input.encoding ??
       input.request.encoding ??
       service?.encoding ??
       input.request.framing?.encoding ??

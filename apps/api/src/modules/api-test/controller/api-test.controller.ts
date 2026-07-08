@@ -297,6 +297,7 @@ export class ApiTestController {
   @Patch(":projectId/transactions/:transactionId/cases/:caseId")
   updateCase(
     @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
     @Param("caseId") caseId: string,
     @Body() body: SaveApiCaseDto,
   ) {
@@ -566,10 +567,11 @@ export class ApiTestController {
       expected?: Record<string, unknown>;
       polarity?: "positive" | "negative";
       environmentId: string;
-      environmentServiceId?: string;
-      caseId?: string;
-    },
-  ) {
+    environmentServiceId?: string;
+    caseId?: string;
+    encoding?: string;
+  },
+) {
     const result = await this.apiExecutionService.debugRun({
       projectId,
       request: body.request as any,
@@ -577,6 +579,7 @@ export class ApiTestController {
       polarity: body.polarity,
       environmentId: body.environmentId,
       environmentServiceId: body.environmentServiceId,
+      encoding: body.encoding,
     });
     if (body.caseId) {
       await this.apiCaseService.persistLastDebugRun(projectId, body.caseId, {
