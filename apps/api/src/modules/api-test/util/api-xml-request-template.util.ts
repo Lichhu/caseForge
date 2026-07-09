@@ -222,7 +222,7 @@ export function buildTransactionXmlScaffold(input: {
   transactionCode: string;
   bizBodyValues?: Record<string, string | undefined>;
   compact?: boolean;
-  exampleDefaults?: Record<string, string>;
+  exampleMessage?: string;
 }) {
   const meta = extractXmlDocMeta(input.structuredDoc, input.transactionCode);
   const requestSection = extractApiDocSection(input.structuredDoc, "请求报文");
@@ -230,11 +230,17 @@ export function buildTransactionXmlScaffold(input: {
   const grouped = groupFieldsBySection(fields);
   const traceId = sampleTraceId(meta.clientCd);
 
-  // Use example defaults as base, then override with provided values
-  const baseDefaults = input.exampleDefaults || {};
+  // If example message exists, use it as base template and override specific fields
+  if (input.exampleMessage) {
+    return buildXmlFromExample({
+      exampleMessage: input.exampleMessage,
+      overrides: input.bizBodyValues || {},
+      compact: input.compact || false,
+    });
+  }
 
+  // Fallback to original logic if no example message
   const sysHeaderValues = {
-    ...baseDefaults,
     ...buildSysHeaderValues(meta, traceId),
     ...Object.fromEntries(
       grouped.sysHeader.map((field) => [
@@ -244,7 +250,6 @@ export function buildTransactionXmlScaffold(input: {
     ),
   };
   const bizHeaderValues = {
-    ...baseDefaults,
     ...buildBizHeaderValues(meta, traceId),
     ...Object.fromEntries(
       grouped.bizHeader.map((field) => [
@@ -257,10 +262,9 @@ export function buildTransactionXmlScaffold(input: {
     ...Object.fromEntries(
       grouped.bizBody.map((field) => [
         field.code,
-        baseDefaults[field.code] || "",
+        input.bizBodyValues?.[field.code] || "",
       ]),
     ),
-    ...input.bizBodyValues,
   };
 
   const sysHeader = buildSectionXml(
@@ -308,6 +312,25 @@ export function buildTransactionXmlScaffold(input: {
 }
 
 export { minifyXml, prettyPrintXml, parseXmlExampleDefaults };
+
+function buildXmlFromExample(input: {
+  exampleMessage: string;
+  overrides: Record<string, string | undefined>;
+  compact: boolean;
+}): string {
+  let xml = input.exampleMessage;
+
+  // Apply field overrides
+  for (const [fieldCode, value] of Object.entries(input.overrides)) {
+    if (value === undefined) continue;
+
+    // Replace field value in XML
+    const regex = new RegExp(`<${fieldCode}>([^<]*)</${fieldCode}>`, "g");
+    xml = xml.replace(regex, `<${fieldCode}>${value}</${fieldCode}>`);
+  }
+
+  return input.compact ? minifyXml(xml) : prettyPrintXml(xml);
+}
 
 function parseXmlExampleDefaults(exampleXml: string): Record<string, string> {
   const defaults: Record<string, string> = {};

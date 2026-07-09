@@ -271,16 +271,13 @@ export function assembleCaseRequest(input: {
 
     // Extract defaults from example message
     const exampleMessage = extractExampleMessage(input.canonicalDoc);
-    const exampleDefaults = exampleMessage
-      ? parseXmlExampleDefaults(exampleMessage)
-      : undefined;
 
     body = buildTransactionXmlScaffold({
       structuredDoc: input.canonicalDoc,
       transactionCode: input.transactionCode,
       bizBodyValues: allOverrides,
       compact: false,
-      exampleDefaults,
+      exampleMessage: exampleMessage || undefined,
     });
     body = prettyPrintXml(unescapeLiteralXmlEscapes(body as string));
   } else {
