@@ -28,6 +28,7 @@ import {
   maxCaseNoSuffix,
   formatCaseNo,
   nextCaseNo,
+  type ScenarioPromptInfo,
 } from "@api-test/util/api-case-ai.util";
 import {
   assessDocReadiness,
@@ -153,7 +154,9 @@ export class ApiCaseService {
         ...(payload.debugEnvironmentServiceId
           ? { debugEnvironmentServiceId: payload.debugEnvironmentServiceId }
           : {}),
-        ...(payload.debugEncoding ? { debugEncoding: payload.debugEncoding } : {}),
+        ...(payload.debugEncoding
+          ? { debugEncoding: payload.debugEncoding }
+          : {}),
         ...(payload.lastDebugRun ? { lastDebugRun: payload.lastDebugRun } : {}),
       },
       ...auditFieldsForCreate(),
@@ -181,11 +184,7 @@ export class ApiCaseService {
       throw new NotFoundException("案例不存在");
     }
     if (payload.endpointId && payload.endpointId !== existing.endpointId) {
-      await this.requireEndpoint(
-        projectId,
-        payload.endpointId,
-        transactionId,
-      );
+      await this.requireEndpoint(projectId, payload.endpointId, transactionId);
       existing.endpointId = payload.endpointId;
     }
     existing.title = payload.title;
@@ -385,11 +384,7 @@ export class ApiCaseService {
       order: { sortOrder: "ASC" },
     });
     const results = endpoints.map((ep) => {
-      const canonicalDoc = resolveCanonicalDoc(
-        structuredDoc,
-        ep.requestNotes,
-        ep.responseNotes,
-      );
+      const canonicalDoc = resolveCanonicalDoc(structuredDoc, ep.requestNotes);
       const readiness = assessDocReadiness(canonicalDoc, ep.path, doc.smpData);
       return {
         endpointId: ep.id,
@@ -483,7 +478,7 @@ export class ApiCaseService {
     }
 
     const promptIds = options?.promptIds ?? doc.metadata?.promptIds ?? [];
-    const scenarioPromptText = await this.resolveScenarioPromptText(promptIds);
+    const scenarioPrompts = await this.resolveScenarioPrompts(promptIds);
     const structuredDoc =
       doc.tempStructuredMarkdown?.trim() ||
       doc.structuredMarkdown?.trim() ||
@@ -510,53 +505,80 @@ export class ApiCaseService {
         }
       }
 
-      const payloads = await generateCasesWithPlan(
-        this.aiWorkflow,
-        {
-          transactionCode: transaction.code,
-          structuredDoc,
-          endpoint,
-          scenarioPromptText,
-          smpData: doc.smpData,
-        },
-        this.logger,
-      );
-
-      if (options?.jobId) {
-        const job = await this.generateJobRepo.findOne({
-          where: { id: options.jobId },
-        });
-        if (job?.status === "cancelled") {
-          this.logger.log(
-            `案例生成已取消，丢弃端点 ${endpoint.id} 的 ${payloads.length} 条生成结果`,
-          );
-          continue;
-        }
-      }
-
       let seq = await maxCaseNoSuffix(
         this.caseRepo,
         projectId,
         endpoint.id,
         transaction.code,
       );
-      for (const payload of payloads) {
-        seq += 1;
-        payload.caseNo = formatCaseNo(transaction.code, seq);
-        const entity = this.caseRepo.create({
-          projectId,
-          endpointId: endpoint.id,
-          ...payload,
-          transactionCode: payload.transactionCode ?? transaction.code,
-          owner: payload.owner?.trim() || RequestContext.getUserName(),
-          metadata: {
-            source: "ai",
-            promptIds: [...promptIds],
-            generateVersion: options?.version,
+
+      const scenarioList: ScenarioPromptInfo[] = scenarioPrompts.length
+        ? scenarioPrompts
+        : [
+            {
+              promptId: undefined,
+              scenarioName: undefined,
+              promptName: undefined,
+              content: "",
+            },
+          ];
+
+      for (const scenarioPrompt of scenarioList) {
+        if (options?.jobId) {
+          const job = await this.generateJobRepo.findOne({
+            where: { id: options.jobId },
+          });
+          if (job?.status === "cancelled") {
+            this.logger.log(
+              `案例生成已取消，跳过端点 ${endpoint.id} 的场景 ${scenarioPrompt.scenarioName || "（无场景）"}`,
+            );
+            break;
+          }
+        }
+
+        const payloads = await generateCasesWithPlan(
+          this.aiWorkflow,
+          {
+            transactionCode: transaction.code,
+            structuredDoc,
+            endpoint,
+            scenarioPrompt,
+            smpData: doc.smpData,
           },
-          ...auditFieldsForCreate(),
-        });
-        created.push(await this.caseRepo.save(entity));
+          this.logger,
+        );
+
+        if (options?.jobId) {
+          const job = await this.generateJobRepo.findOne({
+            where: { id: options.jobId },
+          });
+          if (job?.status === "cancelled") {
+            this.logger.log(
+              `案例生成已取消，丢弃端点 ${endpoint.id} 场景 ${scenarioPrompt.scenarioName || "（无场景）"} 的 ${payloads.length} 条生成结果`,
+            );
+            break;
+          }
+        }
+
+        for (const payload of payloads) {
+          seq += 1;
+          payload.caseNo = formatCaseNo(transaction.code, seq);
+          const entity = this.caseRepo.create({
+            projectId,
+            endpointId: endpoint.id,
+            ...payload,
+            transactionCode: payload.transactionCode ?? transaction.code,
+            owner: payload.owner?.trim() || RequestContext.getUserName(),
+            metadata: {
+              ...payload.metadata,
+              source: "ai",
+              promptIds: [...promptIds],
+              generateVersion: options?.version,
+            },
+            ...auditFieldsForCreate(),
+          });
+          created.push(await this.caseRepo.save(entity));
+        }
       }
     }
     return {
@@ -565,9 +587,11 @@ export class ApiCaseService {
     };
   }
 
-  private async resolveScenarioPromptText(promptIds: string[]) {
+  private async resolveScenarioPrompts(
+    promptIds: string[],
+  ): Promise<ScenarioPromptInfo[]> {
     if (!promptIds.length) {
-      return "";
+      return [];
     }
     const prompts = await this.promptRepo.find({
       where: scopedWhereWithSystem({ id: In(promptIds) }),
@@ -589,10 +613,14 @@ export class ApiCaseService {
             : promptName
               ? `【${promptName}】`
               : "";
-        return title ? `${title}\n${content}` : content;
+        return {
+          promptId: id,
+          scenarioName: scenarioName || undefined,
+          promptName: promptName || undefined,
+          content: title ? `${title}\n${content}` : content,
+        };
       })
-      .filter((content): content is string => Boolean(content))
-      .join("\n\n");
+      .filter((item): item is NonNullable<typeof item> => item !== null);
   }
 
   private validateCasePayload(payload: SaveApiCaseDto) {

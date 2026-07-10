@@ -8,7 +8,6 @@ import type {
   ApiTransport,
 } from "@case-forge/shared";
 import { extractApiDocSection, getApiDocFieldValue } from "./api-doc.parser";
-import { buildXmlGuidanceExtra } from "./api-xml-request-template.util";
 
 const DEFAULT_PROFILE: ApiTechnicalProfile = {
   transport: "http",
@@ -75,7 +74,6 @@ export interface TechnicalProfileEndpointHint {
   method?: string | null;
   path?: string | null;
   requestNotes?: string | null;
-  responseNotes?: string | null;
 }
 
 /** 文档「技术信息」段是否已填写通讯方式或报文类型（非空即视为用户/上传文档的明确配置） */
@@ -98,8 +96,7 @@ function deriveTechnicalProfileFromEndpoint(
   const method = (endpoint.method || "").toUpperCase();
   const path = (endpoint.path || "").toLowerCase();
   const requestNotes = (endpoint.requestNotes || "").trim();
-  const responseNotes = (endpoint.responseNotes || "").trim();
-  const sample = requestNotes || responseNotes;
+  const sample = requestNotes;
 
   const isTcp =
     ["TCP", "TEP", "SOCKET"].includes(method) ||
@@ -164,116 +161,6 @@ export function resolveContentType(profile: ApiTechnicalProfile): string {
   }
 }
 
-export function buildProtocolGuidance(
-  profile: ApiTechnicalProfile,
-  structuredDoc?: string,
-  transactionCode?: string,
-): string {
-  const transportLabel =
-    profile.transport === "http"
-      ? "HTTP"
-      : profile.transport === "tcp"
-        ? "Socket"
-        : profile.transport === "mq"
-          ? "MQ"
-          : profile.transport === "tuxedo"
-            ? "TUXEDO"
-            : "其它通讯方式";
-  const formatLabel =
-    profile.messageFormat === "json"
-      ? "JSON"
-      : profile.messageFormat === "xml"
-        ? "XML"
-        : profile.messageFormat === "soap"
-          ? "SOAP"
-          : profile.messageFormat === "text"
-            ? "文本"
-            : "其它报文类型";
-
-  const lines = [
-    `本接口通讯方式为 **${transportLabel}**，报文类型为 **${formatLabel}**${
-      profile.encoding ? `，编码 **${profile.encoding}**` : ""
-    }。`,
-    "",
-    "### 请求报文生成规则",
-  ];
-
-  if (profile.messageFormat === "json") {
-    lines.push(
-      "- `requestBody` 输出 **JSON 对象字符串**（仅业务报文体，不含 HTTP 头）。",
-      "- 字段名须与文档「请求报文」表中的**节点代码**一致。",
-    );
-  } else if (
-    profile.messageFormat === "xml" ||
-    profile.messageFormat === "soap"
-  ) {
-    lines.push(
-      "- `requestBody` 输出 **完整 XML 字符串**（非 JSON 对象）。",
-      "- 按文档「请求报文」表的**节点路径**嵌套生成标签，标签名取**节点代码**。",
-      "- 根节点为 `Transaction`，须包含 `Header/sysHeader`、`Body/request/bizHeader`、`Body/request/bizBody` 三层。",
-    );
-    if (
-      profile.transport === "tcp" &&
-      structuredDoc?.trim() &&
-      transactionCode
-    ) {
-      lines.push(buildXmlGuidanceExtra(structuredDoc, transactionCode));
-    }
-    if (profile.messageFormat === "soap") {
-      lines.push(
-        "- 若文档要求 SOAP 封装，在业务 XML 外套上标准 SOAP Envelope/Body。",
-      );
-    }
-  } else if (profile.messageFormat === "text") {
-    lines.push(
-      "- `requestBody` 输出 **纯文本字符串**，按文档字段顺序或定长格式拼接。",
-    );
-  } else {
-    lines.push("- `requestBody` 按文档「请求报文」定义的格式输出字符串。");
-  }
-
-  lines.push("", "### 预期结果生成规则");
-
-  if (profile.transport === "http") {
-    lines.push(
-      "- `expectedResult` 须写明 **HTTP 状态码**（如 HTTP 200、HTTP 400）及关键响应字段/报文片段断言。",
-    );
-    if (profile.messageFormat === "xml" || profile.messageFormat === "soap") {
-      lines.push(
-        "- 响应为 XML 时，断言响应报文中的业务节点取值或错误码节点（如 `retCode`、`retMsg`）。",
-      );
-    }
-  } else if (profile.transport === "tcp") {
-    lines.push(
-      "- **不要写 HTTP 状态码**；`expectedResult` 描述 **Socket 响应报文**中的业务返回码、错误信息或关键 XML 节点。",
-      "- 正向案例示例：`响应报文 bizResCode=000000，bizBody 含目标字段`；反向示例：`响应报文 bizResCode 非 000000，bizResText 提示参数非法`。",
-    );
-    if (profile.messageFormat === "xml") {
-      lines.push(
-        "- 响应通常以 `</Transaction>` 结尾；断言中可引用响应 XML 节点路径。",
-      );
-    }
-  } else if (profile.transport === "mq") {
-    lines.push(
-      "- **不要写 HTTP 状态码**；`expectedResult` 描述 **MQ 响应报文**中的业务返回码、错误信息或关键节点。",
-    );
-  } else {
-    lines.push(
-      "- `expectedResult` 描述业务返回码或响应报文关键字段，不要编造 HTTP 语义（除非文档明确为 HTTP）。",
-    );
-  }
-
-  if (profile.businessHeaderMark) {
-    lines.push(
-      "",
-      `### 业务头`,
-      `- 文档标注业务头标示为 \`${profile.businessHeaderMark}\`，请求/响应报文生成时须保留对应头字段。`,
-    );
-  }
-
-  return lines.join("\n");
-}
-
 /** 非 HTTP 接口生成时，在场景约束后追加通讯方式适配说明 */
 export function appendScenarioProtocolAdaptation(
   scenarioPromptText: string,
@@ -298,7 +185,7 @@ export function appendScenarioProtocolAdaptation(
     profile.messageFormat === "xml"
       ? "- requestBody 输出完整 XML 字符串（含 sysHeader/bizHeader/bizBody）；"
       : "- requestBody 按报文类型输出对应格式；",
-    "- expectedResult 断言响应报文 bizResCode/resCode 及关键业务节点。",
+    "- 案例 remark 描述预期业务返回码及关键业务节点。",
   ].join("\n");
 
   return base ? `${base}\n\n${adaptation}` : adaptation;
@@ -312,8 +199,6 @@ export function buildEndpointContextForPrompt(
     endpointPath: string;
     structuredDoc: string;
     requestNotes?: string;
-    responseNotes?: string;
-    exampleMessage?: string;
   },
 ): string {
   const formatLabel =
@@ -364,30 +249,6 @@ export function buildEndpointContextForPrompt(
       "```",
     );
   }
-  if (input.responseNotes?.trim()) {
-    lines.push(
-      "",
-      "- 响应报文示例：",
-      "```",
-      truncateText(input.responseNotes.trim(), 3000),
-      "```",
-    );
-  }
-  if (input.exampleMessage?.trim()) {
-    lines.push(
-      "",
-      "## 示例报文（测试人员维护，生成时须优先参照）",
-      "以下为用户提供的真实报文样例。生成 bodyOverrides 时：",
-      "1. 字段名必须与「请求字段目录」中的节点代码一致",
-      "2. 取值风格、数据类型、格式须与示例报文保持一致",
-      "3. 正向案例以示例为基准；反向案例仅变更被测字段，其余参照示例",
-      "4. 禁止编造示例中不存在的字段结构",
-      "```",
-      truncateText(input.exampleMessage.trim(), 3000),
-      "```",
-    );
-  }
-
   return lines.join("\n");
 }
 

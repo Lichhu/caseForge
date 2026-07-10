@@ -19,10 +19,39 @@ import {
 } from "@api-test/util/api-report-html.util";
 import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
 import { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
+import { ApiTransactionEntity } from "@api-test/entity/api-transaction.entity";
 import { ApiTestEnvironmentEntity } from "@api-test/entity/api-test-environment.entity";
 import { ApiTestExecutionSetEntity } from "@api-test/entity/api-test-execution-set.entity";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { ApiExecutionService } from "./api-execution.service";
+
+function sanitizeExportFileToken(value: string) {
+  return value
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/\s+/g, "_");
+}
+
+function buildExportFileName(
+  requirementNo: string,
+  transactionCode: string,
+  format: "xlsx" | "pdf" | "html",
+  runId: string,
+) {
+  const ext = format === "xlsx" ? "xlsx" : format;
+  const req = sanitizeExportFileToken(requirementNo);
+  const tx = sanitizeExportFileToken(transactionCode);
+  if (req && tx) {
+    return `${req}_${tx}.${ext}`;
+  }
+  if (req) {
+    return `${req}.${ext}`;
+  }
+  if (tx) {
+    return `${tx}.${ext}`;
+  }
+  return `api-test-run-${runId}.${ext}`;
+}
 
 type RunDetail = Awaited<ReturnType<ApiExecutionService["getRunDetail"]>>;
 
@@ -40,6 +69,8 @@ export class ApiReportService {
     private readonly execSetRepo: Repository<ApiTestExecutionSetEntity>,
     @InjectRepository(CaseProjectEntity)
     private readonly projectRepo: Repository<CaseProjectEntity>,
+    @InjectRepository(ApiTransactionEntity)
+    private readonly transactionRepo: Repository<ApiTransactionEntity>,
   ) {}
 
   async summary(projectId: string, runId?: string, transactionId?: string) {
@@ -95,10 +126,16 @@ export class ApiReportService {
     if (transactionId) {
       run = await this.filterRunByTransaction(projectId, transactionId, run);
     }
+    const fileName = await this.resolveExportFileName(
+      projectId,
+      transactionId,
+      runId,
+      format,
+    );
     if (format === "xlsx") {
       return {
         buffer: await this.toExcel(run),
-        fileName: `api-test-run-${runId}.xlsx`,
+        fileName,
         contentType:
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       };
@@ -108,18 +145,42 @@ export class ApiReportService {
       const html = buildApiReportHtml(run, context);
       return {
         buffer: Buffer.from(html, "utf-8"),
-        fileName: `api-test-run-${runId}.html`,
+        fileName,
         contentType: "text/html; charset=utf-8",
       };
     }
     if (format === "pdf") {
       return {
         buffer: await this.toPdf(run),
-        fileName: `api-test-run-${runId}.pdf`,
+        fileName,
         contentType: "application/pdf",
       };
     }
     throw new BadRequestException(`不支持的导出格式: ${format}`);
+  }
+
+  private async resolveExportFileName(
+    projectId: string,
+    transactionId: string | undefined,
+    runId: string,
+    format: "xlsx" | "pdf" | "html",
+  ) {
+    const [project, transaction] = await Promise.all([
+      this.projectRepo.findOne({
+        where: { id: projectId },
+        select: ["id", "requirementNo"],
+      }),
+      transactionId
+        ? this.transactionRepo.findOne({
+            where: { id: transactionId, projectId },
+            select: ["id", "code", "reqCode"],
+          })
+        : null,
+    ]);
+    const requirementNo =
+      transaction?.reqCode?.trim() || project?.requirementNo?.trim() || "";
+    const transactionCode = transaction?.code?.trim() || "";
+    return buildExportFileName(requirementNo, transactionCode, format, runId);
   }
 
   private async filterRunByTransaction(

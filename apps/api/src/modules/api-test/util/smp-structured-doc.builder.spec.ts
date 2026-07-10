@@ -139,7 +139,7 @@ describe("buildStructuredMarkdownFromSmp", () => {
     );
   });
 
-  it("includes 请求报文 and 响应报文 as field tables", () => {
+  it("includes 请求报文 as field table without 响应报文 section", () => {
     const md = buildStructuredMarkdownFromSmp(
       [makeCallItem()],
       [makeTestItem()],
@@ -150,8 +150,8 @@ describe("buildStructuredMarkdownFromSmp", () => {
     expect(requestSection).toContain(
       "| Transaction/Body/request/bizBody/taskId | taskId | N |",
     );
-    const responseSection = extractApiDocSection(md, "响应报文");
-    expect(responseSection).toContain("bizResCode");
+    expect(extractApiDocSection(md, "响应报文")).toBe("");
+    expect(md).not.toContain("响应报文\n----");
   });
 
   it("prefers callService node lists over testInfo JSON bodies", () => {
@@ -194,11 +194,7 @@ describe("buildStructuredMarkdownFromSmp", () => {
       "| Transaction/Body/request/bizBody/CUST_ID | CUST_ID | Y |",
     );
     expect(requestSection).not.toContain("taskId");
-
-    const responseSection = extractApiDocSection(md, "响应报文");
-    expect(responseSection).toContain(
-      "| Transaction/Body/response/bizBody/FINA_AMT | FINA_AMT | N |",
-    );
+    expect(extractApiDocSection(md, "响应报文")).toBe("");
   });
 
   it("does NOT emit --- separator row (avoids phantom field)", () => {

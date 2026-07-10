@@ -15,6 +15,22 @@
         <a-button :type="batchMode ? 'primary' : 'default'" @click="toggleBatchMode">
           {{ batchMode ? '退出批量' : '批量删除' }}
         </a-button>
+        <a-dropdown v-model:open="moreMenuOpen" trigger="click">
+          <a-button>
+            更多
+            <DownOutlined
+              :class="['dropdown-trigger-chevron', { 'is-open': moreMenuOpen }]"
+            />
+          </a-button>
+          <template #overlay>
+            <a-menu @click="onCaseMoreMenuClick">
+              <a-menu-item key="environment">
+                <SettingOutlined />
+                维护环境
+              </a-menu-item>
+            </a-menu>
+          </template>
+        </a-dropdown>
       </div>
     </div>
 
@@ -596,6 +612,8 @@
       class="empty-state"
       description="请先在接口文档中 AI 生成案例"
     />
+
+    <ApiEnvironmentMaintainModal v-model:open="envModalOpen" />
   </section>
 </template>
 
@@ -603,14 +621,17 @@
 import { computed, nextTick, onActivated, reactive, ref, watch } from 'vue';
 import {
   DeleteOutlined,
+  DownOutlined,
   FormatPainterOutlined,
   InboxOutlined,
   PlusOutlined,
   RobotOutlined,
   SaveOutlined,
+  SettingOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
+import type { MenuProps } from 'ant-design-vue';
 import {
   caseForgePageSizeOptionLabels,
   executionProfileBadgeColor,
@@ -623,6 +644,7 @@ import { listAllApiCases, debugRunCase, generateAssertions } from '@/api/apiTest
 import { useApiTestStore } from '@/stores/apiTest';
 import KeyValueRowsEditor from '@/components/api-test/KeyValueRowsEditor.vue';
 import AssertionRowsEditor from '@/components/api-test/AssertionRowsEditor.vue';
+import ApiEnvironmentMaintainModal from '@/components/api-test/ApiEnvironmentMaintainModal.vue';
 import {
   assertionsToRows,
   buildExpectedFromRows,
@@ -662,6 +684,15 @@ function onPayloadTextareaPaste(event: Event) {
 }
 
 const batchMode = ref(false);
+const envModalOpen = ref(false);
+const moreMenuOpen = ref(false);
+
+const onCaseMoreMenuClick: MenuProps['onClick'] = ({ key }) => {
+  if (key === 'environment') {
+    envModalOpen.value = true;
+  }
+};
+
 const saving = ref(false);
 const isNewCase = ref(false);
 const syncingForm = ref(false);

@@ -151,7 +151,7 @@ function buildAssertionHint(
   if (!assertions.length) {
     return transport === "http"
       ? "断言 HTTP 状态码与响应体"
-      : "断言响应报文业务码或关键节点";
+      : "断言响应体业务码或关键节点";
   }
   const types = assertions.map((a) => a.type);
   if (types.includes("status_code")) {
@@ -159,7 +159,7 @@ function buildAssertionHint(
     return `断言 HTTP 状态码 ${sc?.expected ?? "200"}`;
   }
   if (transport !== "http") {
-    return "断言响应报文业务码（bizResCode / resCode），不校验 HTTP 状态码";
+    return "断言响应体业务码（bizResCode / resCode），不校验 HTTP 状态码";
   }
   return "断言 HTTP 状态码与响应体";
 }

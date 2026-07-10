@@ -16,39 +16,22 @@ import {
 } from "@case-forge/shared";
 import type { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
 import { extractApiDocSection, getApiDocFieldValue } from "./api-doc.parser";
-import {
-  extractExampleMessage,
-  assessDocReadiness,
-  buildFieldCatalogSummary,
-} from "./api-canonical-doc.util";
+import { extractExampleMessage } from "./api-canonical-doc.util";
 import {
   buildTransactionXmlScaffold,
   parseApiDocMessageFields,
-  parseXmlExampleDefaults,
   type ApiDocMessageField,
 } from "./api-xml-request-template.util";
 import {
   buildCaseRequestFromProfile,
   parseApiTechnicalProfile,
 } from "./api-doc-technical-profile.util";
+import {
+  assembleBodyFromExample,
+  extractPathsFromExample,
+  normalizeOverridePath,
+} from "./api-case-body-assembler.util";
 import { Logger } from "@nestjs/common";
-
-function normalizeOverrides(
-  overrides?: Record<string, string | number | boolean | null>,
-): Record<string, string | undefined> {
-  if (!overrides) return {};
-  const result: Record<string, string | undefined> = {};
-  for (const [key, value] of Object.entries(overrides)) {
-    if (value === null) {
-      result[key] = undefined;
-    } else if (typeof value === "boolean") {
-      result[key] = String(value);
-    } else {
-      result[key] = String(value);
-    }
-  }
-  return result;
-}
 
 function sectionPathPrefix(
   path: string,
@@ -150,7 +133,6 @@ function buildTransactionJsonScaffold(input: {
   structuredDoc: string;
   transactionCode: string;
   bizBodyValues: Record<string, string | undefined>;
-  headerOverrides?: Record<string, string | undefined>;
 }): Record<string, unknown> {
   const meta = extractJsonDocMeta(input.structuredDoc, input.transactionCode);
   const requestSection = extractApiDocSection(input.structuredDoc, "请求报文");
@@ -172,16 +154,6 @@ function buildTransactionJsonScaffold(input: {
     bizBody: {} as Record<string, string | undefined>,
   };
   for (const [key, value] of Object.entries(input.bizBodyValues)) {
-    const section = fieldCodeToSection.get(key);
-    if (section === "sysHeader") {
-      routedOverrides.sysHeader[key] = value;
-    } else if (section === "bizHeader") {
-      routedOverrides.bizHeader[key] = value;
-    } else {
-      routedOverrides.bizBody[key] = value;
-    }
-  }
-  for (const [key, value] of Object.entries(input.headerOverrides ?? {})) {
     const section = fieldCodeToSection.get(key);
     if (section === "sysHeader") {
       routedOverrides.sysHeader[key] = value;
@@ -258,34 +230,61 @@ export function assembleCaseRequest(input: {
   endpoint: ApiEndpointEntity;
   plan: AiCasePlanItem;
 }): { request: ApiCaseRequest; body: unknown } {
-  const bodyOverrides = normalizeOverrides(input.plan.bodyOverrides);
-  const headerOverrides = normalizeOverrides(input.plan.headerOverrides);
+  const overrides = input.plan.bodyOverrides ?? {};
+  const exampleMessage = extractExampleMessage(input.canonicalDoc);
 
   let body: unknown;
 
-  if (
+  if (exampleMessage) {
+    const { body: assembledBody, warnings } = assembleBodyFromExample({
+      exampleMessage,
+      overrides,
+      messageFormat: input.profile.messageFormat,
+      refreshDynamicHeaders: true,
+    });
+
+    for (const w of warnings) {
+      assemblerLogger.warn(w);
+    }
+
+    if (
+      input.profile.messageFormat === "xml" ||
+      input.profile.messageFormat === "soap"
+    ) {
+      body = prettyPrintXml(unescapeLiteralXmlEscapes(assembledBody));
+    } else {
+      body = assembledBody;
+    }
+  } else if (
     input.profile.messageFormat === "xml" ||
     input.profile.messageFormat === "soap"
   ) {
-    const allOverrides = { ...bodyOverrides, ...headerOverrides };
-
-    // Extract defaults from example message
-    const exampleMessage = extractExampleMessage(input.canonicalDoc);
+    const scaffoldOverrides: Record<string, string | undefined> = {};
+    for (const [path, value] of Object.entries(overrides)) {
+      const segments = path.split("/").filter(Boolean);
+      const lastSegment = segments[segments.length - 1];
+      if (lastSegment) scaffoldOverrides[lastSegment] = value;
+    }
 
     body = buildTransactionXmlScaffold({
       structuredDoc: input.canonicalDoc,
       transactionCode: input.transactionCode,
-      bizBodyValues: allOverrides,
+      bizBodyValues: scaffoldOverrides,
       compact: false,
-      exampleMessage: exampleMessage || undefined,
     });
     body = prettyPrintXml(unescapeLiteralXmlEscapes(body as string));
   } else {
+    const scaffoldOverrides: Record<string, string | undefined> = {};
+    for (const [path, value] of Object.entries(overrides)) {
+      const segments = path.split("/").filter(Boolean);
+      const lastSegment = segments[segments.length - 1];
+      if (lastSegment) scaffoldOverrides[lastSegment] = value;
+    }
+
     body = buildTransactionJsonScaffold({
       structuredDoc: input.canonicalDoc,
       transactionCode: input.transactionCode,
-      bizBodyValues: bodyOverrides,
-      headerOverrides,
+      bizBodyValues: scaffoldOverrides,
     });
   }
 
@@ -353,34 +352,41 @@ function inferBodyFields(body: unknown, messageFormat: ApiMessageFormat) {
 
 const assemblerLogger = new Logger("ApiCaseAssembler");
 
-function sanitizeOverrides(
-  overrides: Record<string, unknown> | undefined,
-  validCodes: Set<string>,
-  label: string,
-): void {
-  if (!overrides) return;
-  if (!validCodes.size) return;
-  const unknownKeys = Object.keys(overrides).filter(
-    (key) => !validCodes.has(key),
-  );
-  if (!unknownKeys.length) return;
-  for (const key of unknownKeys) {
-    assemblerLogger.warn(
-      `${label} key "${key}" not found in field catalog; dropping`,
-    );
-    delete overrides[key];
-  }
-}
-
 function sanitizePlanOverrides(
   plan: AiCasePlanItem,
   canonicalDoc: string,
 ): void {
+  if (!plan.bodyOverrides) return;
+
   const requestSection = extractApiDocSection(canonicalDoc, "请求报文");
   const fields = parseApiDocMessageFields(requestSection);
-  const validCodes = new Set(fields.map((f) => f.code));
-  sanitizeOverrides(plan.bodyOverrides, validCodes, "bodyOverrides");
-  sanitizeOverrides(plan.headerOverrides, validCodes, "headerOverrides");
+  const exampleMessage = extractExampleMessage(canonicalDoc);
+
+  const validPaths = new Set(fields.map((f) => normalizeOverridePath(f.path)));
+
+  if (exampleMessage) {
+    const profile = parseApiTechnicalProfile(canonicalDoc);
+    const examplePaths = extractPathsFromExample(
+      exampleMessage,
+      profile.messageFormat,
+    );
+    for (const p of examplePaths) {
+      validPaths.add(normalizeOverridePath(p));
+    }
+  }
+
+  if (!validPaths.size) return;
+
+  const unknownKeys = Object.keys(plan.bodyOverrides).filter((key) => {
+    const normalized = normalizeOverridePath(key);
+    return !validPaths.has(normalized);
+  });
+
+  for (const key of unknownKeys) {
+    assemblerLogger.warn(
+      `bodyOverrides key "${key}" not found in field catalog or example message; keeping (may be intentional for negative testing)`,
+    );
+  }
 }
 
 export function mapCasePlanToPayload(
@@ -390,6 +396,11 @@ export function mapCasePlanToPayload(
   index: number,
   profile: ApiTechnicalProfile,
   canonicalDoc: string,
+  scenarioInfo?: {
+    promptId?: string;
+    scenarioName?: string;
+    promptName?: string;
+  },
 ): ApiTestCasePayload {
   const polarity = normalizePolarity(plan.caseType);
   const priority = normalizePriority(plan.priority);
@@ -407,12 +418,22 @@ export function mapCasePlanToPayload(
 
   const expected = buildExpectedFromPlan(plan, polarity, profile);
 
+  const scenarioSuffix = scenarioInfo?.scenarioName
+    ? `[${scenarioInfo.scenarioName}]`
+    : "";
+
+  const baseTitle =
+    plan.caseName?.trim() || `${endpoint.name} - 案例${index + 1}`;
+  const baseDesc = plan.caseDesc?.trim() || "";
+
   return {
-    title: plan.caseName?.trim() || `${endpoint.name} - 案例${index + 1}`,
+    title: scenarioSuffix ? `${baseTitle}-${scenarioSuffix}` : baseTitle,
     caseNo:
       plan.caseNo?.trim() ||
       `${transactionCode}-${String(index + 1).padStart(3, "0")}`,
-    description: plan.caseDesc?.trim() || "",
+    description: scenarioSuffix
+      ? `${baseDesc}（场景：${scenarioSuffix}）`
+      : baseDesc,
     remark: plan.remark?.trim() || "",
     transactionCode,
     owner: "",
@@ -433,6 +454,9 @@ export function mapCasePlanToPayload(
             ),
           )
         : undefined,
+      promptId: scenarioInfo?.promptId,
+      scenarioName: scenarioInfo?.scenarioName,
+      promptName: scenarioInfo?.promptName,
     },
   };
 }

@@ -58,21 +58,6 @@
                   </div>
                 </a-col>
               </a-row>
-              <a-row :gutter="16" class="smp-field-list-row">
-                <a-col
-                  v-for="fieldKey in CALL_SERVICE_RESPONSE_LIST_KEYS"
-                  :key="fieldKey"
-                  :xs="24"
-                  :lg="12"
-                >
-                  <div class="smp-field-list-block">
-                    <div class="smp-field-list-title">{{ callServiceListLabel(fieldKey) }}</div>
-                    <pre class="smp-json-body">{{
-                      formatJson((item as Record<string, unknown>)[fieldKey])
-                    }}</pre>
-                  </div>
-                </a-col>
-              </a-row>
             </div>
           </a-card>
         </div>
@@ -95,16 +80,10 @@
               <span class="smp-test-info-url">{{ (item as Record<string, unknown>).requestUrl || '—' }}</span>
             </div>
             <a-row :gutter="16" class="smp-test-payload-row">
-              <a-col :xs="24" :lg="12">
+              <a-col :xs="24">
                 <div class="smp-json-block">
                   <div class="smp-json-block-title">请求报文</div>
                   <pre class="smp-json-body">{{ formatJsonBody((item as Record<string, unknown>).requestBody) }}</pre>
-                </div>
-              </a-col>
-              <a-col :xs="24" :lg="12">
-                <div class="smp-json-block">
-                  <div class="smp-json-block-title">响应报文</div>
-                  <pre class="smp-json-body">{{ formatJsonBody((item as Record<string, unknown>).responseBody) }}</pre>
                 </div>
               </a-col>
             </a-row>
@@ -166,8 +145,6 @@ const approvalColumns = computed(() => {
 const CALL_SERVICE_LIST_KEYS = [
   'requestHeadList',
   'requestBodyList',
-  'responseHeadList',
-  'responseBodyList',
 ] as const;
 
 const CALL_SERVICE_REQUEST_LIST_KEYS = [
@@ -175,12 +152,11 @@ const CALL_SERVICE_REQUEST_LIST_KEYS = [
   'requestBodyList',
 ] as const;
 
-const CALL_SERVICE_RESPONSE_LIST_KEYS = [
+const CALL_SERVICE_LIST_KEY_SET = new Set<string>([
+  ...CALL_SERVICE_LIST_KEYS,
   'responseHeadList',
   'responseBodyList',
-] as const;
-
-const CALL_SERVICE_LIST_KEY_SET = new Set<string>(CALL_SERVICE_LIST_KEYS);
+]);
 
 function callServiceMetaKeys(item: Record<string, unknown>): string[] {
   const priority = [
@@ -211,8 +187,6 @@ function callServiceListLabel(key: (typeof CALL_SERVICE_LIST_KEYS)[number]): str
   const labels: Record<(typeof CALL_SERVICE_LIST_KEYS)[number], string> = {
     requestHeadList: 'requestHeadList',
     requestBodyList: 'requestBodyList',
-    responseHeadList: 'responseHeadList',
-    responseBodyList: 'responseBodyList',
   };
   return labels[key];
 }

@@ -1009,14 +1009,18 @@ export const useCaseForgeStore = defineStore("caseForge", {
         await this.refreshProjects();
         if (this.activeProject?.id === projectId) {
           await this.fetchActiveProject(projectId);
-          this.structDocs = [...this.structDocs, uploaded];
-          this.activeStructDocId = uploaded.id;
-          this.activeStructDoc = uploaded;
+          this.structDocs = [...this.structDocs, ...uploaded];
+          this.activeStructDocId = uploaded[0]?.id;
+          this.activeStructDoc = uploaded[0];
           if (this.workspaceStage === "constraints") {
             await this.loadDynamicWorkspace();
           }
         }
-        message.success("需求文档已上传");
+        message.success(
+          uploaded.length > 1
+            ? `需求文档已拆分为 ${uploaded.length} 个部分并上传`
+            : "需求文档已上传",
+        );
       } catch (error) {
         message.error((error as Error)?.message || "上传需求文档失败");
         throw error;

@@ -30,7 +30,7 @@ export const DEFAULT_API_SCENARIOS: DefaultApiScenarioDefinition[] = [
         name: "主流程成功路径",
         content: [
           "优先生成正向（caseType=正）案例，覆盖接口文档中的核心业务成功路径。",
-          "请求报文使用合法、典型的字段取值；预期结果明确成功响应断言（HTTP 写状态码，TCP 写响应报文 bizResCode/关键节点，见「通讯与报文格式」）。",
+          "请求报文使用合法、典型的字段取值；预期结果明确成功响应断言（HTTP 写状态码，TCP 写 bizResCode/关键节点，见「通讯与报文格式」）。",
           "若文档标注服务属性为查询类/管理类/账务类等，案例名称与描述应体现对应业务语义。",
           "同一接口至少 1 条高优先级（priority=高）正向案例。",
         ].join("\n"),
@@ -67,7 +67,7 @@ export const DEFAULT_API_SCENARIOS: DefaultApiScenarioDefinition[] = [
         name: "参数名称错误",
         content: [
           "生成参数名拼写错误或大小写错误的反向案例（如文档字段为 custNo，请求中使用 custNO 或 customerNo）。",
-          "验证接口对未知字段的处理：拒绝、忽略或报错，并在 expectedResult 中说明预期行为。",
+          "验证接口对未知字段的处理：拒绝、忽略或报错，并在 remark 中说明预期行为。",
         ].join("\n"),
         tags: ["参数名", "反向"],
         sortOrder: 2,
@@ -91,7 +91,7 @@ export const DEFAULT_API_SCENARIOS: DefaultApiScenarioDefinition[] = [
           "- 类型错误：数字字段传中文/英文、字符串字段传对象；",
           "- 特殊符号（如 %、'、\"、<script>）；",
           "- null、空串、纯空格。",
-          "每条案例 requestBody 仅重点变更 1～2 个字段，expectedResult 写清错误表现。",
+          "每条案例仅重点变更 1～2 个字段，remark 写清错误表现。",
         ].join("\n"),
         tags: ["边界", "异常", "反向"],
         sortOrder: 1,
@@ -133,7 +133,7 @@ export const DEFAULT_API_SCENARIOS: DefaultApiScenarioDefinition[] = [
           "对文档中的金额、利率、频率、比率类字段生成案例：",
           "- 正向：符合精度要求的小数（如金额两位小数、利率四位小数）；",
           "- 反向：超出精度位数、科学计数法、非数字字符。",
-          "expectedResult 说明是否四舍五入、截断或报错。",
+          "remark 说明是否四舍五入、截断或报错。",
         ].join("\n"),
         tags: ["精度", "金额", "利率"],
         sortOrder: 1,
@@ -198,7 +198,7 @@ export const DEFAULT_API_SCENARIOS: DefaultApiScenarioDefinition[] = [
         content: [
           "识别文档或业务上可能作为幂等键的字段（流水号、业务号+时间戳、订单号等），生成：",
           "- 使用相同幂等键连续两次请求；",
-          "- expectedResult 说明两次响应是否一致、是否拒绝重复、是否返回相同业务结果。",
+          "- remark 说明两次响应是否一致、是否拒绝重复、是否返回相同业务结果。",
           "案例备注标明所采用的幂等字段。",
         ].join("\n"),
         tags: ["幂等"],
@@ -286,8 +286,8 @@ export const DEFAULT_API_SCENARIOS: DefaultApiScenarioDefinition[] = [
       {
         name: "断言检查点",
         content: [
-          "生成的每条案例 expectedResult 应尽量包含多个可验证检查点，例如：",
-          "- 成功/失败响应码（HTTP 状态码，或 TCP 响应报文 bizResCode/resCode）；",
+          "生成的每条案例 remark 应尽量包含多个可验证检查点，例如：",
+          "- 成功/失败响应码（HTTP 状态码，或 TCP bizResCode/resCode）；",
           "- 关键业务字段取值（如余额、状态码、msg）；",
           "- 新增响应字段（接口变更场景）需单独断言。",
           "面客/对客接口：若预期报错，错误信息应为用户可理解的业务文案，不得直接暴露代码层/数据库层异常（可在反向案例中验证）。",

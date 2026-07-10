@@ -27,7 +27,6 @@ export function parseEndpointsFromSmpData(
         stringValue(callItem.serviceCname) ||
         name,
       requestNotes: formatBody(test.requestBody),
-      responseNotes: formatBody(test.responseBody),
       tags: callItem.serviceType
         ? [stringValue(callItem.serviceType)].filter((v): v is string =>
             Boolean(v),

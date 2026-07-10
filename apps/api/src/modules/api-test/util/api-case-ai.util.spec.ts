@@ -6,10 +6,7 @@ import {
   prepareScenarioBlock,
   truncateScenarioPromptText,
 } from "./api-case-ai.util";
-import {
-  buildResponseAssertionSummary,
-  compressApiStructuredDoc,
-} from "./api-doc.parser";
+import { compressApiStructuredDoc } from "./api-doc.parser";
 
 describe("maxCaseNoSuffixFromRows", () => {
   it("returns max numeric suffix for transaction code prefix", () => {
@@ -76,7 +73,7 @@ describe("prepareScenarioBlock", () => {
   });
 });
 
-describe("compressApiStructuredDoc requestOnly", () => {
+describe("compressApiStructuredDoc", () => {
   const sampleDoc = [
     "基础信息",
     "----",
@@ -98,23 +95,13 @@ describe("compressApiStructuredDoc requestOnly", () => {
     "| bizResText | N |",
   ].join("\n");
 
-  it("omits full response table and adds assertion summary", () => {
-    const full = compressApiStructuredDoc(sampleDoc, 60, 5000);
-    const requestOnly = compressApiStructuredDoc(sampleDoc, 60, 5000, {
-      requestOnly: true,
-    });
+  it("keeps request table and omits legacy response section", () => {
+    const compressed = compressApiStructuredDoc(sampleDoc, 60, 5000);
 
-    expect(full).toContain("响应报文");
-    expect(full).toContain("| bizResCode |");
-    expect(requestOnly).not.toMatch(/响应报文\n----\n\| 节点代码/);
-    expect(requestOnly).toContain("响应断言参考");
-    expect(requestOnly).toContain("请求报文");
-  });
-
-  it("buildResponseAssertionSummary picks known code fields", () => {
-    const summary = buildResponseAssertionSummary(sampleDoc);
-    expect(summary).toContain("bizResCode");
-    expect(summary).toContain("bizResText");
+    expect(compressed).not.toMatch(/响应报文\n----/);
+    expect(compressed).not.toContain("响应断言参考");
+    expect(compressed).toContain("请求报文");
+    expect(compressed).toContain("| custNo |");
   });
 });
 
@@ -194,7 +181,7 @@ describe("generateAssertionsFromResponse", () => {
       body: "<root><code>000000</code></root>",
     });
 
-    expect(captured.value).toContain("TCP/Socket");
+    expect(captured.value).toContain("TCP/Socket 响应体");
     expect(captured.value).toContain("不要生成 status_code");
     expect(captured.value).not.toMatch(/状态码: \d/);
     expect(assertions).toHaveLength(1);

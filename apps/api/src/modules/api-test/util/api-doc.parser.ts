@@ -2,7 +2,9 @@ import type { ApiEndpointPayload } from "@case-forge/shared";
 import { randomUUID } from "node:crypto";
 import {
   API_DOC_SECTION_SEPARATOR,
+  API_DOC_SECTION_BOUNDARY_NAMES,
   API_DOC_SHEET_NAMES,
+  API_DOC_LEGACY_SHEET_NAMES,
 } from "./api-doc-format.const";
 
 const HTTP_METHODS = [
@@ -26,7 +28,7 @@ function normalizePath(path: string) {
 }
 
 export function isApiDocSectionFormat(text: string) {
-  return API_DOC_SHEET_NAMES.some(
+  return [...API_DOC_SHEET_NAMES, ...API_DOC_LEGACY_SHEET_NAMES].some(
     (section) =>
       text.includes(`${section}\n${API_DOC_SECTION_SEPARATOR}`) ||
       text.includes(`${section}\r\n${API_DOC_SECTION_SEPARATOR}`),
@@ -34,7 +36,7 @@ export function isApiDocSectionFormat(text: string) {
 }
 
 export function extractApiDocSection(text: string, sectionName: string) {
-  const sectionPattern = API_DOC_SHEET_NAMES.map((name) =>
+  const sectionPattern = API_DOC_SECTION_BOUNDARY_NAMES.map((name) =>
     name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
   ).join("|");
   const pattern = new RegExp(
@@ -72,7 +74,6 @@ export function parseEndpointsFromApiDocSections(
   const basic = extractApiDocSection(text, "基础信息");
   const service = extractApiDocSection(text, "服务信息");
   const request = extractApiDocSection(text, "请求报文");
-  const response = extractApiDocSection(text, "响应报文");
 
   const code = getApiDocFieldValue(basic, "原服务交易码");
   const name =
@@ -114,7 +115,6 @@ export function parseEndpointsFromApiDocSections(
       path: transport === "tcp" ? path : normalizePath(path),
       summary: getApiDocFieldValue(service, "功能描述"),
       requestNotes: request,
-      responseNotes: response,
       tags: code ? [code] : undefined,
     },
   ];
@@ -239,64 +239,14 @@ const MESSAGE_TABLE_TRUNCATE_KEYWORDS = [
 ];
 const MESSAGE_TABLE_MAX_CELL_LENGTH = 40;
 
-const RESPONSE_ASSERTION_CODE_HINTS = [
-  "bizResCode",
-  "bizResText",
-  "resCode",
-  "resText",
-  "retCode",
-  "retMsg",
-];
-
-export interface CompressApiStructuredDocOptions {
-  /** 案例生成仅需 requestBody，响应表改为一行断言摘要。 */
-  requestOnly?: boolean;
-}
-
-/** 从响应报文段提取断言关键节点，替代完整响应表。 */
-export function buildResponseAssertionSummary(structuredDoc: string): string {
-  const responseText = extractApiDocSection(structuredDoc, "响应报文");
-  if (!responseText.trim()) {
-    return "";
-  }
-
-  const found = RESPONSE_ASSERTION_CODE_HINTS.filter((hint) =>
-    responseText.includes(hint),
-  );
-  const nodes = found.length ? found.join("、") : "业务返回码与关键响应字段";
-
-  return [
-    "响应断言参考",
-    API_DOC_SECTION_SEPARATOR,
-    `关键节点：${nodes}；HTTP 接口写状态码，TCP/XML 写 bizResCode（成功通常 000000）。`,
-  ].join("\n");
-}
-
-/**
- * 压缩接口结构化文档，用于缩减 API 案例生成 AI 提示词长度。
- *
- * 保留对生成案例最有价值的部分：基础信息、服务信息、技术信息、请求/响应报文。
- * 在固定分区（基础/服务/技术信息）之外，对请求/响应报文按字符预算压缩：
- * 1. 列裁剪：仅保留与字段定义相关的关键列（节点路径/代码、类型、长度、必填、说明等）；
- * 2. 说明截断：超长说明/取值列截断到固定长度；
- * 3. 动态行数：必填字段优先保留，选填字段按剩余字符预算补齐。
- *
- * `requestOnly`：仅保留请求报文表，响应段改为一行断言摘要（用于 AI 案例生成）。
- */
 export function compressApiStructuredDoc(
   structuredDoc: string,
   maxRowsPerTable = 60,
   maxChars = DEFAULT_COMPRESSED_DOC_MAX_CHARS,
-  options: CompressApiStructuredDocOptions = {},
 ): string {
   if (!structuredDoc?.trim()) {
     return "";
   }
-
-  const requestOnly = options.requestOnly === true;
-  const responseSummary = requestOnly
-    ? buildResponseAssertionSummary(structuredDoc)
-    : "";
 
   const fixedSections: string[] = [];
   for (const name of ["基础信息", "服务信息", "技术信息"] as const) {
@@ -307,15 +257,7 @@ export function compressApiStructuredDoc(
   }
   const fixedText = fixedSections.join("\n\n");
 
-  const summaryReserve = responseSummary ? responseSummary.length + 2 : 0;
-  const tableBudget = Math.max(
-    0,
-    maxChars - fixedText.length - summaryReserve - 200,
-  );
-  const requestBudget = requestOnly
-    ? tableBudget
-    : Math.round(tableBudget * 0.6);
-  const responseBudget = requestOnly ? 0 : tableBudget - requestBudget;
+  const tableBudget = Math.max(0, maxChars - fixedText.length - 200);
 
   const tableSections: string[] = [];
   const requestText = extractApiDocSection(structuredDoc, "请求报文");
@@ -324,23 +266,9 @@ export function compressApiStructuredDoc(
       `请求报文\n${API_DOC_SECTION_SEPARATOR}\n${compressApiDocTable(
         requestText,
         maxRowsPerTable,
-        requestBudget,
+        tableBudget,
       )}`,
     );
-  }
-  if (!requestOnly) {
-    const responseText = extractApiDocSection(structuredDoc, "响应报文");
-    if (responseText.trim()) {
-      tableSections.push(
-        `响应报文\n${API_DOC_SECTION_SEPARATOR}\n${compressApiDocTable(
-          responseText,
-          maxRowsPerTable,
-          responseBudget,
-        )}`,
-      );
-    }
-  } else if (responseSummary) {
-    tableSections.push(responseSummary);
   }
 
   const compressed = [fixedText, ...tableSections].filter(Boolean).join("\n\n");

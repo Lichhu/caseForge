@@ -2,7 +2,7 @@
 
 ## 测试设计标准（标准二 · 非涉帐接口 · 重点测试）
 
-单次生成约 6 条案例（字段丰富或用户勾选场景提示词时可增至 8～12 条），保持「单案例单验证点」。
+单次生成约 4～6 条案例，保持「单案例单验证点」。
 
 文档中不存在对应字段/规则时跳过该维度，不编造字段，可在 `remark` 写「文档无分页字段，跳过」。
 
@@ -10,7 +10,7 @@
 
 - `caseType=正`，`priority=高`
 - `bodyOverrides` 填合法典型取值，覆盖核心业务成功路径
-- `expectedResult`：HTTP 写状态码；TCP/MQ 写响应报文 bizResCode/关键节点
+- 以示例报文为基准，只覆盖需要测试的字段
 
 ### 2. 异常案例（按文档字段择要，每条仅变更 1～2 个字段）
 
@@ -29,13 +29,10 @@
 
 #### 2.3 分页（文档含 pageNum/pageNo/pageSize/limit 等时必覆盖）
 
-至少 3 条反向：
+至少 2 条反向：
 
 - 非法页码：负数、特殊符号、超大值、类型错误、空值
 - 非法页大小：同上
-- 缺失分页参数：不传页码/页大小
-
-可选 1 条正向：页码=1、页大小=10/20
 
 #### 2.4 必填缺失
 
@@ -55,14 +52,14 @@
 
 ## bodyOverrides 规则
 
-1. **只填需要覆盖的业务字段**，未列出的字段由平台填默认值
-2. **key 必须使用字段目录中的节点代码**（如 `custNo`，不是 `customerNo`）
-3. 正向：填合法值（`{ "custNo": "1234567890" }`）
-4. 反向必填缺失：设为空串（`{ "custNo": "" }`）
-5. 反向非法值：只改被测字段
-   - bizBody 字段 → `bodyOverrides`（如 `{ "custNo": "" }`）
-   - bizHeader/sysHeader 字段（如 pageNum/pageSize）→ `headerOverrides`（如 `{ "pageNum": "-1" }`）
-6. **禁止输出完整报文结构**（Transaction/Header/Body/sysHeader/bizHeader 由平台拼装）
+1. **只填需要覆盖的字段**，未列出的字段保留示例报文原值
+2. **key 必须使用字段目录中的节点路径**（如 `Transaction/Body/request/bizBody/cstNo`，不是节点代码 `custNo`）
+3. 正向：填合法值（`{ "Transaction/Body/request/bizBody/cstNo": "1234567890" }`）
+4. 反向必填缺失：设为空串（`{ "Transaction/Body/request/bizBody/cstNo": "" }`）
+5. 反向非法值：只改被测字段，其余字段保留示例报文原值
+6. 覆盖 sysHeader/bizHeader 字段时同样使用节点路径（如 `Transaction/Body/request/bizHeader/pageNum`）
+7. **空值统一用空字符串 `""`**，平台将生成 `<field></field>` 或 `"field":""`
+8. **禁止输出完整报文结构**（Transaction/Header/Body 由平台基于示例报文拼装）
 
 ---
 
@@ -72,9 +69,9 @@
 2. `caseType`：正 / 反
 3. `priority`：高 / 中 / 低（正向主流程用「高」）
 4. `caseDesc` 建议格式：`标准二-{维度}-{子项}`
-5. `expectedResult`：HTTP 接口写状态码；TCP/MQ 接口写响应报文业务返回码，不写 HTTP 状态码
+5. `remark`：描述预期业务返回码及关键验证点（如 `bizResCode=000000` 或 `bizResCode 非 000000，提示参数非法`）
 6. `caseNo` 格式：`{transactionCode}-001` 递增
-7. 至少 6 条，建议配比：正 2～3 条 / 反 3～4 条
+7. 每个场景 4～6 条，建议配比：正 2～3 条 / 反 2～3 条
 
 ## 场景约束
 
@@ -82,15 +79,13 @@
 
 JSON 字段：
 
-| 字段            | 含义                                                                  |
-| --------------- | --------------------------------------------------------------------- |
-| caseNo          | 案例编号                                                              |
-| caseName        | 案例名称                                                              |
-| caseDesc        | 案例描述（含标准二维度标签）                                          |
-| caseType        | 正 / 反                                                               |
-| priority        | 高 / 中 / 低                                                          |
-| remark          | 备注（跳过原因等）                                                    |
-| bodyOverrides   | bizBody 字段覆盖值，如 `{ "custNo": "1234567890" }`                   |
-| headerOverrides | 可选。bizHeader/sysHeader 字段覆盖值，如 `{ "pageNum": "-1" }`        |
-| assertions      | 可选。结构化断言，如 `[{ "type": "contains", "expected": "000000" }]` |
-| expectedResult  | 预期结果描述                                                          |
+| 字段          | 含义                                                                                        |
+| ------------- | ------------------------------------------------------------------------------------------- |
+| caseNo        | 案例编号                                                                                    |
+| caseName      | 案例名称                                                                                    |
+| caseDesc      | 案例描述（含标准二维度标签）                                                                |
+| caseType      | 正 / 反                                                                                     |
+| priority      | 高 / 中 / 低                                                                                |
+| remark        | 备注：预期业务返回码及验证点描述                                                            |
+| bodyOverrides | 字段覆盖值，key 为节点路径，如 `{ "Transaction/Body/request/bizBody/cstNo": "1234567890" }` |
+| assertions    | 可选。结构化断言，如 `[{ "type": "contains", "expected": "000000" }]`                       |

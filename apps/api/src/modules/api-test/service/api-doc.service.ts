@@ -5,7 +5,7 @@ import {
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
-import { Repository } from "typeorm";
+import { In, Repository } from "typeorm";
 import { MinioStorageService } from "@minio/service/minio.service";
 import { auditFieldsForUpdate } from "@common/audit/request-context";
 import { scopedWhere } from "@common/audit/user-scope";
@@ -254,25 +254,54 @@ export class ApiDocService {
     apiDocId: string,
     endpoints: ApiEndpointPayload[],
   ) {
-    await this.endpointRepo.delete({ projectId, transactionId, apiDocId });
     const normalized = ensureEndpointIds(endpoints);
-    const rows = normalized.map((endpoint, index) =>
-      this.endpointRepo.create({
-        projectId,
-        transactionId,
-        apiDocId,
-        name: endpoint.name,
-        method: endpoint.method,
-        path: endpoint.path,
-        summary: endpoint.summary,
-        requestNotes: endpoint.requestNotes,
-        responseNotes: endpoint.responseNotes,
-        tags: endpoint.tags,
-        sortOrder: index,
-      }),
-    );
-    if (rows.length) {
-      await this.endpointRepo.save(rows);
+    const incomingIds = new Set(normalized.map((e) => e.id));
+
+    const existing = await this.endpointRepo.find({
+      where: { projectId, transactionId, apiDocId },
+    });
+    const existingIds = new Set(existing.map((e) => e.id));
+
+    const toDelete = existing.filter((e) => !incomingIds.has(e.id));
+    if (toDelete.length) {
+      await this.endpointRepo.delete({
+        id: In(toDelete.map((e) => e.id)),
+      });
+    }
+
+    for (const endpoint of normalized) {
+      if (existingIds.has(endpoint.id)) {
+        await this.endpointRepo.update(
+          { id: endpoint.id },
+          {
+            name: endpoint.name,
+            method: endpoint.method,
+            path: endpoint.path,
+            summary: endpoint.summary,
+            requestNotes: endpoint.requestNotes,
+            responseNotes: endpoint.responseNotes,
+            tags: endpoint.tags,
+            sortOrder: endpoint.sortOrder,
+          },
+        );
+      } else {
+        await this.endpointRepo.save(
+          this.endpointRepo.create({
+            id: endpoint.id,
+            projectId,
+            transactionId,
+            apiDocId,
+            name: endpoint.name,
+            method: endpoint.method,
+            path: endpoint.path,
+            summary: endpoint.summary,
+            requestNotes: endpoint.requestNotes,
+            responseNotes: endpoint.responseNotes,
+            tags: endpoint.tags,
+            sortOrder: endpoint.sortOrder,
+          }),
+        );
+      }
     }
   }
 }

@@ -99,18 +99,25 @@ export function prepareScenarioBlock(
 const PLAN_MODE_PROMPT_FALLBACK = `作为资深接口测试专家，请根据以下接口信息与字段目录，设计接口测试案例计划。
 
 ## bodyOverrides 规则
-1. **只填需要覆盖的业务字段**，未列出的字段由平台填默认值
-2. **key 必须使用字段目录中的节点代码**
+1. **只填需要覆盖的字段**，未列出的字段保留示例报文原值
+2. **key 必须使用字段目录中的节点路径**（如 Transaction/Body/request/bizBody/cstNo）
 3. 正向：填合法值；反向必填缺失：设为空串；反向非法值：只改被测字段
 4. **禁止输出完整报文结构**（Transaction/Header/Body 由平台拼装）
+5. 空值统一用空字符串 ""，平台将生成 <field></field> 或 "field":""
 
 ## 输出要求
 1. **仅输出 JSON 数组**，不要 Markdown 代码块或说明文字
 2. caseType：正 / 反；priority：高 / 中 / 低
-3. expectedResult：简要描述预期结果
-4. 至少 6 条，建议配比：正 2～3 条 / 反 3～4 条
+3. 每个场景 4～6 条，建议配比：正 2～3 条 / 反 2～3 条
 
-JSON 字段：caseNo, caseName, caseDesc, caseType, priority, remark, bodyOverrides, expectedResult`;
+JSON 字段：caseNo, caseName, caseDesc, caseType, priority, remark, bodyOverrides`;
+
+export interface ScenarioPromptInfo {
+  promptId?: string;
+  scenarioName?: string;
+  promptName?: string;
+  content: string;
+}
 
 export async function generateCasesWithPlan(
   aiWorkflow: AiWorkflowService,
@@ -118,7 +125,7 @@ export async function generateCasesWithPlan(
     transactionCode: string;
     structuredDoc: string;
     endpoint: ApiEndpointEntity;
-    scenarioPromptText?: string;
+    scenarioPrompt?: ScenarioPromptInfo;
     smpData?: {
       callServiceList?: unknown[];
       serviceTestList?: unknown[];
@@ -135,7 +142,6 @@ export async function generateCasesWithPlan(
   const canonicalDoc = resolveCanonicalDoc(
     input.structuredDoc,
     input.endpoint.requestNotes,
-    input.endpoint.responseNotes,
   );
 
   const readiness = assessDocReadiness(
@@ -163,18 +169,16 @@ export async function generateCasesWithPlan(
   const skillTemplate = await loadAtCaseSkillText(aiWorkflow);
   const skillBody = skillTemplate.trim() || PLAN_MODE_PROMPT_FALLBACK;
 
-  const scenario = prepareScenarioBlock(input.scenarioPromptText, profile);
-  const scenarioBlockText = scenario.block || "";
-
   const exampleMessageBlock = exampleMessage
     ? [
         "",
         "## 示例报文（测试人员维护，生成时须优先参照）",
-        "以下为用户提供的真实报文样例。生成 bodyOverrides 时：",
-        "1. 字段名必须与「请求字段目录」中的节点代码一致",
-        "2. 取值风格、数据类型、格式须与示例报文保持一致",
+        "以下为用户提供的真实报文样例，作为请求报文的模板。生成 bodyOverrides 时：",
+        "1. bodyOverrides 的 key 必须使用「请求字段目录」中的**节点路径**（如 Transaction/Body/request/bizBody/cstNo）",
+        "2. 只输出需要变更的字段，其余字段保留示例报文原值",
         "3. 正向案例以示例为基准；反向案例仅变更被测字段，其余参照示例",
-        "4. 禁止编造示例中不存在的字段结构",
+        '4. 空值统一用空字符串 ""',
+        "5. 禁止编造示例中不存在的字段结构",
         "```",
         exampleMessage.slice(0, EXAMPLE_MESSAGE_MAX_CHARS),
         exampleMessage.length > EXAMPLE_MESSAGE_MAX_CHARS
@@ -184,7 +188,7 @@ export async function generateCasesWithPlan(
       ].join("\n")
     : "";
 
-  const technicalContext = [
+  const staticContext = [
     `## 接口信息`,
     `- 交易码：${input.transactionCode}`,
     `- 接口名称：${input.endpoint.name}`,
@@ -195,12 +199,18 @@ export async function generateCasesWithPlan(
     exampleMessageBlock,
   ].join("\n");
 
-  const prompt = [skillBody, "", technicalContext, scenarioBlockText].join(
-    "\n",
-  );
+  const scenarioText = input.scenarioPrompt?.content?.trim() || "";
+  const scenario = prepareScenarioBlock(scenarioText, profile);
+  const scenarioBlockText = scenario.block || "";
+
+  const prompt = [skillBody, "", staticContext, scenarioBlockText].join("\n");
+
+  const scenarioLabel = input.scenarioPrompt?.scenarioName
+    ? `[${input.scenarioPrompt.scenarioName}]`
+    : "";
 
   logger?.log(
-    `接口案例生成提示词：总长 ${prompt.length}，字段 ${readiness.fieldCount} 个，场景 ${scenario.scenarioTextChars}${scenario.truncated ? "（已截断）" : ""}`,
+    `接口案例生成提示词${scenarioLabel}：总长 ${prompt.length}，字段 ${readiness.fieldCount} 个，场景 ${scenario.scenarioTextChars}${scenario.truncated ? "（已截断）" : ""}`,
   );
 
   const { text } = await aiWorkflow.runWithAiChat(prompt);
@@ -208,6 +218,14 @@ export async function generateCasesWithPlan(
   if (!items.length) {
     throw new Error("AI 未返回可解析的案例计划 JSON");
   }
+
+  const scenarioInfo = input.scenarioPrompt
+    ? {
+        promptId: input.scenarioPrompt.promptId,
+        scenarioName: input.scenarioPrompt.scenarioName,
+        promptName: input.scenarioPrompt.promptName,
+      }
+    : undefined;
 
   return items.map((item, index) =>
     mapCasePlanToPayload(
@@ -217,6 +235,7 @@ export async function generateCasesWithPlan(
       index,
       profile,
       canonicalDoc,
+      scenarioInfo,
     ),
   );
 }
@@ -280,7 +299,7 @@ export async function nextCaseNo(
   return formatCaseNo(transactionCode, max + 1);
 }
 
-const ASSERTION_GEN_PROMPT_HTTP = `你是接口测试专家。根据以下 HTTP 响应报文，为该接口测试案例生成断言列表。
+const ASSERTION_GEN_PROMPT_HTTP = `你是接口测试专家。根据以下 HTTP 响应体，为该接口测试案例生成断言列表。
 
 ## 通讯信息
 - 协议: HTTP
@@ -307,7 +326,7 @@ const ASSERTION_GEN_PROMPT_HTTP = `你是接口测试专家。根据以下 HTTP 
 仅输出 JSON 数组，不要 Markdown 代码块或说明文字。示例：
 [{"description":"HTTP 状态码","type":"status_code","operator":"eq","expression":"","expected":"200"},{"description":"响应包含成功","type":"string","operator":"eq","expression":"success"}]`;
 
-const ASSERTION_GEN_PROMPT_TCP = `你是接口测试专家。根据以下 TCP/Socket 响应报文，为该接口测试案例生成断言列表。
+const ASSERTION_GEN_PROMPT_TCP = `你是接口测试专家。根据以下 TCP/Socket 响应体，为该接口测试案例生成断言列表。
 
 ## 通讯信息
 - 协议: TCP/Socket

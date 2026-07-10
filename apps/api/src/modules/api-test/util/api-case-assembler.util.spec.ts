@@ -29,13 +29,6 @@ const SAMPLE_DOC = [
   "| Transaction/Body/request/bizHeader/pageNum | pageNum | N |",
   "| Transaction/Body/request/bizBody/custNo | custNo | Y |",
   "| Transaction/Body/request/bizBody/loanAmt | loanAmt | N |",
-  "",
-  "响应报文",
-  "----",
-  "| 节点路径 | 节点代码 | 是否必填 |",
-  "| --- | --- | --- |",
-  "| Transaction/Header/sysHeader/bizResCode | bizResCode | Y |",
-  "| Transaction/Header/sysHeader/bizResText | bizResText | N |",
 ].join("\n");
 
 const SAMPLE_DOC_JSON = [
@@ -58,13 +51,6 @@ const SAMPLE_DOC_JSON = [
   "| Transaction/Body/request/bizHeader/pageNum | pageNum | N |",
   "| Transaction/Body/request/bizBody/custNo | custNo | Y |",
   "| Transaction/Body/request/bizBody/loanAmt | loanAmt | N |",
-  "",
-  "响应报文",
-  "----",
-  "| 节点路径 | 节点代码 | 是否必填 |",
-  "| --- | --- | --- |",
-  "| Transaction/Header/sysHeader/bizResCode | bizResCode | Y |",
-  "| Transaction/Header/sysHeader/bizResText | bizResText | N |",
 ].join("\n");
 
 const FAKE_ENDPOINT = {
@@ -82,18 +68,14 @@ describe("resolveCanonicalDoc", () => {
   });
 
   it("builds from endpoint notes when doc is empty (no ## prefix, ---- separator)", () => {
-    const doc = resolveCanonicalDoc("", "req notes", "resp notes");
+    const doc = resolveCanonicalDoc("", "req notes");
     expect(doc).toContain("请求报文\n----");
     expect(doc).toContain("req notes");
     expect(doc).not.toContain("## 请求报文");
   });
 
   it("produces extractable sections when built from endpoint notes", () => {
-    const doc = resolveCanonicalDoc(
-      "",
-      "req notes content",
-      "resp notes content",
-    );
+    const doc = resolveCanonicalDoc("", "req notes content");
     const { extractApiDocSection } = require("./api-doc.parser");
     const requestSection = extractApiDocSection(doc, "请求报文");
     expect(requestSection).toBe("req notes content");
@@ -143,7 +125,7 @@ describe("assessDocReadiness", () => {
 
 describe("checkDocReadiness integration", () => {
   it("returns ok=false when no doc exists", () => {
-    const doc = resolveCanonicalDoc("", "", "");
+    const doc = resolveCanonicalDoc("", "");
     const result = assessDocReadiness(doc);
     expect(result.ok).toBe(false);
   });
@@ -152,7 +134,6 @@ describe("checkDocReadiness integration", () => {
     const doc = resolveCanonicalDoc(
       "",
       '{"Transaction":{"Body":{"request":{"bizBody":{"custNo":"Y"}}}}}',
-      "",
     );
     const result = assessDocReadiness(doc);
     expect(result.ok).toBe(false);
@@ -165,12 +146,7 @@ describe("checkDocReadiness integration", () => {
       "| --- | --- | --- |",
       "| Transaction/Body/request/bizBody/custNo | custNo | Y |",
     ].join("\n");
-    const responseNotes = [
-      "| 节点路径 | 节点代码 | 是否必填 |",
-      "| --- | --- | --- |",
-      "| Transaction/Header/sysHeader/bizResCode | bizResCode | Y |",
-    ].join("\n");
-    const doc = resolveCanonicalDoc("", requestNotes, responseNotes);
+    const doc = resolveCanonicalDoc("", requestNotes);
     const result = assessDocReadiness(doc, "32.114.71.6:60030");
     expect(result.ok).toBe(true);
     expect(result.fieldCount).toBeGreaterThan(0);
@@ -178,29 +154,32 @@ describe("checkDocReadiness integration", () => {
 });
 
 describe("buildFieldCatalogSummary", () => {
-  it("lists all fields with code, path, required", () => {
+  it("lists all fields with path, code, required", () => {
     const summary = buildFieldCatalogSummary(SAMPLE_DOC);
     expect(summary).toContain("custNo");
     expect(summary).toContain("loanAmt");
     expect(summary).toContain("pageNum");
+    expect(summary).toContain("Transaction/Body/request/bizBody/custNo");
   });
 });
 
-describe("assembleCaseRequest (XML)", () => {
+describe("assembleCaseRequest (XML, no example message)", () => {
   const profile = {
     transport: "tcp" as const,
     messageFormat: "xml" as const,
     encoding: "UTF-8",
   };
 
-  it("builds full XML scaffold with bodyOverrides", () => {
+  it("builds full XML scaffold with bodyOverrides (node path keys)", () => {
     const plan: AiCasePlanItem = {
       caseName: "正向-核心成功",
       caseDesc: "标准二-正向",
       caseType: "正",
       priority: "高",
-      bodyOverrides: { custNo: "1234567890", loanAmt: "50000" },
-      expectedResult: "bizResCode=000000",
+      bodyOverrides: {
+        "Transaction/Body/request/bizBody/custNo": "1234567890",
+        "Transaction/Body/request/bizBody/loanAmt": "50000",
+      },
     };
 
     const { request, body } = assembleCaseRequest({
@@ -225,8 +204,9 @@ describe("assembleCaseRequest (XML)", () => {
       caseDesc: "custNo 为空",
       caseType: "反",
       priority: "中",
-      bodyOverrides: { custNo: "" },
-      expectedResult: "bizResCode 非 000000",
+      bodyOverrides: {
+        "Transaction/Body/request/bizBody/custNo": "",
+      },
     };
 
     const { body } = assembleCaseRequest({
@@ -237,25 +217,27 @@ describe("assembleCaseRequest (XML)", () => {
       plan,
     });
 
-    expect(body as string).toContain("<custNo/>");
+    expect(body as string).toMatch(/<custNo\s*\/?>/);
   });
 });
 
-describe("assembleCaseRequest (JSON/TCP)", () => {
+describe("assembleCaseRequest (JSON/TCP, no example message)", () => {
   const profile = {
     transport: "tcp" as const,
     messageFormat: "json" as const,
     encoding: "UTF-8",
   };
 
-  it("builds full Transaction JSON envelope with bodyOverrides", () => {
+  it("builds full Transaction JSON envelope with bodyOverrides (node path keys)", () => {
     const plan: AiCasePlanItem = {
       caseName: "正向-核心成功",
       caseDesc: "标准二-正向",
       caseType: "正",
       priority: "高",
-      bodyOverrides: { custNo: "1234567890", loanAmt: "50000" },
-      expectedResult: "bizResCode=000000",
+      bodyOverrides: {
+        "Transaction/Body/request/bizBody/custNo": "1234567890",
+        "Transaction/Body/request/bizBody/loanAmt": "50000",
+      },
     };
 
     const { request, body } = assembleCaseRequest({
@@ -287,8 +269,9 @@ describe("assembleCaseRequest (JSON/TCP)", () => {
       caseDesc: "custNo 为空",
       caseType: "反",
       priority: "中",
-      bodyOverrides: { custNo: "" },
-      expectedResult: "bizResCode 非 000000",
+      bodyOverrides: {
+        "Transaction/Body/request/bizBody/custNo": "",
+      },
     };
 
     const { body } = assembleCaseRequest({
@@ -309,8 +292,9 @@ describe("assembleCaseRequest (JSON/TCP)", () => {
       caseDesc: "pageNum=-1",
       caseType: "反",
       priority: "中",
-      bodyOverrides: { pageNum: "-1" },
-      expectedResult: "bizResCode 非 000000",
+      bodyOverrides: {
+        "Transaction/Body/request/bizHeader/pageNum": "-1",
+      },
     };
 
     const { body } = assembleCaseRequest({
@@ -332,8 +316,9 @@ describe("assembleCaseRequest (JSON/TCP)", () => {
       caseDesc: "改 msgId",
       caseType: "正",
       priority: "高",
-      bodyOverrides: { msgId: "CUSTOM_TRACE_ID" },
-      expectedResult: "bizResCode=000000",
+      bodyOverrides: {
+        "Transaction/Header/sysHeader/msgId": "CUSTOM_TRACE_ID",
+      },
     };
 
     const { body } = assembleCaseRequest({
@@ -356,8 +341,9 @@ describe("mapCasePlanToPayload", () => {
       caseDesc: "标准二-正向-核心成功路径",
       caseType: "正",
       priority: "高",
-      bodyOverrides: { custNo: "1234567890" },
-      expectedResult: "响应报文 bizResCode=000000",
+      bodyOverrides: {
+        "Transaction/Body/request/bizBody/custNo": "1234567890",
+      },
     };
 
     const payload = mapCasePlanToPayload(
@@ -376,7 +362,9 @@ describe("mapCasePlanToPayload", () => {
     expect(payload.request.transport).toBe("tcp");
     expect(payload.metadata?.source).toBe("ai");
     expect(payload.metadata?.inferredFields).toContain("body");
-    expect(payload.metadata?.bodyOverrides).toEqual({ custNo: "1234567890" });
+    expect(payload.metadata?.bodyOverrides).toEqual({
+      "Transaction/Body/request/bizBody/custNo": "1234567890",
+    });
   });
 
   it("produces a complete ApiTestCasePayload (JSON)", () => {
@@ -385,8 +373,10 @@ describe("mapCasePlanToPayload", () => {
       caseDesc: "标准二-正向",
       caseType: "正",
       priority: "高",
-      bodyOverrides: { custNo: "1234567890", loanAmt: "50000" },
-      expectedResult: "bizResCode=000000",
+      bodyOverrides: {
+        "Transaction/Body/request/bizBody/custNo": "1234567890",
+        "Transaction/Body/request/bizBody/loanAmt": "50000",
+      },
     };
 
     const payload = mapCasePlanToPayload(
@@ -403,8 +393,8 @@ describe("mapCasePlanToPayload", () => {
     expect(payload.metadata?.inferredFields).toContain("custNo");
     expect(payload.metadata?.inferredFields).toContain("loanAmt");
     expect(payload.metadata?.bodyOverrides).toEqual({
-      custNo: "1234567890",
-      loanAmt: "50000",
+      "Transaction/Body/request/bizBody/custNo": "1234567890",
+      "Transaction/Body/request/bizBody/loanAmt": "50000",
     });
   });
 
@@ -414,8 +404,9 @@ describe("mapCasePlanToPayload", () => {
       caseDesc: "pageNum=-1",
       caseType: "反",
       priority: "低",
-      bodyOverrides: { pageNum: "-1" },
-      expectedResult: "bizResCode 非 000000，提示分页参数非法",
+      bodyOverrides: {
+        "Transaction/Body/request/bizHeader/pageNum": "-1",
+      },
     };
 
     const payload = mapCasePlanToPayload(
@@ -437,8 +428,9 @@ describe("mapCasePlanToPayload", () => {
       caseDesc: "结构化断言",
       caseType: "正",
       priority: "高",
-      bodyOverrides: { custNo: "123" },
-      expectedResult: "成功",
+      bodyOverrides: {
+        "Transaction/Body/request/bizBody/custNo": "123",
+      },
     };
 
     const payload = mapCasePlanToPayload(
@@ -454,14 +446,16 @@ describe("mapCasePlanToPayload", () => {
     expect(payload.expected.assertions!.length).toBeGreaterThan(0);
   });
 
-  it("drops unknown bodyOverrides keys not in field catalog", () => {
+  it("keeps unknown bodyOverrides keys (warn but not drop)", () => {
     const plan: AiCasePlanItem = {
       caseName: "正向-含非法key",
       caseDesc: "AI 输出了文档不存在的字段",
       caseType: "正",
       priority: "高",
-      bodyOverrides: { custNo: "1234567890", customerNo: "should-be-dropped" },
-      expectedResult: "bizResCode=000000",
+      bodyOverrides: {
+        "Transaction/Body/request/bizBody/custNo": "1234567890",
+        "Transaction/Body/request/bizBody/customerNo": "should-be-kept",
+      },
     };
 
     const payload = mapCasePlanToPayload(
@@ -473,32 +467,309 @@ describe("mapCasePlanToPayload", () => {
       SAMPLE_DOC_JSON,
     );
 
-    expect(payload.metadata?.bodyOverrides).toEqual({ custNo: "1234567890" });
-    expect(payload.metadata?.bodyOverrides).not.toHaveProperty("customerNo");
+    expect(payload.metadata?.bodyOverrides).toHaveProperty(
+      "Transaction/Body/request/bizBody/customerNo",
+    );
   });
+});
 
-  it("drops unknown headerOverrides keys not in field catalog", () => {
+const SAMPLE_DOC_WITH_EXAMPLE = [
+  "基础信息",
+  "----",
+  "原服务交易码|TEST001",
+  "服务URL|32.114.71.6:60030",
+  "",
+  "技术信息",
+  "----",
+  "通讯方式|Socket",
+  "报文类型|XML",
+  "报文编码|UTF-8",
+  "",
+  "请求报文",
+  "----",
+  "| 节点路径 | 节点代码 | 是否必填 |",
+  "| --- | --- | --- |",
+  "| Transaction/Header/sysHeader/msgId | msgId | Y |",
+  "| Transaction/Body/request/bizHeader/interfaceId | interfaceId | N |",
+  "| Transaction/Body/request/bizBody/custNo | custNo | Y |",
+  "| Transaction/Body/request/bizBody/loanAmt | loanAmt | N |",
+  "",
+  "示例报文",
+  "----",
+  [
+    "<Transaction>",
+    "  <Header>",
+    "    <sysHeader>",
+    "      <msgId>OLD_MSG_ID</msgId>",
+    "      <msgDate>20250101</msgDate>",
+    "      <msgTime>12:00:00.000</msgTime>",
+    "      <operation>TEST001</operation>",
+    "    </sysHeader>",
+    "  </Header>",
+    "  <Body>",
+    "    <request>",
+    "      <bizHeader>",
+    "        <interfaceId>IF001</interfaceId>",
+    "        <pageNum>1</pageNum>",
+    "      </bizHeader>",
+    "      <bizBody>",
+    "        <custNo>999999</custNo>",
+    "        <loanAmt>10000</loanAmt>",
+    "      </bizBody>",
+    "    </request>",
+    "  </Body>",
+    "</Transaction>",
+  ].join("\n"),
+].join("\n");
+
+describe("assembleCaseRequest (XML, with example message)", () => {
+  const profile = {
+    transport: "tcp" as const,
+    messageFormat: "xml" as const,
+    encoding: "UTF-8",
+  };
+
+  it("uses example message as base, applies bodyOverrides by node path", () => {
     const plan: AiCasePlanItem = {
-      caseName: "反向-含非法header key",
-      caseDesc: "AI 输出了文档不存在的 header 字段",
-      caseType: "反",
-      priority: "中",
-      bodyOverrides: { custNo: "123" },
-      headerOverrides: { pageNum: "-1", fakeField: "should-be-dropped" },
-      expectedResult: "bizResCode 非 000000",
+      caseName: "正向-覆盖custNo",
+      caseDesc: "标准二-正向",
+      caseType: "正",
+      priority: "高",
+      bodyOverrides: {
+        "Transaction/Body/request/bizBody/custNo": "1234567890",
+        "Transaction/Body/request/bizBody/loanAmt": "50000",
+      },
     };
 
-    const payload = mapCasePlanToPayload(
+    const { body } = assembleCaseRequest({
+      canonicalDoc: SAMPLE_DOC_WITH_EXAMPLE,
+      transactionCode: "TEST001",
+      profile,
+      endpoint: FAKE_ENDPOINT,
       plan,
-      FAKE_ENDPOINT,
-      "PCBS03901001",
-      0,
-      { transport: "tcp", messageFormat: "json", encoding: "UTF-8" },
-      SAMPLE_DOC_JSON,
-    );
+    });
 
-    const txn = (payload.request.body as any).Transaction;
-    expect(txn.Body.request.bizHeader.pageNum).toBe("-1");
-    expect(txn.Body.request.bizHeader).not.toHaveProperty("fakeField");
+    const xml = body as string;
+    expect(xml).toContain("<custNo>1234567890</custNo>");
+    expect(xml).toContain("<loanAmt>50000</loanAmt>");
+    expect(xml).toContain("<interfaceId>IF001</interfaceId>");
+    expect(xml).toContain("<pageNum>1</pageNum>");
+  });
+
+  it("refreshes msgId dynamically, not keeping OLD_MSG_ID", () => {
+    const plan: AiCasePlanItem = {
+      caseName: "正向-动态header",
+      caseDesc: "msgId刷新",
+      caseType: "正",
+      priority: "高",
+      bodyOverrides: {},
+    };
+
+    const { body } = assembleCaseRequest({
+      canonicalDoc: SAMPLE_DOC_WITH_EXAMPLE,
+      transactionCode: "TEST001",
+      profile,
+      endpoint: FAKE_ENDPOINT,
+      plan,
+    });
+
+    const xml = body as string;
+    expect(xml).not.toContain("OLD_MSG_ID");
+    expect(xml).toMatch(/<msgId>[^<]+<\/msgId>/);
+  });
+
+  it("preserves bizHeader custom fields from example", () => {
+    const plan: AiCasePlanItem = {
+      caseName: "正向-保留bizHeader",
+      caseDesc: "验证示例报文bizHeader字段保留",
+      caseType: "正",
+      priority: "高",
+      bodyOverrides: {
+        "Transaction/Body/request/bizBody/custNo": "NEW_CUST",
+      },
+    };
+
+    const { body } = assembleCaseRequest({
+      canonicalDoc: SAMPLE_DOC_WITH_EXAMPLE,
+      transactionCode: "TEST001",
+      profile,
+      endpoint: FAKE_ENDPOINT,
+      plan,
+    });
+
+    const xml = body as string;
+    expect(xml).toContain("<interfaceId>IF001</interfaceId>");
+    expect(xml).toContain("<custNo>NEW_CUST</custNo>");
+  });
+});
+
+const SAMPLE_DOC_JSON_WITH_EXAMPLE = [
+  "基础信息",
+  "----",
+  "原服务交易码|idc_SNYF0001",
+  "服务URL|32.114.71.6:60030",
+  "",
+  "技术信息",
+  "----",
+  "通讯方式|Socket",
+  "报文类型|JSON",
+  "报文编码|UTF-8",
+  "",
+  "请求报文",
+  "----",
+  "| 节点路径 | 节点代码 | 是否必填 |",
+  "| --- | --- | --- |",
+  "| Transaction/Body/request/bizBody/model | model | Y |",
+  "| Transaction/Body/request/bizBody/org_code | org_code | Y |",
+  "",
+  "示例报文",
+  "----",
+  JSON.stringify(
+    {
+      Transaction: {
+        Header: {
+          sysHeader: {
+            msgId: "OLD_MSG_ID",
+            msgDate: "20250101",
+            msgTime: "12:00:00.000",
+            operation: "idc_SNYF0001",
+          },
+        },
+        Body: {
+          request: {
+            bizHeader: { interfaceId: "idc_SNYF0001", ver: "1" },
+            bizBody: { model: "3", org_code: "041" },
+          },
+        },
+      },
+    },
+    null,
+    2,
+  ),
+].join("\n");
+
+describe("assembleCaseRequest (JSON, with example message)", () => {
+  const profile = {
+    transport: "tcp" as const,
+    messageFormat: "json" as const,
+    encoding: "UTF-8",
+  };
+
+  it("applies bodyOverrides with full node path", () => {
+    const plan: AiCasePlanItem = {
+      caseName: "正向-覆盖model",
+      caseDesc: "标准二-正向",
+      caseType: "正",
+      priority: "高",
+      bodyOverrides: {
+        "Transaction/Body/request/bizBody/model": "5",
+      },
+    };
+
+    const { body } = assembleCaseRequest({
+      canonicalDoc: SAMPLE_DOC_JSON_WITH_EXAMPLE,
+      transactionCode: "idc_SNYF0001",
+      profile,
+      endpoint: FAKE_ENDPOINT,
+      plan,
+    });
+
+    const parsed = JSON.parse(body as string);
+    expect(parsed.Transaction.Body.request.bizBody.model).toBe("5");
+    expect(parsed.Transaction.Body.request.bizBody.org_code).toBe("041");
+  });
+
+  it("falls back to last-segment match when AI returns short key", () => {
+    const plan: AiCasePlanItem = {
+      caseName: "反向-model非数字",
+      caseDesc: "model=abc",
+      caseType: "反",
+      priority: "中",
+      bodyOverrides: {
+        model: "abc",
+      },
+    };
+
+    const { body } = assembleCaseRequest({
+      canonicalDoc: SAMPLE_DOC_JSON_WITH_EXAMPLE,
+      transactionCode: "idc_SNYF0001",
+      profile,
+      endpoint: FAKE_ENDPOINT,
+      plan,
+    });
+
+    const parsed = JSON.parse(body as string);
+    expect(parsed.Transaction.Body.request.bizBody.model).toBe("abc");
+  });
+
+  it("sets empty string for required field missing case", () => {
+    const plan: AiCasePlanItem = {
+      caseName: "反向-必填缺失",
+      caseDesc: "model和org_code为空",
+      caseType: "反",
+      priority: "中",
+      bodyOverrides: {
+        model: "",
+        org_code: "",
+      },
+    };
+
+    const { body } = assembleCaseRequest({
+      canonicalDoc: SAMPLE_DOC_JSON_WITH_EXAMPLE,
+      transactionCode: "idc_SNYF0001",
+      profile,
+      endpoint: FAKE_ENDPOINT,
+      plan,
+    });
+
+    const parsed = JSON.parse(body as string);
+    expect(parsed.Transaction.Body.request.bizBody.model).toBe("");
+    expect(parsed.Transaction.Body.request.bizBody.org_code).toBe("");
+  });
+
+  it("refreshes msgId dynamically", () => {
+    const plan: AiCasePlanItem = {
+      caseName: "正向-动态header",
+      caseDesc: "msgId刷新",
+      caseType: "正",
+      priority: "高",
+      bodyOverrides: {},
+    };
+
+    const { body } = assembleCaseRequest({
+      canonicalDoc: SAMPLE_DOC_JSON_WITH_EXAMPLE,
+      transactionCode: "idc_SNYF0001",
+      profile,
+      endpoint: FAKE_ENDPOINT,
+      plan,
+    });
+
+    const parsed = JSON.parse(body as string);
+    expect(parsed.Transaction.Header.sysHeader.msgId).not.toBe("OLD_MSG_ID");
+    expect(parsed.Transaction.Header.sysHeader.msgId).toBeTruthy();
+  });
+});
+
+describe("assessDocReadiness with example message only", () => {
+  it("passes when no field table but has example message", () => {
+    const docWithOnlyExample = [
+      "基础信息",
+      "----",
+      "原服务交易码|TEST001",
+      "服务URL|32.114.71.6:60030",
+      "",
+      "技术信息",
+      "----",
+      "通讯方式|Socket",
+      "报文类型|XML",
+      "报文编码|UTF-8",
+      "",
+      "示例报文",
+      "----",
+      "<Transaction><Body><request><bizBody><custNo>123</custNo></bizBody></request></Body></Transaction>",
+    ].join("\n");
+
+    const result = assessDocReadiness(docWithOnlyExample);
+    expect(result.ok).toBe(true);
   });
 });

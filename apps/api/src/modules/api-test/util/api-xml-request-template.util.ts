@@ -3,7 +3,12 @@ import { extractApiDocSection, getApiDocFieldValue } from "./api-doc.parser";
 export interface ApiDocMessageField {
   path: string;
   code: string;
+  name?: string;
+  dataType?: string;
+  length?: string;
   required: boolean;
+  description?: string;
+  codeValues?: string;
 }
 
 interface XmlDocMeta {
@@ -93,9 +98,17 @@ export function parseApiDocMessageFields(
   if (!lines.length) return [];
 
   const header = lines[0];
-  const pathIndex = header.findIndex((cell) => cell.includes("节点路径"));
-  const codeIndex = header.findIndex((cell) => cell.includes("节点代码"));
-  const requiredIndex = header.findIndex((cell) => cell.includes("是否必填"));
+  const findIndex = (keywords: string[]) =>
+    header.findIndex((cell) => keywords.some((kw) => cell.includes(kw)));
+
+  const pathIndex = findIndex(["节点路径"]);
+  const codeIndex = findIndex(["节点代码"]);
+  const nameIndex = findIndex(["节点名称", "字段名称"]);
+  const dataTypeIndex = findIndex(["数据类型", "类型"]);
+  const lengthIndex = findIndex(["长度", "maxLength"]);
+  const requiredIndex = findIndex(["是否必填"]);
+  const descIndex = findIndex(["描述", "说明"]);
+  const codeValuesIndex = findIndex(["码值"]);
 
   const fields: ApiDocMessageField[] = [];
   for (const cells of lines.slice(1)) {
@@ -108,7 +121,12 @@ export function parseApiDocMessageFields(
     fields.push({
       path: path || `Transaction/Body/request/bizBody/${code}`,
       code: code || fieldCodeFromPath(path, ""),
+      name: nameIndex >= 0 ? cells[nameIndex] : undefined,
+      dataType: dataTypeIndex >= 0 ? cells[dataTypeIndex] : undefined,
+      length: lengthIndex >= 0 ? cells[lengthIndex] : undefined,
       required: requiredText === "Y" || requiredText === "是",
+      description: descIndex >= 0 ? cells[descIndex] : undefined,
+      codeValues: codeValuesIndex >= 0 ? cells[codeValuesIndex] : undefined,
     });
   }
   return fields.filter((field) => field.code);
@@ -222,7 +240,6 @@ export function buildTransactionXmlScaffold(input: {
   transactionCode: string;
   bizBodyValues?: Record<string, string | undefined>;
   compact?: boolean;
-  exampleMessage?: string;
 }) {
   const meta = extractXmlDocMeta(input.structuredDoc, input.transactionCode);
   const requestSection = extractApiDocSection(input.structuredDoc, "请求报文");
@@ -230,16 +247,6 @@ export function buildTransactionXmlScaffold(input: {
   const grouped = groupFieldsBySection(fields);
   const traceId = sampleTraceId(meta.clientCd);
 
-  // If example message exists, use it as base template and override specific fields
-  if (input.exampleMessage) {
-    return buildXmlFromExample({
-      exampleMessage: input.exampleMessage,
-      overrides: input.bizBodyValues || {},
-      compact: input.compact || false,
-    });
-  }
-
-  // Fallback to original logic if no example message
   const sysHeaderValues = {
     ...buildSysHeaderValues(meta, traceId),
     ...Object.fromEntries(
@@ -311,71 +318,7 @@ export function buildTransactionXmlScaffold(input: {
   return `${xml}\n`;
 }
 
-export { minifyXml, prettyPrintXml, parseXmlExampleDefaults };
-
-function buildXmlFromExample(input: {
-  exampleMessage: string;
-  overrides: Record<string, string | undefined>;
-  compact: boolean;
-}): string {
-  let xml = input.exampleMessage;
-
-  // Apply field overrides
-  for (const [fieldCode, value] of Object.entries(input.overrides)) {
-    if (value === undefined) continue;
-
-    // Replace field value in XML
-    const regex = new RegExp(`<${fieldCode}>([^<]*)</${fieldCode}>`, "g");
-    xml = xml.replace(regex, `<${fieldCode}>${value}</${fieldCode}>`);
-  }
-
-  return input.compact ? minifyXml(xml) : prettyPrintXml(xml);
-}
-
-function parseXmlExampleDefaults(exampleXml: string): Record<string, string> {
-  const defaults: Record<string, string> = {};
-
-  // Parse sysHeader values
-  const sysHeaderMatch = exampleXml.match(/<sysHeader>([\s\S]*?)<\/sysHeader>/);
-  if (sysHeaderMatch) {
-    const sysHeaderContent = sysHeaderMatch[1];
-    SYS_HEADER_FIELDS.forEach((field) => {
-      const fieldMatch = sysHeaderContent.match(
-        new RegExp(`<${field}>([^<]*)</${field}>`),
-      );
-      if (fieldMatch) {
-        defaults[field] = fieldMatch[1];
-      }
-    });
-  }
-
-  // Parse bizHeader values
-  const bizHeaderMatch = exampleXml.match(/<bizHeader>([\s\S]*?)<\/bizHeader>/);
-  if (bizHeaderMatch) {
-    const bizHeaderContent = bizHeaderMatch[1];
-    BIZ_HEADER_FIELDS.forEach((field) => {
-      const fieldMatch = bizHeaderContent.match(
-        new RegExp(`<${field}>([^<]*)</${field}>`),
-      );
-      if (fieldMatch) {
-        defaults[field] = fieldMatch[1];
-      }
-    });
-  }
-
-  // Parse bizBody values
-  const bizBodyMatch = exampleXml.match(/<bizBody>([\s\S]*?)<\/bizBody>/);
-  if (bizBodyMatch) {
-    const bizBodyContent = bizBodyMatch[1];
-    // Extract all field values from bizBody
-    const fieldMatches = bizBodyContent.matchAll(/<([^>]+)>([^<]*)<\/\1>/g);
-    for (const match of fieldMatches) {
-      defaults[match[1]] = match[2];
-    }
-  }
-
-  return defaults;
-}
+export { minifyXml, prettyPrintXml };
 
 export function buildXmlProtocolScaffoldExample(
   structuredDoc: string,

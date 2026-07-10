@@ -202,7 +202,7 @@ function buildCaseHeaderRow(
   return header + row;
 }
 
-/** 请求 / 响应报文区块 */
+/** 请求 / 响应体区块 */
 function buildPayloadSection(item: HtmlRunItem) {
   const requestBody = prettyPayload(item.requestSnapshot?.body);
   const responseBody = prettyPayload(item.responseSnapshot?.body);
@@ -217,9 +217,9 @@ function buildPayloadSection(item: HtmlRunItem) {
   sections.push(
     `<pre class="payload"><code>${escapeHtml(requestBody || "（无请求报文）")}</code></pre>`,
   );
-  sections.push(`<div class="step-bar">响应报文</div>`);
+  sections.push(`<div class="step-bar">响应体</div>`);
   sections.push(
-    `<pre class="payload"><code>${escapeHtml(responseBody || "（无响应报文）")}</code></pre>`,
+    `<pre class="payload"><code>${escapeHtml(responseBody || "（无响应体）")}</code></pre>`,
   );
   return sections.join("\n");
 }

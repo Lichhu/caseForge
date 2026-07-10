@@ -36,6 +36,7 @@ import {
   MAX_REQUIREMENT_DOC_SIZE_BYTES,
   MAX_REQUIREMENT_DOC_SIZE_MB,
 } from "@case-forge/shared";
+import { splitDocumentText } from "@struct-doc/util/document-splitter.util";
 import { Repository } from "typeorm";
 
 @ApiTags("struct-doc")
@@ -93,13 +94,35 @@ export class StructDocController {
     });
     assertReadableText(extractedText, "需求文档");
     const chineseChars = (extractedText.match(/[\u4e00-\u9fa5]/g) || []).length;
-    if (chineseChars > MAX_REQUIREMENT_DOC_CHINESE_CHARS) {
-      throw new BadRequestException(
-        `超过单次文本内容最大限制，请拆分后上传，每个拆分部分单独结构化处理。`,
-      );
-    }
 
     await findOwnedProject(this.projectRepo, projectId);
+
+    if (chineseChars > MAX_REQUIREMENT_DOC_CHINESE_CHARS) {
+      const chunks = splitDocumentText(extractedText);
+      const baseName = this.normalizeUploadFileName(file.originalname);
+      const stem = baseName.replace(/\.(doc|docx|md)$/i, "");
+      const results = [];
+      for (const chunk of chunks) {
+        const partName = chunk.title
+          ? `${stem} - 第${chunk.index}部分 ${chunk.title}.md`
+          : `${stem} - 第${chunk.index}部分.md`;
+        const objectPath = this.minioService.buildProjectObjectPath(
+          projectId,
+          partName,
+        );
+        await this.minioService.uploadFile(
+          objectPath,
+          Buffer.from(chunk.content, "utf8"),
+        );
+        const saved = await this.structDocService.saveUploadedRequirement(
+          projectId,
+          { reqDocName: partName, reqDocPath: objectPath },
+        );
+        results.push(saved);
+      }
+      await touchProjectUpdatedAt(this.projectRepo, projectId);
+      return results;
+    }
 
     const fileName = this.normalizeUploadFileName(file.originalname);
     const objectPath = this.minioService.buildProjectObjectPath(
@@ -110,10 +133,14 @@ export class StructDocController {
     await this.minioService.uploadFile(objectPath, file.buffer);
     await touchProjectUpdatedAt(this.projectRepo, projectId);
 
-    return this.structDocService.saveUploadedRequirement(projectId, {
-      reqDocName: fileName,
-      reqDocPath: objectPath,
-    });
+    const saved = await this.structDocService.saveUploadedRequirement(
+      projectId,
+      {
+        reqDocName: fileName,
+        reqDocPath: objectPath,
+      },
+    );
+    return [saved];
   }
 
   /** 异步触发 AI Chat 结构化需求文档。 */

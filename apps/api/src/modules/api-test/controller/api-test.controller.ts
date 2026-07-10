@@ -597,7 +597,7 @@ export class ApiTestController {
   }
 
   @Post(":projectId/transactions/:transactionId/cases/generate-assertions")
-  @ApiOperation({ summary: "AI 根据响应报文生成断言" })
+  @ApiOperation({ summary: "AI 根据响应体生成断言" })
   async generateAssertions(
     @Param("projectId") projectId: string,
     @Body()

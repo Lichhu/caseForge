@@ -114,6 +114,9 @@ export interface ApiTestCasePayload {
     source?: ApiCaseSource;
     inferredFields?: string[];
     promptIds?: string[];
+    promptId?: string;
+    scenarioName?: string;
+    promptName?: string;
     bodyOverrides?: Record<string, unknown>;
     generateVersion?: number;
     debugEnvironmentId?: string;
@@ -161,9 +164,7 @@ export interface AiCasePlanItem {
   caseType: "正" | "反";
   priority?: "高" | "中" | "低";
   remark?: string;
-  bodyOverrides?: Record<string, string | number | boolean | null>;
-  headerOverrides?: Record<string, string>;
-  expectedResult: string;
+  bodyOverrides?: Record<string, string>;
   assertions?: ApiAssertion[];
 }
 
@@ -208,7 +209,7 @@ export function buildDefaultExpected(
       assertions: isNegative
         ? [
             {
-              description: "响应报文含业务返回码",
+              description: "响应体含业务返回码",
               type: "string" as const,
               operator: "eq" as const,
               expression: "bizResCode",
@@ -235,7 +236,7 @@ export function buildDefaultExpected(
     assertions: isNegative
       ? [
           {
-            description: "响应报文含业务返回码",
+            description: "响应体含业务返回码",
             type: "string" as const,
             operator: "eq" as const,
             expression: "bizResCode",

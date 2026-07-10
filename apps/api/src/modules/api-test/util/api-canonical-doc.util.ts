@@ -1,9 +1,7 @@
 import type { ApiTechnicalProfile } from "@case-forge/shared";
 import { extractApiDocSection, getApiDocFieldValue } from "./api-doc.parser";
 import { parseApiDocMessageFields } from "./api-xml-request-template.util";
-import {
-  resolveApiTechnicalProfile,
-} from "./api-doc-technical-profile.util";
+import { resolveApiTechnicalProfile } from "./api-doc-technical-profile.util";
 
 /** SMP 兜底数据形状（避免与 entity 强耦合） */
 export interface DocReadinessSmpData {
@@ -21,7 +19,6 @@ export interface DocReadinessResult {
 export function resolveCanonicalDoc(
   structuredMarkdown: string,
   endpointRequestNotes?: string,
-  endpointResponseNotes?: string,
 ): string {
   const doc = structuredMarkdown.trim();
   if (doc) return doc;
@@ -29,9 +26,6 @@ export function resolveCanonicalDoc(
   const lines = ["技术信息", "----"];
   if (endpointRequestNotes?.trim()) {
     lines.push("请求报文", "----", endpointRequestNotes.trim());
-  }
-  if (endpointResponseNotes?.trim()) {
-    lines.push("响应报文", "----", endpointResponseNotes.trim());
   }
   return lines.join("\n");
 }
@@ -45,11 +39,13 @@ export function assessDocReadiness(
 
   const requestSection = extractApiDocSection(canonicalDoc, "请求报文");
   const fields = parseApiDocMessageFields(requestSection);
+  const exampleMessage = extractExampleMessage(canonicalDoc);
 
-  if (!fields.length) {
+  if (!fields.length && !exampleMessage) {
     return {
       ok: false,
-      message: "文档「请求报文」段未解析到字段，请检查文档格式或补充字段表",
+      message:
+        "文档「请求报文」段未解析到字段，且无示例报文，请检查文档格式或补充字段表/示例报文",
       fieldCount: 0,
       profile,
     };
@@ -83,14 +79,33 @@ export function buildFieldCatalogSummary(canonicalDoc: string): string {
 
   if (!fields.length) return "（无字段）";
 
-  const lines = fields.map(
-    (f) => `| ${f.code} | ${f.path} | ${f.required ? "Y" : "N"} |`,
+  const header = [
+    "节点路径",
+    "节点代码",
+    "节点名称",
+    "数据类型",
+    "必填",
+    "描述",
+    "码值",
+  ];
+  const separator = header.map(() => "---").join(" | ");
+
+  const lines = fields.map((f) =>
+    [
+      f.path,
+      f.code,
+      f.name ?? "",
+      f.dataType ?? "",
+      f.required ? "Y" : "N",
+      f.description ?? "",
+      f.codeValues ?? "",
+    ].join(" | "),
   );
 
   return [
-    "| 节点代码 | 节点路径 | 必填 |",
-    "| --- | --- | --- |",
-    ...lines,
+    `| ${header.join(" | ")} |`,
+    `| ${separator} |`,
+    ...lines.map((l) => `| ${l} |`),
   ].join("\n");
 }
 

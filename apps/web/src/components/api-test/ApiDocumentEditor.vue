@@ -122,50 +122,80 @@
           v-if="!sections.length"
           description="上传 Excel 后将自动结构化，可 AI 生成案例"
         />
-        <div v-for="(section, sectionIndex) in sections" :key="section.title" class="doc-section-block">
-          <h3 class="doc-section-title">{{ section.title }}</h3>
-          <div v-if="section.title === '示例报文'" class="example-message-block">
-            <textarea
-              v-model="exampleMessage"
-              class="example-message-input"
-              rows="6"
-              placeholder="可选。填写后将作为 AI 生成案例的报文样例参考。"
-              @input="onExampleMessageInput"
-              @blur="onExampleMessageBlur"
-            />
-          </div>
-          <div v-else class="api-doc-table-wrap">
-            <table class="api-doc-table">
-              <thead>
-                <tr>
-                  <th
-                    v-for="(label, colIndex) in sectionTableHeaders(section)"
-                    :key="`${section.title}-head-${colIndex}`"
-                  >
-                    {{ label }}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="record in sectionData[sectionIndex]"
-                  :key="record.key"
+        <div
+          v-for="(section, sectionIndex) in sections"
+          :key="section.title"
+          class="doc-section-block"
+          :class="{ 'doc-section-block--collapsed': isSectionCollapsed(section.title) }"
+        >
+          <button
+            type="button"
+            class="doc-section-title-btn"
+            @click="toggleSection(section.title)"
+          >
+            <span class="doc-section-chevron" aria-hidden="true">
+              <RightOutlined v-if="isSectionCollapsed(section.title)" />
+              <DownOutlined v-else />
+            </span>
+            <span class="doc-section-title">{{ section.title }}</span>
+          </button>
+          <div v-show="!isSectionCollapsed(section.title)" class="doc-section-body">
+            <div v-if="section.title === '示例报文'" class="example-message-block">
+              <div class="example-message-shell">
+                <a-button
+                  type="link"
+                  size="small"
+                  class="example-message-beautify-btn"
+                  :disabled="!exampleMessage.trim()"
+                  @click="beautifyExampleMessage"
                 >
-                  <td
-                    v-for="colKey in sectionTableColumnKeys(section)"
-                    :key="`${record.key}-${colKey}`"
+                  <template #icon><FormatPainterOutlined /></template>
+                  美化
+                </a-button>
+                <textarea
+                  v-model="exampleMessage"
+                  class="example-message-input"
+                  placeholder="可选。填写后将作为 AI 生成案例的报文样例参考。"
+                  spellcheck="false"
+                  @input="onExampleMessageInput"
+                  @blur="onExampleMessageBlur"
+                  @paste="onExampleMessagePaste"
+                />
+              </div>
+            </div>
+            <div v-else class="api-doc-table-wrap">
+              <table class="api-doc-table">
+                <thead>
+                  <tr>
+                    <th
+                      v-for="(label, colIndex) in sectionTableHeaders(section)"
+                      :key="`${section.title}-head-${colIndex}`"
+                    >
+                      {{ label }}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="record in sectionData[sectionIndex]"
+                    :key="record.key"
                   >
-                    <textarea
-                      v-model="record[colKey]"
-                      class="doc-cell-input"
-                      rows="1"
-                      @input="onCellInput(sectionIndex, $event)"
-                      @blur="handleCellBlur(sectionIndex)"
-                    />
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                    <td
+                      v-for="colKey in sectionTableColumnKeys(section)"
+                      :key="`${record.key}-${colKey}`"
+                    >
+                      <textarea
+                        v-model="record[colKey]"
+                        class="doc-cell-input"
+                        rows="1"
+                        @input="onCellInput(sectionIndex, $event)"
+                        @blur="handleCellBlur(sectionIndex)"
+                      />
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </template>
@@ -212,10 +242,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onActivated, onDeactivated, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, reactive, ref, watch } from 'vue';
 import {
   DownOutlined,
+  FormatPainterOutlined,
   HistoryOutlined,
+  RightOutlined,
   SaveOutlined,
   SettingOutlined,
   ThunderboltOutlined,
@@ -231,6 +263,7 @@ import { useApiTestStore } from '@/stores/apiTest';
 import { filterSelectablePromptIds, collectDefaultPromptIds } from '@/utils/scenarioLibrary';
 import {
   parseApiDocTableText,
+  API_DOC_SECTION_TITLES,
   sectionTableColumnKeys,
   sectionTableData,
   sectionTableHeaders,
@@ -238,8 +271,13 @@ import {
   tableDataToRows,
   type ApiDocTableSection,
 } from '@/utils/api-doc-table.util';
+import {
+  beautifyCasePayloadJson,
+  beautifyRequestBodyXml,
+} from '@/utils/casePayloadFormat.util';
 
 const tableScrollRef = ref<HTMLElement | null>(null);
+const EXAMPLE_MESSAGE_MIN_HEIGHT_PX = 160;
 const apiStore = useApiTestStore();
 const sections = ref<ApiDocTableSection[]>([]);
 const sectionData = ref<Record<string, string>[][]>([]);
@@ -254,6 +292,36 @@ const historyDrawerOpen = ref(false);
 const moreMenuOpen = ref(false);
 const docPromptIds = ref<string[]>([]);
 const generatePromptIds = ref<string[]>([]);
+const collapsedSections = reactive(
+  new Set<string>(
+    API_DOC_SECTION_TITLES.filter((title) => title !== '示例报文'),
+  ),
+);
+
+function isSectionCollapsed(title: string) {
+  return collapsedSections.has(title);
+}
+
+function toggleSection(title: string) {
+  if (collapsedSections.has(title)) {
+    collapsedSections.delete(title);
+    void nextTick(() => {
+      resizeAllDocCellInputs();
+      resizeExampleMessageInput();
+    });
+  } else {
+    collapsedSections.add(title);
+  }
+}
+
+function resetSectionCollapseState() {
+  collapsedSections.clear();
+  for (const title of API_DOC_SECTION_TITLES) {
+    if (title !== '示例报文') {
+      collapsedSections.add(title);
+    }
+  }
+}
 
 const projectId = computed(() => apiStore.activeProjectId ?? '');
 const transactionId = computed(() => apiStore.activeTransactionId ?? '');
@@ -278,6 +346,7 @@ onActivated(() => {
   if (pid && tid) {
     void apiStore.syncCaseGenerateLoading(pid, tid);
   }
+  resizeExampleMessageInput();
 });
 
 onDeactivated(() => {
@@ -297,11 +366,17 @@ function loadFromText(text: string) {
   sections.value = parsed;
   sectionData.value = sections.value.map((section) => sectionTableData(section));
   editorText.value = serializeApiDocTableText(parsed);
+  resetSectionCollapseState();
   syncingFromStore.value = false;
   resizeAllDocCellInputs();
+  resizeExampleMessageInput();
 }
 
-function onExampleMessageInput() {
+function onExampleMessageInput(event: Event) {
+  const el = event.target;
+  if (el instanceof HTMLTextAreaElement) {
+    autoResizeExampleTextarea(el);
+  }
   syncExampleMessageToText();
   scheduleAutoSave();
 }
@@ -309,6 +384,72 @@ function onExampleMessageInput() {
 function onExampleMessageBlur() {
   syncExampleMessageToText();
   void flushAutoSave({ notify: true });
+}
+
+function detectExampleMessageFormat(text: string): 'json' | 'xml' | 'text' {
+  const trimmed = text.trim();
+  if (!trimmed) return 'text';
+  if (trimmed.startsWith('<') || trimmed.includes('<?xml')) return 'xml';
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) return 'json';
+  return 'text';
+}
+
+function beautifyExampleMessage() {
+  const raw = exampleMessage.value.trim();
+  if (!raw) {
+    message.info('示例报文为空');
+    return;
+  }
+  const format = detectExampleMessageFormat(raw);
+  try {
+    if (format === 'xml') {
+      exampleMessage.value = beautifyRequestBodyXml(raw);
+    } else if (format === 'json') {
+      exampleMessage.value = beautifyCasePayloadJson(raw);
+    } else {
+      message.info('纯文本示例报文无需美化');
+      return;
+    }
+    syncExampleMessageToText();
+    scheduleAutoSave();
+    message.success('示例报文已美化');
+    resizeExampleMessageInput();
+  } catch {
+    message.error('报文格式不正确，无法美化');
+  }
+}
+
+function onExampleMessagePaste(event: Event) {
+  const el = event.target;
+  if (!(el instanceof HTMLTextAreaElement)) return;
+  void nextTick(() => {
+    void nextTick(() => {
+      autoResizeExampleTextarea(el);
+    });
+  });
+}
+
+function resolveExampleMessageInput(): HTMLTextAreaElement | null {
+  return (
+    tableScrollRef.value?.querySelector('textarea.example-message-input') ?? null
+  );
+}
+
+function autoResizeExampleTextarea(el: HTMLTextAreaElement) {
+  el.style.height = '0px';
+  const nextHeight = Math.max(EXAMPLE_MESSAGE_MIN_HEIGHT_PX, el.scrollHeight);
+  el.style.height = `${nextHeight}px`;
+}
+
+function resizeExampleMessageInput() {
+  void nextTick(() => {
+    void nextTick(() => {
+      const el = resolveExampleMessageInput();
+      if (el) {
+        autoResizeExampleTextarea(el);
+      }
+    });
+  });
 }
 
 function syncExampleMessageToText() {
@@ -379,6 +520,10 @@ watch(
   },
   { immediate: true },
 );
+
+watch(exampleMessage, () => {
+  resizeExampleMessageInput();
+});
 
 watch(
   () => apiStore.apiDoc?.generationPromptIds,
@@ -666,43 +811,106 @@ async function onSave() {
 }
 
 .document-table-scroll {
-  padding: 0 12px 12px;
+  padding: 16px 12px 12px;
 }
 
 .doc-section-block {
   margin-bottom: 12px;
+  border: 1px solid #eaecf0;
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.doc-section-block--collapsed {
+  margin-bottom: 8px;
+}
+
+.doc-section-title-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: #f9fafb;
+  color: #344054;
+  text-align: left;
+  cursor: pointer;
+}
+
+.doc-section-title-btn:hover {
+  background: #f2f4f7;
+}
+
+.doc-section-chevron {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 14px;
+  color: #667085;
+  font-size: 11px;
 }
 
 .doc-section-title {
-  margin: 0 0 6px;
   font-size: 14px;
   font-weight: 600;
   line-height: 1.3;
 }
 
-.example-message-block {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.doc-section-body {
+  padding: 0 10px 10px;
+}
+
+.doc-section-body .api-doc-table-wrap {
+  margin-top: 0;
+}
+
+.doc-section-body .example-message-block {
+  padding-top: 8px;
+}
+
+.example-message-shell {
+  position: relative;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.example-message-shell:focus-within {
+  border-color: var(--cf-brand, #b60f2d);
+  background: #fffbeb;
+}
+
+.example-message-beautify-btn {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  z-index: 1;
+  height: auto;
+  padding: 0 4px;
+  font-size: 12px;
 }
 
 .example-message-input {
   box-sizing: border-box;
+  display: block;
   width: 100%;
-  padding: 8px 10px;
-  border: 1px solid #d0d5dd;
-  border-radius: 6px;
-  background: #fff;
+  min-height: 160px;
+  padding: 30px 10px 10px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
   font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
   font-size: 13px;
   line-height: 1.5;
-  resize: vertical;
+  overflow-x: auto;
+  overflow-y: hidden;
+  resize: none;
+  field-sizing: content;
 }
 
 .example-message-input:focus {
   outline: none;
-  border-color: var(--cf-brand, #b60f2d);
-  background: #fffbeb;
 }
 
 .example-message-hint {

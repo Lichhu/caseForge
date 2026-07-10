@@ -82,6 +82,9 @@ export class ApiTestCaseEntity {
     source?: ApiCaseSource;
     inferredFields?: string[];
     promptIds?: string[];
+    promptId?: string;
+    scenarioName?: string;
+    promptName?: string;
     generateVersion?: number;
     debugEnvironmentId?: string;
     debugEnvironmentServiceId?: string;

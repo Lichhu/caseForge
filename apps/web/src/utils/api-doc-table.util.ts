@@ -3,8 +3,15 @@ export const API_DOC_SECTION_TITLES = [
   "服务信息",
   "技术信息",
   "请求报文",
-  "响应报文",
   "示例报文",
+] as const;
+
+/** 历史文档分区，仅用于解析边界，不在编辑器展示 */
+export const API_DOC_LEGACY_SECTION_TITLES = ["响应报文"] as const;
+
+export const API_DOC_SECTION_BOUNDARY_TITLES = [
+  ...API_DOC_SECTION_TITLES,
+  ...API_DOC_LEGACY_SECTION_TITLES,
 ] as const;
 
 export const API_DOC_SECTION_SEPARATOR = "----";
@@ -21,7 +28,7 @@ export function parseApiDocTableText(text: string): ApiDocTableSection[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
 
-  const sectionPattern = API_DOC_SECTION_TITLES.map((name) =>
+  const sectionPattern = API_DOC_SECTION_BOUNDARY_TITLES.map((name) =>
     name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
   ).join("|");
 

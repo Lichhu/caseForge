@@ -40,7 +40,6 @@ export function mapMessageTypeLabel(messageType: string): string {
  *   技术信息\n----\n通讯方式|Socket\n报文类型|XML\n...
  *   基础信息\n----\n服务URL|32.114.71.6:60030\n...
  *   请求报文\n----\n（requestHeadList + requestBodyList 字段表）
- *   响应报文\n----\n（responseHeadList + responseBodyList 字段表）
  */
 export function buildStructuredMarkdownFromSmp(
   callServiceList: SmpCallServiceInfoItem[],
@@ -104,18 +103,6 @@ export function buildStructuredMarkdownFromSmp(
     formatSmpBody(testItem.requestBody);
   if (requestSection) {
     sections.push(`请求报文\n${API_DOC_SECTION_SEPARATOR}\n${requestSection}`);
-  }
-
-  /* ── 响应报文 ── */
-  const responseSection =
-    buildFieldTableFromSmpNodeLists(
-      callItem.responseHeadList,
-      callItem.responseBodyList,
-    ) ??
-    buildFieldTableFromJsonBody(testItem.responseBody) ??
-    formatSmpBody(testItem.responseBody);
-  if (responseSection) {
-    sections.push(`响应报文\n${API_DOC_SECTION_SEPARATOR}\n${responseSection}`);
   }
 
   return sections.join("\n\n");

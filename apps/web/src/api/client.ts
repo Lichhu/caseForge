@@ -374,7 +374,7 @@ export async function uploadStructDocRequirement(
 ) {
   const form = new FormData();
   form.append("file", file);
-  const { data } = await http.post<StructDocDetail>(
+  const { data } = await http.post<StructDocDetail[]>(
     `/struct-doc/${projectId}/document/upload`,
     form,
   );
