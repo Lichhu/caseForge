@@ -177,6 +177,7 @@
             v-model:value="editForm.requirementNo"
             maxlength="64"
             placeholder="XQ2026-0818-01"
+            disabled
           />
         </a-form-item>
         <a-form-item label="需求名称" required>
@@ -389,7 +390,12 @@ async function submitCreateProject() {
       });
     }
     createModalOpen.value = false;
-  } catch {
+    message.success(isApiPlatform.value ? '项目已创建' : '需求项目已创建');
+    skipKeywordWatch.value = true;
+    keyword.value = isApiPlatform.value ? apiStore.projectListKeyword : caseStore.projectListKeyword;
+    skipKeywordWatch.value = false;
+  } catch (error) {
+    message.error((error as Error)?.message || '创建失败');
     return Promise.reject();
   } finally {
     creating.value = false;
@@ -504,15 +510,6 @@ async function submitEditProject() {
     message.warning('请输入需求名称');
     return Promise.reject();
   }
-  const requirementNo = editForm.value.requirementNo.trim();
-  if (!requirementNo) {
-    message.warning('请输入需求编号');
-    return Promise.reject();
-  }
-  if (!isValidRequirementNo(requirementNo)) {
-    message.warning('需求编号格式须为 XQxxxx-xxxx-xx');
-    return Promise.reject();
-  }
   if (saving.value || !editingProjectId.value) {
     return Promise.reject();
   }
@@ -521,18 +518,18 @@ async function submitEditProject() {
     if (isApiPlatform.value) {
       await apiStore.updateProjectInfo(editingProjectId.value, {
         title,
-        requirementNo,
         description: editForm.value.description.trim(),
       });
     } else {
       await caseStore.updateProjectInfo(editingProjectId.value, {
         title,
-        requirementNo,
         description: editForm.value.description.trim(),
       });
     }
     editModalOpen.value = false;
-  } catch {
+    message.success('项目信息已保存');
+  } catch (error) {
+    message.error((error as Error)?.message || '保存失败');
     return Promise.reject();
   } finally {
     saving.value = false;
