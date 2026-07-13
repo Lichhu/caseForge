@@ -24,6 +24,10 @@
           </a-button>
           <template #overlay>
             <a-menu @click="onCaseMoreMenuClick">
+              <a-menu-item key="export-excel">
+                <ExportOutlined />
+                导出 Excel
+              </a-menu-item>
               <a-menu-item key="environment">
                 <SettingOutlined />
                 维护环境
@@ -689,6 +693,11 @@
     </a-modal>
 
     <ApiEnvironmentMaintainModal v-model:open="envModalOpen" />
+    <ApiCaseExportModal
+      v-model:open="exportModalOpen"
+      :project-id="projectId"
+      :transaction-id="transactionId"
+    />
   </section>
 </template>
 
@@ -698,6 +707,7 @@ import {
   DeleteOutlined,
   DownOutlined,
   ExpandOutlined,
+  ExportOutlined,
   FormatPainterOutlined,
   InboxOutlined,
   PlusOutlined,
@@ -721,6 +731,7 @@ import { useApiTestStore } from '@/stores/apiTest';
 import KeyValueRowsEditor from '@/components/api-test/KeyValueRowsEditor.vue';
 import AssertionRowsEditor from '@/components/api-test/AssertionRowsEditor.vue';
 import ApiEnvironmentMaintainModal from '@/components/api-test/ApiEnvironmentMaintainModal.vue';
+import ApiCaseExportModal from '@/components/api-test/ApiCaseExportModal.vue';
 import { IMMERSIVE_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import {
   assertionsToRows,
@@ -762,12 +773,15 @@ function onPayloadTextareaPaste(event: Event) {
 
 const batchMode = ref(false);
 const envModalOpen = ref(false);
+const exportModalOpen = ref(false);
 const bodyExpandModalOpen = ref(false);
 const moreMenuOpen = ref(false);
 
 const onCaseMoreMenuClick: MenuProps['onClick'] = ({ key }) => {
   if (key === 'environment') {
     envModalOpen.value = true;
+  } else if (key === 'export-excel') {
+    exportModalOpen.value = true;
   }
 };
 

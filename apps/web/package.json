@@ -23,7 +23,8 @@
     "mind-elixir": "^5.12.2",
     "pinia": "^2.2.2",
     "vue": "^3.4.38",
-    "vue-router": "^4.4.3"
+    "vue-router": "^4.4.3",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.1.2",
