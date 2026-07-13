@@ -142,16 +142,27 @@
           <div v-show="!isSectionCollapsed(section.title)" class="doc-section-body">
             <div v-if="section.title === '示例报文'" class="example-message-block">
               <div class="example-message-shell">
-                <a-button
-                  type="link"
-                  size="small"
-                  class="example-message-beautify-btn"
-                  :disabled="!exampleMessage.trim()"
-                  @click="beautifyExampleMessage"
-                >
-                  <template #icon><FormatPainterOutlined /></template>
-                  美化
-                </a-button>
+                <div class="example-message-actions">
+                  <a-button
+                    type="link"
+                    size="small"
+                    class="example-message-beautify-btn"
+                    :disabled="!exampleMessage.trim()"
+                    @click="beautifyExampleMessage"
+                  >
+                    <template #icon><FormatPainterOutlined /></template>
+                    美化
+                  </a-button>
+                  <a-button
+                    type="link"
+                    size="small"
+                    class="example-message-expand-btn"
+                    @click="exampleExpandModalOpen = true"
+                  >
+                    <template #icon><ExpandOutlined /></template>
+                    展开编辑
+                  </a-button>
+                </div>
                 <textarea
                   v-model="exampleMessage"
                   class="example-message-input"
@@ -239,12 +250,50 @@
       />
     </div>
   </a-modal>
+
+  <a-modal
+    v-model:open="exampleExpandModalOpen"
+    title="编辑示例报文"
+    :width="1000"
+    :z-index="IMMERSIVE_OVERLAY_Z_INDEX"
+    ok-text="完成"
+    cancel-text="取消"
+    wrap-class-name="example-message-expand-modal-wrap"
+    :destroy-on-close="false"
+    @ok="onExampleExpandModalOk"
+  >
+    <div class="example-message-expand-modal">
+      <p class="example-message-expand-hint">
+        可选。填写后将作为 AI 生成案例的报文样例参考。
+      </p>
+      <div class="example-message-expand-toolbar">
+        <a-button
+          type="link"
+          size="small"
+          class="example-message-beautify-btn"
+          :disabled="!exampleMessage.trim()"
+          @click="beautifyExampleMessage"
+        >
+          <template #icon><FormatPainterOutlined /></template>
+          美化
+        </a-button>
+      </div>
+      <textarea
+        v-model="exampleMessage"
+        class="example-message-expand-input"
+        placeholder="可选。填写后将作为 AI 生成案例的报文样例参考。"
+        spellcheck="false"
+        @input="onExampleMessageInput"
+      />
+    </div>
+  </a-modal>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onActivated, onDeactivated, reactive, ref, watch } from 'vue';
 import {
   DownOutlined,
+  ExpandOutlined,
   FormatPainterOutlined,
   HistoryOutlined,
   RightOutlined,
@@ -259,6 +308,7 @@ import ScenarioMaintainModal from '@/components/ScenarioMaintainModal.vue';
 import ScenarioPromptPicker from '@/components/ScenarioPromptPicker.vue';
 import SmpDocumentViewer from '@/components/api-test/SmpDocumentViewer.vue';
 import ApiCaseGenerateHistoryDrawer from '@/components/api-test/ApiCaseGenerateHistoryDrawer.vue';
+import { IMMERSIVE_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import { useApiTestStore } from '@/stores/apiTest';
 import { filterSelectablePromptIds, collectDefaultPromptIds } from '@/utils/scenarioLibrary';
 import {
@@ -288,6 +338,7 @@ const syncingFromStore = ref(false);
 const panelActive = ref(true);
 const scenarioModalOpen = ref(false);
 const generateModalOpen = ref(false);
+const exampleExpandModalOpen = ref(false);
 const historyDrawerOpen = ref(false);
 const moreMenuOpen = ref(false);
 const docPromptIds = ref<string[]>([]);
@@ -374,7 +425,7 @@ function loadFromText(text: string) {
 
 function onExampleMessageInput(event: Event) {
   const el = event.target;
-  if (el instanceof HTMLTextAreaElement) {
+  if (el instanceof HTMLTextAreaElement && el.classList.contains('example-message-input')) {
     autoResizeExampleTextarea(el);
   }
   syncExampleMessageToText();
@@ -384,6 +435,13 @@ function onExampleMessageInput(event: Event) {
 function onExampleMessageBlur() {
   syncExampleMessageToText();
   void flushAutoSave({ notify: true });
+}
+
+function onExampleExpandModalOk() {
+  syncExampleMessageToText();
+  void flushAutoSave({ notify: true });
+  exampleExpandModalOpen.value = false;
+  resizeExampleMessageInput();
 }
 
 function detectExampleMessageFormat(text: string): 'json' | 'xml' | 'text' {
@@ -881,11 +939,18 @@ async function onSave() {
   background: #fffbeb;
 }
 
-.example-message-beautify-btn {
+.example-message-actions {
   position: absolute;
   top: 2px;
   right: 4px;
   z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.example-message-beautify-btn,
+.example-message-expand-btn {
   height: auto;
   padding: 0 4px;
   font-size: 12px;
@@ -918,6 +983,46 @@ async function onSave() {
   color: #667085;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.example-message-expand-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.example-message-expand-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #98a2b3;
+}
+
+.example-message-expand-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.example-message-expand-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: min(68vh, 720px);
+  max-height: 72vh;
+  padding: 12px 14px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  background: #fff;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  resize: vertical;
+  overflow: auto;
+}
+
+.example-message-expand-input:focus {
+  outline: none;
+  border-color: var(--cf-brand, #b60f2d);
+  box-shadow: 0 0 0 2px rgb(182 15 45 / 8%);
 }
 
 .api-doc-table-wrap {

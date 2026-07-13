@@ -28,6 +28,7 @@ import { toPublicApiRun } from "@common/http/public-response.util";
 const DEFAULT_CONCURRENCY = 5;
 const MAX_CONCURRENCY = 10;
 const DEFAULT_TIMEOUT_MS = 30_000;
+const TCP_IDLE_TIMEOUT_MS = 1_500;
 
 type RuntimeService = {
   id: string;
@@ -431,7 +432,7 @@ export class ApiExecutionService {
         target.port,
         payload,
         encoding,
-        !resolvedFraming,
+        resolvedFraming,
       );
       const durationMs = Date.now() - started;
       const responseSnapshot = {
@@ -627,7 +628,7 @@ export class ApiExecutionService {
         target.port,
         payload,
         encoding,
-        !resolvedFraming,
+        resolvedFraming,
       );
       const durationMs = Date.now() - started;
       const assertions = runAssertions({
@@ -750,7 +751,7 @@ function buildRequestBody(request: { method: string; body?: unknown }) {
   return JSON.stringify(request.body);
 }
 
-function buildTcpPayload(
+export function buildTcpPayload(
   request: ApiCaseRequest,
   encoding: string,
   framing?: { type: "length-prefix"; width: number; encoding?: string },
@@ -780,36 +781,92 @@ function encodeText(value: string, encoding: string) {
   return Buffer.from(value, "utf8");
 }
 
-function sendTcpPayload(
+export function sendTcpPayload(
   host: string,
   port: number,
   payload: Buffer,
   encoding: string,
-  halfClose: boolean,
+  framing?: { type: "length-prefix"; width?: number; encoding?: string },
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const socket = new Socket();
     const chunks: Buffer[] = [];
-    const timer = setTimeout(() => {
+    const frameWidth = framing ? (framing.width ?? 8) : 0;
+    let totalReceived = 0;
+    let expectedTotal: number | undefined;
+    let prefixChecked = false;
+    let settled = false;
+    let connected = false;
+    let idleTimer: NodeJS.Timeout | undefined;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (idleTimer) clearTimeout(idleTimer);
       socket.destroy();
-      reject(new Error("TCP 请求超时"));
-    }, DEFAULT_TIMEOUT_MS);
-    socket.once("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    socket.on("data", (chunk) => chunks.push(chunk));
-    socket.once("end", () => {
-      clearTimeout(timer);
       const buf = Buffer.concat(chunks);
       const responseEncoding = detectResponseEncoding(buf, encoding);
       resolve(decodeText(buf, responseEncoding));
+    };
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (idleTimer) clearTimeout(idleTimer);
+      socket.destroy();
+      reject(error);
+    };
+    const timer = setTimeout(() => {
+      if (chunks.length > 0) {
+        finish();
+      } else if (!connected) {
+        fail(new Error(`TCP 连接超时（${host}:${port}），请确认地址可达`));
+      } else {
+        fail(
+          new Error(
+            `TCP 已连接但未收到响应（${host}:${port}），请检查长度前缀与编码配置`,
+          ),
+        );
+      }
+    }, DEFAULT_TIMEOUT_MS);
+    const decodeAccumulated = () => decodeText(Buffer.concat(chunks), encoding);
+    const isComplete = () => {
+      if (frameWidth <= 0) return false;
+      if (!prefixChecked && totalReceived >= frameWidth) {
+        prefixChecked = true;
+        const head = Buffer.concat(chunks)
+          .subarray(0, frameWidth)
+          .toString("latin1");
+        if (/^\d+$/.test(head)) {
+          expectedTotal = frameWidth + Number(head);
+        }
+      }
+      if (expectedTotal !== undefined && totalReceived >= expectedTotal) {
+        return true;
+      }
+      return decodeAccumulated().includes("</Transaction>");
+    };
+    socket.once("error", (error) => fail(error));
+    socket.on("data", (chunk) => {
+      chunks.push(chunk);
+      totalReceived += chunk.length;
+      if (isComplete()) {
+        finish();
+        return;
+      }
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(finish, TCP_IDLE_TIMEOUT_MS);
+    });
+    socket.once("end", finish);
+    socket.once("close", () => {
+      if (chunks.length > 0) finish();
     });
     socket.connect(port, host, () => {
-      if (halfClose) {
-        socket.end(payload);
-      } else {
+      connected = true;
+      if (framing) {
         socket.write(payload);
+      } else {
+        socket.end(payload);
       }
     });
   });

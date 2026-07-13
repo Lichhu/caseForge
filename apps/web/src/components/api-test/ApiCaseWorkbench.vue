@@ -359,16 +359,26 @@
                               {{ item.label }}
                             </button>
                           </div>
-                          <a-button
-                            v-if="canBeautifyBody"
-                            type="link"
-                            size="small"
-                            class="case-editor-beautify-btn"
-                            @click="beautifyRequestJson"
-                          >
-                            <template #icon><FormatPainterOutlined /></template>
-                            美化
-                          </a-button>
+                          <div v-if="canBeautifyBody" class="case-editor-chrome-actions">
+                            <a-button
+                              type="link"
+                              size="small"
+                              class="case-editor-beautify-btn"
+                              @click="beautifyRequestJson"
+                            >
+                              <template #icon><FormatPainterOutlined /></template>
+                              美化
+                            </a-button>
+                            <a-button
+                              type="link"
+                              size="small"
+                              class="case-editor-expand-btn"
+                              @click="bodyExpandModalOpen = true"
+                            >
+                              <template #icon><ExpandOutlined /></template>
+                              展开编辑
+                            </a-button>
+                          </div>
                         </div>
                         <div class="case-editor-content">
                         <template v-if="form.bodyFormat === 'json'">
@@ -613,6 +623,71 @@
       description="请先在接口文档中 AI 生成案例"
     />
 
+    <a-modal
+      v-model:open="bodyExpandModalOpen"
+      :title="bodyExpandModalTitle"
+      :width="1000"
+      :z-index="IMMERSIVE_OVERLAY_Z_INDEX"
+      ok-text="完成"
+      cancel-text="取消"
+      wrap-class-name="case-body-expand-modal-wrap"
+      :destroy-on-close="false"
+      @ok="bodyExpandModalOpen = false"
+    >
+      <div class="case-body-expand-modal">
+        <p class="case-body-expand-hint">{{ bodyTabHint }}</p>
+        <div class="case-body-expand-toolbar">
+          <div class="case-body-format-bar">
+            <button
+              v-for="item in bodyFormatOptions"
+              :key="item.value"
+              type="button"
+              class="case-body-format-btn"
+              :class="{
+                active: form.bodyFormat === item.value,
+                disabled: form.protocol === 'http' && !httpMethodHasBody(form.httpMethod),
+              }"
+              :disabled="form.protocol === 'http' && !httpMethodHasBody(form.httpMethod)"
+              @click="form.bodyFormat = item.value"
+            >
+              {{ item.label }}
+            </button>
+          </div>
+          <a-button
+            v-if="canBeautifyBody"
+            type="link"
+            size="small"
+            class="case-editor-beautify-btn"
+            @click="beautifyRequestJson"
+          >
+            <template #icon><FormatPainterOutlined /></template>
+            美化
+          </a-button>
+        </div>
+        <textarea
+          v-if="form.bodyFormat === 'json'"
+          v-model="form.requestBodyJson"
+          class="ant-input editor-textarea case-json-editor case-body-expand-textarea"
+          placeholder="{}"
+          spellcheck="false"
+        />
+        <textarea
+          v-else-if="form.bodyFormat === 'xml'"
+          v-model="form.requestBodyXml"
+          class="ant-input editor-textarea case-xml-editor case-body-expand-textarea"
+          placeholder="XML 报文"
+          spellcheck="false"
+        />
+        <textarea
+          v-else
+          v-model="form.requestBodyText"
+          class="ant-input editor-textarea case-body-expand-textarea"
+          placeholder="纯文本报文"
+          spellcheck="false"
+        />
+      </div>
+    </a-modal>
+
     <ApiEnvironmentMaintainModal v-model:open="envModalOpen" />
   </section>
 </template>
@@ -622,6 +697,7 @@ import { computed, nextTick, onActivated, reactive, ref, watch } from 'vue';
 import {
   DeleteOutlined,
   DownOutlined,
+  ExpandOutlined,
   FormatPainterOutlined,
   InboxOutlined,
   PlusOutlined,
@@ -645,6 +721,7 @@ import { useApiTestStore } from '@/stores/apiTest';
 import KeyValueRowsEditor from '@/components/api-test/KeyValueRowsEditor.vue';
 import AssertionRowsEditor from '@/components/api-test/AssertionRowsEditor.vue';
 import ApiEnvironmentMaintainModal from '@/components/api-test/ApiEnvironmentMaintainModal.vue';
+import { IMMERSIVE_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import {
   assertionsToRows,
   buildExpectedFromRows,
@@ -685,6 +762,7 @@ function onPayloadTextareaPaste(event: Event) {
 
 const batchMode = ref(false);
 const envModalOpen = ref(false);
+const bodyExpandModalOpen = ref(false);
 const moreMenuOpen = ref(false);
 
 const onCaseMoreMenuClick: MenuProps['onClick'] = ({ key }) => {
@@ -1073,6 +1151,13 @@ const canBeautifyBody = computed(
   () =>
     httpMethodHasBody(form.httpMethod) || form.protocol !== 'http',
 );
+
+const bodyExpandModalTitle = computed(() => {
+  const label =
+    bodyFormatOptions.find((item) => item.value === form.bodyFormat)?.label ??
+    'Body';
+  return `编辑请求 Body（${label}）`;
+});
 
 const headersTabHint = computed(() => {
   if (form.protocol === 'http') return '配置请求头，如 Content-Type、Authorization 等';
@@ -1847,10 +1932,18 @@ function onBatchDelete() {
 
 .api-case-panel .instruction-editor-body {
   overflow: hidden;
+  gap: 8px;
+  padding: 12px 16px 8px;
 }
 
 .api-case-panel .editor-hero {
   flex-shrink: 0;
+  padding: 10px 14px;
+}
+
+.api-case-panel .instruction-editor-body > .case-payload-block {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .case-list-toolbar {
@@ -2511,15 +2604,23 @@ function onBatchDelete() {
   flex-shrink: 0;
 }
 
+.case-editor-chrome-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
 .case-editor-content {
   flex: 1;
-  min-height: 0;
+  min-height: 280px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-.case-editor-beautify-btn {
+.case-editor-beautify-btn,
+.case-editor-expand-btn {
   flex-shrink: 0;
   height: auto;
   padding: 0 4px;
@@ -2675,6 +2776,45 @@ function onBatchDelete() {
 }
 
 .case-payload-textarea--expand.case-xml-editor {
+  white-space: pre;
+}
+
+.case-body-expand-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.case-body-expand-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #98a2b3;
+}
+
+.case-body-expand-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.case-body-expand-textarea {
+  width: 100%;
+  min-height: min(68vh, 720px);
+  max-height: 72vh;
+  padding: 12px 14px;
+  border: 1px solid #d0d5dd !important;
+  border-radius: 8px !important;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  resize: vertical;
+  box-sizing: border-box;
+  overflow: auto;
+}
+
+.case-body-expand-textarea.case-xml-editor {
   white-space: pre;
 }
 
