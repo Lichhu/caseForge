@@ -376,7 +376,7 @@
                               @click="bodyExpandModalOpen = true"
                             >
                               <template #icon><ExpandOutlined /></template>
-                              展开编辑
+                              编辑
                             </a-button>
                           </div>
                         </div>
