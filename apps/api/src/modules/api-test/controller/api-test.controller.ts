@@ -55,7 +55,7 @@ import { SmpSyncTransactionsDto } from "@api-test/dto/smp-sync-transactions.dto"
 import { ListApiCasesDto } from "@api-test/dto/list-api-cases.dto";
 import { ListApiExecutionSetsDto } from "@api-test/dto/list-api-execution-sets.dto";
 import { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
-import { generateAssertionsFromResponse } from "@api-test/util/api-case-ai.util";
+import { ApiAssertionGenerateQueueService } from "@api-test/service/api-assertion-generate-queue.service";
 
 const UPLOAD_EXTENSIONS = ["xls", "xlsx"];
 
@@ -73,6 +73,7 @@ export class ApiTestController {
     private readonly smpSyncService: SmpSyncService,
     private readonly minio: MinioStorageService,
     private readonly aiWorkflow: AiWorkflowService,
+    private readonly assertionGenerateQueueService: ApiAssertionGenerateQueueService,
     @InjectRepository(CaseProjectEntity)
     private readonly projectRepo: Repository<CaseProjectEntity>,
   ) {}
@@ -567,11 +568,11 @@ export class ApiTestController {
       expected?: Record<string, unknown>;
       polarity?: "positive" | "negative";
       environmentId: string;
-    environmentServiceId?: string;
-    caseId?: string;
-    encoding?: string;
-  },
-) {
+      environmentServiceId?: string;
+      caseId?: string;
+      encoding?: string;
+    },
+  ) {
     const result = await this.apiExecutionService.debugRun({
       projectId,
       request: body.request as any,
@@ -597,11 +598,13 @@ export class ApiTestController {
   }
 
   @Post(":projectId/transactions/:transactionId/cases/generate-assertions")
-  @ApiOperation({ summary: "AI 根据响应体生成断言" })
+  @ApiOperation({ summary: "AI 根据响应体生成断言（入队）" })
   async generateAssertions(
     @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
     @Body()
     body: {
+      caseId?: string;
       transport: string;
       messageFormat: string;
       polarity: "positive" | "negative";
@@ -613,11 +616,75 @@ export class ApiTestController {
     if (!this.aiWorkflow.canUseAiChat()) {
       throw new BadRequestException("AI Chat 未配置，请检查 AI_CHAT_URL");
     }
-    const assertions = await generateAssertionsFromResponse(
-      this.aiWorkflow,
-      body,
+    const job = await this.assertionGenerateQueueService.enqueue({
+      projectId,
+      transactionId,
+      caseId: body.caseId,
+      transport: body.transport,
+      messageFormat: body.messageFormat,
+      polarity: body.polarity,
+      statusCode: body.statusCode,
+      headers: body.headers,
+      body: body.body,
+    });
+    return { jobId: job.id, phase: job.status };
+  }
+
+  @Get(
+    ":projectId/transactions/:transactionId/cases/generate-assertions/status",
+  )
+  @ApiOperation({ summary: "查询断言生成任务状态" })
+  async getAssertionGenerateStatus(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+    @Query("caseId") caseId?: string,
+    @Query("jobId") jobId?: string,
+  ) {
+    return this.assertionGenerateQueueService.getStatus(
+      projectId,
+      transactionId,
+      caseId,
+      jobId,
     );
-    return { assertions };
+  }
+
+  @Get(
+    ":projectId/transactions/:transactionId/cases/generate-assertions/result",
+  )
+  @ApiOperation({ summary: "获取断言生成结果" })
+  async getAssertionGenerateResult(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+    @Query("caseId") caseId?: string,
+    @Query("jobId") jobId?: string,
+  ) {
+    const result = await this.assertionGenerateQueueService.getResult(
+      projectId,
+      transactionId,
+      caseId,
+      jobId,
+    );
+    if (!result) {
+      throw new BadRequestException("断言生成结果不存在或尚未完成");
+    }
+    return result;
+  }
+
+  @Post(
+    ":projectId/transactions/:transactionId/cases/generate-assertions/cancel",
+  )
+  @ApiOperation({ summary: "取消断言生成任务" })
+  async cancelAssertionGenerate(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+    @Body() body: { caseId?: string; jobId?: string },
+  ) {
+    return this.assertionGenerateQueueService.cancel(
+      projectId,
+      transactionId,
+      body?.caseId,
+      body?.jobId,
+    );
   }
 
   @Post(":projectId/transactions/:transactionId/runs")

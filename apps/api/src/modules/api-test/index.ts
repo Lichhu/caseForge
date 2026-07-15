@@ -5,6 +5,7 @@ import { MinioStorageModule } from "@minio/index";
 import { AiWorkflowModule } from "@common/ai-workflow";
 import { ApiTestController } from "./controller/api-test.controller";
 import { ApiCaseGenerateJobEntity } from "./entity/api-case-generate-job.entity";
+import { ApiAssertionGenerateJobEntity } from "./entity/api-assertion-generate-job.entity";
 import { ApiDocEntity } from "./entity/api-doc.entity";
 import { ApiEndpointEntity } from "./entity/api-endpoint.entity";
 import { ApiTestCaseEntity } from "./entity/api-test-case.entity";
@@ -19,6 +20,7 @@ import { PromptEntity } from "@scenario/entity/prompt.entity";
 import { ApiDocService } from "./service/api-doc.service";
 import { ApiCaseService } from "./service/api-case.service";
 import { ApiCaseGenerateQueueService } from "./service/api-case-generate-queue.service";
+import { ApiAssertionGenerateQueueService } from "./service/api-assertion-generate-queue.service";
 import { ApiTransactionService } from "./service/api-transaction.service";
 import { ApiExecutionSetService } from "./service/api-execution-set.service";
 import { ApiEnvironmentService } from "./service/api-environment.service";
@@ -31,6 +33,7 @@ import { SmpSyncService } from "./service/smp-sync.service";
   imports: [
     TypeOrmModule.forFeature([
       ApiCaseGenerateJobEntity,
+      ApiAssertionGenerateJobEntity,
       ApiDocEntity,
       ApiEndpointEntity,
       ApiTestCaseEntity,
@@ -52,6 +55,7 @@ import { SmpSyncService } from "./service/smp-sync.service";
     ApiDocService,
     ApiCaseService,
     ApiCaseGenerateQueueService,
+    ApiAssertionGenerateQueueService,
     ApiExecutionSetService,
     ApiEnvironmentService,
     ApiExecutionService,

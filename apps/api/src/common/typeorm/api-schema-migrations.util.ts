@@ -67,6 +67,7 @@ async function alignUuidColumn(
 }
 
 export async function applyApiTestSchemaMigrations(runner: Queryable) {
+  await ensureApiAssertionGenerateJobTable(runner);
   if (!(await tableExists(runner, "api_doc"))) {
     return;
   }
@@ -76,6 +77,37 @@ export async function applyApiTestSchemaMigrations(runner: Queryable) {
   await ensureApiTransactionTable(runner);
   await ensureApiTestCaseColumns(runner);
   await ensureExecutionPlatformTables(runner);
+}
+
+async function ensureApiAssertionGenerateJobTable(runner: Queryable) {
+  if (await tableExists(runner, "api_assertion_generate_job")) {
+    return;
+  }
+  await runner.query(`
+    CREATE TABLE api_assertion_generate_job (
+      id VARCHAR(36) CHARACTER SET utf8 NOT NULL PRIMARY KEY,
+      projectId VARCHAR(36) CHARACTER SET utf8 NOT NULL,
+      transactionId VARCHAR(36) CHARACTER SET utf8 NOT NULL,
+      caseId VARCHAR(36) CHARACTER SET utf8 NULL,
+      transport VARCHAR(50) NOT NULL,
+      messageFormat VARCHAR(20) NOT NULL,
+      polarity VARCHAR(20) NOT NULL,
+      statusCode INT NOT NULL,
+      headers JSON NOT NULL,
+      body LONGTEXT NOT NULL,
+      status ENUM('queued','running','completed','failed','cancelled') NOT NULL DEFAULT 'queued',
+      resultAssertions JSON NULL,
+      queuedAt DATETIME(3) NOT NULL,
+      startedAt DATETIME(3) NULL,
+      finishedAt DATETIME(3) NULL,
+      errorMessage TEXT NULL,
+      createdBy VARCHAR(255) NULL DEFAULT 'system',
+      createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+      updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+      INDEX idx_api_assertion_gen_job_status_queued (status, queuedAt),
+      INDEX idx_api_assertion_gen_job_case (projectId, transactionId, caseId)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
 }
 
 async function ensureApiTransactionTable(runner: Queryable) {

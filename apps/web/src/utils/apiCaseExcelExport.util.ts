@@ -1,7 +1,7 @@
 import type { ApiTestCaseRow } from "@/api/apiTestClient";
 import * as XLSX from "xlsx";
 
-const EXPORT_BASE_HEADERS = ["属性", "案例名称", "启用状态"] as const;
+const EXPORT_BASE_HEADERS = ["序号", "属性", "描述", "启用状态"] as const;
 const REMARK_HEADER = "备注";
 
 function looksLikeXml(value: string): boolean {
@@ -209,9 +209,15 @@ export function buildCaseExportData(cases: ApiTestCaseRow[]) {
 
   const rows = cases.map((c, index) => {
     const fields = caseFieldMaps[index];
+    const serialNumber = String(index + 1);
     const polarityLabel = c.polarity === "negative" ? "反案例" : "正案例";
     const enabledLabel = c.enabled ? "是" : "否";
-    const base = [polarityLabel, c.title || c.caseNo || "", enabledLabel];
+    const base = [
+      serialNumber,
+      polarityLabel,
+      c.description ?? "",
+      enabledLabel,
+    ];
     const dynamicValues = dynamicHeaders.map((header) => {
       const path = allPaths.find((p) => pathToHeader.get(p) === header);
       if (!path) return "";

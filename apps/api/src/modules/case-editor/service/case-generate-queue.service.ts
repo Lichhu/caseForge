@@ -6,6 +6,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  OnModuleDestroy,
   OnModuleInit,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
@@ -20,7 +21,7 @@ import {
   getCaseGenerateActiveCount,
   getCaseGenerateConcurrency,
   getCaseGenerateWaitingCount,
-  setCaseGenerateSlotReleaseHook,
+  registerCaseGenerateSlotReleaseHook,
   withCaseGenerateSlot,
 } from "@case-editor/util/case-generate-concurrency";
 import {
@@ -70,9 +71,10 @@ export interface CaseGenerateQueueStatusResponse {
 }
 
 @Injectable()
-export class CaseGenerateQueueService implements OnModuleInit {
+export class CaseGenerateQueueService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CaseGenerateQueueService.name);
   private pumping = false;
+  private unregisterSlotHook?: () => void;
 
   constructor(
     @InjectRepository(CaseGenerateJobEntity)
@@ -86,12 +88,16 @@ export class CaseGenerateQueueService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    setCaseGenerateSlotReleaseHook(() => {
+    this.unregisterSlotHook = registerCaseGenerateSlotReleaseHook(() => {
       void this.pump();
     });
     void this.recoverInterruptedJobs()
       .then(() => this.reconcileGeneratingInstructs())
       .then(() => this.pump());
+  }
+
+  onModuleDestroy() {
+    this.unregisterSlotHook?.();
   }
 
   async recoverInterruptedJobs() {

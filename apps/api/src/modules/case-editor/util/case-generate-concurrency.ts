@@ -22,14 +22,6 @@ export function registerCaseGenerateSlotReleaseHook(hook: () => void) {
   return () => slotReleaseHooks.delete(hook);
 }
 
-/** 单队列兼容：覆盖全部槽位释放回调 */
-export function setCaseGenerateSlotReleaseHook(hook: (() => void) | undefined) {
-  slotReleaseHooks.clear();
-  if (hook) {
-    slotReleaseHooks.add(hook);
-  }
-}
-
 /** 当前占用的槽位数 */
 export function getCaseGenerateActiveCount() {
   return activeCount;

@@ -702,7 +702,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onActivated, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, reactive, ref, watch } from 'vue';
 import {
   DeleteOutlined,
   DownOutlined,
@@ -726,7 +726,7 @@ import {
 } from '@case-forge/shared';
 import type { ApiCaseRequest } from '@case-forge/shared';
 import type { ApiTestCaseRow, DebugRunResult } from '@/api/apiTestClient';
-import { listAllApiCases, debugRunCase, generateAssertions } from '@/api/apiTestClient';
+import { listAllApiCases, debugRunCase, generateAssertions, getAssertionGenerateStatus, getAssertionGenerateResult } from '@/api/apiTestClient';
 import { useApiTestStore } from '@/stores/apiTest';
 import KeyValueRowsEditor from '@/components/api-test/KeyValueRowsEditor.vue';
 import AssertionRowsEditor from '@/components/api-test/AssertionRowsEditor.vue';
@@ -790,6 +790,15 @@ const isNewCase = ref(false);
 const syncingForm = ref(false);
 const debugRunningCaseKey = ref<string | null>(null);
 const generatingAssertionsCaseKey = ref<string | null>(null);
+
+let assertionPollTimer: ReturnType<typeof setInterval> | null = null;
+interface AssertionPollTarget {
+  jobId: string;
+  caseKey: string;
+  caseId?: string;
+}
+let assertionPollTarget: AssertionPollTarget | null = null;
+const ASSERTION_POLL_INTERVAL_MS = 1500;
 const debugResult = ref<DebugRunResult | null>(null);
 const debugServiceId = ref<string>('');
 const debugEncoding = ref('UTF-8');
@@ -865,37 +874,27 @@ const debugServiceOptions = computed(() => {
   const envId = apiStore.selectedEnvironmentId;
   if (!envId) return [];
   const services = apiStore.environmentServices[envId] ?? [];
-  const expectedTransport = resolveDebugExpectedTransport();
   return services
     .filter((s) => s.enabled)
     .map((s) => {
       const transport = s.transport ?? 'http';
-      const mismatch = transport !== expectedTransport;
       return {
-        label: mismatch
-          ? `${s.name} (${transport.toUpperCase()} · 协议不符)`
-          : `${s.name} (${transport.toUpperCase()})`,
+        label: `${s.name} (${transport.toUpperCase()})`,
         value: s.id,
-        disabled: mismatch,
       };
     });
 });
 
 const hasDebugServices = computed(() => debugServiceOptions.value.length > 0);
 
-function resolveDebugExpectedTransport(): 'http' | 'tcp' {
-  return form.protocol === 'socket' ? 'tcp' : 'http';
-}
-
 function syncDebugServiceSelection() {
-  const compatible = debugServiceOptions.value.filter((item) => !item.disabled);
   if (
     debugServiceId.value &&
-    compatible.some((item) => item.value === debugServiceId.value)
+    debugServiceOptions.value.some((item) => item.value === debugServiceId.value)
   ) {
     return;
   }
-  debugServiceId.value = compatible[0]?.value ?? '';
+  debugServiceId.value = debugServiceOptions.value[0]?.value ?? '';
 }
 const editorMainTab = ref<'basic' | 'request' | 'assertion'>('request');
 const editorMainTabs = [
@@ -969,6 +968,11 @@ async function loadAvailableVersions() {
 onActivated(() => {
   void loadAvailableVersions();
   void ensureDebugEnvironments();
+  void syncAssertionGenerateFromServer();
+});
+
+onDeactivated(() => {
+  stopAssertionPoll();
 });
 
 async function ensureDebugEnvironments() {
@@ -1824,10 +1828,11 @@ async function onGenerateAssertions() {
   try {
     const transport = form.protocol === 'socket' ? 'tcp' : 'http';
     const messageFormat = form.bodyFormat === 'xml' ? 'xml' : form.bodyFormat === 'text' ? 'text' : 'json';
-    const { assertions } = await generateAssertions(
+    const job = await generateAssertions(
       projectId.value,
       transactionId.value,
       {
+        caseId: caseIdAtStart,
         transport,
         messageFormat,
         polarity: form.polarity,
@@ -1836,61 +1841,148 @@ async function onGenerateAssertions() {
         body: result.body,
       },
     );
-    if (!assertions.length) {
-      if (isStillOnCase(caseKey)) {
-        message.warning('AI 未生成有效断言，请手动编辑');
-      }
-      return;
-    }
-    if (!isStillOnCase(caseKey)) {
-      if (caseIdAtStart) {
-        const row = apiStore.cases.find((item) => item.id === caseIdAtStart);
-        if (row) {
-          const expected = buildExpectedFromRows(assertionsToRows(assertions));
-          await apiStore.saveCase(
-            projectId.value,
-            transactionId.value,
-            {
-              endpointId: row.endpointId,
-              title: row.title,
-              caseNo: row.caseNo,
-              description: row.description,
-              remark: row.remark,
-              transactionCode: row.transactionCode,
-              owner: row.owner,
-              polarity: row.polarity,
-              status: row.status,
-              enabled: row.enabled,
-              request: row.request,
-              expected,
-              debugEnvironmentId: row.metadata?.debugEnvironmentId,
-              debugEnvironmentServiceId: row.metadata?.debugEnvironmentServiceId,
-              lastDebugRun: row.metadata?.lastDebugRun,
-            },
-            caseIdAtStart,
-            { silent: true },
-          );
-          message.success(`案例「${row.title || row.caseNo || '未命名'}」的断言已生成`);
-        }
-      }
-      return;
-    }
-    form.assertionRows = assertionsToRows(assertions);
-    debugResponseTab.value = 'expected';
-    const saved = await persistCase({ silent: true });
-    if (saved) {
-      message.success(`AI 生成了 ${assertions.length} 条断言并已保存`);
-    } else if (!form.title.trim()) {
-      message.warning(`AI 生成了 ${assertions.length} 条断言，请填写案例名称后保存`);
-    } else {
-      message.warning(`AI 生成了 ${assertions.length} 条断言，但自动保存失败，请手动点击保存`);
-    }
+    startAssertionPoll(job.jobId, caseKey, caseIdAtStart);
   } catch {
     if (isStillOnCase(caseKey)) {
-      message.error('AI 生成断言失败，请稍后重试');
+      message.error('AI 生成断言入队失败，请稍后重试');
     }
-  } finally {
     releaseCaseTask(generatingAssertionsCaseKey, caseKey);
+  }
+}
+
+function startAssertionPoll(jobId: string, caseKey: string, caseId?: string) {
+  assertionPollTarget = { jobId, caseKey, caseId };
+  if (assertionPollTimer) return;
+  void syncAssertionPoll();
+  assertionPollTimer = setInterval(() => {
+    void syncAssertionPoll();
+  }, ASSERTION_POLL_INTERVAL_MS);
+}
+
+function stopAssertionPoll() {
+  if (assertionPollTimer) {
+    clearInterval(assertionPollTimer);
+    assertionPollTimer = null;
+  }
+  assertionPollTarget = null;
+}
+
+async function syncAssertionPoll() {
+  const target = assertionPollTarget;
+  if (!target) {
+    stopAssertionPoll();
+    return;
+  }
+  const pid = projectId.value;
+  const tid = transactionId.value;
+  if (!pid || !tid) return;
+  try {
+    const status = await getAssertionGenerateStatus(pid, tid, target.caseId, target.jobId);
+    if (status.phase === 'queued' || status.phase === 'running') return;
+    stopAssertionPoll();
+    await applyAssertionResult(target, status.phase, status.errorMessage);
+  } catch {
+    // 状态查询失败不打断轮询
+  }
+}
+
+async function applyAssertionResult(
+  target: AssertionPollTarget,
+  phase: string,
+  errorMessage?: string,
+) {
+  const pid = projectId.value;
+  const tid = transactionId.value;
+  if (!pid || !tid) return;
+
+  if (phase === 'completed') {
+    try {
+      const { assertions } = await getAssertionGenerateResult(
+        pid,
+        tid,
+        target.caseId,
+        target.jobId,
+      );
+      if (!assertions.length) {
+        if (isStillOnCase(target.caseKey)) {
+          message.warning('AI 未生成有效断言，请手动编辑');
+        }
+        releaseCaseTask(generatingAssertionsCaseKey, target.caseKey);
+        return;
+      }
+      if (!isStillOnCase(target.caseKey)) {
+        if (target.caseId) {
+          const row = apiStore.cases.find((item) => item.id === target.caseId);
+          if (row) {
+            const expected = buildExpectedFromRows(assertionsToRows(assertions));
+            await apiStore.saveCase(
+              pid,
+              tid,
+              {
+                endpointId: row.endpointId,
+                title: row.title,
+                caseNo: row.caseNo,
+                description: row.description,
+                remark: row.remark,
+                transactionCode: row.transactionCode,
+                owner: row.owner,
+                polarity: row.polarity,
+                status: row.status,
+                enabled: row.enabled,
+                request: row.request,
+                expected,
+                debugEnvironmentId: row.metadata?.debugEnvironmentId,
+                debugEnvironmentServiceId: row.metadata?.debugEnvironmentServiceId,
+                lastDebugRun: row.metadata?.lastDebugRun,
+              },
+              target.caseId,
+              { silent: true },
+            );
+            message.success(`案例「${row.title || row.caseNo || '未命名'}」的断言已生成`);
+          }
+        }
+        releaseCaseTask(generatingAssertionsCaseKey, target.caseKey);
+        return;
+      }
+      form.assertionRows = assertionsToRows(assertions);
+      debugResponseTab.value = 'expected';
+      const saved = await persistCase({ silent: true });
+      if (saved) {
+        message.success(`AI 生成了 ${assertions.length} 条断言并已保存`);
+      } else if (!form.title.trim()) {
+        message.warning(`AI 生成了 ${assertions.length} 条断言，请填写案例名称后保存`);
+      } else {
+        message.warning(`AI 生成了 ${assertions.length} 条断言，但自动保存失败，请手动点击保存`);
+      }
+    } catch {
+      if (isStillOnCase(target.caseKey)) {
+        message.error('获取断言生成结果失败，请稍后重试');
+      }
+    }
+  } else if (phase === 'failed' || phase === 'cancelled') {
+    if (isStillOnCase(target.caseKey)) {
+      message.error(errorMessage?.trim() || 'AI 生成断言失败，请稍后重试');
+    }
+  }
+  releaseCaseTask(generatingAssertionsCaseKey, target.caseKey);
+}
+
+async function syncAssertionGenerateFromServer() {
+  const pid = projectId.value;
+  const tid = transactionId.value;
+  if (!pid || !tid) return;
+  try {
+    const caseId = isNewCase.value ? undefined : apiStore.activeCaseId || undefined;
+    const status = await getAssertionGenerateStatus(pid, tid, caseId);
+    if (status.phase === 'queued' || status.phase === 'running') {
+      const caseKey = activeCaseKey();
+      generatingAssertionsCaseKey.value = caseKey;
+      startAssertionPoll(status.jobId, caseKey, caseId);
+    } else {
+      generatingAssertionsCaseKey.value = null;
+    }
+  } catch {
+    generatingAssertionsCaseKey.value = null;
   }
 }
 
@@ -1945,7 +2037,9 @@ function onBatchDelete() {
 }
 
 .api-case-panel .instruction-editor-body {
-  overflow: hidden;
+  /* 页面级滚动兜底：编辑区内容超过视口时，底部操作栏仍可到达。 */
+  overflow-x: hidden;
+  overflow-y: auto;
   gap: 8px;
   padding: 12px 16px 8px;
 }
@@ -1956,8 +2050,9 @@ function onBatchDelete() {
 }
 
 .api-case-panel .instruction-editor-body > .case-payload-block {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-height: 0;
+  width: 100%;
 }
 
 .case-list-toolbar {
@@ -2277,7 +2372,7 @@ function onBatchDelete() {
   padding-bottom: 12px;
   display: flex;
   flex-direction: column;
-  flex: 1;
+  flex: 0 0 auto;
   min-height: 0;
   overflow: hidden;
 }
@@ -2285,7 +2380,7 @@ function onBatchDelete() {
 .case-payload-block > .case-editor-panel {
   display: flex;
   flex-direction: column;
-  flex: 1;
+  flex: 0 0 auto;
   min-height: 0;
   overflow: hidden;
 }
@@ -2337,12 +2432,13 @@ function onBatchDelete() {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  overflow: visible;
 }
 
 .case-request-shell {
   display: flex;
   flex-direction: column;
-  flex: 1;
+  flex: 0 0 auto;
   min-height: 0;
   overflow: hidden;
   border: 1px solid #eaecf0;
@@ -2553,6 +2649,12 @@ function onBatchDelete() {
   overflow: hidden;
 }
 
+/* 报文是案例编辑的主工作区，保持可读高度，避免被底部操作栏压缩。 */
+.case-request-panel .case-body-panel,
+.case-request-panel .case-editor-surface {
+  min-height: 420px;
+}
+
 .case-body-hint-row {
   min-height: 20px;
 }
@@ -2627,7 +2729,7 @@ function onBatchDelete() {
 
 .case-editor-content {
   flex: 1;
-  min-height: 280px;
+  min-height: 420px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2666,7 +2768,7 @@ function onBatchDelete() {
 }
 
 .case-editor-surface .case-body-empty {
-  min-height: 280px;
+  min-height: 420px;
   border: none;
   border-radius: 0;
 }

@@ -824,6 +824,7 @@ export async function generateAssertions(
   projectId: string,
   transactionId: string,
   payload: {
+    caseId?: string;
     transport: string;
     messageFormat: string;
     polarity: "positive" | "negative";
@@ -832,9 +833,61 @@ export async function generateAssertions(
     body: unknown;
   },
 ) {
-  const { data } = await http.post<{ assertions: ApiAssertion[] }>(
+  const { data } = await http.post<{ jobId: string; phase: string }>(
     `${transactionBase(projectId, transactionId)}/cases/generate-assertions`,
     payload,
+  );
+  return data;
+}
+
+export interface ApiAssertionGenerateStatus {
+  jobId: string;
+  phase: "queued" | "running" | "completed" | "failed" | "cancelled" | "none";
+  queuePosition: number;
+  estimatedWaitSeconds: number;
+  elapsedSeconds: number;
+  resultCount?: number;
+  errorMessage?: string;
+  globalQueuedCount: number;
+  globalRunningCount: number;
+  slotWaitingCount: number;
+}
+
+export async function getAssertionGenerateStatus(
+  projectId: string,
+  transactionId: string,
+  caseId?: string,
+  jobId?: string,
+) {
+  const { data } = await http.get<ApiAssertionGenerateStatus>(
+    `${transactionBase(projectId, transactionId)}/cases/generate-assertions/status`,
+    { params: { caseId, jobId } },
+  );
+  return data;
+}
+
+export async function getAssertionGenerateResult(
+  projectId: string,
+  transactionId: string,
+  caseId?: string,
+  jobId?: string,
+) {
+  const { data } = await http.get<{ assertions: ApiAssertion[] }>(
+    `${transactionBase(projectId, transactionId)}/cases/generate-assertions/result`,
+    { params: { caseId, jobId } },
+  );
+  return data;
+}
+
+export async function cancelAssertionGenerate(
+  projectId: string,
+  transactionId: string,
+  caseId?: string,
+  jobId?: string,
+) {
+  const { data } = await http.post<{ ok: boolean }>(
+    `${transactionBase(projectId, transactionId)}/cases/generate-assertions/cancel`,
+    { caseId, jobId },
   );
   return data;
 }
