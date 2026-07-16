@@ -15,22 +15,6 @@
         <a-button :type="batchDeleteMode ? 'primary' : 'default'" @click="toggleBatchDeleteMode">
           {{ batchDeleteMode ? '退出批量' : '批量删除' }}
         </a-button>
-        <a-dropdown v-model:open="moreMenuOpen" trigger="click">
-          <a-button>
-            更多
-            <DownOutlined
-              :class="['dropdown-trigger-chevron', { 'is-open': moreMenuOpen }]"
-            />
-          </a-button>
-          <template #overlay>
-            <a-menu @click="onRunnerMoreMenuClick">
-              <a-menu-item key="environment">
-                <SettingOutlined />
-                环境维护
-              </a-menu-item>
-            </a-menu>
-          </template>
-        </a-dropdown>
       </div>
     </div>
 
@@ -217,10 +201,10 @@
                   </template>
                   <template v-if="column.key === 'version'">
                     <a-tag
-                      v-if="record.metadata?.generateVersion != null"
+                      v-if="record.metadata?.versionCode"
                       size="small"
                     >
-                      v{{ record.metadata.generateVersion }}
+                      {{ record.metadata.versionCode }}
                     </a-tag>
                     <span v-else>—</span>
                   </template>
@@ -497,7 +481,17 @@
             :options="manageCasesVersionOptions"
             size="small"
             class="manage-cases-version-filter"
+            :popup-match-select-width="false"
+            :dropdown-style="{ minWidth: '180px' }"
             @change="onManageCasesVersionChange"
+          />
+          <a-select
+            v-if="manageCasesChannelOptions.length > 1"
+            v-model:value="manageCasesChannelFilter"
+            :options="manageCasesChannelOptions"
+            size="small"
+            class="manage-cases-channel-filter"
+            @change="onManageCasesChannelChange"
           />
         </div>
         <span class="manage-cases-selection">
@@ -520,11 +514,11 @@
               <div class="manage-case-title-row">
                 <strong :title="item.title">{{ item.title || '未命名案例' }}</strong>
                 <a-tag
-                  v-if="item.metadata?.generateVersion != null"
+                  v-if="item.metadata?.versionCode"
                   size="small"
                   class="manage-case-version-tag"
                 >
-                  v{{ item.metadata.generateVersion }}
+                  {{ item.metadata.versionCode }}
                 </a-tag>
               </div>
               <small>{{ item.caseNo || item.transactionCode || '待分配编号' }}</small>
@@ -565,42 +559,14 @@
       :mask-closable="!apiStore.running"
       @ok="onConfirmRun"
     >
-      <a-form layout="vertical" class="run-modal-form">
-        <a-form-item label="环境" required>
-          <a-select
-            v-model:value="runForm.environmentId"
-            placeholder="选择执行环境"
-            :options="envOptions"
-            @change="onRunEnvChange"
-          />
-        </a-form-item>
-        <a-form-item v-if="runServiceOptions.length" label="优先环境服务（可选）">
-          <a-select
-            v-model:value="runForm.environmentServiceId"
-            placeholder="不选则按案例协议自动匹配 HTTP/TCP 服务"
-            allow-clear
-            :options="runServiceOptions"
-          />
-        </a-form-item>
-        <a-form-item label="传输给接口的编码格式" required>
-          <a-select
-            v-model:value="runForm.encoding"
-            placeholder="选择编码"
-            :options="encodingOptions"
-          />
-        </a-form-item>
-        <p class="run-form-hint">
-          不选择服务时会按案例协议自动匹配当前环境下的 HTTP/TCP 服务；TCP 报文按所选编码和服务长度前缀发送。
-        </p>
-      </a-form>
+      每条案例将使用案例中已指定的环境、地址和编码执行。
     </a-modal>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { message, Modal } from 'ant-design-vue';
-import type { MenuProps } from 'ant-design-vue';
 import {
   DeleteOutlined,
   DownOutlined,
@@ -630,13 +596,6 @@ import {
 const apiStore = useApiTestStore();
 const pageSizeOptions = caseForgePageSizeOptionLabels();
 const envModalOpen = ref(false);
-const moreMenuOpen = ref(false);
-
-const onRunnerMoreMenuClick: MenuProps['onClick'] = ({ key }) => {
-  if (key === 'environment') {
-    envModalOpen.value = true;
-  }
-};
 
 const createSetOpen = ref(false);
 const manageCasesOpen = ref(false);
@@ -656,11 +615,13 @@ const manageCasesPageSize = ref(normalizeCaseForgePageSize(10));
 const manageCasesTotal = ref(0);
 const manageCasesLoading = ref(false);
 const manageCasesSaving = ref(false);
-const manageCasesVersionFilter = ref<number | null>(null);
-const manageCasesVersionOptions = ref<Array<{ value: number | null; label: string }>>([]);
+const manageCasesVersionFilter = ref<string | null>(null);
+const manageCasesVersionOptions = ref<Array<{ value: string | null; label: string }>>([]);
+const manageCasesChannelFilter = ref<string | null>(null);
+const manageCasesChannelOptions = ref<Array<{ value: string | null; label: string }>>([]);
 const manageCasesEmptyHint = computed(() =>
-  manageCasesVersionFilter.value != null
-    ? `v${manageCasesVersionFilter.value} 暂无案例，请切换其他版本`
+  manageCasesVersionFilter.value != null || manageCasesChannelFilter.value != null
+    ? '当前筛选条件下暂无案例'
     : '暂无案例，请先在案例编辑中创建',
 );
 const detailTab = ref<'cases' | 'result'>('cases');
@@ -668,17 +629,6 @@ const detailTabOptions = [
   { label: '关联案例', value: 'cases' },
   { label: '执行结果', value: 'result' },
 ];
-
-const encodingOptions = [
-  { label: 'GBK', value: 'GBK' },
-  { label: 'UTF-8', value: 'UTF-8' },
-];
-
-const runForm = reactive({
-  environmentId: '',
-  environmentServiceId: '',
-  encoding: 'GBK',
-});
 
 const activeSet = computed(() => apiStore.activeExecutionSet);
 
@@ -758,29 +708,6 @@ function caseProfileLabel(request: ApiCaseRequest) {
 function caseProfileColor(request: ApiCaseRequest) {
   return executionProfileBadgeColor(resolveExecutionProfile(request).transport);
 }
-
-const envOptions = computed(() =>
-  apiStore.environments.map((e) => ({ label: e.name, value: e.id })),
-);
-
-const runServiceOptions = computed(() => {
-  const services = apiStore.environmentServices[runForm.environmentId] ?? [];
-  return services.map((item) => ({
-    label: item.pathPrefix ? `${item.name} (${item.pathPrefix})` : item.name,
-    value: item.id,
-  }));
-});
-
-watch(
-  () => runForm.environmentId,
-  async (environmentId) => {
-    const projectId = apiStore.activeProjectId;
-    if (projectId && environmentId) {
-      await apiStore.refreshEnvironmentServices(projectId, environmentId);
-    }
-    runForm.environmentServiceId = '';
-  },
-);
 
 watch(detailTab, async (tab) => {
   if (tab !== 'result') return;
@@ -1051,6 +978,7 @@ async function openManageCasesAsync() {
   selectedCaseIds.value = [...(activeSet.value?.caseIds ?? [])];
   manageCasesPage.value = 1;
   manageCasesVersionFilter.value = null;
+  manageCasesChannelFilter.value = null;
   manageCasesOpen.value = true;
   await loadManageCasesVersions();
   await loadManageCasesList();
@@ -1063,23 +991,43 @@ async function loadManageCasesVersions() {
   const rows = await listAllApiCases(projectId, transactionId).catch(
     () => [] as ApiTestCaseRow[],
   );
-  const versions = new Set<number>();
+  const versions = new Set<string>();
+  const channels = new Map<string, string>();
+  const currentChannelNames = new Map(
+    (apiStore.apiDoc?.generationProfile?.channels ?? []).map((channel) => [channel.id, channel.name]),
+  );
   for (const row of rows) {
-    const version = row.metadata?.generateVersion;
-    if (version != null) {
-      versions.add(version);
+    const code = row.metadata?.versionCode;
+    if (code != null) {
+      versions.add(code);
+    }
+    const channelId = row.metadata?.channelId;
+    if (channelId != null) {
+      channels.set(
+        channelId,
+        currentChannelNames.get(channelId) || row.metadata?.channelName || channelId,
+      );
     }
   }
-  const sorted = Array.from(versions).sort((a, b) => a - b);
+  const sorted = Array.from(versions).sort();
   manageCasesVersionOptions.value = [
     { value: null, label: '全部版本' },
-    ...sorted.map((version) => ({ value: version, label: `v${version}` })),
+    ...sorted.map((code) => ({ value: code, label: code })),
   ];
+  manageCasesChannelOptions.value = [
+    { value: null, label: '全部渠道' },
+    ...Array.from(channels, ([value, label]) => ({ value, label })).sort((a, b) =>
+      a.label.localeCompare(b.label),
+    ),
+  ];
+  if (manageCasesChannelFilter.value != null && !channels.has(manageCasesChannelFilter.value)) {
+    manageCasesChannelFilter.value = null;
+  }
 
   const current = manageCasesVersionFilter.value;
   if (current != null && !versions.has(current)) {
     manageCasesVersionFilter.value = sorted.length
-      ? (sorted[sorted.length - 1] ?? null)
+      ? sorted[sorted.length - 1] ?? null
       : null;
   } else if (current == null && sorted.length > 0) {
     manageCasesVersionFilter.value = sorted[sorted.length - 1] ?? null;
@@ -1087,6 +1035,11 @@ async function loadManageCasesVersions() {
 }
 
 function onManageCasesVersionChange() {
+  manageCasesPage.value = 1;
+  void loadManageCasesList();
+}
+
+function onManageCasesChannelChange() {
   manageCasesPage.value = 1;
   void loadManageCasesList();
 }
@@ -1100,11 +1053,13 @@ async function loadManageCasesList() {
     const result = await listApiCases(projectId, transactionId, {
       page: manageCasesPage.value,
       pageSize: manageCasesPageSize.value,
-      generateVersion: manageCasesVersionFilter.value ?? undefined,
+      versionCode: manageCasesVersionFilter.value ?? undefined,
+      channelId: manageCasesChannelFilter.value ?? undefined,
     });
     if (
       result.count === 0 &&
       manageCasesVersionFilter.value != null &&
+      manageCasesChannelFilter.value == null &&
       manageCasesVersionOptions.value.some(
         (item) =>
           item.value != null && item.value !== manageCasesVersionFilter.value,
@@ -1199,37 +1154,8 @@ async function onSaveCases() {
   }
 }
 
-function inferDefaultEncoding() {
-  const cases = apiStore.runnerCases;
-  const tcpCase = cases.find((item) => item.request.transport === 'tcp');
-  if (tcpCase?.request.encoding?.toUpperCase().includes('GBK')) {
-    return 'GBK';
-  }
-  if (tcpCase?.request.encoding) {
-    return tcpCase.request.encoding.toUpperCase().includes('UTF') ? 'UTF-8' : tcpCase.request.encoding;
-  }
-  return cases.some((item) => item.request.transport === 'tcp') ? 'GBK' : 'UTF-8';
-}
-
 function openRunModal() {
-  if (!apiStore.environments.length) {
-    message.warning('请先创建执行环境');
-    envModalOpen.value = true;
-    return;
-  }
-  runForm.environmentId =
-    apiStore.selectedEnvironmentId || apiStore.environments[0]?.id || '';
-  runForm.environmentServiceId = apiStore.selectedEnvironmentServiceId || '';
-  runForm.encoding = inferDefaultEncoding();
   runModalOpen.value = true;
-  const projectId = apiStore.activeProjectId;
-  if (projectId && runForm.environmentId) {
-    void apiStore.refreshEnvironmentServices(projectId, runForm.environmentId);
-  }
-}
-
-function onRunEnvChange() {
-  runForm.environmentServiceId = '';
 }
 
 async function onConfirmRun() {
@@ -1239,31 +1165,17 @@ async function onConfirmRun() {
   if (!projectId || !transactionId || !setId) {
     return Promise.reject();
   }
-  if (!runForm.environmentId) {
-    message.warning('请选择环境');
-    return Promise.reject();
-  }
-  if (!runForm.encoding) {
-    message.warning('请选择传输编码');
-    return Promise.reject();
-  }
   if (apiStore.running) {
     message.warning('当前已有执行任务进行中');
     return Promise.reject();
   }
-
-  const runOptions = {
-    environmentId: runForm.environmentId,
-    environmentServiceId: runForm.environmentServiceId || undefined,
-    encoding: runForm.encoding,
-  };
 
   runModalOpen.value = false;
   detailTab.value = 'result';
   message.info('已开始后台执行，完成后将自动刷新结果');
 
   void apiStore
-    .runExecutionSet(projectId, transactionId, setId, runOptions)
+    .runExecutionSet(projectId, transactionId, setId, {})
     .catch((error) => {
       const responseMessage = (error as { response?: { data?: { message?: string } } })
         ?.response?.data?.message;
@@ -1362,7 +1274,6 @@ async function onRerunHistoryAsync(runId: string) {
 
   try {
     const run = await apiStore.rerunHistoricalRun(projectId, transactionId, runId, {
-      encoding: runForm.encoding || inferDefaultEncoding(),
       executionSetId: setId || undefined,
     });
     if (run) {
@@ -2320,6 +2231,10 @@ function onExpand(expanded: boolean, record: { id: string }) {
 }
 
 .manage-cases-version-filter {
+  width: 112px;
+}
+
+.manage-cases-channel-filter {
   width: 112px;
 }
 

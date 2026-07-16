@@ -89,6 +89,13 @@ export class SaveApiCaseDto {
   @IsInt()
   generateVersion?: number;
 
+  @ApiPropertyOptional({
+    description: "归入指定版本编码（如 20260716-105144）",
+  })
+  @IsOptional()
+  @IsString()
+  versionCode?: string;
+
   @ApiPropertyOptional({ description: "案例调试默认环境" })
   @IsOptional()
   @IsUUID()
@@ -123,12 +130,33 @@ export class GenerateApiCasesDto {
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  promptIds?: string[];
+  channelIds?: string[];
+}
 
-  @ApiPropertyOptional({ type: [String] })
-  @IsOptional()
+export class BatchPatchApiCaseRequestDto {
+  @ApiProperty({ type: [String] })
   @IsArray()
-  endpointIds?: string[];
+  @IsUUID(undefined, { each: true })
+  caseIds!: string[];
+
+  @ApiProperty()
+  @IsObject()
+  patch!: Partial<ApiCaseRequest>;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  environmentId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  environmentServiceId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  encoding?: string;
 }
 
 export class RunApiCasesDto {
@@ -136,9 +164,10 @@ export class RunApiCasesDto {
   @IsArray()
   caseIds!: string[];
 
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsUUID()
-  environmentId!: string;
+  environmentId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

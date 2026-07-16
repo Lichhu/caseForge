@@ -1,5 +1,6 @@
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { ApiEndpointEntity } from "./api-endpoint.entity";
+import type { ApiDocGenerationProfile } from "@case-forge/shared";
 import {
   Column,
   CreateDateColumn,
@@ -79,6 +80,7 @@ export class ApiDocEntity {
   @Column({ type: "json", nullable: true })
   metadata?: {
     promptIds?: string[];
+    generationProfile?: ApiDocGenerationProfile;
   };
 
   /** 接口文档来源：smp（服管平台）或 upload（上传 Excel） */

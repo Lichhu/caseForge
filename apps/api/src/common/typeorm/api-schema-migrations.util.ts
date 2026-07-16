@@ -68,6 +68,7 @@ async function alignUuidColumn(
 
 export async function applyApiTestSchemaMigrations(runner: Queryable) {
   await ensureApiAssertionGenerateJobTable(runner);
+  await ensureApiCaseGenerateScenarioTable(runner);
   if (!(await tableExists(runner, "api_doc"))) {
     return;
   }
@@ -76,7 +77,62 @@ export async function applyApiTestSchemaMigrations(runner: Queryable) {
   await ensureApiEndpointTransactionColumn(runner);
   await ensureApiTransactionTable(runner);
   await ensureApiTestCaseColumns(runner);
+  await ensureApiCaseGenerateJobColumns(runner);
   await ensureExecutionPlatformTables(runner);
+}
+
+async function ensureApiCaseGenerateScenarioTable(runner: Queryable) {
+  if (await tableExists(runner, "api_case_generate_scenario")) return;
+  await runner.query(`
+    CREATE TABLE api_case_generate_scenario (
+      id VARCHAR(36) CHARACTER SET utf8 NOT NULL PRIMARY KEY,
+      jobId VARCHAR(36) CHARACTER SET utf8 NOT NULL,
+      projectId VARCHAR(36) CHARACTER SET utf8 NOT NULL,
+      transactionId VARCHAR(36) CHARACTER SET utf8 NOT NULL,
+      scenarioKey VARCHAR(64) NOT NULL,
+      scenarioName VARCHAR(128) NOT NULL,
+      status VARCHAR(32) NOT NULL DEFAULT 'pending',
+      applicableReason TEXT NULL,
+      result JSON NULL,
+      resultCount INT NOT NULL DEFAULT 0,
+      attemptCount INT NOT NULL DEFAULT 0,
+      promptChars INT NOT NULL DEFAULT 0,
+      inputFieldCount INT NOT NULL DEFAULT 0,
+      durationMs INT NULL,
+      errorMessage TEXT NULL,
+      startedAt DATETIME(3) NULL,
+      finishedAt DATETIME(3) NULL,
+      createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+      updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+      UNIQUE KEY uk_api_case_generate_scenario_job_key (jobId, scenarioKey),
+      INDEX idx_api_case_generate_scenario_job_status (jobId, status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+}
+
+async function ensureApiCaseGenerateJobColumns(runner: Queryable) {
+  if (!(await tableExists(runner, "api_case_generate_job"))) return;
+  for (const { name, def } of [
+    { name: "versionCode", def: "VARCHAR(32) NULL" },
+    { name: "ruleVersion", def: "VARCHAR(64) NULL" },
+    { name: "snapshot", def: "JSON NULL" },
+    { name: "scenarioCount", def: "INT NOT NULL DEFAULT 0" },
+    { name: "completedScenarioCount", def: "INT NOT NULL DEFAULT 0" },
+    { name: "notApplicableScenarioCount", def: "INT NOT NULL DEFAULT 0" },
+    { name: "failedScenarioCount", def: "INT NOT NULL DEFAULT 0" },
+  ]) {
+    if (!(await columnExists(runner, "api_case_generate_job", name))) {
+      await runner.query(
+        `ALTER TABLE api_case_generate_job ADD COLUMN ${name} ${def}`,
+      );
+    }
+  }
+  if (!(await indexExists(runner, "api_case_generate_job", "uk_api_case_generate_job_version"))) {
+    await runner.query(`
+      CREATE UNIQUE INDEX uk_api_case_generate_job_version
+      ON api_case_generate_job (projectId, transactionId, versionCode)
+    `);
+  }
 }
 
 async function ensureApiAssertionGenerateJobTable(runner: Queryable) {

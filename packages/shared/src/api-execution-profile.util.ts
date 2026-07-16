@@ -54,6 +54,13 @@ function inferMessageFormat(request: ApiCaseRequest): ApiMessageFormat {
   return "json";
 }
 
+function requestHasBody(request: ApiCaseRequest): boolean {
+  const body = request.body;
+  if (body === undefined || body === null) return false;
+  if (typeof body === "string") return body.trim().length > 0;
+  return true;
+}
+
 function inferTransport(request: ApiCaseRequest): ApiTransport {
   if (request.transport) return request.transport;
   if (request.framing?.type === "length-prefix") return "tcp";
@@ -64,11 +71,12 @@ function buildListLabel(
   transport: ApiTransport,
   messageFormat: ApiMessageFormat,
   httpMethod?: string,
+  hasBody = true,
 ): string {
   const format = FORMAT_LABEL[messageFormat];
   if (transport === "http") {
     const method = (httpMethod ?? "POST").toUpperCase();
-    return `HTTP ${method} + ${format}`;
+    return hasBody ? `HTTP ${method} + ${format}` : `HTTP ${method}`;
   }
   return `${TRANSPORT_LABEL[transport]} + ${format}`;
 }
@@ -98,9 +106,13 @@ function buildSummary(
   transport: ApiTransport,
   messageFormat: ApiMessageFormat,
   httpMethod?: string,
+  hasBody = true,
 ): string {
   if (transport === "http") {
     const method = (httpMethod ?? "POST").toUpperCase();
+    if (!hasBody) {
+      return `${method} 请求，无请求 Body`;
+    }
     if (messageFormat === "json") {
       return `${method} 请求，Body 为 JSON`;
     }
@@ -216,12 +228,13 @@ export function resolveExecutionProfile(
   const framing = buildFramingHint(request);
   const envMismatch = detectEnvMismatch(transport, options?.envAddress);
   const supported = transport === "http" || transport === "tcp";
+  const hasBody = transport !== "http" || requestHasBody(request);
 
   return {
     transport,
     messageFormat,
-    label: buildListLabel(transport, messageFormat, httpMethod),
-    summary: buildSummary(transport, messageFormat, httpMethod),
+    label: buildListLabel(transport, messageFormat, httpMethod, hasBody),
+    summary: buildSummary(transport, messageFormat, httpMethod, hasBody),
     httpMethod,
     contentType,
     encoding,

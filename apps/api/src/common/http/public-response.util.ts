@@ -171,6 +171,7 @@ export function toPublicApiDoc(
     structuringStatus: doc.structuringStatus,
     structuringError: doc.structuringError,
     generationPromptIds: doc.metadata?.promptIds ?? [],
+    generationProfile: doc.metadata?.generationProfile ?? null,
     endpoints: extra.endpoints.map(toPublicApiEndpoint),
     canEnterCases: extra.canEnterCases,
     canGenerateCases: extra.canGenerateCases,

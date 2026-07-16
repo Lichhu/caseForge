@@ -1,15 +1,17 @@
 <template>
   <div class="kv-rows-editor">
-    <div class="kv-rows-toolbar">
-      <span v-if="hint" class="kv-rows-hint">{{ hint }}</span>
-      <a-button type="text" size="small" class="kv-add-btn" title="添加" @click="addRow">
-        <PlusOutlined />
-      </a-button>
+    <div class="kv-rows-head">
+      <span class="kv-col kv-col--key">名称</span>
+      <span class="kv-col kv-col--value">值</span>
+      <span class="kv-col kv-col--action">
+        <a-button type="text" size="small" class="kv-add-btn" title="添加" @click="addRow">
+          <PlusOutlined />
+        </a-button>
+      </span>
     </div>
     <div class="kv-rows-body">
       <div v-if="!rows.length" class="kv-empty-hint">暂无配置</div>
       <div v-for="(row, index) in rows" :key="row.id" class="kv-row">
-        <span class="kv-col kv-col--index">{{ index + 1 }}</span>
         <a-input
           :value="row.key"
           size="small"
@@ -76,21 +78,30 @@ function removeRow(index: number) {
   min-height: 0;
 }
 
-.kv-rows-toolbar {
-  display: flex;
+.kv-rows-head,
+.kv-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 64px;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 24px;
-  flex-shrink: 0;
 }
 
-.kv-rows-hint {
-  flex: 1;
-  min-width: 0;
+.kv-rows-head {
+  flex-shrink: 0;
+  border: 1px solid #eaecf0;
+  border-bottom: none;
+  background: #fafbfc;
   font-size: 12px;
-  line-height: 1.5;
-  color: #98a2b3;
+  font-weight: 600;
+  color: #667085;
+}
+
+.kv-rows-head > .kv-col {
+  padding: 6px 10px;
+  border-right: 1px solid #f2f4f7;
+}
+
+.kv-rows-head > .kv-col:last-child {
+  border-right: none;
 }
 
 .kv-add-btn {
@@ -117,22 +128,11 @@ function removeRow(index: number) {
 }
 
 .kv-row {
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) minmax(0, 1fr) 32px;
-  align-items: center;
-  gap: 0;
   border-bottom: 1px solid #f2f4f7;
 }
 
 .kv-row:last-child {
   border-bottom: none;
-}
-
-.kv-col--index {
-  text-align: center;
-  font-size: 11px;
-  color: #98a2b3;
-  user-select: none;
 }
 
 .kv-col--action {

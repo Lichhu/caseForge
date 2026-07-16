@@ -13,7 +13,7 @@
           新建案例
         </a-button>
         <a-button :type="batchMode ? 'primary' : 'default'" @click="toggleBatchMode">
-          {{ batchMode ? '退出批量' : '批量删除' }}
+          {{ batchMode ? '退出批量' : '批量操作' }}
         </a-button>
         <a-dropdown v-model:open="moreMenuOpen" trigger="click">
           <a-button>
@@ -40,18 +40,35 @@
 
     <div v-if="showCaseWorkspace" class="dynamic-layout">
       <div class="test-point-list test-point-list-panel case-list-panel">
-        <div class="test-point-list-head">
-          <strong>案例列表</strong>
-          <div class="case-list-head-controls">
+        <div class="test-point-list-header">
+          <div class="test-point-list-head">
+            <strong>案例列表</strong>
+            <span class="test-point-count">{{ apiStore.caseListTotal }} 条</span>
+          </div>
+          <div class="test-point-filter-bar case-list-filter-bar">
             <a-select
               v-if="versionOptions.length > 1"
               v-model:value="apiStore.caseListVersionFilter"
               :options="versionOptions"
               size="small"
               class="case-version-filter"
+              :popup-match-select-width="false"
+              :dropdown-style="{ minWidth: '180px' }"
               @change="onVersionFilterChange"
             />
-            <span>{{ apiStore.caseListTotal }} 条</span>
+            <span
+              v-if="versionOptions.length > 1 && channelOptions.length > 1"
+              class="test-point-filter-sep"
+              aria-hidden="true"
+            >/</span>
+            <a-select
+              v-if="channelOptions.length > 1"
+              v-model:value="apiStore.caseListChannelFilter"
+              :options="channelOptions"
+              size="small"
+              class="case-channel-filter"
+              @change="onChannelFilterChange"
+            />
           </div>
         </div>
         <div v-if="batchMode && apiStore.cases.length" class="list-toolbar batch-list-toolbar case-list-toolbar">
@@ -88,7 +105,7 @@
                 @change="(e: Event) => onToggleSelect(item.id, readCheckboxChecked(e))"
               />
               <div class="test-point-card-title case-card-title">
-                <strong :title="item.title">{{ item.title || '未命名案例' }}</strong>
+                <strong :title="displayCaseTitle(item)">{{ displayCaseTitle(item) }}</strong>
                 <small>{{ item.caseNo || item.transactionCode || '待分配编号' }}</small>
                 <div class="case-badges-row">
                   <span
@@ -98,10 +115,10 @@
                     {{ caseProfileLabel(resolveListItemRequest(item)) }}
                   </span>
                   <a-tag
-                    v-if="item.metadata?.generateVersion != null"
+                    v-if="item.metadata?.versionCode"
                     class="case-version-tag"
                   >
-                    v{{ item.metadata.generateVersion }}
+                    {{ item.metadata.versionCode }}
                   </a-tag>
                 </div>
               </div>
@@ -131,11 +148,36 @@
             <div class="editor-hero editor-hero-batch">
               <div>
                 <h3>已选 {{ selectedIds.length }} 条案例</h3>
-                <p>确认后可批量删除所选案例</p>
+                <p>批量指定请求配置，或删除所选案例</p>
               </div>
-              <a-tag color="processing">批量删除</a-tag>
+              <a-tag color="processing">批量操作</a-tag>
             </div>
 
+            <div class="editor-block">
+              <div class="editor-block-title">执行环境</div>
+              <div class="batch-request-config">
+                <a-select v-model:value="batchEnvironmentId" placeholder="环境" :options="debugEnvironmentOptions" @change="batchEnvironmentServiceId = ''" />
+                <a-select v-model:value="batchEnvironmentServiceId" show-search option-filter-prop="searchText" allow-clear placeholder="输入名称或地址筛选" :options="batchEnvironmentServiceOptions" :disabled="!batchEnvironmentId" />
+              </div>
+            </div>
+            <div class="editor-block">
+              <div class="editor-block-title">请求配置（仅覆盖已填写项）</div>
+              <div class="batch-request-config batch-request-config--request">
+                <a-select v-model:value="batchRequest.protocol" allow-clear placeholder="通讯协议" :options="protocolOptions" />
+                <a-select
+                  v-if="batchRequest.protocol === 'http'"
+                  v-model:value="batchRequest.method"
+                  allow-clear
+                  placeholder="HTTP 方法"
+                  :options="httpMethodOptions"
+                />
+                <a-select v-model:value="batchRequest.encoding" allow-clear placeholder="编码" :options="encodingOptions" />
+                <a-input v-if="batchRequest.protocol === 'http'" v-model:value="batchRequest.path" class="batch-request-path" placeholder="请求路径" allow-clear />
+              </div>
+              <div v-if="batchFullRequestUrl" class="batch-request-url">
+                完整请求路径：<span>{{ batchFullRequestUrl }}</span>
+              </div>
+            </div>
             <div class="editor-block">
               <div class="editor-block-title">已选案例</div>
               <ul class="batch-case-summary-list">
@@ -152,6 +194,9 @@
                   <span class="batch-case-summary-no">
                     {{ row.caseNo || row.transactionCode || '待分配编号' }}
                   </span>
+                  <span class="batch-case-summary-status" :class="batchCaseStatus(row).className">
+                    {{ batchCaseStatus(row).label }}
+                  </span>
                 </li>
                 <li
                   v-if="selectedIds.length > selectedRows.length"
@@ -164,6 +209,16 @@
           </div>
 
           <div class="instruction-editor-footer dynamic-editor-footer action-toolbar">
+            <span v-if="batchAssertionRunning" class="batch-assertion-progress">
+              正在处理 {{ batchAssertionProgress.done }}/{{ batchAssertionProgress.total }}，成功 {{ batchAssertionProgress.success }}，失败 {{ batchAssertionProgress.failed }}
+            </span>
+            <a-button :disabled="!selectedIds.length || (!hasBatchRequestPatch && !batchEnvironmentId)" :loading="batchSaving" @click="onBatchSaveRequest">
+              批量设置
+            </a-button>
+            <a-button type="primary" :disabled="!selectedIds.length" :loading="batchAssertionRunning" @click="onBatchGenerateAssertions">
+              <template #icon><RobotOutlined /></template>
+              AI 生成断言
+            </a-button>
             <a-button danger :disabled="!selectedIds.length" @click="onBatchDelete">
               <template #icon><DeleteOutlined /></template>
               批量删除
@@ -180,11 +235,11 @@
                   <template v-if="!isNewCase">
                     <span class="hero-case-no">{{ form.caseNo || form.transactionCode || '待分配编号' }}</span>
                     <a-tag
-                      v-if="form.metadata?.generateVersion != null"
+                      v-if="form.metadata?.versionCode"
                       color="blue"
                       class="hero-version-tag"
                     >
-                      v{{ form.metadata.generateVersion }}
+                      {{ form.metadata.versionCode }}
                     </a-tag>
                   </template>
                 </div>
@@ -267,8 +322,50 @@
 
               <div v-show="editorMainTab === 'request'" class="case-editor-panel case-request-panel">
                 <div class="case-request-shell">
-                <div class="case-protocol-bar">
-                  <div class="case-protocol-field">
+                <div
+                  class="case-request-summary case-request-summary--clickable"
+                  role="button"
+                  tabindex="0"
+                  @click="requestConfigExpanded = !requestConfigExpanded"
+                  @keydown.enter="requestConfigExpanded = !requestConfigExpanded"
+                >
+                  <span class="case-request-summary-method">{{ form.protocol === 'http' ? form.httpMethod : form.protocol.toUpperCase() }}</span>
+                  <span class="case-request-summary-url" :title="fullRequestAddress">{{ fullRequestAddress || '请选择环境和地址' }}</span>
+                  <span class="case-request-summary-encoding">{{ debugEncoding }}</span>
+                  <a-button type="text" size="small" @click.stop="requestConfigExpanded = !requestConfigExpanded">
+                    {{ requestConfigExpanded ? '收起' : '展开' }}
+                    <DownOutlined :class="['request-config-chevron', { 'is-open': requestConfigExpanded }]" />
+                  </a-button>
+                </div>
+                <template v-if="requestConfigExpanded">
+                <div class="case-request-config-block">
+                <div class="case-target-bar">
+                  <div class="case-protocol-field case-protocol-field--target">
+                    <span class="case-protocol-label">环境</span>
+                    <a-select
+                      v-model:value="apiStore.selectedEnvironmentId"
+                      :options="debugEnvironmentOptions"
+                      size="small"
+                      placeholder="选择环境"
+                      allow-clear
+                    />
+                  </div>
+                  <div class="case-protocol-field case-protocol-field--target">
+                    <span class="case-protocol-label">地址</span>
+                    <a-select
+                      v-model:value="debugServiceId"
+                      :options="debugServiceOptions"
+                      show-search
+                      option-filter-prop="searchText"
+                      size="small"
+                      placeholder="输入名称或地址筛选"
+                      allow-clear
+                      :disabled="!apiStore.selectedEnvironmentId"
+                    />
+                  </div>
+                </div>
+                <div class="case-protocol-bar" :class="`case-protocol-bar--${form.protocol}`">
+                  <div class="case-protocol-field case-protocol-field--protocol">
                     <span class="case-protocol-label">通讯协议</span>
                     <a-select
                       v-model:value="form.protocol"
@@ -278,7 +375,7 @@
                     />
                   </div>
                   <template v-if="form.protocol === 'http'">
-                    <div class="case-protocol-field">
+                    <div class="case-protocol-field case-protocol-field--method">
                       <span class="case-protocol-label">请求方法</span>
                       <a-select
                         v-model:value="form.httpMethod"
@@ -296,16 +393,18 @@
                       />
                     </div>
                   </template>
-                  <div v-if="form.protocol === 'socket'" class="case-protocol-field">
+                  <div class="case-protocol-field case-protocol-field--encoding">
                     <span class="case-protocol-label">编码</span>
                     <a-select
-                      v-model:value="form.socketEncoding"
-                      :options="encodingOptions"
+                      v-model:value="debugEncoding"
+                      :options="debugEncodingOptions"
                       size="small"
                       class="case-protocol-select"
                     />
                   </div>
                 </div>
+                </div>
+                </template>
                 <div class="case-request-toolbar">
                   <div class="case-request-tabs">
                     <button
@@ -320,28 +419,30 @@
                       <span v-if="tab.count" class="case-request-tab-badge">{{ tab.count }}</span>
                     </button>
                   </div>
+                  <div v-if="form.protocol === 'http'" class="case-request-view-switch">
+                    <button type="button" :class="{ active: requestViewMode === 'template' }" @click="requestViewMode = 'template'">模板</button>
+                    <button type="button" :class="{ active: requestViewMode === 'curl' }" @click="requestViewMode = 'curl'">cURL</button>
+                  </div>
                 </div>
                 <div class="case-payload-fields case-payload-fields--body">
-                  <template v-if="requestTab === 'params'">
-                    <KeyValueRowsEditor
-                      v-model:rows="form.queryRows"
-                      hint="Query 参数将拼接到请求 URL 后"
-                    />
+                  <div v-if="requestViewMode === 'curl' && form.protocol === 'http'" class="case-curl-panel">
+                    <div class="case-curl-toolbar">
+                      <span>终端命令</span>
+                      <a-button type="link" size="small" @click="copyCurlCommand">
+                        <template #icon><CopyOutlined /></template>
+                        复制
+                      </a-button>
+                    </div>
+                    <pre>{{ curlCommand }}</pre>
+                  </div>
+                  <template v-else-if="requestTab === 'params'">
+                    <KeyValueRowsEditor v-model:rows="form.queryRows" />
                   </template>
                   <template v-else-if="requestTab === 'headers'">
-                    <KeyValueRowsEditor
-                      v-model:rows="form.headerRows"
-                      :hint="headersTabHint"
-                    />
+                    <KeyValueRowsEditor v-model:rows="form.headerRows" />
                   </template>
                   <template v-else>
                     <div class="case-body-panel">
-                      <div
-                        v-if="httpMethodHasBody(form.httpMethod) || form.protocol !== 'http'"
-                        class="case-body-hint-row"
-                      >
-                        <span class="case-body-hint">{{ bodyTabHint }}</span>
-                      </div>
                       <div class="case-editor-surface">
                         <div
                           v-if="httpMethodHasBody(form.httpMethod) || form.protocol !== 'http'"
@@ -426,171 +527,32 @@
               <div v-show="editorMainTab === 'assertion'" class="case-editor-panel case-assertion-panel">
                 <div class="case-assertion-shell">
                   <div class="case-assertion-toolbar">
-                    <div class="case-debug-bar">
-                      <a-select
-                        v-model:value="apiStore.selectedEnvironmentId"
-                        size="small"
-                        placeholder="选择环境"
-                        :options="debugEnvironmentOptions"
-                        class="case-debug-env-select"
-                        allow-clear
-                      />
-                      <a-select
-                        v-if="hasDebugServices"
-                        v-model:value="debugServiceId"
-                        size="small"
-                        placeholder="选择服务（可选）"
-                        :options="debugServiceOptions"
-                        class="case-debug-service-select"
-                        allow-clear
-                      />
-                      <a-select
-                        v-model:value="debugEncoding"
-                        size="small"
-                        placeholder="编码"
-                        :options="debugEncodingOptions"
-                        class="case-debug-encoding-select"
-                      />
-                      <a-button
-                        type="primary"
-                        size="small"
-                        :loading="debugRunning"
-                        :disabled="!apiStore.selectedEnvironmentId"
-                        @click="onDebugRun"
-                      >
-                        <template #icon><ThunderboltOutlined /></template>
-                        调试执行
-                      </a-button>
+                    <div>
+                      <strong>断言内容（{{ form.assertionRows.filter((row) => row.type && row.operator).length }}）</strong>
                     </div>
                     <div class="case-assertion-toolbar-actions">
-                      <div v-if="debugResult" class="case-debug-response-meta">
-                        <span
-                          class="case-debug-status"
-                          :class="{ 'status-ok': debugResult.statusCode >= 200 && debugResult.statusCode < 300, 'status-err': debugResult.statusCode === 0 || debugResult.statusCode >= 400, 'status-tcp': debugResult.statusCode === -1 }"
-                        >
-                          {{ debugResult.error ? '请求失败' : debugResult.statusCode === -1 ? 'Socket 响应' : `${debugResult.statusCode}` }}
-                        </span>
-                        <span class="case-debug-duration">{{ debugResult.durationMs }}ms</span>
-                        <span class="case-debug-size">{{ debugResult.bodySize }} bytes</span>
-                      </div>
                       <a-button
                         type="primary"
                         size="small"
-                        :loading="generatingAssertions"
-                        :disabled="!canGenerateAssertions"
+                        :loading="debugRunning || generatingAssertions"
+                        :disabled="!apiStore.selectedEnvironmentId || (debugServiceOptions.length > 0 && !debugServiceId)"
                         @click="onGenerateAssertions"
                       >
                         <template #icon><RobotOutlined /></template>
-                        AI 生成断言
+                        {{ debugRunning ? '正在请求接口' : generatingAssertions ? '正在生成断言' : 'AI 生成断言' }}
                       </a-button>
-                      <span v-if="!debugResult" class="case-panel-hint">选择环境并调试执行，再使用 AI 生成断言</span>
                     </div>
                   </div>
-                  <div class="case-debug-response case-debug-response--full">
-                    <div v-if="debugResult?.error" class="case-debug-error">
-                      {{ debugResult.error }}
-                    </div>
-                    <div class="case-debug-tabs">
-                      <button
-                        type="button"
-                        class="case-debug-tab"
-                        :class="{ active: debugResponseTab === 'expected' }"
-                        @click="debugResponseTab = 'expected'"
-                      >
-                        断言内容
-                      </button>
-                      <template v-if="debugResult && !debugResult.error">
-                        <button
-                          type="button"
-                          class="case-debug-tab"
-                          :class="{ active: debugResponseTab === 'body' }"
-                          @click="debugResponseTab = 'body'"
-                        >
-                          响应体
-                        </button>
-                        <button
-                          type="button"
-                          class="case-debug-tab"
-                          :class="{ active: debugResponseTab === 'assert' }"
-                          @click="debugResponseTab = 'assert'"
-                        >
-                          断言比对 ({{ debugResult.assertions.length }})
-                        </button>
-                        <button
-                          type="button"
-                          class="case-debug-tab"
-                          :class="{ active: debugResponseTab === 'headers' }"
-                          @click="debugResponseTab = 'headers'"
-                        >
-                          响应头 ({{ Object.keys(debugResult.headers).length }})
-                        </button>
-                      </template>
-                    </div>
-                    <div class="case-debug-panel">
-                      <AssertionRowsEditor
-                        v-if="debugResponseTab === 'expected'"
-                        :key="`${payloadEditorKey}-expected`"
-                        v-model:rows="form.assertionRows"
-                        :protocol="form.protocol"
-                        class="case-debug-assertion-editor"
-                        hint="可手动添加断言，或调试后使用 AI 生成"
-                      />
-                      <div
-                        v-else-if="debugResponseTab === 'body' && debugResult"
-                        class="case-debug-body-shell"
-                      >
-                        <div class="case-debug-body-toolbar">
-                          <a-button
-                            type="link"
-                            size="small"
-                            class="case-editor-beautify-btn"
-                            :disabled="!hasDebugResponseBody"
-                            @click="beautifyDebugResponseBody"
-                          >
-                            <template #icon><FormatPainterOutlined /></template>
-                            美化
-                          </a-button>
-                        </div>
-                        <pre class="case-debug-body-pre">{{ debugResponseBodyText }}</pre>
-                      </div>
-                      <table
-                        v-else-if="debugResponseTab === 'assert' && debugResult"
-                        class="case-debug-assert-table"
-                      >
-                        <thead>
-                          <tr>
-                            <th>断言</th>
-                            <th>断言值</th>
-                            <th>实际值</th>
-                            <th style="width: 64px">结果</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr
-                            v-for="(assertion, idx) in debugResult.assertions"
-                            :key="idx"
-                            :class="assertion.passed ? 'assert-pass' : 'assert-fail'"
-                          >
-                            <td>{{ assertion.name }}</td>
-                            <td class="case-debug-assert-value">{{ formatAssertValue(assertion.expected) }}</td>
-                            <td class="case-debug-assert-value">{{ formatAssertValue(assertion.actual) }}</td>
-                            <td>
-                              <span
-                                class="case-debug-assert-status"
-                                :class="assertion.passed ? 'pass' : 'fail'"
-                              >
-                                {{ assertion.passed ? '通过' : '失败' }}
-                              </span>
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                      <pre
-                        v-else-if="debugResponseTab === 'headers' && debugResult"
-                        class="case-debug-headers-pre"
-                      >{{ JSON.stringify(debugResult.headers, null, 2) }}</pre>
-                    </div>
+                  <div v-if="assertionGenerateError" class="case-assertion-error">{{ assertionGenerateError }}</div>
+                  <div v-if="assertionGenerateError && form.assertionRows.some((row) => row.type && row.operator)" class="case-existing-assertion-note">
+                    以下为原有断言，本次请求失败，未调用 AI、未更新断言。
                   </div>
+                  <AssertionRowsEditor
+                    :key="`${payloadEditorKey}-expected`"
+                    v-model:rows="form.assertionRows"
+                    :protocol="form.protocol"
+                    class="case-debug-assertion-editor"
+                  />
                 </div>
               </div>
             </div>
@@ -598,6 +560,14 @@
 
           <div class="instruction-editor-footer dynamic-editor-footer action-toolbar case-editor-footer">
             <div class="case-editor-footer-right">
+              <a-button
+                :loading="debugRunning"
+                :disabled="!apiStore.selectedEnvironmentId || (debugServiceOptions.length > 0 && !debugServiceId)"
+                @click="onDebugRun"
+              >
+                <template #icon><ThunderboltOutlined /></template>
+                调试
+              </a-button>
               <a-button v-if="!isNewCase" danger @click="onDelete">
                 <template #icon><DeleteOutlined /></template>
                 删除
@@ -628,6 +598,27 @@
     />
 
     <a-modal
+      v-model:open="debugResultModalOpen"
+      title="调试结果"
+      :width="760"
+      :footer="null"
+      centered
+    >
+      <div v-if="debugResult" class="case-debug-result-modal">
+        <div class="case-debug-result-summary">
+          <span :class="['case-debug-result-status', debugResult.error ? 'is-failed' : 'is-success']">
+            {{ debugResult.error ? '连接失败' : '连接成功' }}
+          </span>
+          <span v-if="form.protocol === 'http'">状态码 {{ debugResult.statusCode }}</span>
+          <span>{{ debugResult.durationMs }} ms</span>
+          <span>{{ debugResult.bodySize }} bytes</span>
+        </div>
+        <div v-if="debugResult.error" class="case-debug-result-error">{{ debugResult.error }}</div>
+        <pre v-else class="case-debug-result-body">{{ debugResultBodyText }}</pre>
+      </div>
+    </a-modal>
+
+    <a-modal
       v-model:open="bodyExpandModalOpen"
       :title="bodyExpandModalTitle"
       :width="1000"
@@ -639,7 +630,6 @@
       @ok="bodyExpandModalOpen = false"
     >
       <div class="case-body-expand-modal">
-        <p class="case-body-expand-hint">{{ bodyTabHint }}</p>
         <div class="case-body-expand-toolbar">
           <div class="case-body-format-bar">
             <button
@@ -704,6 +694,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onActivated, onDeactivated, reactive, ref, watch } from 'vue';
 import {
+  CopyOutlined,
   DeleteOutlined,
   DownOutlined,
   ExpandOutlined,
@@ -726,7 +717,7 @@ import {
 } from '@case-forge/shared';
 import type { ApiCaseRequest } from '@case-forge/shared';
 import type { ApiTestCaseRow, DebugRunResult } from '@/api/apiTestClient';
-import { listAllApiCases, debugRunCase, generateAssertions, getAssertionGenerateStatus, getAssertionGenerateResult } from '@/api/apiTestClient';
+import { batchPatchApiCaseRequest, listAllApiCases, debugRunCase, generateAssertions, getAssertionGenerateStatus, getAssertionGenerateResult } from '@/api/apiTestClient';
 import { useApiTestStore } from '@/stores/apiTest';
 import KeyValueRowsEditor from '@/components/api-test/KeyValueRowsEditor.vue';
 import AssertionRowsEditor from '@/components/api-test/AssertionRowsEditor.vue';
@@ -741,7 +732,6 @@ import {
 import {
   beautifyCasePayloadJson,
   beautifyRequestBodyXml,
-  formatRunSnapshotForDisplay,
   buildDefaultHeaderRows,
   createEmptyKeyValueRow,
   defaultContentType,
@@ -772,6 +762,21 @@ function onPayloadTextareaPaste(event: Event) {
 }
 
 const batchMode = ref(false);
+const batchSaving = ref(false);
+const batchAssertionRunning = ref(false);
+const batchAssertionProgress = reactive({ done: 0, total: 0, success: 0, failed: 0 });
+const batchAssertionStatuses = reactive<Record<string, 'running' | 'success' | 'failed'>>({});
+const batchEnvironmentId = ref('');
+const batchEnvironmentServiceId = ref('');
+const batchRequest = reactive<{
+  protocol?: CaseProtocol;
+  method?: HttpMethod;
+  path?: string;
+  encoding?: string;
+}>({});
+const hasBatchRequestPatch = computed(() => Boolean(
+  batchRequest.protocol || batchRequest.method || batchRequest.path?.trim() || batchRequest.encoding,
+));
 const envModalOpen = ref(false);
 const exportModalOpen = ref(false);
 const bodyExpandModalOpen = ref(false);
@@ -800,11 +805,23 @@ interface AssertionPollTarget {
 let assertionPollTarget: AssertionPollTarget | null = null;
 const ASSERTION_POLL_INTERVAL_MS = 1500;
 const debugResult = ref<DebugRunResult | null>(null);
+const debugResultModalOpen = ref(false);
 const debugServiceId = ref<string>('');
 const debugEncoding = ref('UTF-8');
-const debugResponseBodyOverride = ref<string | null>(null);
 const loadedCaseId = ref('');
 const debugResponseTab = ref<'expected' | 'body' | 'assert' | 'headers'>('expected');
+const assertionGenerateError = ref('');
+
+const debugResultBodyText = computed(() => {
+  const body = debugResult.value?.body;
+  if (body === undefined || body === null) return '无响应体';
+  if (typeof body === 'string') return body;
+  try {
+    return JSON.stringify(body, null, 2);
+  } catch {
+    return String(body);
+  }
+});
 
 function activeCaseKey() {
   return isNewCase.value ? 'new-case' : (apiStore.activeCaseId || '');
@@ -843,24 +860,6 @@ function getDebugResponseIssue(result: DebugRunResult | null): string | null {
   return null;
 }
 
-const canGenerateAssertions = computed(
-  () => getDebugResponseIssue(debugResult.value) === null,
-);
-
-watch(
-  () => debugResult.value,
-  () => {
-    debugResponseBodyOverride.value = null;
-  },
-);
-
-const hasDebugResponseBody = computed(() => {
-  const body = debugResult.value?.body;
-  if (body === undefined || body === null) return false;
-  if (typeof body === 'string') return body.trim().length > 0;
-  return true;
-});
-
 const debugEnvironmentOptions = computed(() =>
   apiStore.environments
     .filter((env) => env.enabled)
@@ -873,19 +872,94 @@ const debugEnvironmentOptions = computed(() =>
 const debugServiceOptions = computed(() => {
   const envId = apiStore.selectedEnvironmentId;
   if (!envId) return [];
+  const expectedTransport = form.protocol === 'socket' ? 'tcp' : form.protocol;
   const services = apiStore.environmentServices[envId] ?? [];
   return services
-    .filter((s) => s.enabled)
+    .filter((s) => s.enabled && (s.transport ?? 'http') === expectedTransport)
     .map((s) => {
       const transport = s.transport ?? 'http';
+      const address = s.baseUrl?.trim() || s.serverAddress?.trim() || (s.host && s.port ? `${s.host}:${s.port}` : '');
       return {
-        label: `${s.name} (${transport.toUpperCase()})`,
+        label: `${s.name}${address ? ` · ${address}` : ''} (${transport.toUpperCase()})`,
         value: s.id,
+        searchText: `${s.name} ${address} ${s.host ?? ''} ${s.port ?? ''} ${transport}`.toLowerCase(),
       };
     });
 });
 
-const hasDebugServices = computed(() => debugServiceOptions.value.length > 0);
+const fullRequestAddress = computed(() => {
+  const services = apiStore.environmentServices[apiStore.selectedEnvironmentId] ?? [];
+  const service = services.find((item) => item.id === debugServiceId.value);
+  if (form.protocol !== 'http') {
+    return service?.serverAddress || (service?.host && service.port ? `${service.host}:${service.port}` : '');
+  }
+  const environment = apiStore.environments.find((item) => item.id === apiStore.selectedEnvironmentId);
+  let baseUrl = service?.baseUrl?.trim() || service?.serverAddress?.trim() || environment?.baseUrl?.trim() || '';
+  if (!baseUrl) return '';
+  if (service?.pathPrefix?.trim() && !service.baseUrl?.trim() && !service.serverAddress?.trim()) {
+    baseUrl = `${baseUrl.replace(/\/$/, '')}/${service.pathPrefix.replace(/^\//, '')}`;
+  }
+  const query = new URLSearchParams(
+    form.queryRows.filter((row) => row.key.trim()).map((row) => [row.key.trim(), row.value]),
+  ).toString();
+  const url = `${baseUrl.replace(/\/$/, '')}/${(form.httpPath.trim() || '/').replace(/^\//, '')}`;
+  return query ? `${url}?${query}` : url;
+});
+
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+const curlCommand = computed(() => {
+  const request = buildDebugRequest();
+  const parts = [`curl --request ${request.method || 'GET'}`, shellQuote(fullRequestAddress.value || request.path || '/')];
+  for (const [key, value] of Object.entries(request.headers ?? {})) {
+    parts.push(`--header ${shellQuote(`${key}: ${value}`)}`);
+  }
+  if (request.body !== undefined && request.body !== null && request.body !== '') {
+    const body = typeof request.body === 'string' ? request.body : JSON.stringify(request.body);
+    parts.push(`--data-raw ${shellQuote(body)}`);
+  }
+  return parts.join(' \\\n  ');
+});
+
+async function copyCurlCommand() {
+  await navigator.clipboard.writeText(curlCommand.value);
+  message.success('cURL 已复制');
+}
+
+const batchEnvironmentServiceOptions = computed(() =>
+  (apiStore.environmentServices[batchEnvironmentId.value] ?? [])
+    .filter((service) => service.enabled)
+    .map((service) => {
+      const transport = service.transport ?? 'http';
+      const address = service.baseUrl?.trim() || service.serverAddress?.trim() || (service.host && service.port ? `${service.host}:${service.port}` : '');
+      return {
+        label: `${service.name}${address ? ` · ${address}` : ''} (${transport.toUpperCase()})`,
+        value: service.id,
+        searchText: `${service.name} ${address} ${service.host ?? ''} ${service.port ?? ''} ${transport}`.toLowerCase(),
+      };
+    }),
+);
+const batchFullRequestUrl = computed(() => {
+  if (batchRequest.protocol !== 'http' || !batchEnvironmentId.value) return '';
+  const environment = apiStore.environments.find((item) => item.id === batchEnvironmentId.value);
+  const service = (apiStore.environmentServices[batchEnvironmentId.value] ?? [])
+    .find((item) => item.id === batchEnvironmentServiceId.value);
+  let baseUrl = service?.baseUrl?.trim() || service?.serverAddress?.trim() || environment?.baseUrl?.trim() || '';
+  if (!baseUrl) return '';
+  if (service?.pathPrefix?.trim() && !service.baseUrl?.trim() && !service.serverAddress?.trim()) {
+    baseUrl = `${baseUrl.replace(/\/$/, '')}/${service.pathPrefix.replace(/^\//, '')}`;
+  }
+  const path = batchRequest.path?.trim() || '/';
+  return `${baseUrl.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
+});
+
+watch(batchEnvironmentId, (environmentId) => {
+  if (projectId.value && environmentId) {
+    void apiStore.refreshEnvironmentServices(projectId.value, environmentId);
+  }
+});
 
 function syncDebugServiceSelection() {
   if (
@@ -903,34 +977,58 @@ const editorMainTabs = [
   { key: 'assertion' as const, label: '断言' },
 ];
 const requestTab = ref<'params' | 'body' | 'headers'>('body');
+const requestViewMode = ref<'template' | 'curl'>('template');
+const requestConfigExpanded = ref(false);
 const pageSizeOptions = caseForgePageSizeOptionLabels();
 
 const projectId = computed(() => apiStore.activeProjectId ?? '');
 const transactionId = computed(() => apiStore.activeTransactionId ?? '');
 const selectedIds = computed(() => apiStore.selectedCaseIds);
-const allVersions = ref<number[]>([]);
+const allVersions = ref<string[]>([]);
+const allChannels = ref<{ id: string; name: string }[]>([]);
+const currentChannelNames = computed(
+  () => new Map(
+    (apiStore.apiDoc?.generationProfile?.channels ?? []).map((channel) => [channel.id, channel.name]),
+  ),
+);
+
+function displayCaseTitle(item: ApiTestCaseRow) {
+  const title = item.title || '未命名案例';
+  const channelId = item.metadata?.channelId;
+  const currentName = channelId ? currentChannelNames.value.get(channelId) : undefined;
+  return currentName ? title.replace(/^\[[^\]]+\]/, `[${currentName}]`) : title;
+}
 const showCaseWorkspace = computed(
   () =>
     apiStore.caseListTotal > 0 ||
     apiStore.cases.length > 0 ||
     allVersions.value.length > 0 ||
-    apiStore.caseListVersionFilter != null,
+    allChannels.value.length > 0 ||
+    apiStore.caseListVersionFilter != null ||
+    apiStore.caseListChannelFilter != null,
 );
 const caseListEmptyHint = computed(() =>
-  apiStore.caseListVersionFilter != null
-    ? `v${apiStore.caseListVersionFilter} 暂无案例，请切换其他版本`
+  apiStore.caseListVersionFilter != null || apiStore.caseListChannelFilter != null
+    ? '当前筛选条件下暂无案例'
     : '当前暂无案例',
 );
 const versionOptions = computed(() => {
-  const list = [...allVersions.value].sort((a, b) => a - b);
-  const options: { value: number | null; label: string }[] = [
+  const list = [...allVersions.value].sort();
+  const options: { value: string | null; label: string }[] = [
     { value: null, label: '全部版本' },
   ];
   for (const v of list) {
-    options.push({ value: v, label: `v${v}` });
+    options.push({ value: v, label: v });
   }
   return options;
 });
+const channelOptions = computed(() => [
+  { value: null, label: '全部渠道' },
+  ...allChannels.value.map((channel) => ({
+    value: channel.id,
+    label: channel.name,
+  })),
+]);
 
 let loadVersionsReqId = 0;
 
@@ -943,24 +1041,42 @@ async function loadAvailableVersions() {
   if (reqId !== loadVersionsReqId) return;
   if (pid !== projectId.value || tid !== transactionId.value) return;
 
-  const versions = new Set<number>();
+  const versions = new Set<string>();
+  const channels = new Map<string, string>();
   for (const row of rows) {
-    const version = row.metadata?.generateVersion;
-    if (version != null) {
-      versions.add(version);
+    const code = row.metadata?.versionCode;
+    if (code != null) {
+      versions.add(code);
+    }
+    const channelId = row.metadata?.channelId;
+    if (channelId != null) {
+      channels.set(
+        channelId,
+        currentChannelNames.value.get(channelId) || row.metadata?.channelName || channelId,
+      );
     }
   }
   allVersions.value = Array.from(versions);
+  allChannels.value = Array.from(channels, ([id, name]) => ({ id, name })).sort(
+    (a, b) => a.name.localeCompare(b.name),
+  );
+
+  if (
+    apiStore.caseListChannelFilter != null &&
+    !channels.has(apiStore.caseListChannelFilter)
+  ) {
+    apiStore.caseListChannelFilter = null;
+  }
 
   const filter = apiStore.caseListVersionFilter;
   if (filter != null && !versions.has(filter)) {
     const latest = allVersions.value.length
-      ? Math.max(...allVersions.value)
+      ? allVersions.value.sort()[allVersions.value.length - 1]
       : null;
     apiStore.caseListVersionFilter = latest;
     await apiStore.refreshCases(pid, tid, {
       resetPage: true,
-      generateVersion: latest ?? undefined,
+      versionCode: latest ?? undefined,
     });
   }
 }
@@ -981,7 +1097,7 @@ async function ensureDebugEnvironments() {
   await apiStore.refreshEnvironments(pid);
 }
 
-function onVersionFilterChange(value: number | null) {
+function onVersionFilterChange(value: string | null) {
   const pid = projectId.value;
   const tid = transactionId.value;
   if (!pid || !tid) return;
@@ -989,7 +1105,7 @@ function onVersionFilterChange(value: number | null) {
   void (async () => {
     await apiStore.refreshCases(pid, tid, {
       resetPage: true,
-      generateVersion: value ?? undefined,
+      versionCode: value ?? undefined,
     });
     if (
       value != null &&
@@ -1000,6 +1116,17 @@ function onVersionFilterChange(value: number | null) {
       await loadAvailableVersions();
     }
   })();
+}
+
+function onChannelFilterChange(value: string | null) {
+  const pid = projectId.value;
+  const tid = transactionId.value;
+  if (!pid || !tid) return;
+  apiStore.caseListChannelFilter = value;
+  void apiStore.refreshCases(pid, tid, {
+    resetPage: true,
+    channelId: value ?? undefined,
+  });
 }
 const caseLookup = computed(() => {
   const map = new Map<string, ApiTestCaseRow>();
@@ -1013,6 +1140,15 @@ const selectedRows = computed(() =>
     .map((id) => caseLookup.value.get(id))
     .filter((row): row is ApiTestCaseRow => Boolean(row)),
 );
+function batchCaseStatus(row: ApiTestCaseRow) {
+  const state = batchAssertionStatuses[row.id];
+  if (state === 'running') return { label: '处理中', className: 'is-running' };
+  if (state === 'success') return { label: '已生成', className: 'is-success' };
+  if (state === 'failed') return { label: '生成失败', className: 'is-failed' };
+  if (!row.metadata?.debugEnvironmentId) return { label: '缺少环境', className: 'is-failed' };
+  if (!row.metadata?.debugEnvironmentServiceId) return { label: '缺少地址', className: 'is-warning' };
+  return { label: '配置完整', className: 'is-ready' };
+}
 const activeCase = computed(() =>
   apiStore.cases.find((item) => item.id === apiStore.activeCaseId) ?? null,
 );
@@ -1160,8 +1296,8 @@ const requestTabs = computed(() => {
     return tabs;
   }
   return [
-    { key: 'headers' as const, label: 'Headers', count: countFilledRows(form.headerRows) },
     { key: 'body' as const, label: 'Body', count: 1 },
+    { key: 'headers' as const, label: 'Headers', count: countFilledRows(form.headerRows) },
   ];
 });
 
@@ -1175,24 +1311,6 @@ const bodyExpandModalTitle = computed(() => {
     bodyFormatOptions.find((item) => item.value === form.bodyFormat)?.label ??
     'Body';
   return `编辑请求 Body（${label}）`;
-});
-
-const headersTabHint = computed(() => {
-  if (form.protocol === 'http') return '配置请求头，如 Content-Type、Authorization 等';
-  if (form.protocol === 'socket') return '配置 Socket 通讯头信息';
-  return '配置 MQ 消息头信息';
-});
-
-const bodyTabHint = computed(() => {
-  if (form.protocol === 'http') {
-    return `${form.httpMethod} 请求 Body，格式选择 JSON / XML / Text`;
-  }
-  if (form.protocol === 'socket') {
-    return form.bodyFormat === 'xml'
-      ? 'Socket 报文体，GBK 编码时自动附加 8 位长度前缀'
-      : `Socket 报文体，格式为 ${form.bodyFormat.toUpperCase()}`;
-  }
-  return `MQ 消息体，格式为 ${form.bodyFormat.toUpperCase()}`;
 });
 
 watch(
@@ -1345,9 +1463,15 @@ watch(
 watch(
   () => form.protocol,
   () => {
+    requestViewMode.value = 'template';
+    requestTab.value = form.protocol === 'http' && !httpMethodHasBody(form.httpMethod) ? 'params' : 'body';
     syncDebugServiceSelection();
   },
 );
+
+watch(debugEncoding, (encoding) => {
+  if (form.protocol === 'socket') form.socketEncoding = encoding;
+});
 
 function onCasePageChange(page: number, pageSize: number) {
   const pid = projectId.value;
@@ -1485,6 +1609,28 @@ function toggleBatchMode() {
   }
   if (apiStore.activeCaseId) {
     apiStore.selectedCaseIds = [apiStore.activeCaseId];
+  }
+}
+
+async function onBatchSaveRequest() {
+  if (!projectId.value || !transactionId.value || !selectedIds.value.length) return;
+  const patch: Partial<ApiCaseRequest> = {};
+  if (batchRequest.protocol) patch.transport = batchRequest.protocol === 'socket' ? 'tcp' : 'http';
+  if (batchRequest.method) patch.method = batchRequest.method;
+  if (batchRequest.path?.trim()) patch.path = batchRequest.path.trim();
+  if (batchRequest.encoding) patch.encoding = batchRequest.encoding;
+  batchSaving.value = true;
+  try {
+    const result = await batchPatchApiCaseRequest(
+      projectId.value, transactionId.value, [...selectedIds.value], patch,
+      batchEnvironmentId.value || undefined,
+      batchEnvironmentServiceId.value || undefined,
+      batchRequest.encoding || undefined,
+    );
+    message.success(`已更新 ${result.updated} 条案例`);
+    await apiStore.refreshCases(projectId.value, transactionId.value);
+  } finally {
+    batchSaving.value = false;
   }
 }
 
@@ -1636,7 +1782,7 @@ function buildSavePayload(): Record<string, unknown> | null {
       debugEncoding: debugEncoding.value || undefined,
     };
   if (isNewCase.value && apiStore.caseListVersionFilter != null) {
-    payload.generateVersion = apiStore.caseListVersionFilter;
+    payload.versionCode = apiStore.caseListVersionFilter;
   }
   if (debugResult.value) {
     payload.lastDebugRun = toLastDebugRunSnapshot(debugResult.value);
@@ -1677,43 +1823,6 @@ async function onSave() {
     return;
   }
   await persistCase();
-}
-
-const debugResponseBodyText = computed(() => {
-  if (debugResponseBodyOverride.value !== null) {
-    return debugResponseBodyOverride.value;
-  }
-  const body = debugResult.value?.body;
-  if (body === undefined || body === null) return '';
-  if (typeof body === 'string') return body;
-  try {
-    return JSON.stringify(body, null, 2);
-  } catch {
-    return String(body);
-  }
-});
-
-function beautifyDebugResponseBody() {
-  if (!debugResult.value || !hasDebugResponseBody.value) {
-    message.info('暂无响应体');
-    return;
-  }
-  try {
-    debugResponseBodyOverride.value = formatRunSnapshotForDisplay(debugResult.value.body);
-    message.success('响应体已美化');
-  } catch {
-    message.error('无法美化当前响应体');
-  }
-}
-
-function formatAssertValue(value: unknown): string {
-  if (value === undefined || value === null) return '—';
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
 }
 
 function buildDebugRequest(): ApiCaseRequest {
@@ -1760,35 +1869,21 @@ async function onDebugRun() {
         caseId: caseIdAtStart,
       },
     );
-    if (!isStillOnCase(caseKey)) {
-      if (caseIdAtStart) {
-        const row = apiStore.cases.find((item) => item.id === caseIdAtStart);
-        if (row) {
-          row.metadata = {
-            ...row.metadata,
-            lastDebugRun: toLastDebugRunSnapshot(result),
-          };
-        }
-      }
-      return;
-    }
+    if (!isStillOnCase(caseKey)) return;
     debugResult.value = result;
-    debugResponseTab.value = result.error ? 'expected' : 'body';
-    editorMainTab.value = 'assertion';
-    if (caseIdAtStart) {
-      patchActiveCaseLastDebugRun(toLastDebugRunSnapshot(result));
-    }
-    const saved = await persistCase({ silent: true });
-    if (saved) {
-      message.success('调试完成并已保存');
-    } else if (!form.title.trim()) {
-      message.warning('调试完成，请填写案例名称后保存');
-    } else {
-      message.warning('调试完成，但自动保存失败，请手动点击保存');
-    }
-  } catch {
+    debugResultModalOpen.value = true;
+  } catch (error) {
     if (isStillOnCase(caseKey)) {
-      message.error('调试执行失败，请检查环境配置和请求报文');
+      debugResult.value = {
+        statusCode: 0,
+        headers: {},
+        body: null,
+        bodySize: 0,
+        durationMs: 0,
+        error: error instanceof Error ? error.message : '调试执行失败，请检查环境配置和请求报文',
+        assertions: [],
+      };
+      debugResultModalOpen.value = true;
     }
   } finally {
     releaseCaseTask(debugRunningCaseKey, caseKey);
@@ -1797,35 +1892,48 @@ async function onDebugRun() {
 
 async function onGenerateAssertions() {
   if (!projectId.value || !transactionId.value) return;
-
-  const responseIssue = getDebugResponseIssue(debugResult.value);
-  if (responseIssue) {
-    message.warning(responseIssue);
+  if (!apiStore.selectedEnvironmentId) {
+    message.warning('请先在请求报文页选择环境');
     return;
   }
-  const result = debugResult.value!;
   const caseKey = activeCaseKey();
   const caseIdAtStart = isNewCase.value ? undefined : apiStore.activeCaseId || undefined;
 
-  const hasExisting = form.assertionRows.some((row) => Boolean(row.type && row.operator));
-
-  if (hasExisting) {
-    const confirmed = await new Promise<boolean>((resolve) => {
-      Modal.confirm({
-        title: '覆盖已有断言？',
-        content: '当前已有断言，AI 生成的断言将整段替换。确定继续？',
-        okText: '替换',
-        cancelText: '取消',
-        centered: true,
-        onOk: () => resolve(true),
-        onCancel: () => resolve(false),
-      });
-    });
-    if (!confirmed) return;
-  }
-
-  generatingAssertionsCaseKey.value = caseKey;
+  assertionGenerateError.value = '';
+  debugRunningCaseKey.value = caseKey;
   try {
+    const result = await debugRunCase(projectId.value, transactionId.value, {
+      request: buildDebugRequest(),
+      expected: buildExpectedFromRows(form.assertionRows),
+      polarity: form.polarity,
+      environmentId: apiStore.selectedEnvironmentId,
+      environmentServiceId: debugServiceId.value || undefined,
+      encoding: debugEncoding.value,
+      caseId: caseIdAtStart,
+    });
+    const responseIssue = getDebugResponseIssue(result);
+    if (responseIssue) throw new Error(result.error || responseIssue);
+    debugResult.value = result;
+    releaseCaseTask(debugRunningCaseKey, caseKey);
+
+    if (form.assertionRows.some((row) => Boolean(row.type && row.operator))) {
+      const confirmed = await new Promise<boolean>((resolve) => {
+        Modal.confirm({
+          title: '响应获取成功，覆盖已有断言？',
+          content: 'AI 生成的断言将整段替换当前断言。',
+          okText: '生成并替换',
+          cancelText: '保留原断言',
+          centered: true,
+          closable: true,
+          maskClosable: true,
+          onOk: () => resolve(true),
+          onCancel: () => resolve(false),
+        });
+      });
+      if (!confirmed) return;
+    }
+
+    generatingAssertionsCaseKey.value = caseKey;
     const transport = form.protocol === 'socket' ? 'tcp' : 'http';
     const messageFormat = form.bodyFormat === 'xml' ? 'xml' : form.bodyFormat === 'text' ? 'text' : 'json';
     const job = await generateAssertions(
@@ -1842,11 +1950,97 @@ async function onGenerateAssertions() {
       },
     );
     startAssertionPoll(job.jobId, caseKey, caseIdAtStart);
-  } catch {
+  } catch (error) {
+    assertionGenerateError.value = `请求未成功，未调用 AI：${error instanceof Error ? error.message : '请检查请求配置'}`;
     if (isStillOnCase(caseKey)) {
-      message.error('AI 生成断言入队失败，请稍后重试');
+      message.error(assertionGenerateError.value);
     }
+    releaseCaseTask(debugRunningCaseKey, caseKey);
     releaseCaseTask(generatingAssertionsCaseKey, caseKey);
+  }
+}
+
+async function waitForAssertionResult(caseId: string, jobId: string) {
+  while (true) {
+    const status = await getAssertionGenerateStatus(projectId.value, transactionId.value, caseId, jobId);
+    if (status.phase === 'completed') {
+      return getAssertionGenerateResult(projectId.value, transactionId.value, caseId, jobId);
+    }
+    if (status.phase === 'failed' || status.phase === 'cancelled') {
+      throw new Error(status.errorMessage || 'AI 生成断言失败');
+    }
+    await new Promise((resolve) => setTimeout(resolve, ASSERTION_POLL_INTERVAL_MS));
+  }
+}
+
+async function onBatchGenerateAssertions() {
+  if (!projectId.value || !transactionId.value || !selectedIds.value.length) return;
+  batchAssertionRunning.value = true;
+  Object.keys(batchAssertionStatuses).forEach((key) => delete batchAssertionStatuses[key]);
+  Object.assign(batchAssertionProgress, { done: 0, total: selectedIds.value.length, success: 0, failed: 0 });
+  try {
+    const allCases = await listAllApiCases(projectId.value, transactionId.value);
+    const rows = allCases.filter((row) => selectedIds.value.includes(row.id));
+    for (const row of rows) {
+      batchAssertionStatuses[row.id] = 'running';
+      try {
+        const environmentId = row.metadata?.debugEnvironmentId;
+        if (!environmentId) throw new Error('缺少环境');
+        if (!row.metadata?.debugEnvironmentServiceId) throw new Error('缺少地址');
+        const result = await debugRunCase(projectId.value, transactionId.value, {
+          request: row.request,
+          expected: row.expected,
+          polarity: row.polarity,
+          environmentId,
+          environmentServiceId: row.metadata?.debugEnvironmentServiceId,
+          encoding: row.metadata?.debugEncoding || 'UTF-8',
+          caseId: row.id,
+        });
+        const responseIssue = getDebugResponseIssue(result);
+        if (responseIssue) throw new Error(result.error || responseIssue);
+        const bodyText = typeof row.request.body === 'string' ? row.request.body.trim() : '';
+        const job = await generateAssertions(projectId.value, transactionId.value, {
+          caseId: row.id,
+          transport: row.request.transport || 'http',
+          messageFormat: bodyText.startsWith('<') ? 'xml' : 'json',
+          polarity: row.polarity,
+          statusCode: result.statusCode,
+          headers: result.headers,
+          body: result.body,
+        });
+        const { assertions } = await waitForAssertionResult(row.id, job.jobId);
+        if (!assertions.length) throw new Error('AI 未生成有效断言');
+        await apiStore.saveCase(projectId.value, transactionId.value, {
+          endpointId: row.endpointId,
+          title: row.title,
+          caseNo: row.caseNo,
+          description: row.description,
+          remark: row.remark,
+          transactionCode: row.transactionCode,
+          owner: row.owner,
+          polarity: row.polarity,
+          status: row.status,
+          enabled: row.enabled,
+          request: row.request,
+          expected: buildExpectedFromRows(assertionsToRows(assertions)),
+          debugEnvironmentId: environmentId,
+          debugEnvironmentServiceId: row.metadata?.debugEnvironmentServiceId,
+          debugEncoding: row.metadata?.debugEncoding,
+          lastDebugRun: toLastDebugRunSnapshot(result),
+        }, row.id, { silent: true });
+        batchAssertionStatuses[row.id] = 'success';
+        batchAssertionProgress.success += 1;
+      } catch {
+        batchAssertionStatuses[row.id] = 'failed';
+        batchAssertionProgress.failed += 1;
+      } finally {
+        batchAssertionProgress.done += 1;
+      }
+    }
+    message.success(`批量生成完成：成功 ${batchAssertionProgress.success}，失败 ${batchAssertionProgress.failed}`);
+    await apiStore.refreshCases(projectId.value, transactionId.value);
+  } finally {
+    batchAssertionRunning.value = false;
   }
 }
 
@@ -2128,7 +2322,7 @@ function onBatchDelete() {
 
 .batch-case-summary-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 140px 132px;
+  grid-template-columns: minmax(0, 1fr) 140px 132px 72px;
   align-items: center;
   gap: 12px;
   padding: 8px 0;
@@ -2160,9 +2354,58 @@ function onBatchDelete() {
   white-space: nowrap;
 }
 
+.batch-case-summary-status {
+  justify-self: end;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.batch-case-summary-status.is-ready,
+.batch-case-summary-status.is-success { color: #039855; }
+.batch-case-summary-status.is-running { color: #175cd3; }
+.batch-case-summary-status.is-warning { color: #b54708; }
+.batch-case-summary-status.is-failed { color: #d92d20; }
+
+.batch-assertion-progress {
+  margin-right: auto;
+  color: #667085;
+  font-size: 12px;
+}
+
 .batch-case-summary-more {
   color: #667085;
   font-size: 12px;
+}
+
+.batch-request-config {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.batch-request-config--request {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.batch-request-path {
+  grid-column: 1 / -1;
+}
+
+.batch-request-url {
+  margin-top: 12px;
+  color: #667085;
+  font-size: 13px;
+}
+
+.batch-request-url span {
+  color: #344054;
+  word-break: break-all;
+}
+
+@media (max-width: 720px) {
+  .batch-request-config {
+    grid-template-columns: 1fr;
+  }
 }
 
 .case-card-title strong {
@@ -2178,14 +2421,16 @@ function onBatchDelete() {
   font-size: 12px;
 }
 
-.case-list-head-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.case-list-filter-bar {
+  margin-bottom: 12px;
 }
 
 .case-version-filter {
-  width: 88px;
+  width: auto;
+}
+
+.case-channel-filter {
+  width: auto;
 }
 
 .case-list-empty {
@@ -2525,10 +2770,10 @@ function onBatchDelete() {
 }
 
 .case-protocol-bar {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: center;
-  gap: 10px 14px;
+  gap: 12px;
   margin-bottom: 0;
   padding: 10px 12px;
   border: none;
@@ -2538,26 +2783,179 @@ function onBatchDelete() {
   flex-shrink: 0;
 }
 
-.case-protocol-field {
+.case-protocol-bar--socket,
+.case-protocol-bar--mq {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.case-protocol-bar--http .case-protocol-field--grow {
+  grid-row: 2;
+  grid-column: 2;
+}
+
+.case-protocol-bar--http .case-protocol-field--encoding {
+  grid-row: 2;
+  grid-column: 1;
+}
+
+.case-request-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #eaecf0;
+  background: #fafbfc;
+}
+
+.case-request-summary--clickable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.case-request-summary--clickable:hover {
+  background: #f2f4f7;
+}
+
+.case-request-section-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid #eaecf0;
+  background: #f2f4f7;
+}
+
+.case-request-section-heading strong {
+  color: #344054;
+  font-size: 13px;
+}
+
+.case-request-section-heading span {
+  color: #98a2b3;
+  font-size: 12px;
+}
+
+.case-request-section-heading--content {
+  margin-top: 8px;
+  border-top: 1px solid #eaecf0;
+  background: #fff;
+}
+
+.case-request-config-block {
+  background: #fafbfc;
+}
+
+.case-request-summary-method {
+  color: #b50930;
+  font-weight: 700;
+}
+
+.case-request-summary-url {
+  overflow: hidden;
+  color: #344054;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.case-request-summary-encoding {
+  color: #667085;
+  font-size: 12px;
+}
+
+.request-config-chevron {
+  margin-left: 4px;
+  transition: transform 0.2s;
+}
+
+.request-config-chevron.is-open { transform: rotate(180deg); }
+
+.case-target-bar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #eaecf0;
+}
+
+.case-protocol-field--target :deep(.ant-select) {
+  width: 100%;
+}
+
+.case-request-view-switch {
+  display: flex;
+  margin-left: auto;
+  border: 1px solid #d0d5dd;
+}
+
+.case-request-view-switch button {
+  height: 26px;
+  padding: 0 12px;
+  border: 0;
+  border-right: 1px solid #d0d5dd;
+  background: #fff;
+  color: #475467;
+  cursor: pointer;
+}
+
+.case-request-view-switch button:last-child { border-right: 0; }
+.case-request-view-switch button.active { background: #b50930; color: #fff; }
+
+.case-curl-panel {
+  display: flex;
+  min-height: 320px;
+  flex-direction: column;
+  border: 1px solid #eaecf0;
+  background: #fff;
+}
+
+.case-curl-toolbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid #eaecf0;
+  background: #f9fafb;
+  color: #475467;
+  font-size: 12px;
+}
+
+.case-curl-panel pre {
+  flex: 1;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  color: #1d2939;
+  font: 12px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.case-protocol-field {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .case-protocol-field--grow {
-  flex: 1;
-  min-width: 220px;
+  min-width: 0;
 }
 
 .case-protocol-label {
-  flex-shrink: 0;
   font-size: 12px;
   color: #667085;
+  text-align: right;
   white-space: nowrap;
 }
 
 .case-protocol-select {
-  min-width: 108px;
+  width: 100%;
+  min-width: 0;
 }
 
 .case-payload-grid {
@@ -2824,6 +3222,77 @@ function onBatchDelete() {
 .case-debug-assertion-editor {
   flex: 1;
   min-height: 0;
+  margin: 12px;
+  overflow: auto;
+}
+
+.case-assertion-error {
+  margin: 12px 12px 0;
+  padding: 8px 10px;
+  border: 1px solid #fecdca;
+  background: #fef3f2;
+  color: #b42318;
+  font-size: 12px;
+}
+
+.case-existing-assertion-note {
+  margin: 8px 12px 0;
+  padding: 7px 10px;
+  border-left: 3px solid #f79009;
+  background: #fffaeb;
+  color: #93370d;
+  font-size: 12px;
+}
+
+.case-debug-result-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.case-debug-result-summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: #667085;
+  font-size: 13px;
+}
+
+.case-debug-result-status {
+  font-weight: 700;
+}
+
+.case-debug-result-status.is-success { color: #039855; }
+.case-debug-result-status.is-failed { color: #d92d20; }
+
+.case-debug-result-error,
+.case-debug-result-body {
+  max-height: 420px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid #eaecf0;
+  background: #f9fafb;
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.case-debug-result-error {
+  border-color: #fecdca;
+  background: #fef3f2;
+  color: #b42318;
+}
+
+@media (max-width: 900px) {
+  .case-request-summary { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .case-request-summary-encoding { display: none; }
+  .case-target-bar { grid-template-columns: 1fr; }
+  .case-protocol-bar,
+  .case-protocol-bar--socket,
+  .case-protocol-bar--mq { grid-template-columns: 1fr; }
+  .batch-case-summary-item { grid-template-columns: minmax(0, 1fr) auto; }
+  .batch-case-summary-no { justify-self: start; }
 }
 
 .case-body-empty {

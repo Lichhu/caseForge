@@ -1,24 +1,20 @@
 <template>
   <div class="assertion-rows-editor">
-    <div class="assertion-rows-toolbar">
-      <span v-if="hint" class="assertion-rows-hint">{{ hint }}</span>
-      <a-button type="text" size="small" class="assertion-add-btn" title="添加断言" @click="addRow">
-        <PlusOutlined />
-      </a-button>
-    </div>
     <div class="assertion-rows-head">
-      <span class="assertion-col assertion-col--index">#</span>
       <span class="assertion-col assertion-col--desc">描述</span>
       <span class="assertion-col assertion-col--type">类型</span>
       <span class="assertion-col assertion-col--operator">比较</span>
       <span class="assertion-col assertion-col--expression">表达式</span>
       <span class="assertion-col assertion-col--expected">期望值</span>
-      <span class="assertion-col assertion-col--action" />
+      <span class="assertion-col assertion-col--action">
+        <a-button type="text" size="small" class="assertion-add-btn" title="添加断言" @click="addRow">
+          <PlusOutlined />
+        </a-button>
+      </span>
     </div>
     <div class="assertion-rows-body">
-      <div v-if="!rows.length" class="assertion-empty-hint">暂无断言，调试后可 AI 生成，或点击右上角添加</div>
+      <div v-if="!rows.length" class="assertion-empty-hint">暂无断言，可使用 AI 生成或点击操作列加号添加</div>
       <div v-for="(row, index) in rows" :key="row.id" class="assertion-row">
-        <span class="assertion-col assertion-col--index">{{ index + 1 }}</span>
         <a-input
           :value="row.description"
           size="small"
@@ -138,23 +134,6 @@ function removeRow(index: number) {
   height: 100%;
 }
 
-.assertion-rows-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 24px;
-  flex-shrink: 0;
-}
-
-.assertion-rows-hint {
-  flex: 1;
-  min-width: 0;
-  font-size: 12px;
-  line-height: 1.5;
-  color: #98a2b3;
-}
-
 .assertion-add-btn {
   flex-shrink: 0;
   width: 24px;
@@ -171,7 +150,7 @@ function removeRow(index: number) {
 .assertion-rows-head,
 .assertion-row {
   display: grid;
-  grid-template-columns: 32px minmax(88px, 1fr) 118px 78px minmax(96px, 1.1fr) minmax(72px, 0.9fr) 32px;
+  grid-template-columns: minmax(88px, 1fr) 118px 78px minmax(96px, 1.1fr) minmax(72px, 0.9fr) 64px;
   align-items: center;
   gap: 0;
 }
@@ -212,13 +191,6 @@ function removeRow(index: number) {
 
 .assertion-row:last-child {
   border-bottom: none;
-}
-
-.assertion-col--index {
-  text-align: center;
-  font-size: 11px;
-  color: #98a2b3;
-  user-select: none;
 }
 
 .assertion-col--action {

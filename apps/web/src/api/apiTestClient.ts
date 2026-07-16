@@ -17,6 +17,7 @@ import type {
   ApiTransport,
   AssertionResult,
   ApiRunItemStatus,
+  ApiDocGenerationProfile,
 } from "@case-forge/shared";
 
 export interface ApiTransactionRow {
@@ -76,6 +77,7 @@ export interface ApiDocDetail {
   structuringError?: string;
   endpoints: ApiEndpointRow[];
   generationPromptIds?: string[];
+  generationProfile?: ApiDocGenerationProfile | null;
   canEnterCases: boolean;
   canGenerateCases: boolean;
   canEnterRunner: boolean;
@@ -116,6 +118,9 @@ export interface ApiTestCaseRow {
     source?: string;
     promptIds?: string[];
     generateVersion?: number;
+    versionCode?: string;
+    channelId?: string;
+    channelName?: string;
     debugEnvironmentId?: string;
     debugEnvironmentServiceId?: string;
     debugEncoding?: string;
@@ -374,11 +379,11 @@ export async function saveApiDocument(
 export async function saveApiDocumentGeneration(
   projectId: string,
   transactionId: string,
-  promptIds: string[],
+  profile: ApiDocGenerationProfile,
 ) {
   const { data } = await http.patch<ApiDocDetail>(
     `${transactionBase(projectId, transactionId)}/document/generation`,
-    { promptIds },
+    profile,
   );
   return data;
 }
@@ -393,7 +398,12 @@ export interface ApiCaseListResult {
 export async function listApiCases(
   projectId: string,
   transactionId: string,
-  params?: { page?: number; pageSize?: number; generateVersion?: number },
+  params?: {
+    page?: number;
+    pageSize?: number;
+    versionCode?: string;
+    channelId?: string;
+  },
 ): Promise<ApiCaseListResult> {
   const page = Math.max(1, params?.page ?? 1);
   const pageSize = normalizeCaseForgePageSize(
@@ -405,9 +415,10 @@ export async function listApiCases(
       params: {
         page,
         pageSize,
-        ...(params?.generateVersion != null
-          ? { generateVersion: params.generateVersion }
+        ...(params?.versionCode != null
+          ? { versionCode: params.versionCode }
           : {}),
+        ...(params?.channelId != null ? { channelId: params.channelId } : {}),
       },
       headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
     },
@@ -419,7 +430,7 @@ export async function listApiCases(
 export async function listAllApiCases(
   projectId: string,
   transactionId: string,
-  params?: { generateVersion?: number },
+  params?: { versionCode?: string; channelId?: string },
 ): Promise<ApiTestCaseRow[]> {
   const pageSize = 100;
   let page = 1;
@@ -429,7 +440,8 @@ export async function listAllApiCases(
     const result = await listApiCases(projectId, transactionId, {
       page,
       pageSize,
-      generateVersion: params?.generateVersion,
+      versionCode: params?.versionCode,
+      channelId: params?.channelId,
     });
     rows.push(...result.rows);
     total = result.count;
@@ -473,10 +485,26 @@ export async function deleteApiCase(
   );
 }
 
+export async function batchPatchApiCaseRequest(
+  projectId: string,
+  transactionId: string,
+  caseIds: string[],
+  patch: Partial<ApiCaseRequest>,
+  environmentId?: string,
+  environmentServiceId?: string,
+  encoding?: string,
+) {
+  const { data } = await http.patch<{ ok: boolean; updated: number }>(
+    `${transactionBase(projectId, transactionId)}/cases/request-config`,
+    { caseIds, patch, environmentId, environmentServiceId, encoding },
+  );
+  return data;
+}
+
 export async function generateApiCases(
   projectId: string,
   transactionId: string,
-  options?: { endpointIds?: string[]; promptIds?: string[] },
+  options?: { channelIds?: string[] },
 ) {
   const { data } = await http.post<{
     jobId: string;
@@ -522,7 +550,14 @@ export async function checkDocReadiness(
 export interface ApiCaseGenerateQueueStatus {
   jobId?: string;
   transactionId: string;
-  phase: "queued" | "running" | "completed" | "failed" | "cancelled" | "none";
+  phase:
+    | "queued"
+    | "running"
+    | "completed"
+    | "partial"
+    | "failed"
+    | "cancelled"
+    | "none";
   queuePosition: number;
   estimatedWaitSeconds: number;
   estimatedRemainingSeconds: number;
@@ -560,18 +595,20 @@ export async function cancelApiCaseGenerate(
 export interface ApiCaseGenerateHistoryItem {
   jobId: string;
   version: number | null;
+  versionCode: string | null;
+  ruleVersion: string | null;
   status: string;
   resultCount: number | null;
-  promptIds: string[];
-  promptSummaries: Array<{
-    id: string;
-    name: string | null;
-    scenarioName: string | null;
-  }>;
   createdBy: string | null;
   queuedAt: string;
   finishedAt: string | null;
   errorMessage: string | null;
+  scenarioSummary: {
+    total: number;
+    completed: number;
+    notApplicable: number;
+    failed: number;
+  };
 }
 
 export async function getApiCaseGenerateHistory(
@@ -582,6 +619,62 @@ export async function getApiCaseGenerateHistory(
     `${transactionBase(projectId, transactionId)}/cases/generate/history`,
   );
   return data;
+}
+
+export interface ApiCaseGenerateScenarioItem {
+  id: string;
+  scenarioKey: string;
+  scenarioName: string;
+  status:
+    | "pending"
+    | "running"
+    | "completed"
+    | "not_applicable"
+    | "failed"
+    | "retrying";
+  applicableReason?: string | null;
+  resultCount: number;
+  attemptCount: number;
+  durationMs?: number | null;
+  errorMessage?: string | null;
+}
+
+export interface ApiCaseGenerateVersionDetail extends ApiCaseGenerateHistoryItem {
+  id: string;
+  scenarios: ApiCaseGenerateScenarioItem[];
+}
+
+export async function getApiCaseGenerateVersion(
+  projectId: string,
+  transactionId: string,
+  jobId: string,
+) {
+  const { data } = await http.get<ApiCaseGenerateVersionDetail>(
+    `${transactionBase(projectId, transactionId)}/case-versions/${jobId}`,
+  );
+  return data;
+}
+
+export async function retryApiCaseGenerateScenario(
+  projectId: string,
+  transactionId: string,
+  jobId: string,
+  scenarioId: string,
+) {
+  const { data } = await http.post<ApiCaseGenerateVersionDetail>(
+    `${transactionBase(projectId, transactionId)}/case-versions/${jobId}/scenarios/${scenarioId}/retry`,
+  );
+  return data;
+}
+
+export async function deleteApiCaseGenerateVersion(
+  projectId: string,
+  transactionId: string,
+  jobId: string,
+) {
+  await http.delete(
+    `${transactionBase(projectId, transactionId)}/case-versions/${jobId}`,
+  );
 }
 
 export async function listApiEnvironments(projectId: string) {
@@ -757,7 +850,7 @@ export async function runApiExecutionSet(
   transactionId: string,
   setId: string,
   payload: {
-    environmentId: string;
+    environmentId?: string;
     environmentServiceId?: string;
     concurrency?: number;
     encoding?: string;
@@ -775,7 +868,7 @@ export async function runApiCases(
   transactionId: string,
   payload: {
     caseIds: string[];
-    environmentId: string;
+    environmentId?: string;
     environmentServiceId?: string;
     concurrency?: number;
     encoding?: string;

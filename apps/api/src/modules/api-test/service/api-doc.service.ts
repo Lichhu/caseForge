@@ -179,7 +179,13 @@ export class ApiDocService {
     const doc = await this.ensureDoc(projectId, transactionId);
     doc.metadata = {
       ...doc.metadata,
-      promptIds: payload.promptIds ?? [],
+      generationProfile: {
+        serviceProperty: payload.serviceProperty,
+        transport: payload.transport,
+        messageFormat: payload.messageFormat,
+        exampleMessage: payload.exampleMessage.trim(),
+        channels: payload.channels,
+      },
     };
     await this.apiDocRepo.save({ ...doc, ...auditFieldsForUpdate() });
     await touchProjectUpdatedAt(this.projectRepo, projectId);

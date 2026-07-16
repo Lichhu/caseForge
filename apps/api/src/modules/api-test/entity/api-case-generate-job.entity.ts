@@ -9,11 +9,13 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from "typeorm";
+import type { ApiDocGenerationProfile } from "@case-forge/shared";
 
 export const API_CASE_GENERATE_JOB_STATUS = [
   "queued",
   "running",
   "completed",
+  "partial",
   "failed",
   "cancelled",
 ] as const;
@@ -65,6 +67,30 @@ export class ApiCaseGenerateJobEntity {
 
   @Column({ type: "int", nullable: true })
   version?: number | null;
+
+  @Column({ type: "varchar", length: 32, nullable: true })
+  versionCode?: string | null;
+
+  @Column({ type: "varchar", length: 64, nullable: true })
+  ruleVersion?: string | null;
+
+  @Column({ type: "json", nullable: true })
+  snapshot?: {
+    profile: ApiDocGenerationProfile;
+    structuredMarkdown: string;
+  } | null;
+
+  @Column({ type: "int", default: 0 })
+  scenarioCount: number;
+
+  @Column({ type: "int", default: 0 })
+  completedScenarioCount: number;
+
+  @Column({ type: "int", default: 0 })
+  notApplicableScenarioCount: number;
+
+  @Column({ type: "int", default: 0 })
+  failedScenarioCount: number;
 
   @Column({ type: "datetime", precision: 3 })
   queuedAt: Date;

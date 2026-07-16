@@ -71,7 +71,7 @@ export class ApiExecutionService {
   async runCases(input: {
     projectId: string;
     caseIds: string[];
-    environmentId: string;
+    environmentId?: string;
     environmentServiceId?: string;
     executionSetId?: string;
     transactionId?: string;
@@ -86,11 +86,6 @@ export class ApiExecutionService {
       MAX_CONCURRENCY,
       Math.max(1, input.concurrency ?? DEFAULT_CONCURRENCY),
     );
-    const env = (await this.environmentService.getRuntimeEnvironment(
-      input.projectId,
-      input.environmentId,
-      input.environmentServiceId,
-    )) as RuntimeEnvironment;
     const cases = await this.caseRepo.find({
       where: {
         ...scopedWhere({ projectId: input.projectId }),
@@ -102,6 +97,17 @@ export class ApiExecutionService {
     if (!cases.length) {
       throw new BadRequestException("未找到可执行的启用案例");
     }
+    const runtimeByCase = new Map<string, RuntimeEnvironment>();
+    for (const testCase of cases) {
+      const environmentId = testCase.metadata?.debugEnvironmentId ?? input.environmentId;
+      if (!environmentId) throw new BadRequestException(`案例「${testCase.title}」未指定执行环境`);
+      runtimeByCase.set(testCase.id, (await this.environmentService.getRuntimeEnvironment(
+        input.projectId,
+        environmentId,
+        testCase.metadata?.debugEnvironmentServiceId ?? input.environmentServiceId,
+      )) as RuntimeEnvironment);
+    }
+    const env = runtimeByCase.get(cases[0].id)!;
 
     let run: ApiTestRunEntity;
     if (input.runId) {
@@ -140,19 +146,19 @@ export class ApiExecutionService {
       );
     }
 
-    const vars = buildRuntimeVariables(env.variables, env.secrets);
     const items: ApiTestRunItemEntity[] = [];
     let passed = 0;
     let failed = 0;
     let error = 0;
 
     await this.runWithConcurrency(cases, concurrency, async (testCase) => {
+      const caseEnv = runtimeByCase.get(testCase.id)!;
       const item = await this.executeSingleCase({
         runId: run.id,
         testCase,
-        env,
-        vars,
-        encoding: input.encoding,
+        env: caseEnv,
+        vars: buildRuntimeVariables(caseEnv.variables, caseEnv.secrets),
+        encoding: testCase.metadata?.debugEncoding ?? input.encoding,
       });
       items.push(item);
       if (item.status === "passed") passed += 1;
@@ -184,7 +190,7 @@ export class ApiExecutionService {
     projectId: string;
     transactionId: string;
     executionSetId: string;
-    environmentId: string;
+    environmentId?: string;
     environmentServiceId?: string;
     concurrency?: number;
     encoding?: string;
@@ -300,11 +306,7 @@ export class ApiExecutionService {
     const baseUrl = this.resolveHttpBaseUrl(input.env, service);
     const path = substituteVariablesPath(input.request.path, input.vars);
     const url = new URL(path.replace(/^\//, ""), `${baseUrl}/`);
-    if (input.request.query) {
-      for (const [key, value] of Object.entries(input.request.query)) {
-        url.searchParams.set(key, String(value));
-      }
-    }
+    applyEncodedQuery(url, input.request.query, input.encoding ?? input.request.encoding);
     const headers = applyTransportEncoding(
       {
         ...input.env.headers,
@@ -328,21 +330,26 @@ export class ApiExecutionService {
 
     const started = Date.now();
     try {
-      const response = await fetch(url.toString(), {
-        method: input.request.method,
-        headers,
-        body: buildRequestBody(input.request),
-        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
-      });
+      let response: Response | undefined;
+      for (let attempt = 0; attempt < Math.max(1, input.request.repeatCount ?? 1); attempt += 1) {
+        response = await fetch(url.toString(), {
+          method: input.request.method,
+          headers,
+          body: buildEncodedHttpBody(input.request, input.encoding ?? input.request.encoding),
+          signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+        });
+      }
+      if (!response) throw new Error("请求未执行");
       const durationMs = Date.now() - started;
-      const text = await response.text();
+      const responseBuffer = Buffer.from(await response.arrayBuffer());
+      const responseHeaders = Object.fromEntries(response.headers.entries());
+      const text = decodeHttpResponse(responseBuffer, responseHeaders, input.encoding ?? input.request.encoding);
       let body: unknown = text;
       try {
         body = text ? JSON.parse(text) : null;
       } catch {
         body = text;
       }
-      const responseHeaders = Object.fromEntries(response.headers.entries());
       const responseSnapshot = {
         status: response.status,
         headers: responseHeaders,
@@ -353,7 +360,7 @@ export class ApiExecutionService {
         statusCode: response.status,
         headers: responseHeaders,
         body,
-        bodySize: text.length,
+        bodySize: responseBuffer.length,
         durationMs,
         polarity: input.testCase.polarity,
       });
@@ -427,13 +434,16 @@ export class ApiExecutionService {
     };
     const started = Date.now();
     try {
-      const responseText = await sendTcpPayload(
-        target.host,
-        target.port,
-        payload,
-        encoding,
-        resolvedFraming,
-      );
+      let responseText = "";
+      for (let attempt = 0; attempt < Math.max(1, input.request.repeatCount ?? 1); attempt += 1) {
+        responseText = await sendTcpPayload(
+          target.host,
+          target.port,
+          payload,
+          encoding,
+          resolvedFraming,
+        );
+      }
       const durationMs = Date.now() - started;
       const responseSnapshot = {
         status: -1,
@@ -539,11 +549,7 @@ export class ApiExecutionService {
     const baseUrl = this.resolveHttpBaseUrl(input.env, service);
     const path = substituteVariablesPath(input.request.path, input.vars);
     const url = new URL(path.replace(/^\//, ""), `${baseUrl}/`);
-    if (input.request.query) {
-      for (const [key, value] of Object.entries(input.request.query)) {
-        url.searchParams.set(key, String(value));
-      }
-    }
+    applyEncodedQuery(url, input.request.query, input.encoding ?? input.request.encoding);
     const headers = applyTransportEncoding(
       {
         ...input.env.headers,
@@ -555,27 +561,32 @@ export class ApiExecutionService {
 
     const started = Date.now();
     try {
-      const response = await fetch(url.toString(), {
-        method: input.request.method,
-        headers,
-        body: buildRequestBody(input.request),
-        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
-      });
+      let response: Response | undefined;
+      for (let attempt = 0; attempt < Math.max(1, input.request.repeatCount ?? 1); attempt += 1) {
+        response = await fetch(url.toString(), {
+          method: input.request.method,
+          headers,
+          body: buildEncodedHttpBody(input.request, input.encoding ?? input.request.encoding),
+          signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+        });
+      }
+      if (!response) throw new Error("请求未执行");
       const durationMs = Date.now() - started;
-      const text = await response.text();
+      const responseBuffer = Buffer.from(await response.arrayBuffer());
+      const responseHeaders = Object.fromEntries(response.headers.entries());
+      const text = decodeHttpResponse(responseBuffer, responseHeaders, input.encoding ?? input.request.encoding);
       let body: unknown = text;
       try {
         body = text ? JSON.parse(text) : null;
       } catch {
         body = text;
       }
-      const responseHeaders = Object.fromEntries(response.headers.entries());
       const assertions = runAssertions({
         expected: input.expected ?? {},
         statusCode: response.status,
         headers: responseHeaders,
         body,
-        bodySize: text.length,
+        bodySize: responseBuffer.length,
         durationMs,
         polarity: input.polarity,
       });
@@ -583,7 +594,7 @@ export class ApiExecutionService {
         statusCode: response.status,
         headers: responseHeaders,
         body: truncateBody(body),
-        bodySize: text.length,
+        bodySize: responseBuffer.length,
         durationMs,
         assertions,
       };
@@ -623,13 +634,16 @@ export class ApiExecutionService {
 
     const started = Date.now();
     try {
-      const responseText = await sendTcpPayload(
-        target.host,
-        target.port,
-        payload,
-        encoding,
-        resolvedFraming,
-      );
+      let responseText = "";
+      for (let attempt = 0; attempt < Math.max(1, input.request.repeatCount ?? 1); attempt += 1) {
+        responseText = await sendTcpPayload(
+          target.host,
+          target.port,
+          payload,
+          encoding,
+          resolvedFraming,
+        );
+      }
       const durationMs = Date.now() - started;
       const assertions = runAssertions({
         expected: input.expected ?? {},
@@ -743,12 +757,59 @@ function substituteVariablesPath(path: string, vars: Record<string, string>) {
   );
 }
 
-function buildRequestBody(request: { method: string; body?: unknown }) {
+export function buildEncodedHttpBody(
+  request: { method: string; body?: unknown },
+  encoding = "UTF-8",
+) {
   const upper = request.method.toUpperCase();
   if (["GET", "HEAD"].includes(upper)) return undefined;
   if (request.body === undefined || request.body === null) return undefined;
-  if (typeof request.body === "string") return request.body;
-  return JSON.stringify(request.body);
+  const body =
+    typeof request.body === "string"
+      ? request.body
+      : JSON.stringify(request.body);
+  const buffer = encodeText(body, encoding);
+  return buffer.buffer.slice(
+    buffer.byteOffset,
+    buffer.byteOffset + buffer.byteLength,
+  ) as ArrayBuffer;
+}
+
+export function encodeQueryComponent(value: string, encoding = "UTF-8") {
+  return Array.from(encodeText(value, encoding), (byte) =>
+    (byte >= 0x41 && byte <= 0x5a) ||
+    (byte >= 0x61 && byte <= 0x7a) ||
+    (byte >= 0x30 && byte <= 0x39) ||
+    [0x2d, 0x2e, 0x5f, 0x7e].includes(byte)
+      ? String.fromCharCode(byte)
+      : `%${byte.toString(16).toUpperCase().padStart(2, "0")}`,
+  ).join("");
+}
+
+function applyEncodedQuery(
+  url: URL,
+  query: ApiCaseRequest["query"],
+  encoding = "UTF-8",
+) {
+  if (!query) return;
+  url.search = Object.entries(query)
+    .map(
+      ([key, value]) =>
+        `${encodeQueryComponent(key, encoding)}=${encodeQueryComponent(String(value), encoding)}`,
+    )
+    .join("&");
+}
+
+function decodeHttpResponse(
+  buffer: Buffer,
+  headers: Record<string, string>,
+  fallback = "UTF-8",
+) {
+  const contentType = Object.entries(headers).find(
+    ([key]) => key.toLowerCase() === "content-type",
+  )?.[1];
+  const charset = contentType?.match(/charset\s*=\s*([^;\s]+)/i)?.[1];
+  return decodeText(buffer, charset || fallback);
 }
 
 export function buildTcpPayload(

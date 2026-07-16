@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from "@nestjs/swagger";
 import { Type } from "class-transformer";
-import { IsIn, IsInt, IsOptional, Min } from "class-validator";
+import { IsIn, IsInt, IsOptional, IsString, Min } from "class-validator";
 import { CASE_FORGE_PAGE_SIZE_OPTIONS } from "@case-forge/shared";
 
 export class ListApiCasesDto {
@@ -18,10 +18,13 @@ export class ListApiCasesDto {
   @IsIn([...CASE_FORGE_PAGE_SIZE_OPTIONS])
   pageSize?: number;
 
-  @ApiPropertyOptional({ description: "按生成版本号筛选" })
+  @ApiPropertyOptional({ description: "按版本编码筛选（如 20260716-105144）" })
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  generateVersion?: number;
+  @IsString()
+  versionCode?: string;
+
+  @ApiPropertyOptional({ description: "按渠道 ID 筛选" })
+  @IsOptional()
+  @IsString()
+  channelId?: string;
 }

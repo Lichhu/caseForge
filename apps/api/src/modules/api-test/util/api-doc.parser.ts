@@ -249,7 +249,7 @@ export function compressApiStructuredDoc(
   }
 
   const fixedSections: string[] = [];
-  for (const name of ["基础信息", "服务信息", "技术信息"] as const) {
+  for (const name of ["基础信息", "服务信息"] as const) {
     const text = extractApiDocSection(structuredDoc, name);
     if (text.trim()) {
       fixedSections.push(`${name}\n${API_DOC_SECTION_SEPARATOR}\n${text}`);

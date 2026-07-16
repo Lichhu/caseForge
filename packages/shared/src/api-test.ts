@@ -11,6 +11,33 @@ export type ApiStructuringStatus =
 export type ApiTransport = "http" | "tcp" | "mq" | "tuxedo" | "other";
 export type ApiMessageFormat = "json" | "xml" | "text" | "soap" | "other";
 
+export const API_SERVICE_PROPERTIES = [
+  "query_non_accounting",
+  "query_accounting",
+  "management_non_accounting",
+  "management_accounting",
+  "accounting",
+  "reversal",
+  "file",
+  "push",
+] as const;
+export type ApiServiceProperty = (typeof API_SERVICE_PROPERTIES)[number];
+
+export interface ApiDocChannel {
+  id: string;
+  name: string;
+  clientCd: string;
+  serviceCd: string;
+}
+
+export interface ApiDocGenerationProfile {
+  serviceProperty: ApiServiceProperty;
+  transport: "http" | "socket";
+  messageFormat: "json" | "xml" | "text";
+  exampleMessage: string;
+  channels: ApiDocChannel[];
+}
+
 export interface ApiMessageFraming {
   type: "length-prefix";
   width: number;
@@ -90,6 +117,7 @@ export interface ApiCaseRequest {
   contentType?: string;
   encoding?: string;
   framing?: ApiMessageFraming;
+  repeatCount?: number;
 }
 
 export interface ApiCaseExpected {

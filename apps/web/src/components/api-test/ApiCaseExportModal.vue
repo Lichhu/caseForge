@@ -31,6 +31,14 @@
           placeholder="全部版本"
           class="case-export-filter-select"
         />
+        <a-select
+          v-if="channelOptions.length > 1"
+          v-model:value="channelFilter"
+          :options="channelOptions"
+          allow-clear
+          placeholder="全部渠道"
+          class="case-export-filter-select"
+        />
       </div>
 
       <div class="case-export-table-wrap">
@@ -83,7 +91,7 @@
               </td>
               <td :title="row.title">{{ row.title || row.caseNo || '未命名案例' }}</td>
               <td>
-                <span v-if="row.metadata?.generateVersion != null">v{{ row.metadata.generateVersion }}</span>
+                <span v-if="row.metadata?.versionCode">{{ row.metadata.versionCode }}</span>
                 <span v-else class="case-export-muted">—</span>
               </td>
             </tr>
@@ -127,7 +135,8 @@ const loading = ref(false);
 const exporting = ref(false);
 const keyword = ref('');
 const polarityFilter = ref<'all' | 'positive' | 'negative'>('all');
-const versionFilter = ref<number | undefined>(undefined);
+const versionFilter = ref<string | undefined>(undefined);
+const channelFilter = ref<string | undefined>(undefined);
 const selectedIds = ref<Set<string>>(new Set());
 
 const polarityOptions = [
@@ -137,16 +146,23 @@ const polarityOptions = [
 ];
 
 const versionOptions = computed(() => {
-  const versions = new Set<number>();
+  const versions = new Set<string>();
   for (const c of allCases.value) {
-    const v = c.metadata?.generateVersion;
-    if (v != null) {
-      versions.add(v);
+    const code = c.metadata?.versionCode;
+    if (code != null) {
+      versions.add(code);
     }
   }
   return Array.from(versions)
-    .sort((a, b) => a - b)
-    .map((v) => ({ label: `v${v}`, value: v }));
+    .sort()
+    .map((v) => ({ label: v, value: v }));
+});
+
+const channelOptions = computed(() => {
+  const caseChannelIds = new Set(allCases.value.map((c) => c.metadata?.channelId));
+  return (apiStore.apiDoc?.generationProfile?.channels ?? [])
+    .filter((channel) => caseChannelIds.has(channel.id))
+    .map((channel) => ({ label: channel.name, value: channel.id }));
 });
 
 const filteredCases = computed(() => {
@@ -155,7 +171,10 @@ const filteredCases = computed(() => {
     if (polarityFilter.value !== 'all' && c.polarity !== polarityFilter.value) {
       return false;
     }
-    if (versionFilter.value != null && c.metadata?.generateVersion !== versionFilter.value) {
+    if (versionFilter.value != null && c.metadata?.versionCode !== versionFilter.value) {
+      return false;
+    }
+    if (channelFilter.value != null && c.metadata?.channelId !== channelFilter.value) {
       return false;
     }
     if (kw) {
@@ -242,6 +261,7 @@ function reset() {
   keyword.value = '';
   polarityFilter.value = 'all';
   versionFilter.value = undefined;
+  channelFilter.value = undefined;
   selectedIds.value = new Set();
 }
 

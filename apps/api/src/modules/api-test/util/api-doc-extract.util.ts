@@ -35,23 +35,63 @@ export function extractTextFromExcel(buffer: Buffer) {
     throw new Error("Excel 中没有可读取的工作表");
   }
 
-  const sections: string[] = [];
+  const rawRows = new Map<string, string[][]>();
   for (const name of namesToRead) {
     const sheet = workbook.Sheets[name];
     if (!sheet) continue;
     const rows = XLSX.utils.sheet_to_json<(string | number | boolean)[]>(
       sheet,
       { header: 1, defval: "" },
+    ).map((row) => row.map((cell) => String(cell ?? "").trim()));
+    rawRows.set(name, rows.filter((row) => row.some(Boolean)));
+  }
+
+  const basic = filterPropertyRows(rawRows.get("基础信息") ?? [], [
+    "服务编码",
+    "原服务交易码",
+    "服务名称(中)",
+    "服务名称",
+    "服务属性",
+  ]);
+  const basicNameRow = basic.find((row) => row[0] === "服务名称(中)");
+  if (basicNameRow) basicNameRow[0] = "服务名称";
+  const service = filterPropertyRows(rawRows.get("服务信息") ?? [], [
+    "功能描述",
+    "业务规则",
+  ]);
+  const basicValues = new Map(basic.slice(1).map((row) => [row[0], row[1]]));
+  service.push(
+    ["服务名称", basicValues.get("服务名称") || ""],
+    ["服务属性", basicValues.get("服务属性") || ""],
+  );
+
+  const sections: string[] = [];
+  for (const [name, rows] of [
+    ["基础信息", basic],
+    ["服务信息", service],
+    ["请求报文", rawRows.get("请求报文") ?? []],
+  ] as const) {
+    if (!rows.length) continue;
+    sections.push(
+      name,
+      API_DOC_SECTION_SEPARATOR,
+      ...rows.map((row) => row.join(" | ")),
+      "",
     );
-    const lines = rows
-      .map((row) => row.map((cell) => String(cell ?? "").trim()))
-      .filter((row) => row.some(Boolean))
-      .map((row) => row.join(" | "));
-    sections.push(name, API_DOC_SECTION_SEPARATOR, ...lines, "");
   }
 
   const text = sections.join("\n").trim();
   return assertReadableText(text, "Excel 接口文档");
+}
+
+function filterPropertyRows(rows: string[][], allowed: string[]) {
+  const values = new Map(rows.map((row) => [row[0]?.trim(), row[1]?.trim() ?? ""]));
+  return [
+    ["服务属性", "属性值"],
+    ...allowed
+      .filter((name, index) => allowed.indexOf(name) === index && values.has(name))
+      .map((name) => [name, values.get(name) ?? ""]),
+  ];
 }
 
 export function structureEndpointsFromRawText(rawText: string) {

@@ -127,9 +127,10 @@ export class ReplaceExecutionSetCasesDto {
 }
 
 export class RunExecutionSetDto {
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsString()
-  environmentId!: string;
+  environmentId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

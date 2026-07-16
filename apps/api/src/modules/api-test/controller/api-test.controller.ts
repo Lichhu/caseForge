@@ -35,6 +35,7 @@ import {
 import { SaveApiDocGenerationDto } from "@api-test/dto/save-api-doc-generation.dto";
 import {
   ExportApiReportDto,
+  BatchPatchApiCaseRequestDto,
   GenerateApiCasesDto,
   RunApiCasesDto,
   SaveApiCaseDto,
@@ -295,6 +296,18 @@ export class ApiTestController {
     return this.apiCaseService.createCase(projectId, transactionId, body);
   }
 
+  @Patch(":projectId/transactions/:transactionId/cases/request-config")
+  batchPatchCaseRequest(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+    @Body() body: BatchPatchApiCaseRequestDto,
+  ) {
+    return this.apiCaseService.batchPatchCaseRequest(
+      projectId, transactionId, body.caseIds, body.patch,
+      body.environmentId, body.environmentServiceId, body.encoding,
+    );
+  }
+
   @Patch(":projectId/transactions/:transactionId/cases/:caseId")
   updateCase(
     @Param("projectId") projectId: string,
@@ -335,8 +348,7 @@ export class ApiTestController {
     @Body() body: GenerateApiCasesDto,
   ) {
     return this.apiCaseService.generateCases(projectId, transactionId, {
-      endpointIds: body.endpointIds,
-      promptIds: body.promptIds,
+      channelIds: body.channelIds,
     });
   }
 
@@ -365,6 +377,34 @@ export class ApiTestController {
     @Param("transactionId") transactionId: string,
   ) {
     return this.apiCaseService.listGenerateHistory(projectId, transactionId);
+  }
+
+  @Get(":projectId/transactions/:transactionId/case-versions/:jobId")
+  getGenerateVersion(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+    @Param("jobId") jobId: string,
+  ) {
+    return this.apiCaseService.getGenerateVersion(projectId, transactionId, jobId);
+  }
+
+  @Post(":projectId/transactions/:transactionId/case-versions/:jobId/scenarios/:scenarioId/retry")
+  retryGenerateScenario(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+    @Param("jobId") jobId: string,
+    @Param("scenarioId") scenarioId: string,
+  ) {
+    return this.apiCaseService.retryGenerateScenario(projectId, transactionId, jobId, scenarioId);
+  }
+
+  @Delete(":projectId/transactions/:transactionId/case-versions/:jobId")
+  deleteGenerateVersion(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+    @Param("jobId") jobId: string,
+  ) {
+    return this.apiCaseService.deleteGenerateVersion(projectId, transactionId, jobId);
   }
 
   @Get(":projectId/environments")

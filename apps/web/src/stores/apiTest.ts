@@ -103,23 +103,11 @@ const caseGeneratePollTargets = new Map<string, CaseGeneratePollTarget>();
 
 function isTerminalCaseGeneratePhase(phase: string) {
   return (
-    phase === "completed" || phase === "failed" || phase === "cancelled"
+    phase === "completed" ||
+    phase === "partial" ||
+    phase === "failed" ||
+    phase === "cancelled"
   );
-}
-
-function inferRunnerEncoding(cases: ApiTestCaseRow[]): string {
-  const tcpCase = cases.find((item) => item.request.transport === "tcp");
-  if (tcpCase?.request.encoding?.toUpperCase().includes("GBK")) {
-    return "GBK";
-  }
-  if (tcpCase?.request.encoding) {
-    return tcpCase.request.encoding.toUpperCase().includes("UTF")
-      ? "UTF-8"
-      : tcpCase.request.encoding;
-  }
-  return cases.some((item) => item.request.transport === "tcp")
-    ? "GBK"
-    : "UTF-8";
 }
 
 export type ApiWorkspaceStage =
@@ -156,7 +144,8 @@ interface State {
   caseListPage: number;
   caseListPageSize: number;
   caseListTotal: number;
-  caseListVersionFilter: number | null;
+  caseListVersionFilter: string | null;
+  caseListChannelFilter: string | null;
   environments: ApiEnvironmentRow[];
   environmentServices: Record<string, ApiEnvironmentServiceRow[]>;
   executionSets: ApiExecutionSetRow[];
@@ -197,6 +186,7 @@ export const useApiTestStore = defineStore("apiTest", {
     caseListPageSize: DEFAULT_CASE_FORGE_PAGE_SIZE,
     caseListTotal: 0,
     caseListVersionFilter: null,
+    caseListChannelFilter: null,
     environments: [],
     environmentServices: {},
     executionSets: [],
@@ -359,6 +349,7 @@ export const useApiTestStore = defineStore("apiTest", {
       this.caseListPageSize = DEFAULT_CASE_FORGE_PAGE_SIZE;
       this.caseListTotal = 0;
       this.caseListVersionFilter = null;
+      this.caseListChannelFilter = null;
       this.environments = [];
       this.environmentServices = {};
       this.executionSets = [];
@@ -583,6 +574,7 @@ export const useApiTestStore = defineStore("apiTest", {
       this.caseListPageSize = DEFAULT_CASE_FORGE_PAGE_SIZE;
       this.caseListTotal = 0;
       this.caseListVersionFilter = null;
+      this.caseListChannelFilter = null;
       this.environments = [];
       this.environmentServices = {};
       this.executionSets = [];
@@ -672,21 +664,18 @@ export const useApiTestStore = defineStore("apiTest", {
         this.docReadiness = null;
       }
     },
-    async pickLatestCaseGenerateVersion(
+    async pickLatestCaseVersionCode(
       projectId: string,
       transactionId: string,
-    ): Promise<number | null> {
+    ): Promise<string | null> {
       const rows = await listAllApiCases(projectId, transactionId).catch(
         () => [],
       );
-      let latest = 0;
-      for (const row of rows) {
-        const version = row.metadata?.generateVersion;
-        if (version != null && version > latest) {
-          latest = version;
-        }
-      }
-      return latest > 0 ? latest : null;
+      const codes = rows
+        .map((row) => row.metadata?.versionCode)
+        .filter((v): v is string => Boolean(v));
+      if (!codes.length) return null;
+      return codes.sort()[codes.length - 1] ?? null;
     },
     async loadCasesStage(projectId: string, transactionId: string) {
       const doc = this.apiDoc
@@ -696,7 +685,7 @@ export const useApiTestStore = defineStore("apiTest", {
         this.apiDoc = doc;
       }
       if (this.caseListVersionFilter == null) {
-        const latest = await this.pickLatestCaseGenerateVersion(
+        const latest = await this.pickLatestCaseVersionCode(
           projectId,
           transactionId,
         );
@@ -704,7 +693,7 @@ export const useApiTestStore = defineStore("apiTest", {
           this.caseListVersionFilter = latest;
           await this.refreshCases(projectId, transactionId, {
             resetPage: true,
-            generateVersion: latest,
+            versionCode: latest,
           });
           return;
         }
@@ -818,7 +807,8 @@ export const useApiTestStore = defineStore("apiTest", {
         page?: number;
         pageSize?: number;
         resetPage?: boolean;
-        generateVersion?: number;
+        versionCode?: string;
+        channelId?: string;
       },
     ) {
       if (options?.resetPage) {
@@ -831,13 +821,20 @@ export const useApiTestStore = defineStore("apiTest", {
       const result = await listApiCases(projectId, transactionId, {
         page,
         pageSize,
-        generateVersion:
-          options?.generateVersion ?? this.caseListVersionFilter ?? undefined,
+        versionCode:
+          options?.versionCode ?? this.caseListVersionFilter ?? undefined,
+        channelId:
+          options?.channelId ?? this.caseListChannelFilter ?? undefined,
       });
       const activeVersion =
-        options?.generateVersion ?? this.caseListVersionFilter ?? undefined;
-      if (result.count === 0 && activeVersion != null) {
-        const latest = await this.pickLatestCaseGenerateVersion(
+        options?.versionCode ?? this.caseListVersionFilter ?? undefined;
+      if (
+        result.count === 0 &&
+        activeVersion != null &&
+        this.caseListChannelFilter == null &&
+        options?.channelId == null
+      ) {
+        const latest = await this.pickLatestCaseVersionCode(
           projectId,
           transactionId,
         );
@@ -847,7 +844,7 @@ export const useApiTestStore = defineStore("apiTest", {
             ...options,
             page: 1,
             resetPage: true,
-            generateVersion: latest,
+            versionCode: latest,
           });
           return;
         }
@@ -881,8 +878,7 @@ export const useApiTestStore = defineStore("apiTest", {
       projectId: string,
       transactionId: string,
       options?: {
-        endpointIds?: string[];
-        promptIds?: string[];
+        channelIds?: string[];
         /** 生成成功后是否进入案例编辑，默认 true */
         navigateToCases?: boolean;
       },
@@ -979,7 +975,7 @@ export const useApiTestStore = defineStore("apiTest", {
       this.markCaseGenerateEnded(transactionId);
       await this.refreshTransactions(projectId).catch(() => {});
 
-      if (status.phase === "completed") {
+      if (status.phase === "completed" || status.phase === "partial") {
         const count = status.resultCount ?? 0;
         const shouldNavigate = target.navigateToCases && count > 0;
 
@@ -1004,9 +1000,7 @@ export const useApiTestStore = defineStore("apiTest", {
               }
             } catch {
               if (target.notifyOnComplete) {
-                message.error(
-                  "生成结果已就绪，但刷新案例列表失败，请稍后重试",
-                );
+                message.error("生成结果已就绪，但刷新案例列表失败，请稍后重试");
               }
             }
           }
@@ -1025,11 +1019,23 @@ export const useApiTestStore = defineStore("apiTest", {
             );
           }
           if (target.notifyOnComplete) {
-            message.success(`已生成 ${count} 条案例，已进入案例编辑`);
+            if (status.phase === "partial") {
+              message.warning(
+                `已生成 ${count} 条案例，部分场景失败，可在生成历史中重试`,
+              );
+            } else {
+              message.success(`已生成 ${count} 条案例，已进入案例编辑`);
+            }
           }
         } else if (target.notifyOnComplete) {
           if (count > 0) {
-            message.success(`已生成 ${count} 条案例`);
+            if (status.phase === "partial") {
+              message.warning(
+                `已生成 ${count} 条案例，部分场景失败，可在生成历史中重试`,
+              );
+            } else {
+              message.success(`已生成 ${count} 条案例`);
+            }
           } else {
             message.success("案例生成已完成");
           }
@@ -1053,12 +1059,12 @@ export const useApiTestStore = defineStore("apiTest", {
     async saveDocumentGenerationPrompts(
       projectId: string,
       transactionId: string,
-      promptIds: string[],
+      profile: import("@case-forge/shared").ApiDocGenerationProfile,
     ) {
       this.apiDoc = await saveApiDocumentGeneration(
         projectId,
         transactionId,
-        promptIds,
+        profile,
       );
     },
     isGeneratingCases(transactionId: string) {
@@ -1169,27 +1175,26 @@ export const useApiTestStore = defineStore("apiTest", {
       message.success(`已删除 ${caseIds.length} 条案例`);
       await this.syncCaseListVersionFilter(projectId, transactionId);
     },
-    async syncCaseListVersionFilter(
-      projectId: string,
-      transactionId: string,
-    ) {
+    async syncCaseListVersionFilter(projectId: string, transactionId: string) {
       const rows = await listAllApiCases(projectId, transactionId).catch(
         () => [],
       );
-      const versions = new Set<number>();
+      const codes = new Set<string>();
       for (const row of rows) {
-        const version = row.metadata?.generateVersion;
-        if (version != null) {
-          versions.add(version);
+        const code = row.metadata?.versionCode;
+        if (code != null) {
+          codes.add(code);
         }
       }
       const filter = this.caseListVersionFilter;
-      if (filter != null && !versions.has(filter)) {
-        const latest = versions.size ? Math.max(...versions) : null;
+      if (filter != null && !codes.has(filter)) {
+        const latest = codes.size
+          ? Array.from(codes).sort()[Array.from(codes).length - 1]
+          : null;
         this.caseListVersionFilter = latest;
         await this.refreshCases(projectId, transactionId, {
           resetPage: true,
-          generateVersion: latest ?? undefined,
+          versionCode: latest ?? undefined,
         });
       }
     },
@@ -1433,9 +1438,9 @@ export const useApiTestStore = defineStore("apiTest", {
       transactionId: string,
       setId: string,
       options: {
-        environmentId: string;
+        environmentId?: string;
         environmentServiceId?: string;
-        encoding: string;
+        encoding?: string;
         concurrency?: number;
       },
     ) {
@@ -1476,7 +1481,7 @@ export const useApiTestStore = defineStore("apiTest", {
             executionSetId: setId,
           });
         }
-        this.selectedEnvironmentId = options.environmentId;
+        if (options.environmentId) this.selectedEnvironmentId = options.environmentId;
         this.selectedEnvironmentServiceId = options.environmentServiceId ?? "";
         this.activeRun = run;
         this.runs = await listApiRuns(projectId);
@@ -1551,7 +1556,7 @@ export const useApiTestStore = defineStore("apiTest", {
           environmentId,
           environmentServiceId: environmentServiceId || undefined,
           concurrency: detail.concurrency ?? 5,
-          encoding: options?.encoding ?? inferRunnerEncoding(targetCases),
+          encoding: options?.encoding,
           executionSetId,
           runId,
         });

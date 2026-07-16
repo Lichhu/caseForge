@@ -679,6 +679,30 @@ describe("assembleCaseRequest (JSON, with example message)", () => {
     expect(parsed.Transaction.Body.request.bizBody.org_code).toBe("041");
   });
 
+  it("merges case-insensitive override paths into existing JSON nodes", () => {
+    const plan: AiCasePlanItem = {
+      caseName: "正向-覆盖大小写不一致路径",
+      caseDesc: "bizbody 应合并到 bizBody",
+      caseType: "正",
+      priority: "高",
+      bodyOverrides: {
+        "Transaction/Body/request/bizbody/model": "5",
+      },
+    };
+
+    const { body } = assembleCaseRequest({
+      canonicalDoc: SAMPLE_DOC_JSON_WITH_EXAMPLE,
+      transactionCode: "idc_SNYF0001",
+      profile,
+      endpoint: FAKE_ENDPOINT,
+      plan,
+    });
+
+    const parsed = JSON.parse(body as string);
+    expect(parsed.Transaction.Body.request.bizBody.model).toBe("5");
+    expect(parsed.Transaction.Body.request.bizbody).toBeUndefined();
+  });
+
   it("falls back to last-segment match when AI returns short key", () => {
     const plan: AiCasePlanItem = {
       caseName: "反向-model非数字",

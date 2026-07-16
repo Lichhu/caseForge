@@ -39,6 +39,11 @@ import {
 import { ApiDocEntity } from "@api-test/entity/api-doc.entity";
 import { ApiTransactionEntity } from "@api-test/entity/api-transaction.entity";
 import { ApiCaseService } from "./api-case.service";
+import { ApiCaseGenerateScenarioEntity } from "@api-test/entity/api-case-generate-scenario.entity";
+import {
+  API_CASE_RULE_VERSION,
+  scenariosForProperty,
+} from "@api-test/util/api-case-scenarios.util";
 
 export interface ApiCaseGenerateQueueStatus {
   jobId?: string;
@@ -73,6 +78,8 @@ export class ApiCaseGenerateQueueService
     private readonly transactionRepo: Repository<ApiTransactionEntity>,
     @InjectRepository(ApiDocEntity)
     private readonly apiDocRepo: Repository<ApiDocEntity>,
+    @InjectRepository(ApiCaseGenerateScenarioEntity)
+    private readonly scenarioRepo: Repository<ApiCaseGenerateScenarioEntity>,
     @Inject(forwardRef(() => ApiCaseService))
     private readonly apiCaseService: ApiCaseService,
   ) {}
@@ -111,7 +118,7 @@ export class ApiCaseGenerateQueueService
   async enqueue(
     projectId: string,
     transactionId: string,
-    options?: { endpointIds?: string[]; promptIds?: string[] },
+    options?: { channelIds?: string[] },
   ): Promise<ApiCaseGenerateJobEntity> {
     const existing = await this.jobRepo.findOne({
       where: {
@@ -125,45 +132,49 @@ export class ApiCaseGenerateQueueService
       if (existing.status === "running") {
         return existing;
       }
-      const endpointIds = options?.endpointIds?.length
-        ? [...new Set(options.endpointIds)]
-        : null;
-      const promptIds = options?.promptIds?.length
-        ? [...new Set(options.promptIds)]
-        : null;
-      const changed =
-        !this.sameIdList(existing.endpointIds, endpointIds) ||
-        !this.sameIdList(existing.promptIds, promptIds);
-      if (changed) {
-        existing.endpointIds = endpointIds;
-        existing.promptIds = promptIds;
-        existing.queuedAt = new Date();
-        existing.errorMessage = null;
-        await this.jobRepo.save(existing);
-        await this.updateTransactionSyncStatus(
-          projectId,
-          transactionId,
-          "generating",
-        );
-        void this.pump();
-      }
       return existing;
     }
 
+    const doc = await this.apiDocRepo.findOne({ where: { projectId, transactionId } });
+    const profile = doc?.metadata?.generationProfile;
+    if (!doc || !profile?.exampleMessage.trim()) {
+      throw new Error("请先完整填写服务属性、通讯方式、报文类型和示例报文");
+    }
+    const selectedChannels = profile.channels.filter((channel) =>
+      (options?.channelIds ?? []).includes(channel.id),
+    );
+    const versionCode = this.formatVersionCode(new Date());
+    const scenarios = scenariosForProperty(profile.serviceProperty);
     const job = await this.jobRepo.save(
       this.jobRepo.create({
         projectId,
         transactionId,
-        endpointIds: options?.endpointIds?.length
-          ? [...new Set(options.endpointIds)]
-          : null,
-        promptIds: options?.promptIds?.length
-          ? [...new Set(options.promptIds)]
-          : null,
+        endpointIds: null,
+        promptIds: null,
         status: "queued",
+        versionCode,
+        ruleVersion: API_CASE_RULE_VERSION,
+        snapshot: {
+          profile: { ...profile, channels: selectedChannels },
+          structuredMarkdown:
+            doc.tempStructuredMarkdown?.trim() || doc.structuredMarkdown?.trim() || "",
+        },
+        scenarioCount: scenarios.length,
         queuedAt: new Date(),
         createdBy: RequestContext.getUserName(),
       }),
+    );
+    await this.scenarioRepo.save(
+      scenarios.map((scenario) =>
+        this.scenarioRepo.create({
+          jobId: job.id,
+          projectId,
+          transactionId,
+          scenarioKey: scenario.key,
+          scenarioName: scenario.name,
+          status: "pending",
+        }),
+      ),
     );
     await this.updateTransactionSyncStatus(
       projectId,
@@ -172,6 +183,22 @@ export class ApiCaseGenerateQueueService
     );
     void this.pump();
     return job;
+  }
+
+  triggerPump() {
+    void this.pump();
+  }
+
+  private formatVersionCode(date: Date) {
+    const parts = [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, "0"),
+      String(date.getDate()).padStart(2, "0"),
+    ].join("");
+    const time = [date.getHours(), date.getMinutes(), date.getSeconds()]
+      .map((value) => String(value).padStart(2, "0"))
+      .join("");
+    return `${parts}-${time}`;
   }
 
   private sameIdList(
@@ -458,7 +485,7 @@ export class ApiCaseGenerateQueueService
     let version = 0;
     await withCaseGenerateSlot(async () => {
       try {
-        version = await this.assignNextVersion(
+        version = job.version ?? await this.assignNextVersion(
           job.projectId,
           job.transactionId,
         );
@@ -477,9 +504,6 @@ export class ApiCaseGenerateQueueService
             this.apiCaseService.runQueuedGenerateJob({
               projectId: job.projectId,
               transactionId: job.transactionId,
-              endpointIds: job.endpointIds ?? undefined,
-              promptIds: job.promptIds ?? undefined,
-              version,
               jobId: job.id,
             }),
         );
@@ -501,9 +525,13 @@ export class ApiCaseGenerateQueueService
           );
           return;
         }
-        latest.status = "completed";
+        const summarized = await this.jobRepo.findOne({ where: { id: job.id } });
+        latest.status = (summarized?.failedScenarioCount ?? 0) > 0 ? "partial" : "completed";
+        latest.completedScenarioCount = summarized?.completedScenarioCount ?? latest.completedScenarioCount;
+        latest.notApplicableScenarioCount = summarized?.notApplicableScenarioCount ?? latest.notApplicableScenarioCount;
+        latest.failedScenarioCount = summarized?.failedScenarioCount ?? latest.failedScenarioCount;
         latest.finishedAt = new Date();
-        latest.resultCount = result.count;
+        latest.resultCount = (latest.resultCount ?? 0) + result.count;
         latest.version = version;
         latest.errorMessage = null;
         await this.jobRepo.save(latest);

@@ -7,15 +7,14 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, In } from "typeorm";
+import { DataSource, Repository, In } from "typeorm";
 import { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
 import {
   auditFieldsForCreate,
   auditFieldsForUpdate,
   RequestContext,
 } from "@common/audit/request-context";
-import { scopedWhere, scopedWhereWithSystem } from "@common/audit/user-scope";
-import { PromptEntity } from "@scenario/entity/prompt.entity";
+import { scopedWhere } from "@common/audit/user-scope";
 import { ApiDocEntity } from "@api-test/entity/api-doc.entity";
 import { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
 import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
@@ -24,11 +23,9 @@ import { ApiTransactionEntity } from "@api-test/entity/api-transaction.entity";
 import { SaveApiCaseDto } from "@api-test/dto/save-api-case.dto";
 import { ListApiCasesDto } from "@api-test/dto/list-api-cases.dto";
 import {
-  generateCasesWithPlan,
   maxCaseNoSuffix,
   formatCaseNo,
   nextCaseNo,
-  type ScenarioPromptInfo,
 } from "@api-test/util/api-case-ai.util";
 import {
   assessDocReadiness,
@@ -41,6 +38,19 @@ import {
 } from "@case-forge/shared";
 import { ApiCaseGenerateQueueService } from "./api-case-generate-queue.service";
 import { ApiCaseGenerateJobEntity } from "@api-test/entity/api-case-generate-job.entity";
+import { ApiCaseGenerateScenarioEntity } from "@api-test/entity/api-case-generate-scenario.entity";
+import { ApiTestRunItemEntity } from "@api-test/entity/api-test-run-item.entity";
+import { ApiTestRunEntity } from "@api-test/entity/api-test-run.entity";
+import type { ApiCaseRequest } from "@case-forge/shared";
+import {
+  buildScenarioPrompts,
+  assertScenarioCoverage,
+  parseScenarioAiResult,
+  validateScenarioAiResult,
+  type ApiCaseScenarioKey,
+} from "@api-test/util/api-case-scenarios.util";
+import { assembleBodyFromExample } from "@api-test/util/api-case-body-assembler.util";
+import { buildCaseRequestFromProfile } from "@api-test/util/api-doc-technical-profile.util";
 
 @Injectable()
 export class ApiCaseService {
@@ -57,13 +67,18 @@ export class ApiCaseService {
     private readonly transactionRepo: Repository<ApiTransactionEntity>,
     @InjectRepository(ApiTestExecutionSetCaseEntity)
     private readonly setCaseRepo: Repository<ApiTestExecutionSetCaseEntity>,
-    @InjectRepository(PromptEntity)
-    private readonly promptRepo: Repository<PromptEntity>,
     private readonly aiWorkflow: AiWorkflowService,
     @Inject(forwardRef(() => ApiCaseGenerateQueueService))
     private readonly generateQueueService: ApiCaseGenerateQueueService,
     @InjectRepository(ApiCaseGenerateJobEntity)
     private readonly generateJobRepo: Repository<ApiCaseGenerateJobEntity>,
+    @InjectRepository(ApiCaseGenerateScenarioEntity)
+    private readonly scenarioRepo: Repository<ApiCaseGenerateScenarioEntity>,
+    @InjectRepository(ApiTestRunItemEntity)
+    private readonly runItemRepo: Repository<ApiTestRunItemEntity>,
+    @InjectRepository(ApiTestRunEntity)
+    private readonly runRepo: Repository<ApiTestRunEntity>,
+    private readonly dataSource: DataSource,
   ) {}
 
   async listCases(
@@ -85,11 +100,15 @@ export class ApiCaseService {
       })
       .andWhere("e.transactionId = :transactionId", { transactionId });
 
-    if (query.generateVersion != null) {
-      qb.andWhere(
-        "JSON_EXTRACT(c.metadata, '$.generateVersion') = :generateVersion",
-        { generateVersion: query.generateVersion },
-      );
+    if (query.versionCode != null) {
+      qb.andWhere("JSON_EXTRACT(c.metadata, '$.versionCode') = :versionCode", {
+        versionCode: query.versionCode,
+      });
+    }
+    if (query.channelId != null) {
+      qb.andWhere("JSON_EXTRACT(c.metadata, '$.channelId') = :channelId", {
+        channelId: query.channelId,
+      });
     }
 
     const [rows, count] = await qb
@@ -148,6 +167,7 @@ export class ApiCaseService {
         ...(payload.generateVersion != null
           ? { generateVersion: payload.generateVersion }
           : {}),
+        ...(payload.versionCode ? { versionCode: payload.versionCode } : {}),
         ...(payload.debugEnvironmentId
           ? { debugEnvironmentId: payload.debugEnvironmentId }
           : {}),
@@ -253,10 +273,55 @@ export class ApiCaseService {
     return { ok: true };
   }
 
+  async batchPatchCaseRequest(
+    projectId: string,
+    transactionId: string,
+    caseIds: string[],
+    patch: Partial<ApiCaseRequest>,
+    environmentId?: string,
+    environmentServiceId?: string,
+    encoding?: string,
+  ) {
+    if (!caseIds.length) throw new BadRequestException("请选择要设置的案例");
+    const rows = await this.caseRepo
+      .createQueryBuilder("c")
+      .innerJoin("c.endpoint", "e")
+      .where("c.projectId = :projectId", { projectId })
+      .andWhere("c.id IN (:...caseIds)", { caseIds })
+      .andWhere("e.transactionId = :transactionId", { transactionId })
+      .getMany();
+    if (rows.length !== new Set(caseIds).size)
+      throw new BadRequestException("部分案例不存在或不属于当前交易");
+    for (const row of rows) {
+      row.request = {
+        ...row.request,
+        ...patch,
+        headers: patch.headers
+          ? { ...(row.request.headers ?? {}), ...patch.headers }
+          : row.request.headers,
+        query: patch.query
+          ? { ...(row.request.query ?? {}), ...patch.query }
+          : row.request.query,
+      };
+      if (environmentId) {
+        row.metadata = {
+          ...row.metadata,
+          debugEnvironmentId: environmentId,
+          debugEnvironmentServiceId: environmentServiceId,
+        };
+      }
+      if (encoding) row.metadata = { ...row.metadata, debugEncoding: encoding };
+    }
+    await this.caseRepo.save(
+      rows.map((row) => ({ ...row, ...auditFieldsForUpdate() })),
+    );
+    return { ok: true, updated: rows.length };
+  }
+
   async generateCases(
     projectId: string,
     transactionId?: string,
-    options?: { endpointIds?: string[]; promptIds?: string[] },
+    options?: { channelIds?: string[] },
   ) {
     if (!transactionId) {
       throw new BadRequestException("请指定交易码后再生成案例");
@@ -291,50 +356,347 @@ export class ApiCaseService {
     });
     if (!jobs.length) return [];
 
-    const allPromptIds = [...new Set(jobs.flatMap((j) => j.promptIds ?? []))];
-    const prompts = allPromptIds.length
-      ? await this.promptRepo.find({
-          where: scopedWhereWithSystem({ id: In(allPromptIds) }),
-          relations: ["scenario"],
-        })
-      : [];
-    const promptMap = new Map(prompts.map((p) => [p.id, p]));
-
     return jobs.map((job) => ({
       jobId: job.id,
       version: job.version ?? null,
+      versionCode: job.versionCode ?? null,
+      ruleVersion: job.ruleVersion ?? null,
       status: job.status,
       resultCount: job.resultCount ?? null,
-      promptIds: job.promptIds ?? [],
-      promptSummaries: (job.promptIds ?? []).map((id) => {
-        const p = promptMap.get(id);
-        return {
-          id,
-          name: p?.name?.trim() || null,
-          scenarioName: p?.scenario?.name?.trim() || null,
-        };
-      }),
       createdBy: job.createdBy ?? null,
       queuedAt: job.queuedAt,
       finishedAt: job.finishedAt ?? null,
       errorMessage: job.errorMessage ?? null,
+      scenarioSummary: {
+        total: job.scenarioCount ?? 0,
+        completed: job.completedScenarioCount ?? 0,
+        notApplicable: job.notApplicableScenarioCount ?? 0,
+        failed: job.failedScenarioCount ?? 0,
+      },
     }));
+  }
+
+  async getGenerateVersion(
+    projectId: string,
+    transactionId: string,
+    jobId: string,
+  ) {
+    const job = await this.generateJobRepo.findOne({
+      where: { id: jobId, projectId, transactionId },
+    });
+    if (!job) throw new NotFoundException("生成版本不存在");
+    const scenarios = await this.scenarioRepo.find({
+      where: { jobId },
+      order: { createdAt: "ASC" },
+    });
+    return { ...job, scenarios };
+  }
+
+  async retryGenerateScenario(
+    projectId: string,
+    transactionId: string,
+    jobId: string,
+    scenarioId: string,
+  ) {
+    const job = await this.generateJobRepo.findOne({
+      where: { id: jobId, projectId, transactionId },
+    });
+    const task = await this.scenarioRepo.findOne({
+      where: { id: scenarioId, jobId, projectId, transactionId },
+    });
+    if (!job || !task) throw new NotFoundException("生成场景不存在");
+    if (task.status !== "failed")
+      throw new BadRequestException("仅失败场景可以重试");
+    task.status = "pending";
+    task.errorMessage = null;
+    task.finishedAt = null;
+    await this.scenarioRepo.save(task);
+    job.status = "queued";
+    job.finishedAt = null;
+    job.errorMessage = null;
+    await this.generateJobRepo.save(job);
+    this.generateQueueService.triggerPump();
+    return this.getGenerateVersion(projectId, transactionId, jobId);
+  }
+
+  async deleteGenerateVersion(
+    projectId: string,
+    transactionId: string,
+    jobId: string,
+  ) {
+    const job = await this.generateJobRepo.findOne({
+      where: { id: jobId, projectId, transactionId },
+    });
+    if (!job) throw new NotFoundException("生成版本不存在");
+    if (["queued", "running"].includes(job.status))
+      throw new BadRequestException("生成中或重试中的版本不能删除");
+    const running = await this.runRepo.count({
+      where: { projectId, transactionId, status: "running" },
+    });
+    if (running > 0)
+      throw new BadRequestException("当前交易存在正在执行的任务，不能删除版本");
+    const cases = await this.caseRepo.find({ where: { projectId } });
+    const versionCases = cases.filter(
+      (item) => item.metadata?.generateJobId === jobId,
+    );
+    const caseIds = versionCases.map((item) => item.id);
+    if (caseIds.length) {
+      const referenced = await this.setCaseRepo.count({
+        where: { caseId: In(caseIds) },
+      });
+      if (referenced > 0)
+        throw new BadRequestException("版本案例已被执行集引用，不能删除");
+      const executed = await this.runItemRepo.count({
+        where: { caseId: In(caseIds) },
+      });
+      if (executed > 0)
+        throw new BadRequestException("版本案例已有执行记录，不能删除");
+      await this.caseRepo.delete({ id: In(caseIds), projectId });
+    }
+    await this.scenarioRepo.delete({ jobId });
+    await this.generateJobRepo.delete({ id: jobId, projectId, transactionId });
+    return { ok: true };
   }
 
   async runQueuedGenerateJob(input: {
     projectId: string;
     transactionId: string;
-    endpointIds?: string[];
-    promptIds?: string[];
-    version?: number;
-    jobId?: string;
+    jobId: string;
   }) {
-    return this.generateCasesInternal(input.projectId, input.transactionId, {
-      endpointIds: input.endpointIds,
-      promptIds: input.promptIds,
-      version: input.version,
-      jobId: input.jobId,
+    const job = await this.generateJobRepo.findOne({
+      where: { id: input.jobId },
     });
+    if (!job?.snapshot)
+      throw new Error("旧版接口案例生成任务已不再支持，请重新发起生成");
+    return this.runScenarioVersion(job);
+  }
+
+  private async runScenarioVersion(job: ApiCaseGenerateJobEntity) {
+    const transaction = await this.requireTransaction(
+      job.projectId,
+      job.transactionId,
+    );
+    const endpoint = await this.endpointRepo.findOne({
+      where: { projectId: job.projectId, transactionId: job.transactionId },
+      order: { sortOrder: "ASC" },
+    });
+    if (!endpoint || !job.snapshot)
+      throw new BadRequestException("没有可生成案例的接口端点");
+    const tasks = await this.scenarioRepo.find({
+      where: { jobId: job.id },
+      order: { createdAt: "ASC" },
+    });
+    let createdCount = 0;
+    for (const task of tasks) {
+      if (!["pending", "failed"].includes(task.status)) continue;
+      const latestJob = await this.generateJobRepo.findOne({
+        where: { id: job.id },
+      });
+      if (latestJob?.status === "cancelled") break;
+      const started = Date.now();
+      task.status = task.attemptCount > 0 ? "retrying" : "running";
+      task.attemptCount += 1;
+      task.startedAt = new Date();
+      task.errorMessage = null;
+      await this.scenarioRepo.save(task);
+      try {
+        const prompts = buildScenarioPrompts({
+          scenarioKey: task.scenarioKey as ApiCaseScenarioKey,
+          scenarioName: task.scenarioName,
+          structuredMarkdown: job.snapshot.structuredMarkdown,
+          transactionCode: transaction.code,
+          serviceProperty: job.snapshot.profile.serviceProperty,
+        });
+        task.promptChars = prompts.reduce(
+          (sum, item) => sum + item.prompt.length,
+          0,
+        );
+        task.inputFieldCount = prompts.reduce(
+          (sum, item) => sum + item.inputFieldCount,
+          0,
+        );
+        const partialResults = [];
+        for (const prompt of prompts) {
+          const { text } = await this.aiWorkflow.runWithAiChat(prompt.prompt);
+          const parsed = parseScenarioAiResult(text);
+          if (!parsed) throw new Error("AI 返回内容无法解析为场景结果 JSON");
+          partialResults.push(
+            validateScenarioAiResult(parsed, job.snapshot.structuredMarkdown),
+          );
+        }
+        const applicableResults = partialResults.filter(
+          (item) => item.applicable,
+        );
+        const result = validateScenarioAiResult(
+          {
+            applicable: applicableResults.length > 0,
+            reason:
+              applicableResults
+                .map((item) => item.reason)
+                .filter(Boolean)
+                .join("；") ||
+              partialResults
+                .map((item) => item.reason)
+                .filter(Boolean)
+                .join("；"),
+            cases: applicableResults.flatMap((item) => item.cases),
+          },
+          job.snapshot.structuredMarkdown,
+        );
+        assertScenarioCoverage(
+          task.scenarioKey as ApiCaseScenarioKey,
+          result,
+          job.snapshot.structuredMarkdown,
+        );
+        task.result = result;
+        task.applicableReason = result.reason;
+        if (!result.applicable) {
+          task.status = "not_applicable";
+          task.resultCount = 0;
+        } else {
+          const count = await this.persistScenarioCases(
+            job,
+            endpoint,
+            transaction.code,
+            task,
+            result.cases,
+          );
+          task.status = "completed";
+          task.resultCount = count;
+          createdCount += count;
+        }
+      } catch (error) {
+        task.status = "failed";
+        task.errorMessage = (error as Error).message;
+      }
+      task.durationMs = Date.now() - started;
+      task.finishedAt = new Date();
+      await this.scenarioRepo.save(task);
+    }
+    await this.refreshScenarioSummary(job.id);
+    return { count: createdCount, cases: [] };
+  }
+
+  private async persistScenarioCases(
+    job: ApiCaseGenerateJobEntity,
+    endpoint: ApiEndpointEntity,
+    transactionCode: string,
+    task: ApiCaseGenerateScenarioEntity,
+    plans: Array<{
+      title: string;
+      polarity: "positive" | "negative";
+      changes: Array<{ path: string; value: string }>;
+      expected?: string;
+    }>,
+  ) {
+    if (!job.snapshot) return 0;
+    const profile = job.snapshot.profile;
+    const channels = profile.channels.length ? profile.channels : [null];
+    let seq = await maxCaseNoSuffix(
+      this.caseRepo,
+      job.projectId,
+      endpoint.id,
+      transactionCode,
+    );
+    const entities: ApiTestCaseEntity[] = [];
+    for (const plan of plans) {
+      for (const channel of channels) {
+        const overrides = Object.fromEntries(
+          plan.changes.map((change) => [change.path, change.value]),
+        );
+        if (channel) {
+          overrides["Transaction/Header/sysHeader/clientCd"] = channel.clientCd;
+          overrides["Transaction/Header/sysHeader/serviceCd"] =
+            channel.serviceCd;
+        }
+        const assembled = assembleBodyFromExample({
+          exampleMessage: profile.exampleMessage,
+          overrides,
+          messageFormat: profile.messageFormat,
+          createMissingPaths: true,
+          refreshDynamicHeaders: true,
+        });
+        seq += 1;
+        const transport = profile.transport === "socket" ? "tcp" : "http";
+        const request = buildCaseRequestFromProfile(
+          endpoint,
+          {
+            transport,
+            messageFormat: profile.messageFormat,
+          },
+          assembled.body,
+        );
+        if (task.scenarioKey === "idempotency") request.repeatCount = 2;
+        entities.push(
+          this.caseRepo.create({
+            projectId: job.projectId,
+            endpointId: endpoint.id,
+            title: `${channel ? `[${channel.name}] ` : ""}${plan.title}`,
+            caseNo: formatCaseNo(transactionCode, seq),
+            description: plan.expected ?? "",
+            transactionCode,
+            owner: RequestContext.getUserName(),
+            priority: "P1",
+            polarity: plan.polarity,
+            status: "ready",
+            enabled: true,
+            preconditions: [],
+            request,
+            expected: {},
+            metadata: {
+              source: "ai",
+              generateVersion: job.version ?? undefined,
+              scenarioName: task.scenarioName,
+              generateJobId: job.id,
+              versionCode: job.versionCode ?? undefined,
+              scenarioTaskId: task.id,
+              scenarioKey: task.scenarioKey,
+              channelId: channel?.id,
+              channelName: channel?.name,
+              channelSnapshot: channel
+                ? { clientCd: channel.clientCd, serviceCd: channel.serviceCd }
+                : undefined,
+            },
+            ...auditFieldsForCreate(),
+          }),
+        );
+      }
+    }
+    await this.dataSource.transaction(async (manager) => {
+      const existing = await manager.find(ApiTestCaseEntity, {
+        where: { projectId: job.projectId },
+      });
+      const staleIds = existing
+        .filter((item) => item.metadata?.scenarioTaskId === task.id)
+        .map((item) => item.id);
+      if (staleIds.length) {
+        await manager.delete(ApiTestExecutionSetCaseEntity, {
+          caseId: In(staleIds),
+        });
+        await manager.delete(ApiTestCaseEntity, {
+          id: In(staleIds),
+          projectId: job.projectId,
+        });
+      }
+      await manager.save(ApiTestCaseEntity, entities);
+    });
+    return entities.length;
+  }
+
+  private async refreshScenarioSummary(jobId: string) {
+    const tasks = await this.scenarioRepo.find({ where: { jobId } });
+    const job = await this.generateJobRepo.findOne({ where: { id: jobId } });
+    if (!job) return;
+    job.completedScenarioCount = tasks.filter(
+      (task) => task.status === "completed",
+    ).length;
+    job.notApplicableScenarioCount = tasks.filter(
+      (task) => task.status === "not_applicable",
+    ).length;
+    job.failedScenarioCount = tasks.filter(
+      (task) => task.status === "failed",
+    ).length;
+    await this.generateJobRepo.save(job);
   }
 
   async cleanupGeneratedCases(
@@ -418,15 +780,11 @@ export class ApiCaseService {
   private async validateGenerateRequest(
     projectId: string,
     transactionId: string,
-    options?: { endpointIds?: string[]; promptIds?: string[] },
+    _options?: { channelIds?: string[] },
   ) {
     await this.requireTransaction(projectId, transactionId);
-    const endpointIds = options?.endpointIds;
-    const baseWhere = { projectId, transactionId };
     const endpoints = await this.endpointRepo.find({
-      where: endpointIds?.length
-        ? { projectId, id: In(endpointIds), transactionId }
-        : baseWhere,
+      where: { projectId, transactionId },
       order: { sortOrder: "ASC" },
     });
     if (!endpoints.length) {
@@ -438,189 +796,9 @@ export class ApiCaseService {
     if (!doc) {
       throw new BadRequestException("请先上传并结构化接口文档");
     }
-    if (options?.promptIds !== undefined) {
-      doc.metadata = {
-        ...doc.metadata,
-        promptIds: options.promptIds,
-      };
-      await this.apiDocRepo.save(doc);
+    if (!doc.metadata?.generationProfile?.exampleMessage.trim()) {
+      throw new BadRequestException("请先填写完整生成参数和示例报文");
     }
-  }
-
-  private async generateCasesInternal(
-    projectId: string,
-    transactionId: string,
-    options?: {
-      endpointIds?: string[];
-      promptIds?: string[];
-      version?: number;
-      jobId?: string;
-    },
-  ) {
-    const transaction = await this.requireTransaction(projectId, transactionId);
-    const endpointIds = options?.endpointIds;
-    const baseWhere = { projectId, transactionId };
-    const endpoints = await this.endpointRepo.find({
-      where: endpointIds?.length
-        ? { projectId, id: In(endpointIds), transactionId }
-        : baseWhere,
-      order: { sortOrder: "ASC" },
-    });
-    if (!endpoints.length) {
-      throw new BadRequestException("没有可生成案例的接口端点");
-    }
-
-    const doc = await this.apiDocRepo.findOne({
-      where: scopedWhere({ projectId, transactionId }),
-    });
-    if (!doc) {
-      throw new BadRequestException("请先上传并结构化接口文档");
-    }
-
-    const promptIds = options?.promptIds ?? doc.metadata?.promptIds ?? [];
-    const scenarioPrompts = await this.resolveScenarioPrompts(promptIds);
-    const structuredDoc =
-      doc.tempStructuredMarkdown?.trim() ||
-      doc.structuredMarkdown?.trim() ||
-      doc.extractedRawText?.trim() ||
-      "";
-
-    const created: ApiTestCaseEntity[] = [];
-    for (const endpoint of endpoints) {
-      if (endpoint.transactionId !== transactionId) {
-        throw new BadRequestException("接口端点不属于当前交易码");
-      }
-      if (!this.aiWorkflow.canGenerateApiCases()) {
-        throw new BadRequestException(
-          "AI Chat 或 at-case-skill 未配置，请检查 AI_CHAT_URL 与 AT_CASE_SKILL_URL",
-        );
-      }
-      if (options?.jobId) {
-        const job = await this.generateJobRepo.findOne({
-          where: { id: options.jobId },
-        });
-        if (job?.status === "cancelled") {
-          this.logger.log(`案例生成已取消，跳过端点 ${endpoint.id} 的案例保存`);
-          continue;
-        }
-      }
-
-      let seq = await maxCaseNoSuffix(
-        this.caseRepo,
-        projectId,
-        endpoint.id,
-        transaction.code,
-      );
-
-      const scenarioList: ScenarioPromptInfo[] = scenarioPrompts.length
-        ? scenarioPrompts
-        : [
-            {
-              promptId: undefined,
-              scenarioName: undefined,
-              promptName: undefined,
-              content: "",
-            },
-          ];
-
-      for (const scenarioPrompt of scenarioList) {
-        if (options?.jobId) {
-          const job = await this.generateJobRepo.findOne({
-            where: { id: options.jobId },
-          });
-          if (job?.status === "cancelled") {
-            this.logger.log(
-              `案例生成已取消，跳过端点 ${endpoint.id} 的场景 ${scenarioPrompt.scenarioName || "（无场景）"}`,
-            );
-            break;
-          }
-        }
-
-        const payloads = await generateCasesWithPlan(
-          this.aiWorkflow,
-          {
-            transactionCode: transaction.code,
-            structuredDoc,
-            endpoint,
-            scenarioPrompt,
-            smpData: doc.smpData,
-          },
-          this.logger,
-        );
-
-        if (options?.jobId) {
-          const job = await this.generateJobRepo.findOne({
-            where: { id: options.jobId },
-          });
-          if (job?.status === "cancelled") {
-            this.logger.log(
-              `案例生成已取消，丢弃端点 ${endpoint.id} 场景 ${scenarioPrompt.scenarioName || "（无场景）"} 的 ${payloads.length} 条生成结果`,
-            );
-            break;
-          }
-        }
-
-        for (const payload of payloads) {
-          seq += 1;
-          payload.caseNo = formatCaseNo(transaction.code, seq);
-          const entity = this.caseRepo.create({
-            projectId,
-            endpointId: endpoint.id,
-            ...payload,
-            transactionCode: payload.transactionCode ?? transaction.code,
-            owner: payload.owner?.trim() || RequestContext.getUserName(),
-            metadata: {
-              ...payload.metadata,
-              source: "ai",
-              promptIds: [...promptIds],
-              generateVersion: options?.version,
-            },
-            ...auditFieldsForCreate(),
-          });
-          created.push(await this.caseRepo.save(entity));
-        }
-      }
-    }
-    return {
-      count: created.length,
-      cases: created.map(toPublicApiCase),
-    };
-  }
-
-  private async resolveScenarioPrompts(
-    promptIds: string[],
-  ): Promise<ScenarioPromptInfo[]> {
-    if (!promptIds.length) {
-      return [];
-    }
-    const prompts = await this.promptRepo.find({
-      where: scopedWhereWithSystem({ id: In(promptIds) }),
-      relations: ["scenario"],
-    });
-    const promptMap = new Map(prompts.map((prompt) => [prompt.id, prompt]));
-    return promptIds
-      .map((id) => {
-        const prompt = promptMap.get(id);
-        const content = prompt?.content?.trim();
-        if (!content) {
-          return null;
-        }
-        const scenarioName = prompt?.scenario?.name?.trim();
-        const promptName = prompt?.name?.trim();
-        const title =
-          scenarioName && promptName
-            ? `【${scenarioName} / ${promptName}】`
-            : promptName
-              ? `【${promptName}】`
-              : "";
-        return {
-          promptId: id,
-          scenarioName: scenarioName || undefined,
-          promptName: promptName || undefined,
-          content: title ? `${title}\n${content}` : content,
-        };
-      })
-      .filter((item): item is NonNullable<typeof item> => item !== null);
   }
 
   private validateCasePayload(payload: SaveApiCaseDto) {

@@ -15,6 +15,7 @@ export interface AssembleBodyInput {
   overrides: Record<string, string>;
   messageFormat: "json" | "xml" | "soap" | "text" | "other";
   refreshDynamicHeaders?: boolean;
+  createMissingPaths?: boolean;
 }
 
 export interface AssembleBodyResult {
@@ -22,32 +23,140 @@ export interface AssembleBodyResult {
   warnings: string[];
 }
 
+function detectExampleFormat(text: string): "json" | "xml" | "text" {
+  const trimmed = text.trim();
+  if (!trimmed) return "text";
+  if (trimmed.startsWith("<") || trimmed.includes("<?xml")) return "xml";
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) return "json";
+  return "text";
+}
+
 export function assembleBodyFromExample(
   input: AssembleBodyInput,
 ): AssembleBodyResult {
   const warnings: string[] = [];
   const normalized = normalizeOverrides(input.overrides, warnings);
+  const exampleFormat = detectExampleFormat(input.exampleMessage);
+  const outputFormat = input.messageFormat;
 
-  switch (input.messageFormat) {
-    case "xml":
-    case "soap":
-      return assembleXmlBody(
-        input.exampleMessage,
-        normalized,
-        warnings,
-        input.refreshDynamicHeaders,
-      );
-    case "json":
-      return assembleJsonBody(
-        input.exampleMessage,
-        normalized,
-        warnings,
-        input.refreshDynamicHeaders,
-      );
-    case "text":
-    default:
-      return assembleTextBody(input.exampleMessage, normalized, warnings);
+  if (
+    exampleFormat === outputFormat ||
+    (exampleFormat === "xml" &&
+      (outputFormat === "xml" || outputFormat === "soap"))
+  ) {
+    switch (outputFormat) {
+      case "xml":
+      case "soap":
+        return assembleXmlBody(
+          input.exampleMessage,
+          normalized,
+          warnings,
+          input.refreshDynamicHeaders,
+          input.createMissingPaths,
+        );
+      case "json":
+        return assembleJsonBody(
+          input.exampleMessage,
+          normalized,
+          warnings,
+          input.refreshDynamicHeaders,
+          input.createMissingPaths,
+        );
+      case "text":
+      default:
+        return assembleTextBody(
+          input.exampleMessage,
+          normalized,
+          warnings,
+          input.createMissingPaths,
+        );
+    }
   }
+
+  const obj = parseExampleToObject(
+    input.exampleMessage,
+    exampleFormat,
+    warnings,
+  );
+  if (obj === null) {
+    return { body: input.exampleMessage, warnings };
+  }
+
+  for (const [path, value] of Object.entries(normalized)) {
+    const segments = path.split("/").filter(Boolean);
+    const found = setJsonValueByPath(
+      obj,
+      segments,
+      value,
+      input.createMissingPaths,
+    );
+    if (!found) {
+      const lastSegment = segments[segments.length - 1] || path;
+      const fallbackFound = setJsonValueByLastSegment(obj, lastSegment, value);
+      if (fallbackFound) {
+        warnings.push(
+          `路径 "${path}" 全路径未命中，按末段名 "${lastSegment}" 回退匹配`,
+        );
+      } else if (input.createMissingPaths) {
+        warnings.push(`路径 "${path}" 无法在示例结构中创建，已跳过`);
+      } else {
+        warnings.push(`路径 "${path}" 在示例报文中未找到对应节点，已跳过`);
+      }
+    }
+  }
+
+  if (input.refreshDynamicHeaders) {
+    refreshJsonDynamicHeaders(obj);
+  }
+
+  switch (outputFormat) {
+    case "json":
+      return { body: JSON.stringify(obj, null, 2), warnings };
+    case "xml":
+    case "soap": {
+      const xml = objectToXml(obj);
+      return { body: prettyPrintXml(xml), warnings };
+    }
+    case "text":
+    default: {
+      const lines: string[] = [];
+      flattenObjectToTextLines(obj, [], lines);
+      return { body: lines.join("\n"), warnings };
+    }
+  }
+}
+
+function parseExampleToObject(
+  example: string,
+  format: "json" | "xml" | "text",
+  warnings: string[],
+): Record<string, unknown> | null {
+  if (format === "json") {
+    try {
+      return JSON.parse(example);
+    } catch (e) {
+      assemblerLogger.warn(`JSON 示例报文解析失败: ${(e as Error).message}`);
+      warnings.push("示例报文 JSON 解析失败");
+      return null;
+    }
+  }
+  if (format === "xml") {
+    const parsed = parseXmlToObject(example);
+    if (parsed === null) {
+      warnings.push("示例报文 XML 解析失败");
+    }
+    return parsed;
+  }
+  const result: Record<string, string> = {};
+  for (const line of example.split(/\n/)) {
+    const idx = line.indexOf("=");
+    if (idx > 0) {
+      const key = line.slice(0, idx).trim();
+      const value = line.slice(idx + 1).trim();
+      if (key) result[key] = value;
+    }
+  }
+  return result;
 }
 
 function normalizeOverrides(
@@ -201,6 +310,7 @@ function assembleXmlBody(
   overrides: Record<string, string>,
   warnings: string[],
   refreshDynamicHeaders?: boolean,
+  createMissingPaths?: boolean,
 ): AssembleBodyResult {
   const isCompact = !exampleXml.includes("\n");
   let result = exampleXml;
@@ -214,6 +324,10 @@ function assembleXmlBody(
 
     if (replaced.changed) {
       result = replaced.xml;
+    } else if (createMissingPaths) {
+      const created = createXmlPath(result, segments, value);
+      result = created.xml;
+      if (!created.changed) warnings.push(`路径 "${path}" 无法创建`);
     } else {
       warnings.push(`路径 "${path}" 在示例报文中未找到对应节点，已跳过`);
     }
@@ -225,6 +339,35 @@ function assembleXmlBody(
 
   const body = isCompact ? minifyXml(result) : prettyPrintXml(result);
   return { body, warnings };
+}
+
+function createXmlPath(xml: string, segments: string[], value: string) {
+  const parentSegments = segments.slice(0, -1);
+  let parentIndex = parentSegments.length - 1;
+  while (
+    parentIndex >= 0 &&
+    !new RegExp(`<${parentSegments[parentIndex]}(?:\s[^>]*)?>`).test(xml)
+  ) {
+    parentIndex -= 1;
+  }
+  if (parentIndex < 0) return { xml, changed: false };
+  const parent = parentSegments[parentIndex];
+  const missing = segments.slice(parentIndex + 1);
+  const escaped = escapeXmlValue(value);
+  const nested = missing.reduceRight(
+    (content, tag, index) =>
+      index === missing.length - 1
+        ? `<${tag}>${escaped}</${tag}>`
+        : `<${tag}>${content}</${tag}>`,
+    "",
+  );
+  const close = `</${parent}>`;
+  const closeIndex = xml.indexOf(close);
+  if (closeIndex < 0) return { xml, changed: false };
+  return {
+    xml: `${xml.slice(0, closeIndex)}${nested}${xml.slice(closeIndex)}`,
+    changed: true,
+  };
 }
 
 function replaceXmlFieldValue(
@@ -278,13 +421,19 @@ function assembleJsonBody(
   overrides: Record<string, string>,
   warnings: string[],
   refreshDynamicHeaders?: boolean,
+  createMissingPaths?: boolean,
 ): AssembleBodyResult {
   try {
     const obj = JSON.parse(exampleJson);
 
     for (const [path, value] of Object.entries(overrides)) {
       const segments = path.split("/").filter(Boolean);
-      const found = setJsonValueByPath(obj, segments, value);
+      const found = setJsonValueByPath(
+        obj,
+        segments,
+        value,
+        createMissingPaths,
+      );
       if (!found) {
         const lastSegment = segments[segments.length - 1] || path;
         const fallbackFound = setJsonValueByLastSegment(
@@ -321,20 +470,35 @@ function setJsonValueByPath(
   obj: unknown,
   segments: string[],
   value: string,
+  createMissing = false,
 ): boolean {
   let current: unknown = obj;
 
   for (let i = 0; i < segments.length - 1; i++) {
     if (current === null || typeof current !== "object") return false;
-    const next = (current as Record<string, unknown>)[segments[i]];
+    const record = current as Record<string, unknown>;
+    const requestedKey = segments[i];
+    const existingKey = Object.keys(record).find(
+      (key) => key.toLowerCase() === requestedKey.toLowerCase(),
+    );
+    const key = existingKey ?? requestedKey;
+    let next = record[key];
+    if (next === undefined && createMissing) {
+      next = {};
+      record[key] = next;
+    }
     if (next === undefined) return false;
     current = next;
   }
 
   if (current === null || typeof current !== "object") return false;
-  const lastKey = segments[segments.length - 1];
   const record = current as Record<string, unknown>;
-  if (record[lastKey] === undefined) return false;
+  const requestedLastKey = segments[segments.length - 1];
+  const lastKey =
+    Object.keys(record).find(
+      (key) => key.toLowerCase() === requestedLastKey.toLowerCase(),
+    ) ?? requestedLastKey;
+  if (record[lastKey] === undefined && !createMissing) return false;
 
   record[lastKey] = value;
   return true;
@@ -396,6 +560,7 @@ function assembleTextBody(
   exampleText: string,
   overrides: Record<string, string>,
   warnings: string[],
+  createMissingPaths?: boolean,
 ): AssembleBodyResult {
   let result = exampleText;
 
@@ -410,6 +575,9 @@ function assembleTextBody(
 
     if (replaced !== result) {
       result = replaced;
+    } else if (createMissingPaths) {
+      const separator = result.endsWith("\n") || !result ? "" : "\n";
+      result += `${separator}${lastSegment}=${escaped}`;
     } else {
       warnings.push(`路径 "${path}" 在示例报文中未找到对应字段，已跳过`);
     }
@@ -424,6 +592,142 @@ function escapeXmlValue(value: string): string {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function parseXmlToObject(xml: string): Record<string, unknown> | null {
+  const tokens = xml.match(/<\?xml[^?]*\?>|<[^>]+>|[^<]+/g) || [];
+  let i = 0;
+
+  function parseElement(): Record<string, unknown> | string | null {
+    while (i < tokens.length) {
+      const token = tokens[i].trim();
+      if (!token || token.startsWith("<?xml")) {
+        i++;
+        continue;
+      }
+      if (token.startsWith("</")) {
+        i++;
+        return null;
+      }
+      if (token.startsWith("<")) {
+        const match = token.match(/^<([a-zA-Z_:][\w:.-]*)([^>]*)\/??>/);
+        if (!match) {
+          i++;
+          continue;
+        }
+        const tag = match[1];
+        const selfClosing = token.endsWith("/>");
+        i++;
+        if (selfClosing) {
+          return { [tag]: "" };
+        }
+        const children: Record<string, unknown> = {};
+        let hasChildren = false;
+        let textContent = "";
+        while (i < tokens.length) {
+          const peek = tokens[i].trim();
+          if (peek.startsWith(`</${tag}>`)) {
+            i++;
+            break;
+          }
+          if (peek.startsWith("<")) {
+            const child = parseElement();
+            if (child !== null) {
+              if (typeof child === "string") {
+                textContent = child;
+              } else {
+                for (const [k, v] of Object.entries(child)) {
+                  if (k in children) {
+                    const existing = children[k];
+                    if (Array.isArray(existing)) {
+                      existing.push(v);
+                    } else {
+                      children[k] = [existing, v];
+                    }
+                  } else {
+                    children[k] = v;
+                  }
+                }
+                hasChildren = true;
+              }
+            }
+          } else {
+            textContent = peek;
+            i++;
+          }
+        }
+        if (hasChildren) {
+          return { [tag]: children };
+        }
+        return { [tag]: textContent };
+      }
+      i++;
+    }
+    return null;
+  }
+
+  const result = parseElement();
+  if (result === null || typeof result === "string") return null;
+  return result;
+}
+
+function objectToXml(obj: unknown, indent = 0): string {
+  const pad = "  ".repeat(indent);
+  if (obj === null || obj === undefined) return "";
+  if (typeof obj !== "object") return String(obj);
+  if (Array.isArray(obj)) {
+    return obj.map((item) => objectToXml(item, indent)).join("");
+  }
+  const lines: string[] = [];
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === null || value === undefined) {
+      lines.push(`${pad}<${key}></${key}>`);
+    } else if (typeof value === "object") {
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          lines.push(`${pad}<${key}>`);
+          lines.push(objectToXml(item, indent + 1));
+          lines.push(`${pad}</${key}>`);
+        }
+      } else {
+        lines.push(`${pad}<${key}>`);
+        lines.push(objectToXml(value, indent + 1));
+        lines.push(`${pad}</${key}>`);
+      }
+    } else {
+      const escaped = escapeXmlValue(String(value));
+      lines.push(`${pad}<${key}>${escaped}</${key}>`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function flattenObjectToTextLines(
+  obj: unknown,
+  prefix: string[],
+  lines: string[],
+): void {
+  if (obj === null || obj === undefined) return;
+  if (typeof obj !== "object") {
+    if (prefix.length) {
+      lines.push(`${prefix.join("/")}=${obj}`);
+    }
+    return;
+  }
+  if (Array.isArray(obj)) {
+    for (let idx = 0; idx < obj.length; idx++) {
+      flattenObjectToTextLines(obj[idx], [...prefix, `[${idx}]`], lines);
+    }
+    return;
+  }
+  for (const [key, value] of Object.entries(obj)) {
+    const path = [...prefix, key];
+    if (value === null || typeof value !== "object") {
+      lines.push(`${path.join("/")}=${value ?? ""}`);
+    } else {
+      flattenObjectToTextLines(value, path, lines);
+    }
+  }
 }
 
 export { DYNAMIC_HEADER_FIELDS };

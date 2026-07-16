@@ -55,10 +55,6 @@
           </a-button>
           <template #overlay>
             <a-menu @click="onMoreMenuClick">
-              <a-menu-item key="scenario">
-                <SettingOutlined />
-                场景配置
-              </a-menu-item>
               <a-menu-item v-if="!showSmpData" key="save" :disabled="!canSave">
                 <SaveOutlined />
                 手动保存
@@ -213,8 +209,6 @@
     </div>
   </section>
 
-  <ScenarioMaintainModal v-model:open="scenarioModalOpen" scope="api" />
-
   <ApiCaseGenerateHistoryDrawer
     v-model:open="historyDrawerOpen"
     :project-id="projectId"
@@ -234,20 +228,70 @@
     @cancel="onCloseGenerateModal"
   >
     <div class="generate-modal-body">
-      <a-alert
-        v-if="apiStore.apiDoc?.caseCount"
-        type="warning"
-        show-icon
-        class="generate-modal-alert"
-        message="将基于当前接口文档与场景约束重新生成案例，不会自动删除已有案例。"
-      />
-      <p class="generate-modal-hint">场景提示词为可选项，不选择也可直接开始生成。</p>
-      <ScenarioPromptPicker
-        v-model:prompt-ids="generatePromptIds"
-        scope="api"
-        optional
-        embedded
-      />
+      <a-form layout="vertical">
+        <div class="generation-profile-grid">
+          <a-form-item label="服务属性" required>
+            <a-select v-model:value="generationProfile.serviceProperty" :options="servicePropertyOptions" />
+          </a-form-item>
+          <a-form-item label="通讯方式" required>
+            <a-select v-model:value="generationProfile.transport" :options="transportOptions" />
+          </a-form-item>
+          <a-form-item label="报文类型" required>
+            <a-select v-model:value="generationProfile.messageFormat" :options="messageFormatOptions" />
+          </a-form-item>
+        </div>
+        <section class="channel-panel">
+          <div class="channel-editor-header">
+            <div>
+              <strong>渠道数据</strong>
+              <span>勾选参与本次生成</span>
+            </div>
+            <div class="channel-editor-actions">
+              <a-input-search
+                v-model:value="channelKeyword"
+                allow-clear
+                class="channel-search"
+                placeholder="搜索名称 / clientCd / serviceCd"
+              />
+              <a-upload
+                :show-upload-list="false"
+                accept=".xls,.xlsx,.csv"
+                :before-upload="importChannels"
+              >
+                <a-button size="small" type="text" class="channel-add-btn">
+                  <template #icon><ImportOutlined /></template>
+                </a-button>
+              </a-upload>
+              <a-button size="small" type="text" class="channel-add-btn" @click="addChannel">
+                <template #icon><PlusOutlined /></template>
+              </a-button>
+            </div>
+          </div>
+          <div class="channel-editor-columns" aria-hidden="true">
+            <span>选择</span><span>渠道名称</span><span>clientCd</span><span>serviceCd</span><span>操作</span>
+          </div>
+          <div class="channel-editor-list">
+            <div
+              v-for="channel in filteredChannels"
+              :key="channel.id"
+              :class="['channel-editor-row', { 'is-selected': selectedChannelIds.includes(channel.id) }]"
+            >
+            <a-checkbox
+              :checked="selectedChannelIds.includes(channel.id)"
+              :disabled="!isChannelComplete(channel)"
+              @change="toggleChannel(channel.id, $event.target.checked)"
+            />
+            <a-input v-model:value="channel.name" placeholder="渠道名称" />
+            <a-input v-model:value="channel.clientCd" placeholder="clientCd" />
+            <a-input v-model:value="channel.serviceCd" placeholder="serviceCd" />
+              <a-button type="text" danger aria-label="删除渠道" @click="removeChannel(channel.id)">
+                <template #icon><DeleteOutlined /></template>
+              </a-button>
+            </div>
+            <a-empty v-if="channelKeyword && !filteredChannels.length" :image="false" description="未找到匹配渠道" />
+          </div>
+        </section>
+      </a-form>
     </div>
   </a-modal>
 
@@ -293,24 +337,25 @@
 import { computed, nextTick, onActivated, onDeactivated, reactive, ref, watch } from 'vue';
 import {
   DownOutlined,
+  DeleteOutlined,
   ExpandOutlined,
   FormatPainterOutlined,
   HistoryOutlined,
+  ImportOutlined,
+  PlusOutlined,
   RightOutlined,
   SaveOutlined,
-  SettingOutlined,
   ThunderboltOutlined,
   UploadOutlined,
 } from '@ant-design/icons-vue';
 import { Modal, message } from 'ant-design-vue';
 import type { MenuProps, UploadProps } from 'ant-design-vue';
-import ScenarioMaintainModal from '@/components/ScenarioMaintainModal.vue';
-import ScenarioPromptPicker from '@/components/ScenarioPromptPicker.vue';
 import SmpDocumentViewer from '@/components/api-test/SmpDocumentViewer.vue';
 import ApiCaseGenerateHistoryDrawer from '@/components/api-test/ApiCaseGenerateHistoryDrawer.vue';
 import { IMMERSIVE_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import { useApiTestStore } from '@/stores/apiTest';
-import { filterSelectablePromptIds, collectDefaultPromptIds } from '@/utils/scenarioLibrary';
+import type { ApiDocGenerationProfile } from '@case-forge/shared';
+import * as XLSX from 'xlsx';
 import {
   parseApiDocTableText,
   API_DOC_SECTION_TITLES,
@@ -334,15 +379,38 @@ const sectionData = ref<Record<string, string>[][]>([]);
 const exampleMessage = ref('');
 const editorText = ref('');
 const autoSaveTimer = ref<number | null>(null);
+const generationProfileSaveTimer = ref<number | null>(null);
 const syncingFromStore = ref(false);
 const panelActive = ref(true);
-const scenarioModalOpen = ref(false);
 const generateModalOpen = ref(false);
 const exampleExpandModalOpen = ref(false);
 const historyDrawerOpen = ref(false);
 const moreMenuOpen = ref(false);
-const docPromptIds = ref<string[]>([]);
-const generatePromptIds = ref<string[]>([]);
+const generationProfile = reactive<ApiDocGenerationProfile>({
+  serviceProperty: 'query_non_accounting',
+  transport: 'http',
+  messageFormat: 'json',
+  exampleMessage: '',
+  channels: [],
+});
+const selectedChannelIds = ref<string[]>([]);
+const channelKeyword = ref('');
+const servicePropertyOptions = [
+  ['query_non_accounting', '查询类非涉账'], ['query_accounting', '查询类涉账'],
+  ['management_non_accounting', '管理类非涉账'], ['management_accounting', '管理类涉账'],
+  ['accounting', '记账类'], ['reversal', '冲正类'], ['file', '文件类'], ['push', '推送类'],
+].map(([value, label]) => ({ value, label }));
+const transportOptions = [{ value: 'http', label: 'HTTP' }, { value: 'socket', label: 'SOCKET' }];
+const messageFormatOptions = [{ value: 'json', label: 'JSON' }, { value: 'xml', label: 'XML' }, { value: 'text', label: 'TEXT' }];
+const filteredChannels = computed(() => {
+  const keyword = channelKeyword.value.trim().toLowerCase();
+  if (!keyword) return generationProfile.channels;
+  return generationProfile.channels.filter((channel) =>
+    [channel.name, channel.clientCd, channel.serviceCd].some((value) =>
+      value.toLowerCase().includes(keyword),
+    ),
+  );
+});
 const collapsedSections = reactive(
   new Set<string>(
     API_DOC_SECTION_TITLES.filter((title) => title !== '示例报文'),
@@ -391,7 +459,6 @@ const sourceDocName = computed(() => apiStore.apiDoc?.sourceDocName ?? '');
 
 onActivated(() => {
   panelActive.value = true;
-  void ensureScenarioLibrary();
   const pid = projectId.value;
   const tid = transactionId.value;
   if (pid && tid) {
@@ -583,16 +650,48 @@ watch(exampleMessage, () => {
   resizeExampleMessageInput();
 });
 
+watch(() => apiStore.apiDoc?.generationProfile, (next) => {
+  if (!next) return;
+  Object.assign(generationProfile, next, { channels: next.channels.map((channel) => ({ ...channel })) });
+}, { immediate: true, deep: true });
+
 watch(
-  () => apiStore.apiDoc?.generationPromptIds,
-  (next) => {
-    if (!panelActive.value) return;
-    docPromptIds.value = filterSelectablePromptIds(
-      apiStore.apiScenarios,
-      next ?? [],
-    );
+  generationProfile,
+  () => {
+    if (syncingFromStore.value || !projectId.value || !transactionId.value) return;
+    if (
+      !generationProfile.exampleMessage.trim() ||
+      generationProfile.channels.some((channel) => !isChannelComplete(channel))
+    ) return;
+    if (
+      JSON.stringify(generationProfile) ===
+      JSON.stringify(apiStore.apiDoc?.generationProfile)
+    ) return;
+    if (generationProfileSaveTimer.value) {
+      window.clearTimeout(generationProfileSaveTimer.value);
+    }
+    const saveProjectId = projectId.value;
+    const saveTransactionId = transactionId.value;
+    generationProfileSaveTimer.value = window.setTimeout(() => {
+      generationProfileSaveTimer.value = null;
+      if (
+        !panelActive.value ||
+        saveProjectId !== projectId.value ||
+        saveTransactionId !== transactionId.value
+      ) return;
+      void apiStore
+        .saveDocumentGenerationPrompts(saveProjectId, saveTransactionId, {
+          ...generationProfile,
+          channels: generationProfile.channels.map((channel) => ({ ...channel })),
+        })
+        .catch(() => {
+          if (saveProjectId === projectId.value && saveTransactionId === transactionId.value) {
+            message.error('渠道数据自动保存失败');
+          }
+        });
+    }, 1200);
   },
-  { immediate: true },
+  { deep: true },
 );
 
 watch(
@@ -602,20 +701,13 @@ watch(
       window.clearTimeout(autoSaveTimer.value);
       autoSaveTimer.value = null;
     }
-    void ensureScenarioLibrary();
+    if (generationProfileSaveTimer.value) {
+      window.clearTimeout(generationProfileSaveTimer.value);
+      generationProfileSaveTimer.value = null;
+    }
   },
 );
 
-watch(
-  () => apiStore.apiScenarios,
-  () => {
-    docPromptIds.value = filterSelectablePromptIds(
-      apiStore.apiScenarios,
-      docPromptIds.value,
-    );
-  },
-  { deep: true },
-);
 
 function scheduleAutoSave() {
   if (syncingFromStore.value) return;
@@ -673,23 +765,7 @@ function handleCellBlur(sectionIndex: number) {
 
 const canSave = computed(() => Boolean(editorText.value.trim()));
 
-async function ensureScenarioLibrary() {
-  if (!apiStore.apiScenarios.length) {
-    await apiStore.loadApiScenarioLibrary();
-  }
-}
-
-function openScenarioModal() {
-  void ensureScenarioLibrary().then(() => {
-    scenarioModalOpen.value = true;
-  });
-}
-
 const onMoreMenuClick: MenuProps['onClick'] = ({ key }) => {
-  if (key === 'scenario') {
-    openScenarioModal();
-    return;
-  }
   if (key === 'save') {
     void onSave();
   }
@@ -732,16 +808,74 @@ async function onGenerate() {
   const tid = transactionId.value;
   if (!pid || !tid) return;
 
-  await ensureScenarioLibrary();
-  const saved = filterSelectablePromptIds(
-    apiStore.apiScenarios,
-    docPromptIds.value,
-  );
-  generatePromptIds.value = saved.length
-    ? saved
-    : collectDefaultPromptIds(apiStore.apiScenarios);
+  generationProfile.exampleMessage = exampleMessage.value.trim();
+  selectedChannelIds.value = selectedChannelIds.value.filter((id) => generationProfile.channels.some((channel) => channel.id === id));
   generateModalOpen.value = true;
 }
+
+function addChannel() {
+  generationProfile.channels.push({ id: crypto.randomUUID(), name: '', clientCd: '', serviceCd: '' });
+}
+
+async function importChannels(file: File) {
+  try {
+    const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    if (!sheet) throw new Error('文件中没有工作表');
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+    const imported = rows.map((row) => ({
+      id: crypto.randomUUID(),
+      name: String(row['渠道名称'] ?? row.name ?? row.channelName ?? '').trim(),
+      clientCd: String(row.clientCd ?? row['客户端代码'] ?? '').trim(),
+      serviceCd: String(row.serviceCd ?? row['服务代码'] ?? '').trim(),
+    })).filter(isChannelComplete);
+    if (!imported.length) throw new Error('未识别到完整的渠道名称、clientCd、serviceCd');
+    const keys = new Set(generationProfile.channels.map((channel) =>
+      `${channel.name}\u0000${channel.clientCd}\u0000${channel.serviceCd}`,
+    ));
+    const added = imported.filter((channel) => {
+      const key = `${channel.name}\u0000${channel.clientCd}\u0000${channel.serviceCd}`;
+      if (keys.has(key)) return false;
+      keys.add(key);
+      return true;
+    });
+    generationProfile.channels.push(...added);
+    message.success(`已导入 ${added.length} 条渠道${added.length < imported.length ? '，重复项已忽略' : ''}`);
+  } catch (error) {
+    message.error((error as Error).message || '渠道导入失败');
+  }
+  return false;
+}
+
+function removeChannel(id: string) {
+  const index = generationProfile.channels.findIndex((channel) => channel.id === id);
+  if (index < 0) return;
+  const [removed] = generationProfile.channels.splice(index, 1);
+  if (removed) selectedChannelIds.value = selectedChannelIds.value.filter((id) => id !== removed.id);
+}
+
+function toggleChannel(id: string, checked: boolean) {
+  const channel = generationProfile.channels.find((item) => item.id === id);
+  if (checked && (!channel || !isChannelComplete(channel))) return;
+  selectedChannelIds.value = checked
+    ? [...new Set([...selectedChannelIds.value, id])]
+    : selectedChannelIds.value.filter((channelId) => channelId !== id);
+}
+
+function isChannelComplete(channel: ApiDocGenerationProfile['channels'][number]) {
+  return Boolean(channel.name.trim() && channel.clientCd.trim() && channel.serviceCd.trim());
+}
+
+watch(
+  () => generationProfile.channels.map((channel) => [channel.id, channel.name, channel.clientCd, channel.serviceCd]),
+  () => {
+    selectedChannelIds.value = selectedChannelIds.value.filter((id) => {
+      const channel = generationProfile.channels.find((item) => item.id === id);
+      return Boolean(channel && isChannelComplete(channel));
+    });
+  },
+  { deep: true },
+);
 
 function onCloseGenerateModal() {
   generateModalOpen.value = false;
@@ -759,13 +893,24 @@ function onConfirmGenerate() {
   const tid = transactionId.value;
   if (!pid || !tid) return;
 
-  docPromptIds.value = [...generatePromptIds.value];
+  generationProfile.exampleMessage = exampleMessage.value.trim();
+  if (!generationProfile.exampleMessage) {
+    message.warning('请先填写示例报文');
+    return;
+  }
+  if (generationProfile.channels.some((channel) => !channel.name.trim() || !channel.clientCd.trim() || !channel.serviceCd.trim())) {
+    message.warning('请完整填写渠道名称、clientCd 和 serviceCd');
+    return;
+  }
   apiStore.markCaseGenerateStarted(tid);
   generateModalOpen.value = false;
 
   void (async () => {
     try {
-      await apiStore.saveDocumentGenerationPrompts(pid, tid, docPromptIds.value);
+      await apiStore.saveDocumentGenerationPrompts(pid, tid, {
+        ...generationProfile,
+        channels: generationProfile.channels.map((channel) => ({ ...channel })),
+      });
       runGenerate(pid, tid);
     } catch {
       apiStore.markCaseGenerateEnded(tid);
@@ -776,7 +921,7 @@ function onConfirmGenerate() {
 
 function runGenerate(pid: string, tid: string) {
   void apiStore.generateCases(pid, tid, {
-    promptIds: [...docPromptIds.value],
+    channelIds: [...selectedChannelIds.value],
     navigateToCases: true,
   });
 }
@@ -860,7 +1005,122 @@ async function onSave() {
   display: flex;
   flex-direction: column;
   gap: 0;
+  max-height: calc(100vh - 260px);
   min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.generation-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.channel-editor-columns,
+.channel-editor-row {
+  display: grid;
+  align-items: center;
+  gap: 8px;
+}
+
+.channel-panel {
+  overflow: hidden;
+  border: 1px solid #e4e7ec;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.channel-editor-list {
+  max-height: min(320px, 38vh);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.channel-search {
+  width: 260px;
+}
+
+.channel-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  background: #f9fafb;
+}
+
+.channel-editor-header strong,
+.channel-editor-header span {
+  display: block;
+}
+
+.channel-editor-header span {
+  margin-top: 2px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.channel-editor-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.channel-add-btn {
+  color: #475467;
+  font-weight: 500;
+}
+
+.channel-add-btn:hover {
+  background: #f2f4f7;
+  color: var(--cf-brand, #b60f2d);
+}
+
+.channel-editor-columns,
+.channel-editor-row {
+  grid-template-columns: 42px minmax(150px, 1fr) minmax(120px, 1fr) minmax(120px, 1fr) 42px;
+}
+
+.channel-editor-columns {
+  padding: 7px 12px;
+  border-top: 1px solid #eaecf0;
+  border-bottom: 1px solid #eaecf0;
+  color: #667085;
+  font-size: 12px;
+}
+
+.channel-editor-row {
+  padding: 7px 12px;
+  border-bottom: 1px solid #f0f1f3;
+}
+
+.channel-editor-row:last-child {
+  border-bottom: 0;
+}
+
+.channel-editor-row.is-selected {
+  background: #fff6f7;
+}
+
+@media (max-width: 720px) {
+  .generation-profile-grid,
+  .channel-editor-row {
+    grid-template-columns: 1fr;
+  }
+
+  .channel-editor-columns {
+    display: none;
+  }
+
+  .channel-editor-header,
+  .channel-editor-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .channel-search {
+    width: 100%;
+  }
 }
 
 .generate-modal-body :deep(.scenario-prompt-picker--embedded) {

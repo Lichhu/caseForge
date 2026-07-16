@@ -86,6 +86,13 @@ export class ApiTestCaseEntity {
     scenarioName?: string;
     promptName?: string;
     generateVersion?: number;
+    generateJobId?: string;
+    versionCode?: string;
+    scenarioTaskId?: string;
+    scenarioKey?: string;
+    channelId?: string;
+    channelName?: string;
+    channelSnapshot?: { clientCd: string; serviceCd: string };
     debugEnvironmentId?: string;
     debugEnvironmentServiceId?: string;
     debugEncoding?: string;
