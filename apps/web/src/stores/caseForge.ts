@@ -109,6 +109,8 @@ interface State {
   projectListPageSize: number;
   projectListTotal: number;
   projectListKeyword: string;
+  projectListMonth: string;
+  projectListCaseCount: number;
   activeProject: CaseForgeProject | null;
   /** 案例运行摘要（不含案例树），编辑台按需 GET .../runs/:runId 拉整树 */
   runSummaries: GenerationRunSummary[];
@@ -160,6 +162,8 @@ export const useCaseForgeStore = defineStore("caseForge", {
     projectListPageSize: DEFAULT_PROJECT_PAGE_SIZE,
     projectListTotal: 0,
     projectListKeyword: "",
+    projectListMonth: "",
+    projectListCaseCount: 0,
     activeProject: null,
     runSummaries: [],
     structDocs: [],
@@ -254,11 +258,13 @@ export const useCaseForgeStore = defineStore("caseForge", {
       page?: number;
       size?: number;
       keyword?: string;
+      month?: string;
       resetPage?: boolean;
     }) {
       if (options?.keyword !== undefined) {
         this.projectListKeyword = options.keyword;
       }
+      if (options?.month !== undefined) this.projectListMonth = options.month;
       if (options?.size !== undefined) {
         this.projectListPageSize = normalizeProjectPageSize(options.size);
       }
@@ -274,10 +280,12 @@ export const useCaseForgeStore = defineStore("caseForge", {
           page,
           size: this.projectListPageSize,
           input: this.projectListKeyword,
+          month: this.projectListMonth,
         });
 
       let result = await fetchPage(this.projectListPage);
       this.projectListTotal = result.count;
+      this.projectListCaseCount = result.caseCount;
       const maxPage = Math.max(
         1,
         Math.ceil(result.count / this.projectListPageSize) || 1,
@@ -285,6 +293,7 @@ export const useCaseForgeStore = defineStore("caseForge", {
       if (this.projectListPage > maxPage) {
         this.projectListPage = maxPage;
         result = await fetchPage(maxPage);
+        this.projectListCaseCount = result.caseCount;
       }
       this.projects = result.rows;
     },

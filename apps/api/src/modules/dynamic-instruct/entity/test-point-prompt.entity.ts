@@ -18,7 +18,9 @@ import {
  * 测试要点提示词选择实体：记录某测试要点勾选的场景提示词
  */
 @Entity("case_test_point_prompt")
-@Index("uk_case_test_point_prompt", ["testPointId", "promptId"], { unique: true })
+@Index("uk_case_test_point_prompt", ["testPointId", "promptId"], {
+  unique: true,
+})
 @Index("idx_test_point_prompt_prompt", ["promptId"])
 export class TestPointPromptEntity {
   @PrimaryGeneratedColumn("uuid")

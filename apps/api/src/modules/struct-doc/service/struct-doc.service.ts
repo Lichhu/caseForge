@@ -519,13 +519,10 @@ export class StructDocService {
         } as never);
         const otherDocIds = savedDocs.slice(1).map((d) => d.id);
         if (otherDocIds.length) {
-          await this.structDocRepo.update(
-            { id: In(otherDocIds) },
-            {
-              summaryStructDoc: null,
-              ...auditFieldsForUpdate(),
-            } as never,
-          );
+          await this.structDocRepo.update({ id: In(otherDocIds) }, {
+            summaryStructDoc: null,
+            ...auditFieldsForUpdate(),
+          } as never);
         }
         await touchProjectUpdatedAt(this.projectRepo, projectId);
         return summary;

@@ -247,7 +247,9 @@ export class CaseGenerateQueueService implements OnModuleInit, OnModuleDestroy {
     });
     const queuedJobs = activeJobs.filter((job) => job.status === "queued");
     const globalQueuedCount = queuedJobs.length;
-    const globalRunningCount = activeJobs.filter((job) => job.status === "running").length;
+    const globalRunningCount = activeJobs.filter(
+      (job) => job.status === "running",
+    ).length;
     const activeUsers = countActiveUsers(activeJobs);
     const fairQueueIndexByJobId = this.buildFairQueueIndex(activeJobs);
 
@@ -304,7 +306,9 @@ export class CaseGenerateQueueService implements OnModuleInit, OnModuleDestroy {
     }
 
     items.sort(
-      (a, b) => a.queuePosition - b.queuePosition || a.testPointId.localeCompare(b.testPointId),
+      (a, b) =>
+        a.queuePosition - b.queuePosition ||
+        a.testPointId.localeCompare(b.testPointId),
     );
 
     return {
@@ -328,7 +332,11 @@ export class CaseGenerateQueueService implements OnModuleInit, OnModuleDestroy {
     const order: CaseGenerateJobEntity[] = [];
 
     while (remainingQueued.length) {
-      const picked = pickFairQueuedJob(remainingQueued, runningByUser, perUserMax);
+      const picked = pickFairQueuedJob(
+        remainingQueued,
+        runningByUser,
+        perUserMax,
+      );
       if (!picked) {
         order.push(...remainingQueued);
         break;
@@ -376,8 +384,7 @@ export class CaseGenerateQueueService implements OnModuleInit, OnModuleDestroy {
     },
   ): CaseGenerateQueueItemStatus {
     const now = Date.now();
-    const queuePosition =
-      context.queueIndex >= 0 ? context.queueIndex + 1 : 0;
+    const queuePosition = context.queueIndex >= 0 ? context.queueIndex + 1 : 0;
     const userQueuedAhead =
       job.status === "queued"
         ? countUserQueuedAhead(job, context.queuedJobs)

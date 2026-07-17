@@ -51,6 +51,7 @@ http.interceptors.response.use(
 
 export interface ProjectListItem extends CaseForgeProject {
   runCount: number;
+  caseCount: number;
 }
 
 export interface ProjectListQuery {
@@ -58,11 +59,13 @@ export interface ProjectListQuery {
   page?: number;
   size?: number;
   input?: string;
+  month?: string;
 }
 
 export interface ProjectListResult {
   rows: ProjectListItem[];
   count: number;
+  caseCount: number;
 }
 
 function mapProjectListRow(raw: {
@@ -73,6 +76,7 @@ function mapProjectListRow(raw: {
   createdAt: string | Date;
   updatedAt: string | Date;
   generationCount?: number;
+  caseCount?: number;
 }): ProjectListItem {
   return {
     id: raw.id,
@@ -88,6 +92,7 @@ function mapProjectListRow(raw: {
         ? raw.updatedAt
         : raw.updatedAt.toISOString(),
     runCount: raw.generationCount ?? 0,
+    caseCount: raw.caseCount ?? 0,
   };
 }
 
@@ -259,19 +264,23 @@ export async function listProjects(
       createdAt: string | Date;
       updatedAt: string | Date;
       generationCount?: number;
+      caseCount?: number;
     }>;
     count: number;
+    caseCount: number;
   }>("/project-manage/projects", {
     params: {
       platform,
       page,
       size,
       ...(input ? { input } : {}),
+      ...(query.month ? { month: query.month } : {}),
     },
   });
   return {
     rows: data.rows.map(mapProjectListRow),
     count: data.count,
+    caseCount: data.caseCount,
   };
 }
 

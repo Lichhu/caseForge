@@ -390,6 +390,40 @@ body.cf-immersive-active .platform-topbar {
   font-size: 13px;
 }
 
+.project-month-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-month-row .ant-picker {
+  min-width: 0;
+  flex: 1;
+}
+
+.project-month-total {
+  flex-shrink: 0;
+  color: #667085;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.project-month-popup {
+  width: 243px;
+  min-width: 243px !important;
+}
+
+.project-month-popup .ant-picker-panel,
+.project-month-popup .ant-picker-month-panel,
+.project-month-popup .ant-picker-body,
+.project-month-popup .ant-picker-content {
+  width: 100%;
+}
+
+.project-month-popup .ant-picker-content {
+  table-layout: fixed;
+}
+
 .project-search input::placeholder {
   color: #98a2b3;
 }

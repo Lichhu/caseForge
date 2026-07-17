@@ -99,13 +99,21 @@ export class ApiExecutionService {
     }
     const runtimeByCase = new Map<string, RuntimeEnvironment>();
     for (const testCase of cases) {
-      const environmentId = testCase.metadata?.debugEnvironmentId ?? input.environmentId;
-      if (!environmentId) throw new BadRequestException(`案例「${testCase.title}」未指定执行环境`);
-      runtimeByCase.set(testCase.id, (await this.environmentService.getRuntimeEnvironment(
-        input.projectId,
-        environmentId,
-        testCase.metadata?.debugEnvironmentServiceId ?? input.environmentServiceId,
-      )) as RuntimeEnvironment);
+      const environmentId =
+        testCase.metadata?.debugEnvironmentId ?? input.environmentId;
+      if (!environmentId)
+        throw new BadRequestException(
+          `案例「${testCase.title}」未指定执行环境`,
+        );
+      runtimeByCase.set(
+        testCase.id,
+        (await this.environmentService.getRuntimeEnvironment(
+          input.projectId,
+          environmentId,
+          testCase.metadata?.debugEnvironmentServiceId ??
+            input.environmentServiceId,
+        )) as RuntimeEnvironment,
+      );
     }
     const env = runtimeByCase.get(cases[0].id)!;
 
@@ -306,7 +314,11 @@ export class ApiExecutionService {
     const baseUrl = this.resolveHttpBaseUrl(input.env, service);
     const path = substituteVariablesPath(input.request.path, input.vars);
     const url = new URL(path.replace(/^\//, ""), `${baseUrl}/`);
-    applyEncodedQuery(url, input.request.query, input.encoding ?? input.request.encoding);
+    applyEncodedQuery(
+      url,
+      input.request.query,
+      input.encoding ?? input.request.encoding,
+    );
     const headers = applyTransportEncoding(
       {
         ...input.env.headers,
@@ -331,11 +343,18 @@ export class ApiExecutionService {
     const started = Date.now();
     try {
       let response: Response | undefined;
-      for (let attempt = 0; attempt < Math.max(1, input.request.repeatCount ?? 1); attempt += 1) {
+      for (
+        let attempt = 0;
+        attempt < Math.max(1, input.request.repeatCount ?? 1);
+        attempt += 1
+      ) {
         response = await fetch(url.toString(), {
           method: input.request.method,
           headers,
-          body: buildEncodedHttpBody(input.request, input.encoding ?? input.request.encoding),
+          body: buildEncodedHttpBody(
+            input.request,
+            input.encoding ?? input.request.encoding,
+          ),
           signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
         });
       }
@@ -343,7 +362,11 @@ export class ApiExecutionService {
       const durationMs = Date.now() - started;
       const responseBuffer = Buffer.from(await response.arrayBuffer());
       const responseHeaders = Object.fromEntries(response.headers.entries());
-      const text = decodeHttpResponse(responseBuffer, responseHeaders, input.encoding ?? input.request.encoding);
+      const text = decodeHttpResponse(
+        responseBuffer,
+        responseHeaders,
+        input.encoding ?? input.request.encoding,
+      );
       let body: unknown = text;
       try {
         body = text ? JSON.parse(text) : null;
@@ -435,7 +458,11 @@ export class ApiExecutionService {
     const started = Date.now();
     try {
       let responseText = "";
-      for (let attempt = 0; attempt < Math.max(1, input.request.repeatCount ?? 1); attempt += 1) {
+      for (
+        let attempt = 0;
+        attempt < Math.max(1, input.request.repeatCount ?? 1);
+        attempt += 1
+      ) {
         responseText = await sendTcpPayload(
           target.host,
           target.port,
@@ -549,7 +576,11 @@ export class ApiExecutionService {
     const baseUrl = this.resolveHttpBaseUrl(input.env, service);
     const path = substituteVariablesPath(input.request.path, input.vars);
     const url = new URL(path.replace(/^\//, ""), `${baseUrl}/`);
-    applyEncodedQuery(url, input.request.query, input.encoding ?? input.request.encoding);
+    applyEncodedQuery(
+      url,
+      input.request.query,
+      input.encoding ?? input.request.encoding,
+    );
     const headers = applyTransportEncoding(
       {
         ...input.env.headers,
@@ -562,11 +593,18 @@ export class ApiExecutionService {
     const started = Date.now();
     try {
       let response: Response | undefined;
-      for (let attempt = 0; attempt < Math.max(1, input.request.repeatCount ?? 1); attempt += 1) {
+      for (
+        let attempt = 0;
+        attempt < Math.max(1, input.request.repeatCount ?? 1);
+        attempt += 1
+      ) {
         response = await fetch(url.toString(), {
           method: input.request.method,
           headers,
-          body: buildEncodedHttpBody(input.request, input.encoding ?? input.request.encoding),
+          body: buildEncodedHttpBody(
+            input.request,
+            input.encoding ?? input.request.encoding,
+          ),
           signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
         });
       }
@@ -574,7 +612,11 @@ export class ApiExecutionService {
       const durationMs = Date.now() - started;
       const responseBuffer = Buffer.from(await response.arrayBuffer());
       const responseHeaders = Object.fromEntries(response.headers.entries());
-      const text = decodeHttpResponse(responseBuffer, responseHeaders, input.encoding ?? input.request.encoding);
+      const text = decodeHttpResponse(
+        responseBuffer,
+        responseHeaders,
+        input.encoding ?? input.request.encoding,
+      );
       let body: unknown = text;
       try {
         body = text ? JSON.parse(text) : null;
@@ -635,7 +677,11 @@ export class ApiExecutionService {
     const started = Date.now();
     try {
       let responseText = "";
-      for (let attempt = 0; attempt < Math.max(1, input.request.repeatCount ?? 1); attempt += 1) {
+      for (
+        let attempt = 0;
+        attempt < Math.max(1, input.request.repeatCount ?? 1);
+        attempt += 1
+      ) {
         responseText = await sendTcpPayload(
           target.host,
           target.port,

@@ -32,7 +32,9 @@ export class AuditSubscriber implements EntitySubscriberInterface {
   }
 
   private hasColumn(
-    event: InsertEvent<Record<string, unknown>> | UpdateEvent<Record<string, unknown>>,
+    event:
+      | InsertEvent<Record<string, unknown>>
+      | UpdateEvent<Record<string, unknown>>,
     propertyName: string,
   ) {
     return Boolean(event.metadata.findColumnWithPropertyName(propertyName));

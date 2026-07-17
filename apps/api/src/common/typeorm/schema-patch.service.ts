@@ -319,5 +319,4 @@ export class SchemaPatchService implements OnModuleInit {
       }
     }
   }
-
 }

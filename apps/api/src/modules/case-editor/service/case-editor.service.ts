@@ -36,7 +36,7 @@ import { CaseEditorEntity } from "@case-editor/entity/case-editor.entity";
 import { CaseNodeMetadataEntity } from "@case-editor/entity/case-node-metadata.entity";
 import { CaseTreeEntity } from "@case-editor/entity/case-tree.entity";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
-import { DataSource, EntityManager, In, Repository } from "typeorm";
+import { DataSource, EntityManager, In, Not, Repository } from "typeorm";
 import { scopedWhere } from "@common/audit/user-scope";
 import { touchProjectUpdatedAt } from "@common/project/touch-project.util";
 import {
@@ -102,6 +102,10 @@ export class CaseEditorService {
         manager,
         flattenCaseTreeForPersist(input.tree, context),
       );
+      await manager.delete(CaseEditorEntity, {
+        projectId: input.projectId,
+        id: Not(editorId),
+      });
       return editorEntity;
     });
     return this.toGenerationRun(editor, input.tree);

@@ -15,7 +15,10 @@ export class GenerateCasesDto {
   model?: string;
 
   /** 要生成案例的测试要点 ID；单条或多条 */
-  @ApiPropertyOptional({ type: [String], description: "指定生成的测试要点 ID 列表" })
+  @ApiPropertyOptional({
+    type: [String],
+    description: "指定生成的测试要点 ID 列表",
+  })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })

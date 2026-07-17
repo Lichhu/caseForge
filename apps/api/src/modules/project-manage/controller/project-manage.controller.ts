@@ -90,17 +90,25 @@ export class ProjectManageController {
   @ApiQuery({ name: "page", type: Number, required: false, example: 1 })
   @ApiQuery({ name: "size", type: Number, required: false, example: 15 })
   @ApiQuery({ name: "platform", enum: PROJECT_PLATFORMS, required: false })
+  @ApiQuery({
+    name: "month",
+    type: String,
+    required: false,
+    example: "2026-07",
+  })
   async listProjects(
     @Query("page") page: number = 1,
     @Query("size") size: number = 15,
     @Query("input") input?: string,
     @Query("platform") platform: ProjectPlatform = "case-forge",
+    @Query("month") month?: string,
   ) {
     return await this.pmService.listProjects(
       Number(page) || 1,
       Number(size) || 15,
       input,
       platform,
+      month,
     );
   }
 

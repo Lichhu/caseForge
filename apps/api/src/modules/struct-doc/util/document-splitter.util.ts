@@ -65,7 +65,11 @@ function splitSectionByParagraphs(section: Section): Section[] {
 
   for (const para of paragraphs) {
     const candidate = [...buffer, para].join("\n\n");
-    if (countChineseChars(section.heading + "\n" + candidate) > MAX_REQUIREMENT_DOC_CHINESE_CHARS && buffer.length > 0) {
+    if (
+      countChineseChars(section.heading + "\n" + candidate) >
+        MAX_REQUIREMENT_DOC_CHINESE_CHARS &&
+      buffer.length > 0
+    ) {
       result.push({
         heading: section.heading,
         body: buffer.join("\n\n"),
@@ -155,14 +159,21 @@ function extractTitleFromBody(body: string): string {
   return firstLine.slice(0, 30);
 }
 
-function splitByLines(text: string, heading: string): { title: string; content: string }[] {
+function splitByLines(
+  text: string,
+  heading: string,
+): { title: string; content: string }[] {
   const lines = text.split("\n");
   const result: { title: string; content: string }[] = [];
   let buffer: string[] = [];
 
   for (const line of lines) {
     const candidate = [...buffer, line].join("\n");
-    if (countChineseChars(heading + "\n" + candidate) > MAX_REQUIREMENT_DOC_CHINESE_CHARS && buffer.length > 0) {
+    if (
+      countChineseChars(heading + "\n" + candidate) >
+        MAX_REQUIREMENT_DOC_CHINESE_CHARS &&
+      buffer.length > 0
+    ) {
       result.push({
         title: heading || extractTitleFromBody(buffer.join("\n")),
         content: (heading + "\n" + buffer.join("\n")).trim(),
@@ -183,7 +194,9 @@ function splitByLines(text: string, heading: string): { title: string; content: 
   return result;
 }
 
-function mergeSmallChunks(chunks: { title: string; content: string }[]): { title: string; content: string }[] {
+function mergeSmallChunks(
+  chunks: { title: string; content: string }[],
+): { title: string; content: string }[] {
   const result: { title: string; content: string }[] = [];
   let current: { title: string; content: string } | null = null;
 
@@ -193,7 +206,9 @@ function mergeSmallChunks(chunks: { title: string; content: string }[]): { title
       continue;
     }
 
-    const combinedChars = countChineseChars(current.content + "\n\n" + chunk.content);
+    const combinedChars = countChineseChars(
+      current.content + "\n\n" + chunk.content,
+    );
     if (combinedChars <= MAX_REQUIREMENT_DOC_CHINESE_CHARS) {
       current = {
         title: current.title,

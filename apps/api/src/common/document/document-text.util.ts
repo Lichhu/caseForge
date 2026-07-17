@@ -12,7 +12,8 @@ const wordExtractor = new WordExtractor();
 
 function isZipDocx(buffer: Buffer) {
   return (
-    buffer.length >= 4 && buffer.subarray(0, 4).toString("utf8") === "PK\x03\x04"
+    buffer.length >= 4 &&
+    buffer.subarray(0, 4).toString("utf8") === "PK\x03\x04"
   );
 }
 
@@ -54,7 +55,10 @@ function detectDocumentFormat(
   if (extension === ".pdf" || normalizedType === "application/pdf") {
     return "pdf";
   }
-  if (buffer.length >= 5 && buffer.subarray(0, 5).toString("utf8") === "%PDF-") {
+  if (
+    buffer.length >= 5 &&
+    buffer.subarray(0, 5).toString("utf8") === "%PDF-"
+  ) {
     return "pdf";
   }
   if (
@@ -112,7 +116,8 @@ export function assertReadableText(text: string, label: string) {
     throw new Error(`${label}内容为空`);
   }
 
-  const controlChars = trimmed.match(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g)?.length ?? 0;
+  const controlChars =
+    trimmed.match(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g)?.length ?? 0;
   if (controlChars > Math.max(8, trimmed.length * 0.02)) {
     throw new Error(
       `${label}解析失败，请确认文件为有效的 doc、docx、pdf 或文本格式`,

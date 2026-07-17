@@ -10,7 +10,9 @@ function getApiRoot() {
 }
 
 /** 按 NODE_ENV 解析候选 env 文件路径（优先级从高到低） */
-export function resolveEnvFilePaths(nodeEnv = process.env.NODE_ENV ?? "development") {
+export function resolveEnvFilePaths(
+  nodeEnv = process.env.NODE_ENV ?? "development",
+) {
   const envDir = resolve(getApiRoot(), "env");
   return [
     resolve(envDir, `.${nodeEnv}.env`),

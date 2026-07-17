@@ -24,7 +24,8 @@ export const TEST_POINT_INSTRUCT_STATUS = [
 ] as const;
 
 /** 测试要点动态指令状态类型 */
-export type TestPointInstructStatus = (typeof TEST_POINT_INSTRUCT_STATUS)[number];
+export type TestPointInstructStatus =
+  (typeof TEST_POINT_INSTRUCT_STATUS)[number];
 
 /**
  * 测试要点指令实体：与测试要点一对一，存储编辑状态与自然语言约束

@@ -83,8 +83,7 @@ export async function buildTestPlatformCaseExcel(
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(resolveTemplatePath());
-  const sheet =
-    workbook.getWorksheet("测试案例") ?? workbook.worksheets[0];
+  const sheet = workbook.getWorksheet("测试案例") ?? workbook.worksheets[0];
   if (!sheet) {
     throw new Error("测试案例导出模板缺少工作表");
   }

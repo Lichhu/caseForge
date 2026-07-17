@@ -1,12 +1,12 @@
 /**
- * °¸ÀýÉú³ÉÈ¡Ïû²Û£¨½ø³ÌÄÚÄÚ´æ£¬²»³Ö¾Ã»¯£©
+ * ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È¡ï¿½ï¿½ï¿½Û£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú´æ£¬ï¿½ï¿½ï¿½Ö¾Ã»ï¿½ï¿½ï¿½
  *
- * ½öÓÃÓÚÓÃ»§µã»÷¡¸Í£Ö¹¡¹£º
- * - registerCaseGenerate£ºÉú³É¿ªÊ¼Ê±¼ÇÂ¼¡¸È¡ÏûºóÓ¦»ØÍËµ½Ê²Ã´×´Ì¬¡¹
- * - cancelCaseGenerate£º±ê¼Ç cancelled£¬generateCasesInternal ÄÚ shouldAbort »á¸ÐÖª
- * - revert£ºcancelGenerateCases °Ñ DB ×´Ì¬Ð´»Ø revertStatus
+ * ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ã»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í£Ö¹ï¿½ï¿½ï¿½ï¿½
+ * - registerCaseGenerateï¿½ï¿½ï¿½ï¿½ï¿½É¿ï¿½Ê¼Ê±ï¿½ï¿½Â¼ï¿½ï¿½È¡ï¿½ï¿½ï¿½ï¿½Ó¦ï¿½ï¿½ï¿½Ëµï¿½Ê²Ã´×´Ì¬ï¿½ï¿½
+ * - cancelCaseGenerateï¿½ï¿½ï¿½ï¿½ï¿½ cancelledï¿½ï¿½generateCasesInternal ï¿½ï¿½ shouldAbort ï¿½ï¿½ï¿½Öª
+ * - revertï¿½ï¿½cancelGenerateCases ï¿½ï¿½ DB ×´Ì¬Ð´ï¿½ï¿½ revertStatus
  *
- * Ë¢ÐÂÒ³Ãæ¡¢¹Øä¯ÀÀÆ÷²»»áÐ´Õâ¸ö registry£»·þÎñÖØÆôºó registry Çå¿Õ¡£
+ * Ë¢ï¿½ï¿½Ò³ï¿½æ¡¢ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð´ï¿½ï¿½ï¿½ registryï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ registry ï¿½ï¿½Õ¡ï¿½
  */
 
 import type { TestPointInstructEntity } from "@dynamic-instruct/entity/test-point-instruct.entity";
@@ -15,7 +15,7 @@ type InstructStatus = TestPointInstructEntity["status"];
 
 interface GenerateSlot {
   cancelled: boolean;
-  /** È¡ÏûÊ±»Ö¸´µ½µÄ¶¯Ì¬Ö¸Áî×´Ì¬£¨ÒÑ±à¼­ »ò ÔÙ±à¼­£© */
+  /** È¡ï¿½ï¿½Ê±ï¿½Ö¸ï¿½ï¿½ï¿½ï¿½Ä¶ï¿½Ì¬Ö¸ï¿½ï¿½×´Ì¬ï¿½ï¿½ï¿½Ñ±à¼­ ï¿½ï¿½ ï¿½Ù±à¼­ï¿½ï¿½ */
   revertStatus: InstructStatus;
 }
 
@@ -25,7 +25,7 @@ function slotKey(projectId: string, testPointId: string) {
   return `${projectId}:${testPointId}`;
 }
 
-/** Éú³ÉÈÎÎñ¿ªÊ¼Ê±µÇ¼Ç£»revertStatus È¡×Ôµ±Ç° DB ×´Ì¬ */
+/** ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¼Ê±ï¿½Ç¼Ç£ï¿½revertStatus È¡ï¿½Ôµï¿½Ç° DB ×´Ì¬ */
 export function registerCaseGenerate(
   projectId: string,
   testPointId: string,
@@ -37,7 +37,7 @@ export function registerCaseGenerate(
   });
 }
 
-/** ÓÃ»§µã¡¸Í£Ö¹¡¹Ê±µ÷ÓÃ£¬²»Ö±½Ó¸Ä DB£¨ÓÉ cancelGenerateCases Í³Ò» revert£© */
+/** ï¿½Ã»ï¿½ï¿½ã¡¸Í£Ö¹ï¿½ï¿½Ê±ï¿½ï¿½ï¿½Ã£ï¿½ï¿½ï¿½Ö±ï¿½Ó¸ï¿½ DBï¿½ï¿½ï¿½ï¿½ cancelGenerateCases Í³Ò» revertï¿½ï¿½ */
 export function cancelCaseGenerate(projectId: string, testPointId: string) {
   const slot = slots.get(slotKey(projectId, testPointId));
   if (slot) {
@@ -46,7 +46,10 @@ export function cancelCaseGenerate(projectId: string, testPointId: string) {
   return slot;
 }
 
-export function isCaseGenerateCancelled(projectId: string, testPointId: string) {
+export function isCaseGenerateCancelled(
+  projectId: string,
+  testPointId: string,
+) {
   return slots.get(slotKey(projectId, testPointId))?.cancelled ?? false;
 }
 
@@ -57,7 +60,7 @@ export function getCaseGenerateRevertStatus(
   return slots.get(slotKey(projectId, testPointId))?.revertStatus;
 }
 
-/** µ¥ÌõÉú³É½áÊø£¨³É¹¦/Ê§°Ü/È¡Ïû£©ºóÇåÀíÄÚ´æ²Û */
+/** ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½É½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½É¹ï¿½/Ê§ï¿½ï¿½/È¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú´ï¿½ï¿½ */
 export function clearCaseGenerateSlot(projectId: string, testPointId: string) {
   slots.delete(slotKey(projectId, testPointId));
 }

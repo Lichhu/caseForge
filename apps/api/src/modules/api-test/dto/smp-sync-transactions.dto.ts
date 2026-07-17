@@ -52,7 +52,10 @@ class SmpTransactionCandidateDto {
 }
 
 export class SmpSyncTransactionsDto {
-  @ApiProperty({ description: "要同步的交易码列表", type: () => [SmpTransactionCandidateDto] })
+  @ApiProperty({
+    description: "要同步的交易码列表",
+    type: () => [SmpTransactionCandidateDto],
+  })
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => SmpTransactionCandidateDto)

@@ -127,7 +127,13 @@ async function ensureApiCaseGenerateJobColumns(runner: Queryable) {
       );
     }
   }
-  if (!(await indexExists(runner, "api_case_generate_job", "uk_api_case_generate_job_version"))) {
+  if (
+    !(await indexExists(
+      runner,
+      "api_case_generate_job",
+      "uk_api_case_generate_job_version",
+    ))
+  ) {
     await runner.query(`
       CREATE UNIQUE INDEX uk_api_case_generate_job_version
       ON api_case_generate_job (projectId, transactionId, versionCode)

@@ -40,7 +40,10 @@ export class CaseTreeEntity {
   @Column()
   projectId: string;
 
-  @ManyToOne(() => CaseProjectEntity, { onDelete: "CASCADE", onUpdate: "CASCADE" })
+  @ManyToOne(() => CaseProjectEntity, {
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  })
   @JoinColumn({ name: "projectId" })
   project: CaseProjectEntity;
 

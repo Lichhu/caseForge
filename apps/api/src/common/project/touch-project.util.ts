@@ -7,7 +7,9 @@ import { scopedWhere } from "@common/audit/user-scope";
 export async function touchProjectUpdatedAt(
   projectRepo: Repository<CaseProjectEntity>,
   projectId: string,
-  extra?: Partial<Pick<CaseProjectEntity, "title" | "requirementNo" | "description">>,
+  extra?: Partial<
+    Pick<CaseProjectEntity, "title" | "requirementNo" | "description">
+  >,
 ) {
   await projectRepo.update(scopedWhere({ id: projectId }), {
     ...extra,

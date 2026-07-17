@@ -67,7 +67,10 @@ function resolveFontCandidate(): FontCandidate | null {
   if (envPath && existsSync(envPath)) {
     return { path: envPath };
   }
-  for (const candidate of [...bundledFontCandidates(), ...systemFontCandidates()]) {
+  for (const candidate of [
+    ...bundledFontCandidates(),
+    ...systemFontCandidates(),
+  ]) {
     if (existsSync(candidate.path)) {
       return candidate;
     }

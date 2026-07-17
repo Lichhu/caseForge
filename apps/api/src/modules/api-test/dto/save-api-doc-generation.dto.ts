@@ -11,10 +11,10 @@ import { Type } from "class-transformer";
 import { API_SERVICE_PROPERTIES } from "@case-forge/shared";
 
 class ApiDocChannelDto {
-  @IsString() @IsNotEmpty() id!: string;
-  @IsString() @IsNotEmpty() name!: string;
-  @IsString() @IsNotEmpty() clientCd!: string;
-  @IsString() @IsNotEmpty() serviceCd!: string;
+  @IsString() @IsNotEmpty({ message: "渠道标识不能为空" }) id!: string;
+  @IsString() @IsNotEmpty({ message: "渠道名称不能为空" }) name!: string;
+  @IsString() @IsNotEmpty({ message: "clientCd 不能为空" }) clientCd!: string;
+  @IsString() @IsNotEmpty({ message: "serviceCd 不能为空" }) serviceCd!: string;
 }
 
 export class SaveApiDocGenerationDto {

@@ -95,7 +95,9 @@ export function buildCaseTreeDiffPlan(
   const incomingMetadataMap = new Map(
     incoming.metadataRows.map((row) => [row.caseTreeId, row] as const),
   );
-  const existingMap = new Map(existingNodes.map((node) => [node.id, node] as const));
+  const existingMap = new Map(
+    existingNodes.map((node) => [node.id, node] as const),
+  );
 
   const plan: CaseTreeDiffPlan = {
     treeInserts: [],
@@ -153,12 +155,17 @@ export function buildCaseTreeDiffPlan(
   return plan;
 }
 
-export function isFullTreeReplace(plan: CaseTreeDiffPlan, existingCount: number) {
+export function isFullTreeReplace(
+  plan: CaseTreeDiffPlan,
+  existingCount: number,
+) {
   if (!existingCount) {
     return true;
   }
   const changed =
-    plan.treeDeleteIds.length + plan.treeInserts.length + plan.treeUpdates.length;
+    plan.treeDeleteIds.length +
+    plan.treeInserts.length +
+    plan.treeUpdates.length;
   return changed >= existingCount * 0.75;
 }
 
@@ -190,10 +197,7 @@ function treeNodeChanged(old: CaseTreeEntity, incoming: FlatTreeNodeRow) {
   );
 }
 
-function metadataEqual(
-  old: CaseNodeMetadataEntity,
-  incoming: FlatMetadataRow,
-) {
+function metadataEqual(old: CaseNodeMetadataEntity, incoming: FlatMetadataRow) {
   return (
     (old.caseNature ?? undefined) === (incoming.caseNature ?? undefined) &&
     (old.priority ?? undefined) === (incoming.priority ?? undefined) &&

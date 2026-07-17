@@ -250,9 +250,7 @@ export class ApiExecutionSetService {
       caseIds,
     );
     if (accessibleIdSet.size !== caseIds.length) {
-      throw new BadRequestException(
-        "部分案例不存在、已删除或不属于当前交易码",
-      );
+      throw new BadRequestException("部分案例不存在、已删除或不属于当前交易码");
     }
   }
 

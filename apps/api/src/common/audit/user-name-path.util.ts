@@ -4,7 +4,9 @@ import { API_ROUTE_MODULES } from "./api-route-modules";
  * 若 URL 为 /api/v1/:userName/:module/...，剥离 userName 并重写 req.url，供 Nest 路由匹配。
  * @returns 解析到的 userName；非 userName 前缀路径时返回 undefined
  */
-export function extractAndRewriteUserNamePath(req: { url?: string }): string | undefined {
+export function extractAndRewriteUserNamePath(req: {
+  url?: string;
+}): string | undefined {
   const [pathname, query = ""] = splitUrl(req.url ?? "");
   const match = pathname.match(/^(\/api)?(\/v\d+)\/([^/]+)(\/.*)?$/);
   if (!match) {

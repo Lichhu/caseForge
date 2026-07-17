@@ -33,87 +33,86 @@ import {
 ])
 @Index(["structDocId", "testPoint"])
 export class TestPointEntity {
-    @PrimaryGeneratedColumn("uuid")
-    id: string;
+  @PrimaryGeneratedColumn("uuid")
+  id: string;
 
-    // 项目ID
-    @Column()
-    projectId: string;
+  // 项目ID
+  @Column()
+  projectId: string;
 
-    // 结构化文档ID
-    @Column()
-    structDocId: string;
+  // 结构化文档ID
+  @Column()
+  structDocId: string;
 
-    @ManyToOne(() => StructDocEntity, (structDoc) => structDoc.testPoints, {
-      onDelete: "CASCADE",
-      onUpdate: "CASCADE",
-    })
-    @JoinColumn({ name: "structDocId" })
-    structDoc: StructDocEntity;
+  @ManyToOne(() => StructDocEntity, (structDoc) => structDoc.testPoints, {
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  })
+  @JoinColumn({ name: "structDocId" })
+  structDoc: StructDocEntity;
 
-    // 系统
-    @Column()
-    system: string;
+  // 系统
+  @Column()
+  system: string;
 
-    // 系统描述
-    @Column()
-    systemDesc: string;
-    
-    // 功能模块
-    @Column()
-    featureModule: string;
+  // 系统描述
+  @Column()
+  systemDesc: string;
 
-    // 功能模块描述
-    @Column()
-    featureDesc: string;
+  // 功能模块
+  @Column()
+  featureModule: string;
 
-    // 测试要点
-    @Column()
-    testPoint: string;
+  // 功能模块描述
+  @Column()
+  featureDesc: string;
 
-    // 测试要点描述
-    @Column()
-    testPointDesc: string;
+  // 测试要点
+  @Column()
+  testPoint: string;
 
-    @OneToOne(
-      () =>
-        require("@dynamic-instruct/entity/test-point-instruct.entity")
-          .TestPointInstructEntity,
-      (instruct: TestPointInstructEntity) => instruct.testPoint,
-    )
-    instruct?: TestPointInstructEntity;
-  
-    @OneToMany(
-      () =>
-        require("@dynamic-instruct/entity/test-point-prompt.entity")
-          .TestPointPromptEntity,
-      (selection: TestPointPromptEntity) => selection.testPoint,
-    )
-    promptSelections: TestPointPromptEntity[];
-  
+  // 测试要点描述
+  @Column()
+  testPointDesc: string;
 
-    // 新增：一对多关系，指向中间表
-    @OneToOne(
-      () =>
-        require("@dynamic-instruct/entity/dynamic-instruct").DynamicInstructEntity,
-      (selection: DynamicInstructEntity) => selection.testPoint,
-      {
-        cascade: true,
-        eager: false
-      }
-    )
-    selections: DynamicInstructEntity;
+  @OneToOne(
+    () =>
+      require("@dynamic-instruct/entity/test-point-instruct.entity")
+        .TestPointInstructEntity,
+    (instruct: TestPointInstructEntity) => instruct.testPoint,
+  )
+  instruct?: TestPointInstructEntity;
 
+  @OneToMany(
+    () =>
+      require("@dynamic-instruct/entity/test-point-prompt.entity")
+        .TestPointPromptEntity,
+    (selection: TestPointPromptEntity) => selection.testPoint,
+  )
+  promptSelections: TestPointPromptEntity[];
 
-    @Column({ nullable: true, default: "system" })
-    createdBy: string;
-    
-    @Column({ nullable: true, default: "system" })
-    modifiedBy: string;
+  // 新增：一对多关系，指向中间表
+  @OneToOne(
+    () =>
+      require("@dynamic-instruct/entity/dynamic-instruct")
+        .DynamicInstructEntity,
+    (selection: DynamicInstructEntity) => selection.testPoint,
+    {
+      cascade: true,
+      eager: false,
+    },
+  )
+  selections: DynamicInstructEntity;
 
-    @CreateDateColumn()
-    createdAt: Date;
-  
-    @UpdateDateColumn()
-    updatedAt: Date;
+  @Column({ nullable: true, default: "system" })
+  createdBy: string;
+
+  @Column({ nullable: true, default: "system" })
+  modifiedBy: string;
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
 }

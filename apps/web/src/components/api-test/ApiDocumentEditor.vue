@@ -659,6 +659,10 @@ watch(
   generationProfile,
   () => {
     if (syncingFromStore.value || !projectId.value || !transactionId.value) return;
+    if (generationProfileSaveTimer.value) {
+      window.clearTimeout(generationProfileSaveTimer.value);
+      generationProfileSaveTimer.value = null;
+    }
     if (
       !generationProfile.exampleMessage.trim() ||
       generationProfile.channels.some((channel) => !isChannelComplete(channel))
@@ -667,9 +671,6 @@ watch(
       JSON.stringify(generationProfile) ===
       JSON.stringify(apiStore.apiDoc?.generationProfile)
     ) return;
-    if (generationProfileSaveTimer.value) {
-      window.clearTimeout(generationProfileSaveTimer.value);
-    }
     const saveProjectId = projectId.value;
     const saveTransactionId = transactionId.value;
     generationProfileSaveTimer.value = window.setTimeout(() => {
@@ -684,9 +685,9 @@ watch(
           ...generationProfile,
           channels: generationProfile.channels.map((channel) => ({ ...channel })),
         })
-        .catch(() => {
+        .catch((error) => {
           if (saveProjectId === projectId.value && saveTransactionId === transactionId.value) {
-            message.error('渠道数据自动保存失败');
+            message.error((error as Error)?.message || '渠道数据自动保存失败');
           }
         });
     }, 1200);

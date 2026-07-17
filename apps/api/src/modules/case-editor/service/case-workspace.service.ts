@@ -54,10 +54,7 @@ import { TestPointEntity } from "@struct-doc/entity/test-point.entity";
 import { stripDocumentExtension } from "@struct-doc/util/struct-doc.parser";
 import { In, Repository } from "typeorm";
 import { auditFieldsForUpdate } from "@common/audit/request-context";
-import {
-  findOwnedProject,
-  scopedWhere,
-} from "@common/audit/user-scope";
+import { findOwnedProject, scopedWhere } from "@common/audit/user-scope";
 import {
   cancelCaseGenerate,
   clearCaseGenerateSlot,

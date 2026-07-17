@@ -91,10 +91,7 @@ function formatTestPointBlock(point: TestPointGenerationInput, index: number) {
   appendLine(lines, "测试要点详情", point.testPointDesc);
 
   const constraintBlock = buildPromotePromptsText(point);
-  if (
-    constraintBlock &&
-    !constraintBlock.startsWith("（本条测试要点未配置")
-  ) {
+  if (constraintBlock && !constraintBlock.startsWith("（本条测试要点未配置")) {
     lines.push("", constraintBlock);
   }
 

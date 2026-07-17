@@ -2,14 +2,20 @@
  * @file 项目管理业务服务：项目的 CRUD 及级联删除
  */
 import type { ProjectPlatform } from "@case-forge/shared";
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 import { CreateProjectDto } from "@project-manage/dto/create-project.dto";
 import { UpdateProjectDto } from "@project-manage/dto/update-project.dto";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { CaseEditorEntity } from "@case-editor/entity/case-editor.entity";
+import { CaseTreeEntity } from "@case-editor/entity/case-tree.entity";
+import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
 import { StructDocEntity } from "@struct-doc/entity/struct-doc.entity";
-import { DataSource, EntityManager, Repository } from "typeorm";
+import { DataSource, EntityManager, In, Repository } from "typeorm";
 import {
   extractProjectCodeFromText,
   isValidProjectRequirementCode,
@@ -36,6 +42,7 @@ function normalizeRequirementNo(raw: string): string {
 /** 项目列表项：对外字段 + 案例生成次数 */
 export type ProjectListItem = ReturnType<typeof toPublicProject> & {
   generationCount: number;
+  caseCount: number;
 };
 
 /**
@@ -48,6 +55,10 @@ export class ProjectManageService {
     private readonly projectRepo: Repository<CaseProjectEntity>,
     @InjectRepository(CaseEditorEntity)
     private readonly caseEditorRepo: Repository<CaseEditorEntity>,
+    @InjectRepository(CaseTreeEntity)
+    private readonly caseTreeRepo: Repository<CaseTreeEntity>,
+    @InjectRepository(ApiTestCaseEntity)
+    private readonly apiTestCaseRepo: Repository<ApiTestCaseEntity>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
   ) {}
@@ -56,7 +67,9 @@ export class ProjectManageService {
    * 创建项目，未传标题时自动生成默认名称
    * @param dto - 创建载荷
    */
-  async createProject(dto: CreateProjectDto): Promise<ReturnType<typeof toPublicProject>> {
+  async createProject(
+    dto: CreateProjectDto,
+  ): Promise<ReturnType<typeof toPublicProject>> {
     const platform: ProjectPlatform = dto.platform ?? "case-forge";
     if (platform === "api-test") {
       const title = dto.title?.trim();
@@ -112,7 +125,8 @@ export class ProjectManageService {
     size: number = 10,
     input: string = "",
     platform: ProjectPlatform = "case-forge",
-  ): Promise<{ rows: ProjectListItem[]; count: number }> {
+    month?: string,
+  ): Promise<{ rows: ProjectListItem[]; count: number; caseCount: number }> {
     if (page < 1 || size < 1) {
       throw new Error("Invalid page or size value.");
     }
@@ -135,17 +149,45 @@ export class ProjectManageService {
       );
     }
 
+    if (month) {
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+        throw new BadRequestException("年月格式必须为 YYYY-MM");
+      }
+      const [year, monthNumber] = month.split("-").map(Number);
+      const start = new Date(year, monthNumber - 1, 1);
+      const end = new Date(year, monthNumber, 1);
+      query.andWhere(
+        "project.createdAt >= :start AND project.createdAt < :end",
+        {
+          start,
+          end,
+        },
+      );
+    }
+
+    const allProjectIds = (
+      await query
+        .clone()
+        .skip(undefined)
+        .take(undefined)
+        .select("project.id", "id")
+        .getRawMany<{ id: string }>()
+    ).map((row) => row.id);
     const [rows, count] = await query.getManyAndCount();
-    const generationCountMap = await this.getGenerationCountMap(
-      rows.map((row) => String(row.id)),
-    );
+    const projectIds = rows.map((row) => String(row.id));
+    const generationCountMap = await this.getGenerationCountMap(projectIds);
+    const caseCountMap = await this.getCaseCountMap(projectIds, platform);
 
     return {
       rows: rows.map((row) => ({
         ...toPublicProject(row),
         generationCount: generationCountMap.get(String(row.id)) ?? 0,
+        caseCount: caseCountMap.get(String(row.id)) ?? 0,
       })),
       count,
+      caseCount: [
+        ...(await this.getCaseCountMap(allProjectIds, platform)).values(),
+      ].reduce((sum, value) => sum + value, 0),
     };
   }
 
@@ -162,6 +204,10 @@ export class ProjectManageService {
     return {
       ...toPublicProject(project),
       generationCount: generationCountMap.get(String(project.id)) ?? 0,
+      caseCount:
+        (
+          await this.getCaseCountMap([String(project.id)], project.platform)
+        ).get(String(project.id)) ?? 0,
     };
   }
 
@@ -227,7 +273,9 @@ export class ProjectManageService {
     }
     const existing = await query.getOne();
     if (existing) {
-      throw new BadRequestException(`需求编号 ${requirementNo} 已存在，请勿重复创建`);
+      throw new BadRequestException(
+        `需求编号 ${requirementNo} 已存在，请勿重复创建`,
+      );
     }
   }
 
@@ -299,6 +347,50 @@ export class ProjectManageService {
     for (const row of rows) {
       countMap.set(String(row.projectId), Number(row.generationCount) || 0);
     }
+    return countMap;
+  }
+
+  private async getCaseCountMap(
+    projectIds: string[],
+    platform: ProjectPlatform,
+  ): Promise<Map<string, number>> {
+    const countMap = new Map<string, number>();
+    if (!projectIds.length) return countMap;
+
+    const query =
+      platform === "api-test"
+        ? this.apiTestCaseRepo.createQueryBuilder("testCase")
+        : this.caseTreeRepo.createQueryBuilder("testCase");
+    query.where("testCase.projectId IN (:...projectIds)", { projectIds });
+    if (platform === "case-forge") {
+      const latestEditors = await this.caseEditorRepo.find({
+        where: { projectId: In(projectIds) },
+        order: { createdAt: "DESC" },
+        select: ["id", "projectId"],
+      });
+      const latestEditorByProject = new Map<string, string>();
+      for (const editor of latestEditors) {
+        if (!latestEditorByProject.has(editor.projectId)) {
+          latestEditorByProject.set(editor.projectId, editor.id);
+        }
+      }
+      const latestEditorIds = [...latestEditorByProject.values()];
+      if (!latestEditorIds.length) return countMap;
+      query.andWhere("testCase.caseEditorId IN (:...latestEditorIds)", {
+        latestEditorIds,
+      });
+      query.andWhere("testCase.kind IN (:...kinds)", {
+        kinds: ["case", "scenario"],
+      });
+    }
+    const rows = await query
+      .select("testCase.projectId", "projectId")
+      .addSelect("COUNT(testCase.id)", "caseCount")
+      .groupBy("testCase.projectId")
+      .getRawMany<{ projectId: string; caseCount: string }>();
+
+    for (const row of rows)
+      countMap.set(String(row.projectId), Number(row.caseCount) || 0);
     return countMap;
   }
 

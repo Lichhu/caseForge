@@ -12,7 +12,8 @@ export function resolveAverageRunSeconds(
       if (!job.startedAt || !job.finishedAt) {
         return null;
       }
-      const seconds = (job.finishedAt.getTime() - job.startedAt.getTime()) / 1000;
+      const seconds =
+        (job.finishedAt.getTime() - job.startedAt.getTime()) / 1000;
       if (!Number.isFinite(seconds) || seconds < MIN_RUN_SECONDS) {
         return null;
       }

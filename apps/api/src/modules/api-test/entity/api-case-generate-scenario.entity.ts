@@ -15,8 +15,7 @@ export const API_CASE_SCENARIO_STATUS = [
   "failed",
   "retrying",
 ] as const;
-export type ApiCaseScenarioStatus =
-  (typeof API_CASE_SCENARIO_STATUS)[number];
+export type ApiCaseScenarioStatus = (typeof API_CASE_SCENARIO_STATUS)[number];
 
 @Entity("api_case_generate_scenario")
 @Index("uk_api_case_generate_scenario_job_key", ["jobId", "scenarioKey"], {

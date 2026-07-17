@@ -23,6 +23,7 @@ import type {
 export interface ApiTransactionRow {
   id: string;
   projectId: string;
+  createdAt: string;
   code: string;
   name: string;
   description?: string;

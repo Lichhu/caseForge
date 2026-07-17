@@ -39,14 +39,21 @@ export class CaseEditorEntity {
   @Column()
   projectId: string;
 
-  @ManyToOne(() => CaseProjectEntity, { onDelete: "CASCADE", onUpdate: "CASCADE" })
+  @ManyToOne(() => CaseProjectEntity, {
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  })
   @JoinColumn({ name: "projectId" })
   project: CaseProjectEntity;
 
   @Column({ nullable: true })
   structDocId?: string;
 
-  @ManyToOne(() => StructDocEntity, { onDelete: "CASCADE", onUpdate: "CASCADE", nullable: true })
+  @ManyToOne(() => StructDocEntity, {
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+    nullable: true,
+  })
   @JoinColumn({ name: "structDocId" })
   structDoc?: StructDocEntity;
 

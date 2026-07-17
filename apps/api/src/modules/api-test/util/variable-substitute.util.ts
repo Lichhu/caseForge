@@ -10,10 +10,7 @@ export function substituteVariables(
   });
 }
 
-export function substituteDeep<T>(
-  value: T,
-  vars: Record<string, string>,
-): T {
+export function substituteDeep<T>(value: T, vars: Record<string, string>): T {
   if (typeof value === "string") {
     return substituteVariables(value, vars) as T;
   }

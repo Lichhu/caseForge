@@ -63,7 +63,9 @@ export function reassignCaseTreeNodeIds(node: CaseTreeNode): CaseTreeNode {
   return {
     ...node,
     id: randomUUID(),
-    children: (node.children || []).map((child) => reassignCaseTreeNodeIds(child)),
+    children: (node.children || []).map((child) =>
+      reassignCaseTreeNodeIds(child),
+    ),
   };
 }
 
@@ -71,7 +73,10 @@ function pruneRequirementsForTestPoints(
   root: CaseTreeNode,
   testPoints: TestPointSnapshot[],
 ): CaseTreeNode {
-  const prune = (node: CaseTreeNode, ctx: AncestorContext): CaseTreeNode | null => {
+  const prune = (
+    node: CaseTreeNode,
+    ctx: AncestorContext,
+  ): CaseTreeNode | null => {
     const nextCtx: AncestorContext = { ...ctx };
     if (node.kind === "system") {
       nextCtx.system = node.title;
@@ -115,10 +120,7 @@ function matchesTestPoint(
   if (ctx.system?.trim() && ctx.system.trim() !== point.system.trim()) {
     return false;
   }
-  if (
-    ctx.module?.trim() &&
-    ctx.module.trim() !== point.featureModule.trim()
-  ) {
+  if (ctx.module?.trim() && ctx.module.trim() !== point.featureModule.trim()) {
     return false;
   }
   const normalizedTitle = normalizeText(requirementTitle);

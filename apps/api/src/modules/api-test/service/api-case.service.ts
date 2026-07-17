@@ -112,7 +112,8 @@ export class ApiCaseService {
     }
 
     const [rows, count] = await qb
-      .orderBy("c.updatedAt", "DESC")
+      .orderBy("c.createdAt", "DESC")
+      .addOrderBy("c.id", "DESC")
       .skip((page - 1) * pageSize)
       .take(pageSize)
       .getManyAndCount();

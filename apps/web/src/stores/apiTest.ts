@@ -134,6 +134,8 @@ interface State {
   projectListPageSize: number;
   projectListTotal: number;
   projectListKeyword: string;
+  projectListMonth: string;
+  projectListCaseCount: number;
   activeProjectId: string;
   transactions: ApiTransactionRow[];
   activeTransactionId: string;
@@ -175,6 +177,8 @@ export const useApiTestStore = defineStore("apiTest", {
     projectListPageSize: DEFAULT_PROJECT_PAGE_SIZE,
     projectListTotal: 0,
     projectListKeyword: "",
+    projectListMonth: "",
+    projectListCaseCount: 0,
     activeProjectId: localStorage.getItem(activeProjectKey) ?? "",
     transactions: [],
     activeTransactionId: "",
@@ -288,11 +292,13 @@ export const useApiTestStore = defineStore("apiTest", {
       page?: number;
       size?: number;
       keyword?: string;
+      month?: string;
       resetPage?: boolean;
     }) {
       if (options?.keyword !== undefined) {
         this.projectListKeyword = options.keyword;
       }
+      if (options?.month !== undefined) this.projectListMonth = options.month;
       if (options?.size !== undefined) {
         this.projectListPageSize = normalizeProjectPageSize(options.size);
       }
@@ -308,10 +314,12 @@ export const useApiTestStore = defineStore("apiTest", {
           page,
           size: this.projectListPageSize,
           input: this.projectListKeyword,
+          month: this.projectListMonth,
         });
 
       let result = await fetchPage(this.projectListPage);
       this.projectListTotal = result.count;
+      this.projectListCaseCount = result.caseCount;
       const maxPage = Math.max(
         1,
         Math.ceil(result.count / this.projectListPageSize) || 1,
@@ -319,6 +327,7 @@ export const useApiTestStore = defineStore("apiTest", {
       if (this.projectListPage > maxPage) {
         this.projectListPage = maxPage;
         result = await fetchPage(maxPage);
+        this.projectListCaseCount = result.caseCount;
       }
       this.projects = result.rows;
     },
@@ -1131,9 +1140,7 @@ export const useApiTestStore = defineStore("apiTest", {
         }),
         this.refreshRunnerCases(projectId, transactionId),
       ]);
-      if (!caseId) {
-        this.activeCaseId = saved.id;
-      }
+      this.activeCaseId = saved.id;
       if (!options?.silent) {
         message.success("案例已保存");
       }

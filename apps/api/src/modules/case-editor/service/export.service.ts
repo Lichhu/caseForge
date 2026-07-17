@@ -168,7 +168,7 @@ export class ExportService {
           node,
           this.resolveXmindTopicTitle(node, requirementTitle),
         )
-      : node.children ?? [];
+      : (node.children ?? []);
     if (childNodes.length) {
       children.attached = childNodes.map((child) =>
         this.toXmindTopic(child, summaryByParent, nextRequirement),

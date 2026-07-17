@@ -10,14 +10,14 @@ export class HttpAccessLogMiddleware implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction) {
     const start = Date.now();
     const { method } = req;
-    
+
     const rawPath = req.originalUrl || req.url;
     let path: string;
     try {
       path = decodeURIComponent(rawPath);
     } catch (error) {
       path = rawPath;
-    } 
+    }
 
     const userName = RequestContext.getUserName();
     const ip =

@@ -120,6 +120,7 @@ export function toPublicApiTransaction(
     name: row.name,
     description: row.description,
     sortOrder: row.sortOrder,
+    createdAt: row.createdAt,
     reqCode: row.reqCode,
     taskId: row.taskId,
     serviceCode: row.serviceCode,

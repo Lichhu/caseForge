@@ -9,14 +9,14 @@ import {
   Index,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
-} from 'typeorm';
+} from "typeorm";
 
 /** 案例生成约束快照实体，对应 case_constraint 表 */
-@Entity('case_constraint')
+@Entity("case_constraint")
 @Index("idx_case_constraint_project", ["projectId", "createdAt"])
 @Index("idx_case_constraint_struct_doc", ["structDocId"])
 export class CaseConstraintEntity {
-  @PrimaryGeneratedColumn('uuid')
+  @PrimaryGeneratedColumn("uuid")
   id: string;
 
   @Column()
@@ -26,11 +26,11 @@ export class CaseConstraintEntity {
   structDocId?: string;
 
   /** 约束输入参数（场景标签、分组策略、功能点指令等） */
-  @Column({ type: 'json' })
+  @Column({ type: "json" })
   input: Record<string, unknown>;
 
   /** @deprecated 已不再生成，保留列兼容历史数据 */
-  @Column({ type: 'longtext', default: null })
+  @Column({ type: "longtext", default: null })
   markdown: string;
 
   @Column({ nullable: true, default: "system" })

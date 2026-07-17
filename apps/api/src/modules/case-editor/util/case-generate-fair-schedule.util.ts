@@ -31,7 +31,9 @@ export function buildRunningCountByUser<T extends FairScheduleJob>(jobs: T[]) {
 }
 
 /** 每个用户队首任务（按 queuedAt 最早） */
-export function buildQueuedHeadByUser<T extends FairScheduleJob>(queuedJobs: T[]) {
+export function buildQueuedHeadByUser<T extends FairScheduleJob>(
+  queuedJobs: T[],
+) {
   const heads = new Map<string, T>();
   for (const job of queuedJobs) {
     const user = normalizeJobUser(job);

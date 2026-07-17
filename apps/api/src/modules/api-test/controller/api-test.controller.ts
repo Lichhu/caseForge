@@ -303,8 +303,13 @@ export class ApiTestController {
     @Body() body: BatchPatchApiCaseRequestDto,
   ) {
     return this.apiCaseService.batchPatchCaseRequest(
-      projectId, transactionId, body.caseIds, body.patch,
-      body.environmentId, body.environmentServiceId, body.encoding,
+      projectId,
+      transactionId,
+      body.caseIds,
+      body.patch,
+      body.environmentId,
+      body.environmentServiceId,
+      body.encoding,
     );
   }
 
@@ -385,17 +390,28 @@ export class ApiTestController {
     @Param("transactionId") transactionId: string,
     @Param("jobId") jobId: string,
   ) {
-    return this.apiCaseService.getGenerateVersion(projectId, transactionId, jobId);
+    return this.apiCaseService.getGenerateVersion(
+      projectId,
+      transactionId,
+      jobId,
+    );
   }
 
-  @Post(":projectId/transactions/:transactionId/case-versions/:jobId/scenarios/:scenarioId/retry")
+  @Post(
+    ":projectId/transactions/:transactionId/case-versions/:jobId/scenarios/:scenarioId/retry",
+  )
   retryGenerateScenario(
     @Param("projectId") projectId: string,
     @Param("transactionId") transactionId: string,
     @Param("jobId") jobId: string,
     @Param("scenarioId") scenarioId: string,
   ) {
-    return this.apiCaseService.retryGenerateScenario(projectId, transactionId, jobId, scenarioId);
+    return this.apiCaseService.retryGenerateScenario(
+      projectId,
+      transactionId,
+      jobId,
+      scenarioId,
+    );
   }
 
   @Delete(":projectId/transactions/:transactionId/case-versions/:jobId")
@@ -404,7 +420,11 @@ export class ApiTestController {
     @Param("transactionId") transactionId: string,
     @Param("jobId") jobId: string,
   ) {
-    return this.apiCaseService.deleteGenerateVersion(projectId, transactionId, jobId);
+    return this.apiCaseService.deleteGenerateVersion(
+      projectId,
+      transactionId,
+      jobId,
+    );
   }
 
   @Get(":projectId/environments")

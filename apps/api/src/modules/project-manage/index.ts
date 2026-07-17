@@ -6,6 +6,7 @@ import { TypeOrmModule } from "@nestjs/typeorm";
 import { CaseEditorEntity } from "@case-editor/entity/case-editor.entity";
 import { CaseNodeMetadataEntity } from "@case-editor/entity/case-node-metadata.entity";
 import { CaseTreeEntity } from "@case-editor/entity/case-tree.entity";
+import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
 import { StructDocEntity } from "@struct-doc/entity/struct-doc.entity";
 import { TestPointEntity } from "@struct-doc/entity/test-point.entity";
 import { ProjectManageController } from "./controller/project-manage.controller";
@@ -20,6 +21,7 @@ import { CaseProjectEntity } from "./entity/project.entity";
       StructDocEntity,
       TestPointEntity,
       CaseTreeEntity,
+      ApiTestCaseEntity,
       CaseNodeMetadataEntity,
     ]),
   ],

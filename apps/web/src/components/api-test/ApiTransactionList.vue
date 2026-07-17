@@ -77,6 +77,9 @@
             <template v-else-if="column.key === 'description'">
               <span class="transaction-muted">{{ record.description || '—' }}</span>
             </template>
+            <template v-else-if="column.key === 'createdAt'">
+              <span class="transaction-muted">{{ formatDateTime(record.createdAt) }}</span>
+            </template>
             <template v-else-if="column.key === 'actions'">
               <a-space :size="4">
                 <a-button type="link" size="small" class="transaction-action" @click.stop="openEdit(record)">
@@ -191,6 +194,7 @@ const columns = [
   { title: '任务ID', dataIndex: 'taskId', key: 'taskId', width: 120, ellipsis: true },
   { title: '生成状态', key: 'syncStatus', width: 108, align: 'center' as const },
   { title: '备注', key: 'description', width: 200, ellipsis: true },
+  { title: '创建时间', key: 'createdAt', width: 168 },
   { title: '操作', key: 'actions', width: 108, align: 'center' as const, fixed: 'right' as const },
 ];
 
@@ -293,6 +297,13 @@ function normalizeSearchText(value: string) {
     .toLowerCase()
     .replace(/[‐‑‒–—―－]/g, '-')
     .replace(/\s+/g, '');
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 const rowSelection = computed(() => ({

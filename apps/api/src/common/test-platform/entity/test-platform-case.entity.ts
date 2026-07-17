@@ -11,7 +11,12 @@ export class TestPlatformCaseEntity {
   @Column({ name: "is_ai", type: "int", default: 0, nullable: true })
   isAi?: number;
 
-  @Column({ name: "case_serial_code", type: "varchar", length: 60, nullable: true })
+  @Column({
+    name: "case_serial_code",
+    type: "varchar",
+    length: 60,
+    nullable: true,
+  })
   caseSerialCode?: string;
 
   @Column({ name: "case_serial", type: "varchar", length: 60 })
@@ -23,10 +28,20 @@ export class TestPlatformCaseEntity {
   @Column({ name: "model_name", type: "varchar", length: 64, nullable: true })
   modelName?: string;
 
-  @Column({ name: "current_system_name", type: "varchar", length: 64, nullable: true })
+  @Column({
+    name: "current_system_name",
+    type: "varchar",
+    length: 64,
+    nullable: true,
+  })
   currentSystemName?: string;
 
-  @Column({ name: "functionPointName", type: "varchar", length: 500, nullable: true })
+  @Column({
+    name: "functionPointName",
+    type: "varchar",
+    length: 500,
+    nullable: true,
+  })
   functionPointName?: string;
 
   @Column({ name: "case_name", type: "varchar", length: 2000, nullable: true })
@@ -44,10 +59,20 @@ export class TestPlatformCaseEntity {
   @Column({ name: "case_execute_type", type: "tinyint", nullable: true })
   caseExecuteType?: number;
 
-  @Column({ name: "test_purpose", type: "varchar", length: 2000, nullable: true })
+  @Column({
+    name: "test_purpose",
+    type: "varchar",
+    length: 2000,
+    nullable: true,
+  })
   testPurpose?: string;
 
-  @Column({ name: "detailed_description", type: "varchar", length: 2000, nullable: true })
+  @Column({
+    name: "detailed_description",
+    type: "varchar",
+    length: 2000,
+    nullable: true,
+  })
   detailedDescription?: string;
 
   @Column({ type: "tinyint", nullable: true })
@@ -56,10 +81,20 @@ export class TestPlatformCaseEntity {
   @Column({ name: "case_status", type: "tinyint" })
   caseStatus: number;
 
-  @Column({ name: "expected_result", type: "varchar", length: 2000, nullable: true })
+  @Column({
+    name: "expected_result",
+    type: "varchar",
+    length: 2000,
+    nullable: true,
+  })
   expectedResult?: string;
 
-  @Column({ name: "precondition", type: "varchar", length: 200, nullable: true })
+  @Column({
+    name: "precondition",
+    type: "varchar",
+    length: 200,
+    nullable: true,
+  })
   precondition?: string;
 
   @Column({ name: "create_by", type: "varchar", length: 20, nullable: true })
@@ -83,7 +118,12 @@ export class TestPlatformCaseEntity {
   @Column({ name: "storage_status", type: "tinyint", default: 0 })
   storageStatus: number;
 
-  @Column({ name: "require_codes", type: "varchar", length: 64, nullable: true })
+  @Column({
+    name: "require_codes",
+    type: "varchar",
+    length: 64,
+    nullable: true,
+  })
   requireCodes?: string;
 
   @Column({ name: "label", type: "varchar", length: 200, nullable: true })

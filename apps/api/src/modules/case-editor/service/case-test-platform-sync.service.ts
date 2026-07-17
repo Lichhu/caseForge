@@ -1,7 +1,10 @@
 /**
  * 将智能生成案例平台的案例树同步至测管平台（b_project / b_case_test / b_case_operating_step）。
  */
-import { flattenCaseTreeToExcel, normalizeCasePriority } from "@case-forge/shared";
+import {
+  flattenCaseTreeToExcel,
+  normalizeCasePriority,
+} from "@case-forge/shared";
 import { Injectable } from "@nestjs/common";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 import { TEST_PLATFORM_CONNECTION } from "@common/test-platform";

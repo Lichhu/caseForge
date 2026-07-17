@@ -12,7 +12,9 @@ describe("assembleBodyFromExample missing paths", () => {
       createMissingPaths: true,
     });
     expect(JSON.parse(result.body)).toMatchObject({
-      Transaction: { Header: { sysHeader: { clientCd: "520", serviceCd: "R001" } } },
+      Transaction: {
+        Header: { sysHeader: { clientCd: "520", serviceCd: "R001" } },
+      },
     });
   });
 
@@ -23,7 +25,9 @@ describe("assembleBodyFromExample missing paths", () => {
       messageFormat: "xml",
       createMissingPaths: true,
     });
-    expect(result.body).toContain("<sysHeader><clientCd>520</clientCd></sysHeader>");
+    expect(result.body).toContain(
+      "<sysHeader><clientCd>520</clientCd></sysHeader>",
+    );
   });
 
   it("appends missing TEXT key-value fields", () => {

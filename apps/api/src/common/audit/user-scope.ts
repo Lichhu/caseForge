@@ -77,10 +77,9 @@ export function assertAccessible<T extends { createdBy?: string | null }>(
 /**
  * 查询当前用户拥有的项目，不存在或不属于当前用户时 404
  */
-export async function findOwnedProject<T extends { id: string; createdBy?: string | null }>(
-  projectRepo: Repository<T>,
-  projectId: string,
-): Promise<T> {
+export async function findOwnedProject<
+  T extends { id: string; createdBy?: string | null },
+>(projectRepo: Repository<T>, projectId: string): Promise<T> {
   const project = await projectRepo.findOne({
     where: scopedWhere({ id: projectId }) as FindOptionsWhere<T>,
   });

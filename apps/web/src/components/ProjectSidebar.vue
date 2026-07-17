@@ -24,6 +24,19 @@
       <template #prefix><SearchOutlined /></template>
     </a-input>
 
+    <div class="project-month-row">
+      <a-date-picker
+        v-model:value="selectedMonth"
+        picker="month"
+        value-format="YYYY-MM"
+        popup-class-name="project-month-popup"
+        allow-clear
+        placeholder="筛选年月"
+        @change="handleMonthChange"
+      />
+      <span v-if="selectedMonth" class="project-month-total">{{ monthCaseCount }} 条案例</span>
+    </div>
+
     <div v-if="deleteMode" class="project-batch-bar action-toolbar action-toolbar--compact">
       <a-checkbox
         :checked="allFilteredSelected"
@@ -73,8 +86,9 @@
                 :content="cleanProjectTitle(project.title)"
               />
               <span v-if="project.requirementNo" class="project-requirement">
-                {{ project.requirementNo }}
+                {{ project.requirementNo }} · {{ project.caseCount }} 条案例
               </span>
+              <span v-else class="project-requirement">{{ project.caseCount }} 条案例</span>
             </div>
             <button
               v-if="!deleteMode"
@@ -218,6 +232,7 @@ const projectList = computed(() =>
   isApiPlatform.value ? apiStore.projects : caseStore.projects,
 );
 const keyword = ref('');
+const selectedMonth = ref('');
 const listLoading = ref(false);
 const deleteMode = ref(false);
 const deleting = ref(false);
@@ -255,6 +270,7 @@ const listPageSize = computed(() =>
 const listTotal = computed(() =>
   isApiPlatform.value ? apiStore.projectListTotal : caseStore.projectListTotal,
 );
+const monthCaseCount = computed(() => isApiPlatform.value ? apiStore.projectListCaseCount : caseStore.projectListCaseCount);
 const totalPages = computed(() =>
   Math.max(1, Math.ceil(listTotal.value / listPageSize.value) || 1),
 );
@@ -284,6 +300,7 @@ async function reloadProjects(options?: {
   page?: number;
   size?: number;
   keyword?: string;
+  month?: string;
   resetPage?: boolean;
 }) {
   listLoading.value = true;
@@ -296,6 +313,10 @@ async function reloadProjects(options?: {
   } finally {
     listLoading.value = false;
   }
+}
+
+function handleMonthChange(value: string | null) {
+  void reloadProjects({ page: 1, month: value || '' });
 }
 
 function goPrevPage() {
@@ -326,6 +347,7 @@ watch(keyword, (value) => {
 
 onMounted(() => {
   keyword.value = isApiPlatform.value ? apiStore.projectListKeyword : caseStore.projectListKeyword;
+  selectedMonth.value = isApiPlatform.value ? apiStore.projectListMonth : caseStore.projectListMonth;
   skipKeywordWatch.value = false;
 });
 

@@ -16,7 +16,10 @@ import { ApiTags } from "@nestjs/swagger";
 import { ListScenariosQueryDto } from "@scenario/dto/list-scenarios-query.dto";
 import { SaveScenarioDto } from "@scenario/dto/save-scenario.dto";
 import { ScenarioService } from "@scenario/service/scenario.service";
-import { normalizeScenarioScope, SCENARIO_SCOPE_CASE } from "@case-forge/shared";
+import {
+  normalizeScenarioScope,
+  SCENARIO_SCOPE_CASE,
+} from "@case-forge/shared";
 
 @ApiTags("scenario")
 @Controller("scenario")

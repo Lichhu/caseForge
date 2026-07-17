@@ -185,7 +185,7 @@ export class CaseEditorController {
     @Param("runId") runId: string,
     @Body() dto: SyncToTestPlatformDto,
   ) {
-    return null
+    return null;
   }
 
   /** 保存编辑后的案例树 */

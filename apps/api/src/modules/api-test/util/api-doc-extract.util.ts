@@ -39,11 +39,15 @@ export function extractTextFromExcel(buffer: Buffer) {
   for (const name of namesToRead) {
     const sheet = workbook.Sheets[name];
     if (!sheet) continue;
-    const rows = XLSX.utils.sheet_to_json<(string | number | boolean)[]>(
-      sheet,
-      { header: 1, defval: "" },
-    ).map((row) => row.map((cell) => String(cell ?? "").trim()));
-    rawRows.set(name, rows.filter((row) => row.some(Boolean)));
+    const rows = XLSX.utils
+      .sheet_to_json<
+        (string | number | boolean)[]
+      >(sheet, { header: 1, defval: "" })
+      .map((row) => row.map((cell) => String(cell ?? "").trim()));
+    rawRows.set(
+      name,
+      rows.filter((row) => row.some(Boolean)),
+    );
   }
 
   const basic = filterPropertyRows(rawRows.get("基础信息") ?? [], [
@@ -85,11 +89,15 @@ export function extractTextFromExcel(buffer: Buffer) {
 }
 
 function filterPropertyRows(rows: string[][], allowed: string[]) {
-  const values = new Map(rows.map((row) => [row[0]?.trim(), row[1]?.trim() ?? ""]));
+  const values = new Map(
+    rows.map((row) => [row[0]?.trim(), row[1]?.trim() ?? ""]),
+  );
   return [
     ["服务属性", "属性值"],
     ...allowed
-      .filter((name, index) => allowed.indexOf(name) === index && values.has(name))
+      .filter(
+        (name, index) => allowed.indexOf(name) === index && values.has(name),
+      )
       .map((name) => [name, values.get(name) ?? ""]),
   ];
 }

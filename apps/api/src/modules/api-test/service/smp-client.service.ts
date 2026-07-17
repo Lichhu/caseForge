@@ -132,7 +132,9 @@ export class SmpClientService {
    * 查询交易码基础信息列表（selectServiceInfoList）
    * @param reqCode - 需求编号
    */
-  async selectServiceInfoList(reqCode: string): Promise<SmpResponse<SmpServiceInfoItem[]>> {
+  async selectServiceInfoList(
+    reqCode: string,
+  ): Promise<SmpResponse<SmpServiceInfoItem[]>> {
     if (this.smpConfig.demo) {
       await this.delay();
       const raw = demoData.selectServiceInfoList as {
@@ -195,9 +197,17 @@ export class SmpClientService {
       };
     }
 
-    const result = await this.postJson<typeof demoData.selectCallServiceInfoList>(
+    const result = await this.postJson<
+      typeof demoData.selectCallServiceInfoList
+    >(
       this.smpConfig.callServiceInfoListPath,
-      this.buildRequestBody({ reqCode, taskId, tranCode, serviceCode, reqSystemId }),
+      this.buildRequestBody({
+        reqCode,
+        taskId,
+        tranCode,
+        serviceCode,
+        reqSystemId,
+      }),
     );
     const response = result.Transaction.Body.response;
     return {
@@ -239,7 +249,13 @@ export class SmpClientService {
 
     const result = await this.postJson<typeof demoData.selectTestInfoList>(
       this.smpConfig.testInfoListPath,
-      this.buildRequestBody({ reqCode, taskId, tranCode, serviceCode, reqSystemId }),
+      this.buildRequestBody({
+        reqCode,
+        taskId,
+        tranCode,
+        serviceCode,
+        reqSystemId,
+      }),
     );
     const response = result.Transaction.Body.response;
     return {

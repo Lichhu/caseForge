@@ -339,7 +339,9 @@ describe("buildFieldTableFromSmpNodeLists", () => {
       },
     ];
     const table = buildFieldTableFromSmpNodeLists(duplicateHead)!;
-    const rows = table.split("\n").filter((line) => line.includes("transaction_sn"));
+    const rows = table
+      .split("\n")
+      .filter((line) => line.includes("transaction_sn"));
     expect(rows).toHaveLength(1);
   });
 

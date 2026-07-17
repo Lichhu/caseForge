@@ -135,7 +135,9 @@ export class ApiCaseGenerateQueueService
       return existing;
     }
 
-    const doc = await this.apiDocRepo.findOne({ where: { projectId, transactionId } });
+    const doc = await this.apiDocRepo.findOne({
+      where: { projectId, transactionId },
+    });
     const profile = doc?.metadata?.generationProfile;
     if (!doc || !profile?.exampleMessage.trim()) {
       throw new Error("请先完整填写服务属性、通讯方式、报文类型和示例报文");
@@ -157,7 +159,9 @@ export class ApiCaseGenerateQueueService
         snapshot: {
           profile: { ...profile, channels: selectedChannels },
           structuredMarkdown:
-            doc.tempStructuredMarkdown?.trim() || doc.structuredMarkdown?.trim() || "",
+            doc.tempStructuredMarkdown?.trim() ||
+            doc.structuredMarkdown?.trim() ||
+            "",
         },
         scenarioCount: scenarios.length,
         queuedAt: new Date(),
@@ -485,10 +489,9 @@ export class ApiCaseGenerateQueueService
     let version = 0;
     await withCaseGenerateSlot(async () => {
       try {
-        version = job.version ?? await this.assignNextVersion(
-          job.projectId,
-          job.transactionId,
-        );
+        version =
+          job.version ??
+          (await this.assignNextVersion(job.projectId, job.transactionId));
         const latestJob = await this.jobRepo.findOne({ where: { id: job.id } });
         if (latestJob && latestJob.status === "cancelled") {
           return;
@@ -525,11 +528,18 @@ export class ApiCaseGenerateQueueService
           );
           return;
         }
-        const summarized = await this.jobRepo.findOne({ where: { id: job.id } });
-        latest.status = (summarized?.failedScenarioCount ?? 0) > 0 ? "partial" : "completed";
-        latest.completedScenarioCount = summarized?.completedScenarioCount ?? latest.completedScenarioCount;
-        latest.notApplicableScenarioCount = summarized?.notApplicableScenarioCount ?? latest.notApplicableScenarioCount;
-        latest.failedScenarioCount = summarized?.failedScenarioCount ?? latest.failedScenarioCount;
+        const summarized = await this.jobRepo.findOne({
+          where: { id: job.id },
+        });
+        latest.status =
+          (summarized?.failedScenarioCount ?? 0) > 0 ? "partial" : "completed";
+        latest.completedScenarioCount =
+          summarized?.completedScenarioCount ?? latest.completedScenarioCount;
+        latest.notApplicableScenarioCount =
+          summarized?.notApplicableScenarioCount ??
+          latest.notApplicableScenarioCount;
+        latest.failedScenarioCount =
+          summarized?.failedScenarioCount ?? latest.failedScenarioCount;
         latest.finishedAt = new Date();
         latest.resultCount = (latest.resultCount ?? 0) + result.count;
         latest.version = version;

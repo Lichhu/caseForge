@@ -62,7 +62,9 @@ export function sanitizeStructuredMarkdown(markdown: string): string {
 
 function normalizeStructuredMarkdown(markdown: string) {
   const fenced = markdown.match(/^```(?:markdown|md)?\s*([\s\S]*?)\s*```$/i);
-  const unfenced = (fenced ? fenced[1] : markdown).replace(/\r\n/g, "\n").trim();
+  const unfenced = (fenced ? fenced[1] : markdown)
+    .replace(/\r\n/g, "\n")
+    .trim();
   return stripAiThinkingTags(unfenced);
 }
 
@@ -105,9 +107,7 @@ function normalizeStructuredTestPointLines(markdown: string) {
       inTestPointSection = false;
     }
 
-    output.push(
-      inTestPointSection ? normalizeTestPointListLine(line) : line,
-    );
+    output.push(inTestPointSection ? normalizeTestPointListLine(line) : line);
   }
 
   return output.join("\n");
@@ -441,7 +441,8 @@ function buildPointsFromModuleBody(
 /** 按「测试要点」章节全局扫描（无功能模块标题时的兜底） */
 function parseGlobalTestPointSections(markdown: string) {
   const results: ParsedTestPoint[] = [];
-  const sectionPattern = /(?:^|\n)(?:#{1,4}\s*)?(?:\*\*)?测试要点(?:\*\*)?[：:]?\s*\n/gi;
+  const sectionPattern =
+    /(?:^|\n)(?:#{1,4}\s*)?(?:\*\*)?测试要点(?:\*\*)?[：:]?\s*\n/gi;
   const matches = [...markdown.matchAll(sectionPattern)];
   if (!matches.length) {
     return results;
@@ -605,7 +606,9 @@ function extractNumberedTestPoints(text: string) {
       labelTitle === TEST_POINT_DESC_LABEL
         ? cleanText(
             match[0].match(
-              new RegExp(`${TEST_POINT_DESC_LABEL}(?:\\*\\*)?[：:]\\s*([^\\n]+)`),
+              new RegExp(
+                `${TEST_POINT_DESC_LABEL}(?:\\*\\*)?[：:]\\s*([^\\n]+)`,
+              ),
             )?.[1] || "",
           )
         : labelTitle;
@@ -685,7 +688,10 @@ function buildTestPointDetail(body: string) {
 
 function extractSection(text: string, title: string) {
   const marker = text.search(
-    new RegExp(`(?:^|\\n)(?:#{1,4}\\s*)?(?:\\*\\*)?${title}(?:\\*\\*)?[：:]?`, "i"),
+    new RegExp(
+      `(?:^|\\n)(?:#{1,4}\\s*)?(?:\\*\\*)?${title}(?:\\*\\*)?[：:]?`,
+      "i",
+    ),
   );
   if (marker === -1) {
     return "";
@@ -736,7 +742,10 @@ function extractParagraphAfter(text: string, title: string) {
 }
 
 function cleanText(value: string) {
-  return value.replace(/\*\*/g, "").replace(/[：:]+$/g, "").trim();
+  return value
+    .replace(/\*\*/g, "")
+    .replace(/[：:]+$/g, "")
+    .trim();
 }
 
 /** 从「测试要点描述：xxx」或「**测试要点描述**：xxx」行提取真正的测试要点标题 */
@@ -815,7 +824,9 @@ export function buildStructuredDocName(reqDocName?: string | null) {
 export function extractRequirementNo(markdown: string) {
   const normalized = normalizeStructuredMarkdown(markdown);
   return (
-    normalized.match(/(?:\*\*)?需求编号(?:\*\*)?[：:]\s*([^\n]+)/)?.[1]?.trim() ||
+    normalized
+      .match(/(?:\*\*)?需求编号(?:\*\*)?[：:]\s*([^\n]+)/)?.[1]
+      ?.trim() ||
     normalized.match(/\[([A-Z][A-Z0-9-]+)\]/)?.[1]?.trim() ||
     normalized.match(/^#\s*([A-Z0-9-]+)/m)?.[1]?.trim() ||
     undefined
