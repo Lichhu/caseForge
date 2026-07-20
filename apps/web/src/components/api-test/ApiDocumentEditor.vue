@@ -59,6 +59,10 @@
                 <CodeOutlined />
                 数据函数
               </a-menu-item>
+              <a-menu-item key="database-connections">
+                <CodeOutlined />
+                数据库配置
+              </a-menu-item>
               <a-menu-item v-if="!showSmpData" key="save" :disabled="!canSave">
                 <SaveOutlined />
                 手动保存
@@ -224,6 +228,7 @@
   />
 
   <ApiDataFunctionMaintainModal v-model:open="dataFunctionModalOpen" :project-id="apiStore.activeProjectId" />
+  <ApiDatabaseConnectionMaintainModal v-model:open="databaseConnectionModalOpen" :project-id="apiStore.activeProjectId" />
   <a-modal v-model:open="functionInsertOpen" title="插入数据函数" ok-text="插入" @ok="insertFunctionExpression">
     <a-form layout="vertical">
       <a-form-item label="函数" required><a-select v-model:value="insertFunctionName" :options="functionOptions" /></a-form-item>
@@ -370,6 +375,7 @@ import type { MenuProps, UploadProps } from 'ant-design-vue';
 import SmpDocumentViewer from '@/components/api-test/SmpDocumentViewer.vue';
 import ApiCaseGenerateHistoryDrawer from '@/components/api-test/ApiCaseGenerateHistoryDrawer.vue';
 import ApiDataFunctionMaintainModal from '@/components/api-test/ApiDataFunctionMaintainModal.vue';
+import ApiDatabaseConnectionMaintainModal from '@/components/api-test/ApiDatabaseConnectionMaintainModal.vue';
 import { IMMERSIVE_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import { useApiTestStore } from '@/stores/apiTest';
 import type { ApiDocGenerationProfile } from '@case-forge/shared';
@@ -414,6 +420,7 @@ const exampleExpandModalOpen = ref(false);
 const historyDrawerOpen = ref(false);
 const moreMenuOpen = ref(false);
 const dataFunctionModalOpen = ref(false);
+const databaseConnectionModalOpen = ref(false);
 const generationProfile = reactive<ApiDocGenerationProfile>({
   serviceProperty: 'query_non_accounting',
   transport: 'http',
@@ -830,6 +837,9 @@ const onMoreMenuClick: MenuProps['onClick'] = ({ key }) => {
   moreMenuOpen.value = false;
   if (key === 'data-functions') {
     dataFunctionModalOpen.value = true;
+  }
+  if (key === 'database-connections') {
+    databaseConnectionModalOpen.value = true;
   }
   if (key === 'save') {
     void onSave();

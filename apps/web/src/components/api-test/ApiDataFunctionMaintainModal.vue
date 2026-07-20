@@ -315,6 +315,7 @@ const generatedSql = computed(() => {
 });
 const typeOptions = [
   { label: '规则生成', value: 'template' },
+  // { label: '查数据库', value: 'sql' },
 ];
 const templateModeOptions = [{ label: '可视化', value: 'builder' }, { label: 'JavaScript', value: 'javascript' }, { label: 'Python', value: 'python' }];
 const scriptHint = computed(() => form.templateMode === 'javascript'
