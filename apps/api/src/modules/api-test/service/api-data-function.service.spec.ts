@@ -1,0 +1,121 @@
+import { BadRequestException } from "@nestjs/common";
+import { ApiDataFunctionService } from "./api-data-function.service";
+
+describe("ApiDataFunctionService", () => {
+  const functions = [
+    {
+      id: "fn-1",
+      projectId: "p1",
+      name: "MSG_ID",
+      params: ["base", "step"],
+      type: "template" as const,
+      config: {
+        parts: [
+          { kind: "param", value: "base" },
+          { kind: "number", value: "2", operator: "concat" },
+          { kind: "param", value: "step", operator: "concat" },
+        ],
+      },
+      description: "",
+    },
+  ];
+  const service = new ApiDataFunctionService(
+    {} as never,
+    { find: jest.fn().mockResolvedValue(functions) } as never,
+  );
+
+  it("resolves function calls in nested request data", async () => {
+    await expect(
+      service.resolveDeep("p1", { body: { id: "${MSG_ID('00', '3')}" } }),
+    ).resolves.toEqual({ body: { id: "0023" } });
+  });
+
+  it("rejects unknown functions before sending a request", async () => {
+    await expect(
+      service.resolveDeep("p1", "${UNKNOWN()}"),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("passes a value from the current XML request body to a function", async () => {
+    await expect(service.resolveDeep("p1", {
+      body: "<Transaction><Header><clientCd>003</clientCd><msgId>${MSG_ID($.Transaction.Header.clientCd, '9')}</msgId></Header></Transaction>",
+    })).resolves.toEqual({
+      body: "<Transaction><Header><clientCd>003</clientCd><msgId>00329</msgId></Header></Transaction>",
+    });
+  });
+
+  it("supports numeric operations", async () => {
+    await expect(
+      service.preview("p1", {
+        name: "ADD",
+        params: ["base"],
+        type: "template",
+        config: {
+          parts: [
+            { kind: "param", value: "base" },
+            { kind: "number", value: "2", operator: "add" },
+          ],
+        },
+        values: { base: "3" },
+      }),
+    ).resolves.toBe(5);
+  });
+
+  it("supports reading a field from a function result", async () => {
+    const objectService = new ApiDataFunctionService(
+      {} as never,
+      {
+        find: jest.fn().mockResolvedValue([{ ...functions[0], name: "ROW" }]),
+      } as never,
+    );
+    jest
+      .spyOn(objectService as any, "evaluate")
+      .mockResolvedValue({ title: "case title" });
+
+    await expect(
+      objectService.resolveDeep("p1", "${ROW().title}"),
+    ).resolves.toBe("case title");
+  });
+
+  it("runs a sandboxed JavaScript function", async () => {
+    await expect(
+      service.preview("p1", {
+        name: "SCRIPT",
+        params: ["value"],
+        type: "template",
+        config: {
+          mode: "javascript",
+          script: "function(value) { return value.toUpperCase(); }",
+        },
+        values: { value: "case" },
+      }),
+    ).resolves.toBe("CASE");
+  });
+
+  it("runs an isolated Python function", async () => {
+    await expect(
+      service.preview("p1", {
+        name: "SCRIPT",
+        params: [],
+        type: "template",
+        config: {
+          mode: "python",
+          script: 'def function():\n    return datetime.now().strftime("%Y-%m-%d")',
+        },
+        values: {},
+      }),
+    ).resolves.toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("rejects scripts without the required function entry", async () => {
+    await expect(
+      service.preview("p1", {
+        name: "SCRIPT",
+        params: [],
+        type: "template",
+        config: { mode: "javascript", script: "42" },
+        values: {},
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});

@@ -55,6 +55,10 @@
           </a-button>
           <template #overlay>
             <a-menu @click="onMoreMenuClick">
+              <a-menu-item key="data-functions">
+                <CodeOutlined />
+                数据函数
+              </a-menu-item>
               <a-menu-item v-if="!showSmpData" key="save" :disabled="!canSave">
                 <SaveOutlined />
                 手动保存
@@ -139,6 +143,7 @@
             <div v-if="section.title === '示例报文'" class="example-message-block">
               <div class="example-message-shell">
                 <div class="example-message-actions">
+                  <a-button type="link" size="small" :disabled="!hasExampleCursor" @click="openFunctionInsert"><CodeOutlined /> 插入函数</a-button>
                   <a-button
                     type="link"
                     size="small"
@@ -164,6 +169,9 @@
                   class="example-message-input"
                   placeholder="可选。填写后将作为 AI 生成案例的报文样例参考。"
                   spellcheck="false"
+                  @focus="rememberExampleCursor"
+                  @click="rememberExampleCursor"
+                  @keyup="rememberExampleCursor"
                   @input="onExampleMessageInput"
                   @blur="onExampleMessageBlur"
                   @paste="onExampleMessagePaste"
@@ -214,6 +222,17 @@
     :project-id="projectId"
     :transaction-id="transactionId"
   />
+
+  <ApiDataFunctionMaintainModal v-model:open="dataFunctionModalOpen" :project-id="apiStore.activeProjectId" />
+  <a-modal v-model:open="functionInsertOpen" title="插入数据函数" ok-text="插入" @ok="insertFunctionExpression">
+    <a-form layout="vertical">
+      <a-form-item label="函数" required><a-select v-model:value="insertFunctionName" :options="functionOptions" /></a-form-item>
+      <a-form-item label="参数来源" extra="以 $. 开头，引用当前请求体字段；多个参数用英文逗号分隔">
+        <a-input v-model:value="insertFunctionArgs" placeholder="$.Transaction.Header.sysHeader.clientCd" />
+      </a-form-item>
+      <code>{{ functionInsertPreview }}</code>
+    </a-form>
+  </a-modal>
 
   <a-modal
     v-model:open="generateModalOpen"
@@ -307,26 +326,23 @@
     @ok="onExampleExpandModalOk"
   >
     <div class="example-message-expand-modal">
-      <p class="example-message-expand-hint">
-        可选。填写后将作为 AI 生成案例的报文样例参考。
-      </p>
       <div class="example-message-expand-toolbar">
-        <a-button
-          type="link"
-          size="small"
-          class="example-message-beautify-btn"
-          :disabled="!exampleMessage.trim()"
-          @click="beautifyExampleMessage"
-        >
-          <template #icon><FormatPainterOutlined /></template>
-          美化
-        </a-button>
+        <p class="example-message-expand-hint">可选。填写后将作为 AI 生成案例的报文样例参考。</p>
+        <div class="expand-toolbar-actions">
+          <a-button type="link" size="small" :disabled="!hasExampleCursor" @click="openFunctionInsert"><CodeOutlined /> 插入函数</a-button>
+          <a-button type="link" size="small" class="example-message-beautify-btn" :disabled="!exampleMessage.trim()" @click="beautifyExampleMessage">
+            <template #icon><FormatPainterOutlined /></template>美化
+          </a-button>
+        </div>
       </div>
       <textarea
         v-model="exampleMessage"
         class="example-message-expand-input"
         placeholder="可选。填写后将作为 AI 生成案例的报文样例参考。"
         spellcheck="false"
+        @focus="rememberExampleCursor"
+        @click="rememberExampleCursor"
+        @keyup="rememberExampleCursor"
         @input="onExampleMessageInput"
       />
     </div>
@@ -338,6 +354,7 @@ import { computed, nextTick, onActivated, onDeactivated, reactive, ref, watch } 
 import {
   DownOutlined,
   DeleteOutlined,
+  CodeOutlined,
   ExpandOutlined,
   FormatPainterOutlined,
   HistoryOutlined,
@@ -352,6 +369,7 @@ import { Modal, message } from 'ant-design-vue';
 import type { MenuProps, UploadProps } from 'ant-design-vue';
 import SmpDocumentViewer from '@/components/api-test/SmpDocumentViewer.vue';
 import ApiCaseGenerateHistoryDrawer from '@/components/api-test/ApiCaseGenerateHistoryDrawer.vue';
+import ApiDataFunctionMaintainModal from '@/components/api-test/ApiDataFunctionMaintainModal.vue';
 import { IMMERSIVE_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import { useApiTestStore } from '@/stores/apiTest';
 import type { ApiDocGenerationProfile } from '@case-forge/shared';
@@ -370,6 +388,7 @@ import {
   beautifyCasePayloadJson,
   beautifyRequestBodyXml,
 } from '@/utils/casePayloadFormat.util';
+import { listDataFunctions } from '@/api/apiTestClient';
 
 const tableScrollRef = ref<HTMLElement | null>(null);
 const EXAMPLE_MESSAGE_MIN_HEIGHT_PX = 160;
@@ -377,6 +396,13 @@ const apiStore = useApiTestStore();
 const sections = ref<ApiDocTableSection[]>([]);
 const sectionData = ref<Record<string, string>[][]>([]);
 const exampleMessage = ref('');
+const functionInsertOpen = ref(false);
+const functionInsertRange = reactive({ start: 0, end: 0 });
+const hasExampleCursor = ref(false);
+const insertFunctionName = ref('');
+const insertFunctionArgs = ref('$.Transaction.Header.sysHeader.clientCd');
+const functionOptions = ref<Array<{ label: string; value: string }>>([]);
+const functionInsertPreview = computed(() => `\${${insertFunctionName.value || '函数名'}(${insertFunctionArgs.value})}`);
 const editorText = ref('');
 const autoSaveTimer = ref<number | null>(null);
 const generationProfileSaveTimer = ref<number | null>(null);
@@ -386,6 +412,7 @@ const generateModalOpen = ref(false);
 const exampleExpandModalOpen = ref(false);
 const historyDrawerOpen = ref(false);
 const moreMenuOpen = ref(false);
+const dataFunctionModalOpen = ref(false);
 const generationProfile = reactive<ApiDocGenerationProfile>({
   serviceProperty: 'query_non_accounting',
   transport: 'http',
@@ -481,6 +508,7 @@ function loadFromText(text: string) {
   }
   const exampleSection = parsed.find((section) => section.title === '示例报文');
   exampleMessage.value = exampleSection?.freeText ?? '';
+  hasExampleCursor.value = false;
   sections.value = parsed;
   sectionData.value = sections.value.map((section) => sectionTableData(section));
   editorText.value = serializeApiDocTableText(parsed);
@@ -502,6 +530,37 @@ function onExampleMessageInput(event: Event) {
 function onExampleMessageBlur() {
   syncExampleMessageToText();
   void flushAutoSave({ notify: true });
+}
+
+async function openFunctionInsert() {
+  if (!hasExampleCursor.value) return;
+  const rows = await listDataFunctions(projectId.value);
+  functionOptions.value = rows.map((item) => ({ label: item.name, value: item.name }));
+  insertFunctionName.value ||= functionOptions.value[0]?.value ?? '';
+  functionInsertOpen.value = true;
+}
+
+function rememberExampleCursor(event: Event) {
+  const input = event.target as HTMLTextAreaElement;
+  functionInsertRange.start = input.selectionStart;
+  functionInsertRange.end = input.selectionEnd;
+  hasExampleCursor.value = true;
+}
+
+function insertFunctionExpression() {
+  if (!insertFunctionName.value) return message.warning('请选择函数');
+  const expression = functionInsertPreview.value;
+  exampleMessage.value = `${exampleMessage.value.slice(0, functionInsertRange.start)}${expression}${exampleMessage.value.slice(functionInsertRange.end)}`;
+  functionInsertOpen.value = false;
+  syncExampleMessageToText();
+  scheduleAutoSave();
+  resizeExampleMessageInput();
+  void nextTick(() => {
+    const input = resolveExampleMessageInput();
+    const cursor = functionInsertRange.start + expression.length;
+    input?.focus();
+    input?.setSelectionRange(cursor, cursor);
+  });
 }
 
 function onExampleExpandModalOk() {
@@ -767,6 +826,10 @@ function handleCellBlur(sectionIndex: number) {
 const canSave = computed(() => Boolean(editorText.value.trim()));
 
 const onMoreMenuClick: MenuProps['onClick'] = ({ key }) => {
+  moreMenuOpen.value = false;
+  if (key === 'data-functions') {
+    dataFunctionModalOpen.value = true;
+  }
   if (key === 'save') {
     void onSave();
   }
@@ -1261,8 +1324,11 @@ async function onSave() {
 
 .example-message-expand-toolbar {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
+.expand-toolbar-actions { display: flex; align-items: center; gap: 2px; }
 
 .example-message-expand-input {
   box-sizing: border-box;

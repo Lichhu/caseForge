@@ -378,7 +378,8 @@ function replaceXmlFieldValue(
   const escaped = escapeXmlValue(value);
   let changed = false;
 
-  let result = xml.replace(new RegExp(`<${tag}>([^<]*)</${tag}>`, "g"), () => {
+  let result = xml.replace(new RegExp(`<${tag}>([^<]*)</${tag}>`, "g"), (match, current) => {
+    if (isDataFunctionExpression(current)) return match;
     changed = true;
     return `<${tag}>${escaped}</${tag}>`;
   });
@@ -499,6 +500,7 @@ function setJsonValueByPath(
       (key) => key.toLowerCase() === requestedLastKey.toLowerCase(),
     ) ?? requestedLastKey;
   if (record[lastKey] === undefined && !createMissing) return false;
+  if (isDataFunctionExpression(record[lastKey])) return true;
 
   record[lastKey] = value;
   return true;
@@ -513,6 +515,7 @@ function setJsonValueByLastSegment(
 
   const record = obj as Record<string, unknown>;
   if (record[lastSegment] !== undefined) {
+    if (isDataFunctionExpression(record[lastSegment])) return true;
     record[lastSegment] = value;
     return true;
   }
@@ -525,6 +528,10 @@ function setJsonValueByLastSegment(
     }
   }
   return false;
+}
+
+function isDataFunctionExpression(value: unknown): boolean {
+  return typeof value === "string" && /\$\{[A-Z][A-Z0-9_]*\([^{}]*\)(?:\.[A-Za-z_][\w]*)?\}/.test(value);
 }
 
 function refreshJsonDynamicHeaders(obj: unknown): void {

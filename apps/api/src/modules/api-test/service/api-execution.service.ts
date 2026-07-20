@@ -24,6 +24,7 @@ import type {
   ApiRunItemStatus,
 } from "@case-forge/shared";
 import { toPublicApiRun } from "@common/http/public-response.util";
+import { ApiDataFunctionService } from "./api-data-function.service";
 
 const DEFAULT_CONCURRENCY = 5;
 const MAX_CONCURRENCY = 10;
@@ -66,6 +67,7 @@ export class ApiExecutionService {
     private readonly runItemRepo: Repository<ApiTestRunItemEntity>,
     private readonly environmentService: ApiEnvironmentService,
     private readonly executionSetService: ApiExecutionSetService,
+    private readonly dataFunctionService: ApiDataFunctionService,
   ) {}
 
   async runCases(input: {
@@ -291,10 +293,14 @@ export class ApiExecutionService {
     vars: Record<string, string>;
     encoding?: string;
   }) {
-    const request = substituteDeep(
+    const substituted = substituteDeep(
       input.testCase.request,
       input.vars,
     ) as ApiCaseRequest;
+    const request = (await this.dataFunctionService.resolveDeep(
+      input.testCase.projectId,
+      substituted,
+    )) as ApiCaseRequest;
     const transport = request.transport ?? (request.framing ? "tcp" : "http");
     if (transport === "tcp") {
       return this.executeTcpCase({ ...input, request });
@@ -541,7 +547,11 @@ export class ApiExecutionService {
       input.environmentServiceId,
     )) as RuntimeEnvironment;
     const vars = buildRuntimeVariables(env.variables, env.secrets);
-    const request = substituteDeep(input.request, vars) as ApiCaseRequest;
+    const substituted = substituteDeep(input.request, vars) as ApiCaseRequest;
+    const request = (await this.dataFunctionService.resolveDeep(
+      input.projectId,
+      substituted,
+    )) as ApiCaseRequest;
     const transport = request.transport ?? (request.framing ? "tcp" : "http");
 
     if (transport === "tcp") {

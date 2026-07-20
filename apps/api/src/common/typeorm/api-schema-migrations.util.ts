@@ -67,6 +67,7 @@ async function alignUuidColumn(
 }
 
 export async function applyApiTestSchemaMigrations(runner: Queryable) {
+  await ensureApiDataFunctionTables(runner);
   await ensureApiAssertionGenerateJobTable(runner);
   await ensureApiCaseGenerateScenarioTable(runner);
   if (!(await tableExists(runner, "api_doc"))) {
@@ -79,6 +80,30 @@ export async function applyApiTestSchemaMigrations(runner: Queryable) {
   await ensureApiTestCaseColumns(runner);
   await ensureApiCaseGenerateJobColumns(runner);
   await ensureExecutionPlatformTables(runner);
+}
+
+async function ensureApiDataFunctionTables(runner: Queryable) {
+  if (!(await tableExists(runner, "api_database_connection")))
+    await runner.query(`
+    CREATE TABLE api_database_connection (
+      id VARCHAR(36) CHARACTER SET utf8 NOT NULL PRIMARY KEY, projectId VARCHAR(36) CHARACTER SET utf8 NOT NULL,
+      name VARCHAR(255) NOT NULL, type VARCHAR(255) NOT NULL, host VARCHAR(255) NOT NULL, port INT NOT NULL,
+      databaseName VARCHAR(255) NOT NULL, username VARCHAR(255) NOT NULL, passwordEncrypted TEXT NULL, readonly TINYINT NOT NULL DEFAULT 1,
+      createdBy VARCHAR(255) NULL DEFAULT 'system', modifiedBy VARCHAR(255) NULL DEFAULT 'system',
+      createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+      UNIQUE KEY uk_api_database_connection_project_name (projectId, name)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  if (!(await tableExists(runner, "api_data_function")))
+    await runner.query(`
+    CREATE TABLE api_data_function (
+      id VARCHAR(36) CHARACTER SET utf8 NOT NULL PRIMARY KEY, projectId VARCHAR(36) CHARACTER SET utf8 NOT NULL,
+      name VARCHAR(255) NOT NULL, params JSON NOT NULL, type VARCHAR(16) NOT NULL, config JSON NOT NULL, description VARCHAR(500) NOT NULL DEFAULT '',
+      createdBy VARCHAR(255) NULL DEFAULT 'system', modifiedBy VARCHAR(255) NULL DEFAULT 'system',
+      createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+      UNIQUE KEY uk_api_data_function_project_name (projectId, name)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
 }
 
 async function ensureApiCaseGenerateScenarioTable(runner: Queryable) {

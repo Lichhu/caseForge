@@ -1,6 +1,25 @@
 import { assembleBodyFromExample } from "./api-case-body-assembler.util";
 
 describe("assembleBodyFromExample missing paths", () => {
+  it("preserves data functions from the XML example against overrides", () => {
+    const result = assembleBodyFromExample({
+      exampleMessage: "<Transaction><Header><msgId>${MSG($.Transaction.Header.clientCd)}</msgId><clientCd>003</clientCd></Header></Transaction>",
+      overrides: { "Transaction/Header/msgId": "generated-value" },
+      messageFormat: "xml",
+      refreshDynamicHeaders: true,
+    });
+    expect(result.body).toContain("<msgId>${MSG($.Transaction.Header.clientCd)}</msgId>");
+  });
+
+  it("preserves data functions from the JSON example against overrides", () => {
+    const result = assembleBodyFromExample({
+      exampleMessage: '{"Transaction":{"Header":{"sysHeader":{"msgId":"${MSG($.Transaction.Header.sysHeader.clientCd)}","clientCd":"003"}}}}',
+      overrides: { "Transaction/Header/sysHeader/msgId": "generated-value" },
+      messageFormat: "json",
+      refreshDynamicHeaders: true,
+    });
+    expect(result.body).toContain("${MSG($.Transaction.Header.sysHeader.clientCd)}");
+  });
   it("creates missing JSON channel path", () => {
     const result = assembleBodyFromExample({
       exampleMessage: '{"Transaction":{}}',

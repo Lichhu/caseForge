@@ -465,6 +465,7 @@
                             </button>
                           </div>
                           <div v-if="canBeautifyBody" class="case-editor-chrome-actions">
+                            <a-button type="link" size="small" :disabled="!hasBodyCursor" @click="openBodyFunctionInsert"><CodeOutlined /> 插入函数</a-button>
                             <a-button
                               type="link"
                               size="small"
@@ -493,6 +494,9 @@
                             class="ant-input editor-textarea case-json-editor case-payload-textarea case-payload-textarea--expand case-payload-textarea--in-surface"
                             placeholder="{}"
                             spellcheck="false"
+                            @focus="rememberBodyCursor"
+                            @click="rememberBodyCursor"
+                            @keyup="rememberBodyCursor"
                             @paste="onPayloadTextareaPaste"
                           />
                         </template>
@@ -503,6 +507,9 @@
                             class="ant-input editor-textarea case-xml-editor case-payload-textarea case-payload-textarea--expand case-payload-textarea--in-surface"
                             placeholder="XML 报文"
                             spellcheck="false"
+                            @focus="rememberBodyCursor"
+                            @click="rememberBodyCursor"
+                            @keyup="rememberBodyCursor"
                             @paste="onPayloadTextareaPaste"
                           />
                         </template>
@@ -513,6 +520,9 @@
                             class="ant-input editor-textarea case-payload-textarea case-payload-textarea--expand case-payload-textarea--in-surface"
                             placeholder="纯文本报文"
                             spellcheck="false"
+                            @focus="rememberBodyCursor"
+                            @click="rememberBodyCursor"
+                            @keyup="rememberBodyCursor"
                             @paste="onPayloadTextareaPaste"
                           />
                         </template>
@@ -647,16 +657,12 @@
               {{ item.label }}
             </button>
           </div>
-          <a-button
-            v-if="canBeautifyBody"
-            type="link"
-            size="small"
-            class="case-editor-beautify-btn"
-            @click="beautifyRequestJson"
-          >
-            <template #icon><FormatPainterOutlined /></template>
-            美化
-          </a-button>
+          <div class="expand-toolbar-actions">
+            <a-button type="link" size="small" :disabled="!hasBodyCursor" @click="openBodyFunctionInsert"><CodeOutlined /> 插入函数</a-button>
+            <a-button v-if="canBeautifyBody" type="link" size="small" class="case-editor-beautify-btn" @click="beautifyRequestJson">
+              <template #icon><FormatPainterOutlined /></template>美化
+            </a-button>
+          </div>
         </div>
         <textarea
           v-if="form.bodyFormat === 'json'"
@@ -664,6 +670,9 @@
           class="ant-input editor-textarea case-json-editor case-body-expand-textarea"
           placeholder="{}"
           spellcheck="false"
+          @focus="rememberBodyCursor"
+          @click="rememberBodyCursor"
+          @keyup="rememberBodyCursor"
         />
         <textarea
           v-else-if="form.bodyFormat === 'xml'"
@@ -671,6 +680,9 @@
           class="ant-input editor-textarea case-xml-editor case-body-expand-textarea"
           placeholder="XML 报文"
           spellcheck="false"
+          @focus="rememberBodyCursor"
+          @click="rememberBodyCursor"
+          @keyup="rememberBodyCursor"
         />
         <textarea
           v-else
@@ -678,6 +690,9 @@
           class="ant-input editor-textarea case-body-expand-textarea"
           placeholder="纯文本报文"
           spellcheck="false"
+          @focus="rememberBodyCursor"
+          @click="rememberBodyCursor"
+          @keyup="rememberBodyCursor"
         />
       </div>
     </a-modal>
@@ -689,6 +704,15 @@
       :transaction-id="transactionId"
     />
   </section>
+  <a-modal v-model:open="bodyFunctionInsertOpen" title="插入数据函数" ok-text="插入" @ok="insertBodyFunction">
+    <a-form layout="vertical">
+      <a-form-item label="函数" required><a-select v-model:value="bodyFunctionName" :options="bodyFunctionOptions" /></a-form-item>
+      <a-form-item label="参数来源" extra="以 $. 开头引用当前请求体字段；多个参数用英文逗号分隔">
+        <a-input v-model:value="bodyFunctionArgs" placeholder="$.Transaction.Header.sysHeader.clientCd" />
+      </a-form-item>
+      <code>{{ bodyFunctionPreview }}</code>
+    </a-form>
+  </a-modal>
 </template>
 
 <script setup lang="ts">
@@ -717,7 +741,7 @@ import {
 } from '@case-forge/shared';
 import type { ApiCaseRequest } from '@case-forge/shared';
 import type { ApiTestCaseRow, DebugRunResult } from '@/api/apiTestClient';
-import { batchPatchApiCaseRequest, listAllApiCases, debugRunCase, generateAssertions, getAssertionGenerateStatus, getAssertionGenerateResult } from '@/api/apiTestClient';
+import { batchPatchApiCaseRequest, listAllApiCases, listDataFunctions, debugRunCase, generateAssertions, getAssertionGenerateStatus, getAssertionGenerateResult } from '@/api/apiTestClient';
 import { useApiTestStore } from '@/stores/apiTest';
 import KeyValueRowsEditor from '@/components/api-test/KeyValueRowsEditor.vue';
 import AssertionRowsEditor from '@/components/api-test/AssertionRowsEditor.vue';
@@ -761,6 +785,39 @@ function onPayloadTextareaPaste(event: Event) {
   });
 }
 
+function currentBodyText() {
+  return form.bodyFormat === 'json' ? form.requestBodyJson : form.bodyFormat === 'xml' ? form.requestBodyXml : form.requestBodyText;
+}
+
+function setCurrentBodyText(value: string) {
+  if (form.bodyFormat === 'json') form.requestBodyJson = value;
+  else if (form.bodyFormat === 'xml') form.requestBodyXml = value;
+  else form.requestBodyText = value;
+}
+
+function rememberBodyCursor(event: Event) {
+  const input = event.target as HTMLTextAreaElement;
+  bodyFunctionCursor.start = input.selectionStart;
+  bodyFunctionCursor.end = input.selectionEnd;
+  hasBodyCursor.value = true;
+}
+
+async function openBodyFunctionInsert() {
+  if (!hasBodyCursor.value) return;
+  const rows = await listDataFunctions(projectId.value);
+  bodyFunctionOptions.value = rows.map((item) => ({ label: item.name, value: item.name }));
+  bodyFunctionName.value ||= bodyFunctionOptions.value[0]?.value ?? '';
+  bodyFunctionInsertOpen.value = true;
+}
+
+function insertBodyFunction() {
+  if (!bodyFunctionName.value) return message.warning('请选择函数');
+  const expression = bodyFunctionPreview.value;
+  const body = currentBodyText();
+  setCurrentBodyText(`${body.slice(0, bodyFunctionCursor.start)}${expression}${body.slice(bodyFunctionCursor.end)}`);
+  bodyFunctionInsertOpen.value = false;
+}
+
 const batchMode = ref(false);
 const batchSaving = ref(false);
 const batchAssertionRunning = ref(false);
@@ -780,6 +837,13 @@ const hasBatchRequestPatch = computed(() => Boolean(
 const envModalOpen = ref(false);
 const exportModalOpen = ref(false);
 const bodyExpandModalOpen = ref(false);
+const bodyFunctionInsertOpen = ref(false);
+const bodyFunctionName = ref('');
+const bodyFunctionArgs = ref('$.Transaction.Header.sysHeader.clientCd');
+const bodyFunctionOptions = ref<Array<{ label: string; value: string }>>([]);
+const bodyFunctionCursor = reactive({ start: 0, end: 0 });
+const hasBodyCursor = ref(false);
+const bodyFunctionPreview = computed(() => `\${${bodyFunctionName.value || '函数名'}(${bodyFunctionArgs.value})}`);
 const moreMenuOpen = ref(false);
 
 const onCaseMoreMenuClick: MenuProps['onClick'] = ({ key }) => {
@@ -1538,6 +1602,7 @@ function patchActiveCaseLastDebugRun(snapshot: ReturnType<typeof toLastDebugRunS
 }
 
 function loadForm(row: ApiTestCaseRow) {
+  hasBodyCursor.value = false;
   const sameCase = loadedCaseId.value === row.id;
   syncingForm.value = true;
   if (!sameCase) {
@@ -3383,6 +3448,7 @@ function onBatchDelete() {
   justify-content: space-between;
   gap: 8px;
 }
+.expand-toolbar-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; }
 
 .case-body-expand-textarea {
   width: 100%;

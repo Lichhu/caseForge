@@ -155,33 +155,6 @@
                 </a-tooltip>
                 <span v-else class="service-cell-text service-cell-empty">—</span>
               </template>
-              <template v-else-if="column.key === 'jdbcUrl'">
-                <a-tooltip v-if="record.jdbcUrl" placement="topLeft" :mouse-enter-delay="0.3">
-                  <template #title>
-                    <span class="service-cell-tooltip">{{ record.jdbcUrl }}</span>
-                  </template>
-                  <span class="service-cell-text">{{ record.jdbcUrl }}</span>
-                </a-tooltip>
-                <span v-else class="service-cell-text service-cell-empty">—</span>
-              </template>
-              <template v-else-if="column.key === 'remoteConnection'">
-                <a-tooltip v-if="record.remoteConnection" placement="topLeft" :mouse-enter-delay="0.3">
-                  <template #title>
-                    <span class="service-cell-tooltip">{{ record.remoteConnection }}</span>
-                  </template>
-                  <span class="service-cell-text">{{ record.remoteConnection }}</span>
-                </a-tooltip>
-                <span v-else class="service-cell-text service-cell-empty">—</span>
-              </template>
-              <template v-else-if="column.key === 'objectStorage'">
-                <a-tooltip v-if="record.objectStorage" placement="topLeft" :mouse-enter-delay="0.3">
-                  <template #title>
-                    <span class="service-cell-tooltip">{{ record.objectStorage }}</span>
-                  </template>
-                  <span class="service-cell-text">{{ record.objectStorage }}</span>
-                </a-tooltip>
-                <span v-else class="service-cell-text service-cell-empty">—</span>
-              </template>
               <template v-else-if="column.key === 'remark'">
                 <a-tooltip v-if="record.remark" placement="topLeft" :mouse-enter-delay="0.3">
                   <template #title>
@@ -295,18 +268,6 @@
           placeholder="http://host:port/path 或 socket2://host:port"
         />
       </a-form-item>
-      <a-form-item label="数据库连接">
-        <a-input
-          v-model:value="serviceForm.jdbcUrl"
-          placeholder="jdbc:oracle:thin:@host:port:sid"
-        />
-      </a-form-item>
-      <a-form-item label="远程连接">
-        <a-input v-model:value="serviceForm.remoteConnection" />
-      </a-form-item>
-      <a-form-item label="对象存储">
-        <a-input v-model:value="serviceForm.objectStorage" />
-      </a-form-item>
       <a-form-item label="备注">
         <a-textarea v-model:value="serviceForm.remark" :rows="2" />
       </a-form-item>
@@ -363,9 +324,6 @@ const envForm = reactive({
 const serviceForm = reactive({
   name: '',
   serverAddress: '',
-  jdbcUrl: '',
-  remoteConnection: '',
-  objectStorage: '',
   remark: '',
 });
 
@@ -380,9 +338,6 @@ const serviceColumns = [
   { title: '#', key: 'index', width: 44, align: 'center' as const },
   { title: '服务名', key: 'name', width: 140, ellipsis: true },
   { title: '服务器地址', key: 'serverAddress', width: 280, ellipsis: true },
-  { title: '数据库连接', key: 'jdbcUrl', width: 260, ellipsis: true },
-  { title: '远程连接', key: 'remoteConnection', width: 120, ellipsis: true },
-  { title: '对象存储', key: 'objectStorage', width: 120, ellipsis: true },
   { title: '备注', key: 'remark', width: 160, ellipsis: true },
   { title: '操作', key: 'actions', width: 168, fixed: 'right' as const },
 ];
@@ -525,9 +480,6 @@ function openServiceCreate() {
   serviceEditingId.value = '';
   serviceForm.name = '';
   serviceForm.serverAddress = '';
-  serviceForm.jdbcUrl = '';
-  serviceForm.remoteConnection = '';
-  serviceForm.objectStorage = '';
   serviceForm.remark = '';
   serviceModalOpen.value = true;
 }
@@ -536,9 +488,6 @@ function openServiceEdit(row: ApiEnvironmentServiceRow) {
   serviceEditingId.value = row.id;
   serviceForm.name = row.name;
   serviceForm.serverAddress = row.serverAddress ?? '';
-  serviceForm.jdbcUrl = row.jdbcUrl ?? '';
-  serviceForm.remoteConnection = row.remoteConnection ?? '';
-  serviceForm.objectStorage = row.objectStorage ?? '';
   serviceForm.remark = row.remark ?? '';
   serviceModalOpen.value = true;
 }
@@ -550,9 +499,6 @@ async function saveService() {
   const payload = {
     name: serviceForm.name.trim(),
     serverAddress: serviceForm.serverAddress.trim(),
-    jdbcUrl: serviceForm.jdbcUrl.trim() || undefined,
-    remoteConnection: serviceForm.remoteConnection.trim() || undefined,
-    objectStorage: serviceForm.objectStorage.trim() || undefined,
     remark: serviceForm.remark.trim() || undefined,
   };
   await apiStore.saveEnvironmentService(

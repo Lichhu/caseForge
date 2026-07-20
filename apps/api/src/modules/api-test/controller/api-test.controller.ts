@@ -57,6 +57,13 @@ import { ListApiCasesDto } from "@api-test/dto/list-api-cases.dto";
 import { ListApiExecutionSetsDto } from "@api-test/dto/list-api-execution-sets.dto";
 import { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
 import { ApiAssertionGenerateQueueService } from "@api-test/service/api-assertion-generate-queue.service";
+import { ApiDataFunctionService } from "@api-test/service/api-data-function.service";
+import {
+  GenerateDataFunctionScriptDto,
+  PreviewDataFunctionDto,
+  SaveDataFunctionDto,
+  SaveDatabaseConnectionDto,
+} from "@api-test/dto/save-data-function.dto";
 
 const UPLOAD_EXTENSIONS = ["xls", "xlsx"];
 
@@ -75,9 +82,101 @@ export class ApiTestController {
     private readonly minio: MinioStorageService,
     private readonly aiWorkflow: AiWorkflowService,
     private readonly assertionGenerateQueueService: ApiAssertionGenerateQueueService,
+    private readonly dataFunctionService: ApiDataFunctionService,
     @InjectRepository(CaseProjectEntity)
     private readonly projectRepo: Repository<CaseProjectEntity>,
   ) {}
+
+  @Get(":projectId/database-connections")
+  listDatabaseConnections(@Param("projectId") projectId: string) {
+    return this.dataFunctionService.listConnections(projectId);
+  }
+  @Post(":projectId/database-connections")
+  createDatabaseConnection(
+    @Param("projectId") projectId: string,
+    @Body() body: SaveDatabaseConnectionDto,
+  ) {
+    return this.dataFunctionService.saveConnection(projectId, body);
+  }
+  @Patch(":projectId/database-connections/:id")
+  updateDatabaseConnection(
+    @Param("projectId") projectId: string,
+    @Param("id") id: string,
+    @Body() body: SaveDatabaseConnectionDto,
+  ) {
+    return this.dataFunctionService.saveConnection(projectId, body, id);
+  }
+  @Delete(":projectId/database-connections/:id")
+  deleteDatabaseConnection(
+    @Param("projectId") projectId: string,
+    @Param("id") id: string,
+  ) {
+    return this.dataFunctionService.deleteConnection(projectId, id);
+  }
+  @Post(":projectId/database-connections/:id/test")
+  testDatabaseConnection(
+    @Param("projectId") projectId: string,
+    @Param("id") id: string,
+  ) {
+    return this.dataFunctionService.testConnection(projectId, id);
+  }
+  @Get(":projectId/database-connections/:id/metadata")
+  getDatabaseMetadata(
+    @Param("projectId") projectId: string,
+    @Param("id") id: string,
+  ) {
+    return this.dataFunctionService.metadata(projectId, id);
+  }
+
+  @Get(":projectId/data-functions")
+  listDataFunctions(@Param("projectId") projectId: string) {
+    return this.dataFunctionService.listFunctions(projectId);
+  }
+  @Post(":projectId/data-functions")
+  createDataFunction(
+    @Param("projectId") projectId: string,
+    @Body() body: SaveDataFunctionDto,
+  ) {
+    return this.dataFunctionService.saveFunction(projectId, body);
+  }
+  @Patch(":projectId/data-functions/:id")
+  updateDataFunction(
+    @Param("projectId") projectId: string,
+    @Param("id") id: string,
+    @Body() body: SaveDataFunctionDto,
+  ) {
+    return this.dataFunctionService.saveFunction(projectId, body, id);
+  }
+  @Delete(":projectId/data-functions/:id")
+  deleteDataFunction(
+    @Param("projectId") projectId: string,
+    @Param("id") id: string,
+  ) {
+    return this.dataFunctionService.deleteFunction(projectId, id);
+  }
+  @Post(":projectId/data-functions/preview")
+  previewDataFunction(
+    @Param("projectId") projectId: string,
+    @Body() body: PreviewDataFunctionDto,
+  ) {
+    return this.dataFunctionService.preview(projectId, body);
+  }
+  @Post(":projectId/data-functions/generate-script")
+  async generateDataFunctionScript(
+    @Body() body: GenerateDataFunctionScriptDto,
+  ) {
+    const syntax = body.language === "javascript"
+      ? `function(${body.params.join(", ")}) { ... }`
+      : `def function(${body.params.join(", ")}):`;
+    const { text } = await this.aiWorkflow.runWithAiChat([
+      `生成一个 ${body.language} 数据处理函数。`,
+      `函数入口必须严格为：${syntax}`,
+      `需求：${body.requirement}`,
+      body.language === "python" ? "可直接使用 datetime 和 random，不要写 import。" : "可使用 JavaScript 标准内置对象。",
+      "只输出完整函数代码，不要 Markdown 代码块、解释或依赖第三方库。",
+    ].join("\n"));
+    return { script: text.trim().replace(/^```\w*\s*|\s*```$/g, "") };
+  }
 
   @Get(":projectId/transactions")
   @ApiOperation({ summary: "列出需求下的交易码" })

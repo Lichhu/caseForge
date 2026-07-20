@@ -1094,3 +1094,147 @@ export function downloadBlob(blob: Blob, fileName: string) {
   anchor.click();
   URL.revokeObjectURL(url);
 }
+
+export interface ApiDatabaseConnectionRow {
+  id: string;
+  name: string;
+  type: string;
+  host: string;
+  port: number;
+  databaseName: string;
+  username: string;
+  readonly: boolean;
+  hasPassword: boolean;
+}
+export interface ApiDatabaseConnectionPayload {
+  name: string;
+  type: string;
+  host: string;
+  port: number;
+  databaseName: string;
+  username: string;
+  password?: string;
+  readonly: boolean;
+}
+export interface ApiDataFunctionRow {
+  id: string;
+  name: string;
+  params: string[];
+  type: "template" | "sql";
+  description: string;
+  config: Record<string, any> & { builtin?: boolean };
+}
+export interface ApiDataFunctionPayload {
+  name: string;
+  params: string[];
+  type: "template" | "sql";
+  config: Record<string, any>;
+  description?: string;
+}
+
+export async function listDatabaseConnections(projectId: string) {
+  return (
+    await http.get<ApiDatabaseConnectionRow[]>(
+      `/api-test/${projectId}/database-connections`,
+    )
+  ).data;
+}
+export async function createDatabaseConnection(
+  projectId: string,
+  payload: ApiDatabaseConnectionPayload,
+) {
+  return (
+    await http.post<ApiDatabaseConnectionRow>(
+      `/api-test/${projectId}/database-connections`,
+      payload,
+    )
+  ).data;
+}
+export async function updateDatabaseConnection(
+  projectId: string,
+  id: string,
+  payload: ApiDatabaseConnectionPayload,
+) {
+  return (
+    await http.patch<ApiDatabaseConnectionRow>(
+      `/api-test/${projectId}/database-connections/${id}`,
+      payload,
+    )
+  ).data;
+}
+export async function deleteDatabaseConnection(projectId: string, id: string) {
+  await http.delete(`/api-test/${projectId}/database-connections/${id}`);
+}
+export async function testDatabaseConnection(projectId: string, id: string) {
+  return (
+    await http.post<{ ok: boolean }>(
+      `/api-test/${projectId}/database-connections/${id}/test`,
+    )
+  ).data;
+}
+export async function getDatabaseMetadata(projectId: string, id: string) {
+  return (
+    await http.get<{
+      tables: string[];
+      columns: Record<
+        string,
+        Array<{ name: string; type: string; nullable: string }>
+      >;
+    }>(`/api-test/${projectId}/database-connections/${id}/metadata`)
+  ).data;
+}
+export async function listDataFunctions(projectId: string) {
+  return (
+    await http.get<ApiDataFunctionRow[]>(
+      `/api-test/${projectId}/data-functions`,
+    )
+  ).data;
+}
+export async function createDataFunction(
+  projectId: string,
+  payload: ApiDataFunctionPayload,
+) {
+  return (
+    await http.post<ApiDataFunctionRow>(
+      `/api-test/${projectId}/data-functions`,
+      payload,
+    )
+  ).data;
+}
+export async function updateDataFunction(
+  projectId: string,
+  id: string,
+  payload: ApiDataFunctionPayload,
+) {
+  return (
+    await http.patch<ApiDataFunctionRow>(
+      `/api-test/${projectId}/data-functions/${id}`,
+      payload,
+    )
+  ).data;
+}
+export async function deleteDataFunction(projectId: string, id: string) {
+  await http.delete(`/api-test/${projectId}/data-functions/${id}`);
+}
+export async function previewDataFunction(
+  projectId: string,
+  payload: ApiDataFunctionPayload & { values: Record<string, unknown> },
+) {
+  return (
+    await http.post<unknown>(
+      `/api-test/${projectId}/data-functions/preview`,
+      payload,
+    )
+  ).data;
+}
+export async function generateDataFunctionScript(
+  projectId: string,
+  payload: { language: "javascript" | "python"; params: string[]; requirement: string },
+) {
+  return (
+    await http.post<{ script: string }>(
+      `/api-test/${projectId}/data-functions/generate-script`,
+      payload,
+    )
+  ).data;
+}
