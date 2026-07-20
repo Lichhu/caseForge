@@ -1,6 +1,11 @@
 /**
  * @file 接口质量测试报告 HTML 模板（参考行内标准报告样式）
  */
+import {
+  looksLikeXml,
+  prettyPrintXml,
+  unescapeLiteralXmlEscapes,
+} from "@case-forge/shared";
 
 export interface ReportAssertionMeta {
   type: string;
@@ -128,6 +133,9 @@ function prettyPayload(value: unknown): string {
   if (value === null || value === undefined || value === "") return "";
   if (typeof value === "string") {
     const trimmed = value.trim();
+    if (looksLikeXml(trimmed)) {
+      return prettyPrintXml(unescapeLiteralXmlEscapes(trimmed));
+    }
     if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
       try {
         return JSON.stringify(JSON.parse(trimmed), null, 4);

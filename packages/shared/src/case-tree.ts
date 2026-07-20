@@ -1034,7 +1034,7 @@ export function countCaseTreeLeaves(node: CaseTreeNode): number {
 }
 
 function cryptoRandomId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
   return `node-${Math.random().toString(36).slice(2, 10)}`;

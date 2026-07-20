@@ -35,6 +35,7 @@ import { computed } from 'vue';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons-vue';
 import type { CaseNodeKind, CaseTreeNode } from '@case-forge/shared';
 import { CASE_NODE_KIND_LABELS } from '@case-forge/shared';
+import { randomUuid } from '@/utils/randomUuid';
 
 const props = defineProps<{
   node: CaseTreeNode;
@@ -52,7 +53,7 @@ const kindLabel = computed(() => CASE_NODE_KIND_LABELS[props.node.kind] || props
 function addChild() {
   props.node.children ||= [];
   props.node.children.push({
-    id: crypto.randomUUID(),
+    id: randomUuid(),
     title: '新节点',
     kind: props.node.kind === 'scenario' ? 'section' : 'scenario',
     children: [],

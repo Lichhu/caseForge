@@ -1,4 +1,9 @@
-import type { ApiAssertion, ApiCaseExpected } from "@case-forge/shared";
+import {
+  looksLikeXml,
+  prettyPrintXml,
+  type ApiAssertion,
+  type ApiCaseExpected,
+} from "@case-forge/shared";
 import {
   runAssertions,
   isAllPassed,
@@ -30,6 +35,17 @@ function runSingle(
   const r = results[0];
   return { passed: r.passed, actual: r.actual, expected: r.expected };
 }
+
+describe("TCP XML display formatting", () => {
+  it("keeps the length prefix and formats the XML body", () => {
+    const body = "00001754<?xml version=\"1.0\"?><root><bizcode>0000</bizcode></root>";
+
+    expect(looksLikeXml(body)).toBe(true);
+    expect(prettyPrintXml(body)).toBe(
+      "00001754\n<?xml version=\"1.0\"?>\n<root>\n\t<bizcode>0000</bizcode>\n</root>\n",
+    );
+  });
+});
 
 describe("runAssertions – empty assertions", () => {
   it("returns explicit failure when no assertions configured", () => {

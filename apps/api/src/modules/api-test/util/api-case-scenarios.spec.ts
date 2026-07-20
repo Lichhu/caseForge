@@ -1,5 +1,6 @@
 import {
   assertScenarioCoverage,
+  buildScenarioPrompts,
   parseScenarioAiResult,
 } from "./api-case-scenarios.util";
 
@@ -79,5 +80,26 @@ describe("assertScenarioCoverage", () => {
         doc,
       ),
     ).toThrow("精度字段");
+  });
+});
+
+describe("buildScenarioPrompts", () => {
+  it("recognizes nonstandard pagination field names", () => {
+    const prompt = buildScenarioPrompts({
+      scenarioKey: "pagination",
+      scenarioName: "页码和页大小",
+      structuredMarkdown: [
+        "请求报文",
+        "----",
+        "节点路径 | 节点代码 | 节点名称 | 节点类型 | 数据类型 | 长度 | 是否必填 | 描述",
+        "Transaction/Body/request/bizBody | size | 查询条数 | 单节点 | VARCHAR2 | 5 | N |",
+        "Transaction/Body/request/bizBody | startSize | 查询开始条数 | 单节点 | VARCHAR2 | 5 | N |",
+      ].join("\n"),
+      transactionCode: "0101",
+      serviceProperty: "query_non_accounting",
+    })[0].prompt;
+
+    expect(prompt).toContain("start/startSize/startIndex/beginRow/offset");
+    expect(prompt).toContain("size+start、size+startSize");
   });
 });

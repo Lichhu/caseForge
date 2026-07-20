@@ -1,7 +1,7 @@
 import type { ApiServiceProperty } from "@case-forge/shared";
 import { extractApiDocSection, getApiDocFieldValue } from "./api-doc.parser";
 
-export const API_CASE_RULE_VERSION = "api-case-rules-v1";
+export const API_CASE_RULE_VERSION = "api-case-rules-v3";
 
 export const API_CASE_SCENARIOS = {
   positive_flow: "正向流程",
@@ -246,7 +246,7 @@ function scenarioRule(key: ApiCaseScenarioKey) {
     case "positive_flow":
       return "生成1条成功正向案例。";
     case "pagination":
-      return "仅当存在页码和页大小字段时适用，生成单页/多页、单条/多条组合案例。";
+      return "按字段代码、中文名称和描述的语义识别分页，不限固定命名：page/pageNo/pageNum、size/pageSize/limit/rowCount/perPage 及名称含“页码/页数/每页/查询条数”的字段；start/startSize/startIndex/beginRow/offset 及名称含“开始条数/起始条数/起始位置/偏移量”的字段。存在页大小加起始位置（如 size+start、size+startSize）也适用；字段语义有歧义时以中文名称和描述为准，不适用时说明具体原因。生成单页/多页、单条/多条组合案例。";
     case "required_fields":
       return "覆盖必填字段缺失异常，并生成全部非必填字段为空的正向案例；忽略参数名称错误。";
     case "related_fields":

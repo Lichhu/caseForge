@@ -740,6 +740,7 @@ import {
   resolveExecutionProfile,
 } from '@case-forge/shared';
 import type { ApiCaseRequest } from '@case-forge/shared';
+import { copyText } from '@/utils/copyText';
 import type { ApiTestCaseRow, DebugRunResult } from '@/api/apiTestClient';
 import { batchPatchApiCaseRequest, listAllApiCases, listDataFunctions, debugRunCase, generateAssertions, getAssertionGenerateStatus, getAssertionGenerateResult } from '@/api/apiTestClient';
 import { useApiTestStore } from '@/stores/apiTest';
@@ -760,6 +761,7 @@ import {
   createEmptyKeyValueRow,
   defaultContentType,
   defaultEditorState,
+  formatRunSnapshotField,
   httpMethodHasBody,
   HTTP_METHODS,
   mergeRequestFromEditor,
@@ -879,12 +881,7 @@ const assertionGenerateError = ref('');
 const debugResultBodyText = computed(() => {
   const body = debugResult.value?.body;
   if (body === undefined || body === null) return '无响应体';
-  if (typeof body === 'string') return body;
-  try {
-    return JSON.stringify(body, null, 2);
-  } catch {
-    return String(body);
-  }
+  return formatRunSnapshotField(body);
 });
 
 function activeCaseKey() {
@@ -988,7 +985,7 @@ const curlCommand = computed(() => {
 });
 
 async function copyCurlCommand() {
-  await navigator.clipboard.writeText(curlCommand.value);
+  await copyText(curlCommand.value);
   message.success('cURL 已复制');
 }
 

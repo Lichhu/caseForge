@@ -388,6 +388,7 @@ import {
   beautifyCasePayloadJson,
   beautifyRequestBodyXml,
 } from '@/utils/casePayloadFormat.util';
+import { randomUuid } from '@/utils/randomUuid';
 import { listDataFunctions } from '@/api/apiTestClient';
 
 const tableScrollRef = ref<HTMLElement | null>(null);
@@ -878,7 +879,7 @@ async function onGenerate() {
 }
 
 function addChannel() {
-  generationProfile.channels.push({ id: crypto.randomUUID(), name: '', clientCd: '', serviceCd: '' });
+  generationProfile.channels.push({ id: randomUuid(), name: '', clientCd: '', serviceCd: '' });
 }
 
 async function importChannels(file: File) {
@@ -888,7 +889,7 @@ async function importChannels(file: File) {
     if (!sheet) throw new Error('文件中没有工作表');
     const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
     const imported = rows.map((row) => ({
-      id: crypto.randomUUID(),
+      id: randomUuid(),
       name: String(row['渠道名称'] ?? row.name ?? row.channelName ?? '').trim(),
       clientCd: String(row.clientCd ?? row['客户端代码'] ?? '').trim(),
       serviceCd: String(row.serviceCd ?? row['服务代码'] ?? '').trim(),

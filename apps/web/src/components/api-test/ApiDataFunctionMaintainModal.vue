@@ -222,6 +222,8 @@
 </template>
 
 <script setup lang="ts">
+import { randomUuid } from '@/utils/randomUuid';
+import { copyText } from '@/utils/copyText';
 import { computed, reactive, ref, watch } from 'vue';
 import {
   ArrowDownOutlined,
@@ -394,7 +396,7 @@ async function loadSqlMetadata() {
 
 function makeFunction(patch: Partial<DataFunctionDraft> = {}): DataFunctionDraft {
   return {
-    id: crypto.randomUUID(),
+    id: randomUuid(),
     name: '',
     params: '',
     type: 'template',
@@ -423,7 +425,7 @@ function typeLabel(type: FunctionType) {
 }
 
 async function copyUsage() {
-  await navigator.clipboard.writeText(usageExpression.value);
+  await copyText(usageExpression.value);
   message.success('已复制，可粘贴到示例报文');
 }
 
@@ -508,7 +510,7 @@ function addParameter() {
 
 function addSqlCondition() {
   sqlConditions.push({
-    id: crypto.randomUUID(),
+    id: randomUuid(),
     field: sqlFieldOptions.value[0]?.value ?? '',
     operator: '=',
     source: 'param',
@@ -568,7 +570,7 @@ function uniqueParameterName(base: string) {
 }
 
 function makePart(kind: FormulaPartKind = 'text', value = ''): FormulaPart {
-  return { id: crypto.randomUUID(), operator: 'concat', kind, value, length: 4 };
+  return { id: randomUuid(), operator: 'concat', kind, value, length: 4 };
 }
 
 function addPart() {
@@ -589,7 +591,7 @@ function insertPart(index: number) {
 }
 
 function copyPart(index: number) {
-  const part = { ...form.parts[index], id: crypto.randomUUID() };
+  const part = { ...form.parts[index], id: randomUuid() };
   form.parts.splice(index + 1, 0, part);
   selectedPartId.value = part.id;
 }
@@ -667,7 +669,7 @@ function resolvePart(part: FormulaPart, values: Map<string, string>) {
   if (part.kind === 'param') return values.get(part.value) ?? '';
   if (part.kind === 'time') return formatPreviewTime(part.value);
   if (part.kind === 'random') return randomDigits(part.length);
-  if (part.kind === 'uuid') return crypto.randomUUID();
+  if (part.kind === 'uuid') return randomUuid();
   return part.value;
 }
 
