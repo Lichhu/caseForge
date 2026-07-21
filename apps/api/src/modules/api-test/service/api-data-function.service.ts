@@ -5,6 +5,7 @@ import {
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { createPool } from "mysql2/promise";
+import { createRequire } from "node:module";
 import { randomInt, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { DOMParser } from "@xmldom/xmldom";
@@ -32,13 +33,78 @@ type FormulaPart = {
   value?: string;
   length?: number;
 };
+type DbPool = {
+  query: (sql: any, params?: any[]) => Promise<any>;
+  end: () => Promise<void>;
+};
+const nodeRequire = createRequire(__filename);
 
 const BUILTIN_FUNCTIONS = [
-  { name: "DATE_YYYYMMDD", parts: [{ id: "builtin-date", operator: "concat", kind: "time", value: "yyyyMMdd", length: 4 }], description: "当前日期 yyyyMMdd" },
-  { name: "DATETIME_YYYYMMDDHHMMSS", parts: [{ id: "builtin-datetime", operator: "concat", kind: "time", value: "yyyyMMddHHmmss", length: 4 }], description: "当前日期时间 yyyyMMddHHmmss" },
-  { name: "TIMESTAMP_MS", parts: [{ id: "builtin-timestamp", operator: "concat", kind: "time", value: "ms", length: 4 }], description: "当前毫秒时间戳" },
-  { name: "UUID", parts: [{ id: "builtin-uuid", operator: "concat", kind: "uuid", value: "", length: 4 }], description: "UUID v4" },
-  { name: "RANDOM_4", parts: [{ id: "builtin-random", operator: "concat", kind: "random", value: "", length: 4 }], description: "四位随机数字" },
+  {
+    name: "DATE_YYYYMMDD",
+    parts: [
+      {
+        id: "builtin-date",
+        operator: "concat",
+        kind: "time",
+        value: "yyyyMMdd",
+        length: 4,
+      },
+    ],
+    description: "当前日期 yyyyMMdd",
+  },
+  {
+    name: "DATETIME_YYYYMMDDHHMMSS",
+    parts: [
+      {
+        id: "builtin-datetime",
+        operator: "concat",
+        kind: "time",
+        value: "yyyyMMddHHmmss",
+        length: 4,
+      },
+    ],
+    description: "当前日期时间 yyyyMMddHHmmss",
+  },
+  {
+    name: "TIMESTAMP_MS",
+    parts: [
+      {
+        id: "builtin-timestamp",
+        operator: "concat",
+        kind: "time",
+        value: "ms",
+        length: 4,
+      },
+    ],
+    description: "当前毫秒时间戳",
+  },
+  {
+    name: "UUID",
+    parts: [
+      {
+        id: "builtin-uuid",
+        operator: "concat",
+        kind: "uuid",
+        value: "",
+        length: 4,
+      },
+    ],
+    description: "UUID v4",
+  },
+  {
+    name: "RANDOM_4",
+    parts: [
+      {
+        id: "builtin-random",
+        operator: "concat",
+        kind: "random",
+        value: "",
+        length: 4,
+      },
+    ],
+    description: "四位随机数字",
+  },
 ] as const;
 
 @Injectable()
@@ -50,10 +116,11 @@ export class ApiDataFunctionService {
     private readonly functionRepo: Repository<ApiDataFunctionEntity>,
   ) {}
 
-  listConnections(projectId: string) {
-    return this.connectionRepo
-      .find({ where: { projectId }, order: { updatedAt: "DESC" } })
-      .then((rows) => rows.map((row) => this.publicConnection(row)));
+  async listConnections(_projectId: string) {
+    const rows = await this.connectionRepo.find({
+      order: { updatedAt: "DESC" },
+    });
+    return this.uniqueByName(rows).map((row) => this.publicConnection(row));
   }
   async saveConnection(
     projectId: string,
@@ -61,7 +128,7 @@ export class ApiDataFunctionService {
     id?: string,
   ) {
     const row = id
-      ? await this.requireConnection(projectId, id)
+      ? await this.requireConnection(id)
       : this.connectionRepo.create({ projectId, ...auditFieldsForCreate() });
     Object.assign(row, {
       name: body.name.trim(),
@@ -78,36 +145,47 @@ export class ApiDataFunctionService {
     return this.publicConnection(await this.connectionRepo.save(row));
   }
   async deleteConnection(projectId: string, id: string) {
-    await this.requireConnection(projectId, id);
-    await this.connectionRepo.delete({ projectId, id });
+    await this.requireConnection(id);
+    await this.connectionRepo.delete({ id });
     return { ok: true };
   }
   async testConnection(projectId: string, id: string) {
-    const pool = await this.pool(await this.requireConnection(projectId, id));
+    const row = await this.requireConnection(id);
+    const pool = await this.pool(row);
     try {
-      await pool.query("SELECT 1");
+      await pool.query(this.testSql(row.type));
       return { ok: true };
     } finally {
       await pool.end();
     }
   }
   async metadata(projectId: string, id: string) {
-    const row = await this.requireConnection(projectId, id);
+    const row = await this.requireConnection(id);
     const pool = await this.pool(row);
     try {
-      const [tables] = await pool.query<any[]>(
+      const [tables] = await pool.query(
         "SELECT TABLE_NAME name FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME",
         [row.databaseName],
       );
-      const [columns] = await pool.query<any[]>(
+      const [columns] = await pool.query(
         "SELECT TABLE_NAME tableName, COLUMN_NAME name, COLUMN_TYPE type, IS_NULLABLE nullable FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, ORDINAL_POSITION",
         [row.databaseName],
       );
-      const grouped = columns.reduce<Record<string, any[]>>((result, item) => {
-        (result[item.tableName] ??= []).push(item);
-        return result;
-      }, {});
-      return { tables: tables.map((item) => item.name), columns: grouped };
+      const tableRows = tables as Array<{ name: string }>;
+      const columnRows = columns as Array<{
+        tableName: string;
+        name: string;
+        type: string;
+        nullable: string;
+      }>;
+      const grouped = columnRows.reduce<Record<string, any[]>>(
+        (result, item) => {
+          (result[item.tableName] ??= []).push(item);
+          return result;
+        },
+        {},
+      );
+      return { tables: tableRows.map((item) => item.name), columns: grouped };
     } finally {
       await pool.end();
     }
@@ -115,11 +193,13 @@ export class ApiDataFunctionService {
 
   async listFunctions(projectId: string) {
     const rows = await this.functionRepo.find({
-      where: { projectId },
       order: { updatedAt: "DESC" },
     });
-    const names = new Set(rows.map((row) => row.name));
-    const missing = BUILTIN_FUNCTIONS.filter((item) => !names.has(item.name)).map((item) =>
+    const publicRows = this.uniqueByName(rows);
+    const names = new Set(publicRows.map((row) => row.name));
+    const missing = BUILTIN_FUNCTIONS.filter(
+      (item) => !names.has(item.name),
+    ).map((item) =>
       this.functionRepo.create({
         projectId,
         name: item.name,
@@ -130,7 +210,9 @@ export class ApiDataFunctionService {
         ...auditFieldsForCreate(),
       }),
     );
-    return missing.length ? [...rows, ...(await this.functionRepo.save(missing))] : rows;
+    return missing.length
+      ? [...publicRows, ...(await this.functionRepo.save(missing))]
+      : publicRows;
   }
   async saveFunction(
     projectId: string,
@@ -138,9 +220,10 @@ export class ApiDataFunctionService {
     id?: string,
   ) {
     const row = id
-      ? await this.requireFunction(projectId, id)
+      ? await this.requireFunction(id)
       : this.functionRepo.create({ projectId, ...auditFieldsForCreate() });
-    if (id && row.config.builtin) throw new BadRequestException("内置函数不可修改");
+    if (id && row.config.builtin)
+      throw new BadRequestException("内置函数不可修改");
     Object.assign(row, {
       name: body.name.trim().toUpperCase(),
       params: body.params,
@@ -152,9 +235,9 @@ export class ApiDataFunctionService {
     return this.functionRepo.save(row);
   }
   async deleteFunction(projectId: string, id: string) {
-    const row = await this.requireFunction(projectId, id);
+    const row = await this.requireFunction(id);
     if (row.config.builtin) throw new BadRequestException("内置函数不可删除");
-    await this.functionRepo.delete({ projectId, id });
+    await this.functionRepo.delete({ id });
     return { ok: true };
   }
   preview(projectId: string, body: PreviewDataFunctionDto) {
@@ -162,7 +245,8 @@ export class ApiDataFunctionService {
   }
 
   async resolveDeep(projectId: string, value: unknown): Promise<unknown> {
-    const functions = await this.functionRepo.find({ where: { projectId } });
+    const rows = await this.functionRepo.find({ order: { updatedAt: "DESC" } });
+    const functions = this.uniqueByName(rows);
     const walk = async (item: unknown): Promise<unknown> => {
       if (typeof item === "string")
         return this.resolveText(projectId, item, functions, value);
@@ -281,20 +365,29 @@ export class ApiDataFunctionService {
           ? "JavaScript 必须使用 function(参数) { ... }"
           : "Python 必须使用 def function(参数):",
       );
-    if (language === "python" && /^\s*(?:from\s+\S+\s+import|import\s+)/m.test(source))
-      throw new BadRequestException("Python 脚本不允许 import；可直接使用 datetime 和 random");
+    if (
+      language === "python" &&
+      /^\s*(?:from\s+\S+\s+import|import\s+)/m.test(source)
+    )
+      throw new BadRequestException(
+        "Python 脚本不允许 import；可直接使用 datetime 和 random",
+      );
     const runner =
       language === "javascript"
         ? `[s,a]=JSON.parse(process.argv[1]);const f=eval('('+s+')');Promise.resolve(f(...a)).then(v=>process.stdout.write(JSON.stringify(v)))`
-      : `import json,sys,random,importlib,types\nfrom datetime import datetime as dt\ndef limited_import(name,*_):\n    if name in {"_strptime","time","locale","re","calendar"}: return importlib.import_module(name)\n    raise ImportError("import is not allowed")\ns,a=json.loads(sys.argv[1])\nb={}\ndatetime=types.SimpleNamespace(datetime=dt,now=dt.now)\nexec(s,{"__builtins__":{"str":str,"int":int,"float":float,"bool":bool,"len":len,"range":range,"min":min,"max":max,"sum":sum,"__import__":limited_import},"datetime":datetime,"random":random},b)\nprint(json.dumps(b["function"](*a),ensure_ascii=False))`;
+        : `import json,sys,random,importlib,types\nfrom datetime import datetime as dt\ndef limited_import(name,*_):\n    if name in {"_strptime","time","locale","re","calendar"}: return importlib.import_module(name)\n    raise ImportError("import is not allowed")\ns,a=json.loads(sys.argv[1])\nb={}\ndatetime=types.SimpleNamespace(datetime=dt,now=dt.now)\nexec(s,{"__builtins__":{"str":str,"int":int,"float":float,"bool":bool,"len":len,"range":range,"min":min,"max":max,"sum":sum,"__import__":limited_import},"datetime":datetime,"random":random},b)\nprint(json.dumps(b["function"](*a),ensure_ascii=False))`;
     const command = language === "javascript" ? process.execPath : "python3";
-    const commandArgs = language === "javascript"
-      ? ["--permission", "-e", runner, JSON.stringify([source, args])]
-      : ["-I", "-S", "-c", runner, JSON.stringify([source, args])];
+    const commandArgs =
+      language === "javascript"
+        ? ["--permission", "-e", runner, JSON.stringify([source, args])]
+        : ["-I", "-S", "-c", runner, JSON.stringify([source, args])];
     return new Promise((resolve, reject) => {
       const child = spawn(command, commandArgs, {
         stdio: ["ignore", "pipe", "pipe"],
-        env: { PATH: process.env.PATH ?? "", LANG: process.env.LANG ?? "C.UTF-8" },
+        env: {
+          PATH: process.env.PATH ?? "",
+          LANG: process.env.LANG ?? "C.UTF-8",
+        },
       });
       let output = "";
       let error = "";
@@ -333,7 +426,6 @@ export class ApiDataFunctionService {
     values: Record<string, unknown>,
   ) {
     const connection = await this.requireConnection(
-      projectId,
       String(config.connectionId ?? ""),
     );
     let sql = String(config.sql ?? "").trim();
@@ -356,13 +448,20 @@ export class ApiDataFunctionService {
       params.push(bindings[name]);
       return "?";
     });
-    if (!/\blimit\s+\d+/i.test(sql)) sql += " LIMIT 20";
+    sql = sql.replace(
+      /\s+(?:limit\s+\d+(?:\s*,\s*\d+)?|fetch\s+first\s+\d+\s+rows?\s+only)\s*;?\s*$/i,
+      "",
+    );
+    sql += ["Oracle", "OceanBase-Oracle", "DM8"].includes(connection.type)
+      ? " FETCH FIRST 1 ROWS ONLY"
+      : " LIMIT 1";
     const pool = await this.pool(connection);
     try {
-      const [rows] = await pool.query<any[]>({ sql, timeout: 10000 }, params);
+      const [rows] = await pool.query({ sql, timeout: 10000 }, params);
       const first = rows[0];
       const field = String(config.returnField ?? "");
-      return field ? (first?.[field] ?? "") : (first ?? "");
+      if (field) return first?.[field] ?? "";
+      return first ?? "";
     } finally {
       await pool.end();
     }
@@ -375,53 +474,158 @@ export class ApiDataFunctionService {
   }
   private requestValue(request: unknown, path: string): unknown {
     const parts = path.slice(2).split(".").filter(Boolean);
-    const body = request && typeof request === "object" && "body" in request
-      ? (request as { body: unknown }).body
-      : request;
+    const body =
+      request && typeof request === "object" && "body" in request
+        ? (request as { body: unknown }).body
+        : request;
     let value: unknown = body;
     if (typeof body === "string") {
       const source = body.trim();
       if (source.startsWith("{") || source.startsWith("[")) {
-        try { value = JSON.parse(source); } catch { throw new BadRequestException("函数参数引用的请求体不是有效 JSON"); }
+        try {
+          value = JSON.parse(source);
+        } catch {
+          throw new BadRequestException("函数参数引用的请求体不是有效 JSON");
+        }
       } else if (source.startsWith("<")) {
         const doc = new DOMParser().parseFromString(source, "text/xml");
         let node: any = doc.documentElement;
         for (const part of parts[0] === node.nodeName ? parts.slice(1) : parts)
-          node = Array.from(node?.childNodes ?? []).find((child: any) => child.nodeType === 1 && child.nodeName === part);
+          node = Array.from(node?.childNodes ?? []).find(
+            (child: any) => child.nodeType === 1 && child.nodeName === part,
+          );
         if (!node) throw new BadRequestException(`请求体路径 ${path} 不存在`);
         return node.textContent;
       }
     }
     for (const part of parts)
-      value = value && typeof value === "object" ? (value as Record<string, unknown>)[part] : undefined;
-    if (value === undefined) throw new BadRequestException(`请求体路径 ${path} 不存在`);
+      value =
+        value && typeof value === "object"
+          ? (value as Record<string, unknown>)[part]
+          : undefined;
+    if (value === undefined)
+      throw new BadRequestException(`请求体路径 ${path} 不存在`);
     return value;
   }
   private async pool(row: ApiDatabaseConnectionEntity) {
-    if (!["MySQL", "TiDB", "OceanBase"].includes(row.type))
-      throw new BadRequestException(`${row.type} 驱动尚未配置`);
     const password = decryptSecrets(row.passwordEncrypted).password ?? "";
-    return createPool({
-      host: row.host,
-      port: row.port,
-      database: row.databaseName,
-      user: row.username,
-      password,
-      connectionLimit: 1,
-      connectTimeout: 5000,
-    });
+    if (
+      [
+        "MariaDB",
+        "MySQL",
+        "TiDB",
+        "OceanBase-MySQL",
+        "GoldenDB",
+        "GaussDB-MySQL",
+      ].includes(row.type)
+    )
+      return createPool({
+        host: row.host,
+        port: row.port,
+        database: row.databaseName,
+        user: row.username,
+        password,
+        connectionLimit: 1,
+        connectTimeout: 5000,
+      }) as unknown as DbPool;
+    if (["PostgreSQL", "KingbaseES", "GaussDB"].includes(row.type)) {
+      const { Pool } = nodeRequire("pg");
+      const pool = new Pool({
+        host: row.host,
+        port: row.port,
+        database: row.databaseName,
+        user: row.username,
+        password,
+        max: 1,
+        connectionTimeoutMillis: 5000,
+      });
+      return {
+        query: async (input: any, params: unknown[] = []) => {
+          const sql = typeof input === "string" ? input : input.sql;
+          let index = 0;
+          const result = await pool.query(
+            sql.replace(/\?/g, () => `$${++index}`),
+            params,
+          );
+          return [result.rows, result.fields];
+        },
+        end: () => pool.end(),
+      } satisfies DbPool;
+    }
+    if (["Oracle", "OceanBase-Oracle"].includes(row.type)) {
+      const oracledb = nodeRequire("oracledb");
+      const conn = await oracledb.getConnection({
+        user: row.username,
+        password,
+        connectString: `${row.host}:${row.port}/${row.databaseName}`,
+      });
+      return {
+        query: async (input: any, params: unknown[] = []) => {
+          const sql = typeof input === "string" ? input : input.sql;
+          let index = 0;
+          const result = await conn.execute(
+            sql.replace(/\?/g, () => `:${++index}`),
+            params,
+            { outFormat: oracledb.OUT_FORMAT_OBJECT },
+          );
+          return [result.rows ?? [], result.metaData ?? []];
+        },
+        end: () => conn.close(),
+      } satisfies DbPool;
+    }
+    if (row.type === "DM8") {
+      const dmdb = nodeRequire("dmdb");
+      const pool = dmdb.createPool({
+        connectString: `dm://${encodeURIComponent(row.username)}:${encodeURIComponent(password)}@${row.host}:${row.port}`,
+        poolMax: 1,
+        poolMin: 1,
+      });
+      const conn = await pool.getConnection();
+      return {
+        query: async (input: any, params: unknown[] = []) => {
+          const sql = typeof input === "string" ? input : input.sql;
+          let index = 0;
+          const result = await conn.execute(
+            sql.replace(/\?/g, () => `:${++index}`),
+            params.map((val) => ({ val })),
+          );
+          return [result.rows ?? [], result.metaData ?? []];
+        },
+        end: async () => {
+          await conn.close();
+          await pool.close();
+        },
+      } satisfies DbPool;
+    }
+    throw new BadRequestException(`${row.type} 驱动尚未配置`);
+  }
+  private testSql(type: string) {
+    return ["Oracle", "OceanBase-Oracle"].includes(type)
+      ? "SELECT 1 FROM DUAL"
+      : "SELECT 1";
   }
   private publicConnection(row: ApiDatabaseConnectionEntity) {
     const { passwordEncrypted, ...publicRow } = row;
     return { ...publicRow, hasPassword: Boolean(passwordEncrypted) };
   }
-  private async requireConnection(projectId: string, id: string) {
-    const row = await this.connectionRepo.findOne({ where: { projectId, id } });
+  private uniqueByName<T extends { name: string }>(rows: T[]) {
+    return [
+      ...rows
+        .reduce(
+          (result, row) =>
+            result.has(row.name) ? result : result.set(row.name, row),
+          new Map<string, T>(),
+        )
+        .values(),
+    ];
+  }
+  private async requireConnection(id: string) {
+    const row = await this.connectionRepo.findOne({ where: { id } });
     if (!row) throw new NotFoundException("数据库连接不存在");
     return row;
   }
-  private async requireFunction(projectId: string, id: string) {
-    const row = await this.functionRepo.findOne({ where: { projectId, id } });
+  private async requireFunction(id: string) {
+    const row = await this.functionRepo.findOne({ where: { id } });
     if (!row) throw new NotFoundException("数据函数不存在");
     return row;
   }

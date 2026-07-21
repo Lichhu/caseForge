@@ -223,6 +223,24 @@
                     </span>
                   </template>
                   <template v-else-if="column.key === 'actions'">
+                    <a-button
+                      size="small"
+                      type="text"
+                      :disabled="linkedSetCases[0]?.id === record.id"
+                      title="上移"
+                      @click="moveLinkedCase(record.id, -1)"
+                    >
+                      <ArrowUpOutlined />
+                    </a-button>
+                    <a-button
+                      size="small"
+                      type="text"
+                      :disabled="linkedSetCases[linkedSetCases.length - 1]?.id === record.id"
+                      title="下移"
+                      @click="moveLinkedCase(record.id, 1)"
+                    >
+                      <ArrowDownOutlined />
+                    </a-button>
                     <a-button size="small" danger type="link" @click="removeLinkedCase(record.id)">
                       移除
                     </a-button>
@@ -340,6 +358,20 @@
                             </template>
                             <template v-else-if="column.key === 'durationMs'">
                               <span class="exec-run-duration">{{ formatDuration(record.durationMs) }}</span>
+                            </template>
+                            <template v-else-if="column.key === 'actions'">
+                              <span class="exec-run-item-actions">
+                                <a-tooltip title="重新执行">
+                                  <a-button type="text" size="small" :loading="rerunningItemId === record.id" @click.stop="onRerunItem(item.id, record.caseId)">
+                                    <template #icon><RedoOutlined /></template>
+                                  </a-button>
+                                </a-tooltip>
+                                <a-tooltip title="打开案例编辑">
+                                  <a-button type="text" size="small" @click.stop="openRunCase(record.caseId)">
+                                    <template #icon><EditOutlined /></template>
+                                  </a-button>
+                                </a-tooltip>
+                              </span>
                             </template>
                           </template>
                           <template #expandedRowRender="{ record }">
@@ -568,8 +600,11 @@
 import { computed, ref, watch } from 'vue';
 import { message, Modal } from 'ant-design-vue';
 import {
+  ArrowDownOutlined,
+  ArrowUpOutlined,
   DeleteOutlined,
   DownOutlined,
+  EditOutlined,
   InboxOutlined,
   InfoCircleOutlined,
   PlayCircleOutlined,
@@ -607,6 +642,7 @@ const selectedSetIds = ref<string[]>([]);
 const expandedKeys = ref<string[]>([]);
 const expandedRunId = ref<string | null>(null);
 const rerunningRunId = ref<string | null>(null);
+const rerunningItemId = ref<string | null>(null);
 const deletingRunId = ref<string | null>(null);
 const runDetailLoading = ref(false);
 const manageCasesList = ref<ApiTestCaseRow[]>([]);
@@ -733,6 +769,7 @@ const itemColumns = [
   },
   { title: '状态', dataIndex: 'status', key: 'status', width: 96 },
   { title: '耗时', dataIndex: 'durationMs', key: 'durationMs', width: 88, align: 'right' as const },
+  { title: '操作', key: 'actions', width: 96, align: 'center' as const },
 ];
 
 const linkedCaseColumns = [
@@ -752,7 +789,7 @@ const linkedCaseColumns = [
     customCell: () => ({ class: 'exec-linked-profile-cell' }),
   },
   { title: '方向', key: 'polarity', width: 64, align: 'center' as const },
-  { title: '操作', key: 'actions', width: 72, align: 'center' as const },
+  { title: '操作', key: 'actions', width: 132, align: 'center' as const },
 ];
 
 const assertionColumns = [
@@ -1206,6 +1243,18 @@ function removeLinkedCase(caseId: string) {
   });
 }
 
+async function moveLinkedCase(caseId: string, offset: -1 | 1) {
+  const projectId = apiStore.activeProjectId;
+  const transactionId = apiStore.activeTransactionId;
+  const setId = apiStore.activeExecutionSetId;
+  const caseIds = [...(activeSet.value?.caseIds ?? [])];
+  const index = caseIds.indexOf(caseId);
+  const target = index + offset;
+  if (!projectId || !transactionId || !setId || index < 0 || target < 0 || target >= caseIds.length) return;
+  [caseIds[index], caseIds[target]] = [caseIds[target], caseIds[index]];
+  await apiStore.replaceExecutionSetCases(projectId, transactionId, setId, caseIds);
+}
+
 function onDeleteSet() {
   const projectId = apiStore.activeProjectId;
   const transactionId = apiStore.activeTransactionId;
@@ -1287,6 +1336,45 @@ async function onRerunHistoryAsync(runId: string) {
   } finally {
     rerunningRunId.value = null;
   }
+}
+
+async function onRerunItem(runId: string, caseId: string) {
+  const projectId = apiStore.activeProjectId;
+  const transactionId = apiStore.activeTransactionId;
+  if (!projectId || !transactionId) return message.warning('缺少项目或交易码信息');
+  if (apiStore.running) return message.warning('当前已有执行任务进行中');
+  rerunningItemId.value = caseId;
+  try {
+    await apiStore.rerunHistoricalRun(projectId, transactionId, runId, {
+      executionSetId: apiStore.activeExecutionSetId || undefined,
+      caseIds: [caseId],
+    });
+  } finally {
+    rerunningItemId.value = null;
+  }
+}
+
+async function openRunCase(caseId: string) {
+  const projectId = apiStore.activeProjectId;
+  const transactionId = apiStore.activeTransactionId;
+  if (!projectId || !transactionId) return;
+  const target = apiStore.runnerCases.find((item) => item.id === caseId);
+  const versionCode = target?.metadata?.versionCode ?? null;
+  const channelId = target?.metadata?.channelId ?? null;
+  const cases = await listAllApiCases(projectId, transactionId, {
+    versionCode: versionCode ?? undefined,
+    channelId: channelId ?? undefined,
+  });
+  const index = cases.findIndex((item) => item.id === caseId);
+  apiStore.caseListVersionFilter = versionCode;
+  apiStore.caseListChannelFilter = channelId;
+  apiStore.setWorkspaceStage(projectId, transactionId, 'api-cases');
+  await apiStore.refreshCases(projectId, transactionId, {
+    page: index < 0 ? 1 : Math.floor(index / apiStore.caseListPageSize) + 1,
+    versionCode: versionCode ?? undefined,
+    channelId: channelId ?? undefined,
+  });
+  apiStore.activeCaseId = caseId;
 }
 
 function onDeleteHistory(runId: string) {

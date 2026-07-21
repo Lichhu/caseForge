@@ -122,6 +122,17 @@
                   </a-tag>
                 </div>
               </div>
+              <a-button
+                v-if="!batchMode"
+                class="case-card-copy-button"
+                type="text"
+                size="small"
+                title="复制"
+                :loading="copying && apiStore.activeCaseId === item.id"
+                @click.stop="copyCase(item.id)"
+              >
+                <template #icon><CopyOutlined /></template>
+              </a-button>
               <span class="polarity-pill" :class="item.polarity">
                 {{ item.polarity === 'negative' ? '反' : '正' }}
               </span>
@@ -704,11 +715,11 @@
       :transaction-id="transactionId"
     />
   </section>
-  <a-modal v-model:open="bodyFunctionInsertOpen" title="插入数据函数" ok-text="插入" @ok="insertBodyFunction">
+  <a-modal v-model:open="bodyFunctionInsertOpen" title="插入数据函数" :z-index="NESTED_OVERLAY_Z_INDEX" ok-text="插入" @ok="insertBodyFunction">
     <a-form layout="vertical">
-      <a-form-item label="函数" required><a-select v-model:value="bodyFunctionName" :options="bodyFunctionOptions" /></a-form-item>
-      <a-form-item label="参数来源" extra="以 $. 开头引用当前请求体字段；多个参数用英文逗号分隔">
-        <a-input v-model:value="bodyFunctionArgs" placeholder="$.Transaction.Header.sysHeader.clientCd" />
+      <a-form-item label="函数" required><a-select v-model:value="bodyFunctionName" :options="bodyFunctionOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }" show-search /></a-form-item>
+      <a-form-item v-if="selectedBodyFunction?.type !== 'sql'" label="参数来源" extra="以 $. 开头引用当前请求体字段；多个参数用英文逗号分隔">
+        <a-auto-complete v-model:value="bodyFunctionArgs" :options="bodyPathOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }" filter-option placeholder="$.Transaction.Header.sysHeader.clientCd" />
       </a-form-item>
       <code>{{ bodyFunctionPreview }}</code>
     </a-form>
@@ -748,7 +759,7 @@ import KeyValueRowsEditor from '@/components/api-test/KeyValueRowsEditor.vue';
 import AssertionRowsEditor from '@/components/api-test/AssertionRowsEditor.vue';
 import ApiEnvironmentMaintainModal from '@/components/api-test/ApiEnvironmentMaintainModal.vue';
 import ApiCaseExportModal from '@/components/api-test/ApiCaseExportModal.vue';
-import { IMMERSIVE_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
+import { IMMERSIVE_OVERLAY_Z_INDEX, NESTED_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import {
   assertionsToRows,
   buildExpectedFromRows,
@@ -773,8 +784,10 @@ import {
   type KeyValueRow,
   type SocketRequestMeta,
 } from '@/utils/casePayloadFormat.util';
+import { messagePathOptions } from '@/utils/messagePathOptions';
 
 const apiStore = useApiTestStore();
+const popupContainer = () => document.body;
 
 /** 清除 resize / 旧版动态高度残留的内联样式，粘贴后回到顶部 */
 function onPayloadTextareaPaste(event: Event) {
@@ -807,6 +820,7 @@ function rememberBodyCursor(event: Event) {
 async function openBodyFunctionInsert() {
   if (!hasBodyCursor.value) return;
   const rows = await listDataFunctions(projectId.value);
+  bodyFunctions.value = rows;
   bodyFunctionOptions.value = rows.map((item) => ({ label: item.name, value: item.name }));
   bodyFunctionName.value ||= bodyFunctionOptions.value[0]?.value ?? '';
   bodyFunctionInsertOpen.value = true;
@@ -822,6 +836,7 @@ function insertBodyFunction() {
 
 const batchMode = ref(false);
 const batchSaving = ref(false);
+const copying = ref(false);
 const batchAssertionRunning = ref(false);
 const batchAssertionProgress = reactive({ done: 0, total: 0, success: 0, failed: 0 });
 const batchAssertionStatuses = reactive<Record<string, 'running' | 'success' | 'failed'>>({});
@@ -842,10 +857,19 @@ const bodyExpandModalOpen = ref(false);
 const bodyFunctionInsertOpen = ref(false);
 const bodyFunctionName = ref('');
 const bodyFunctionArgs = ref('$.Transaction.Header.sysHeader.clientCd');
+const bodyFunctions = ref<Awaited<ReturnType<typeof listDataFunctions>>>([]);
 const bodyFunctionOptions = ref<Array<{ label: string; value: string }>>([]);
 const bodyFunctionCursor = reactive({ start: 0, end: 0 });
 const hasBodyCursor = ref(false);
-const bodyFunctionPreview = computed(() => `\${${bodyFunctionName.value || '函数名'}(${bodyFunctionArgs.value})}`);
+const selectedBodyFunction = computed(() => bodyFunctions.value.find((item) => item.name === bodyFunctionName.value));
+const bodyFunctionPreview = computed(() => selectedBodyFunction.value?.type === 'sql'
+  ? `\${${bodyFunctionName.value || '函数名'}().字段}`
+  : `\${${bodyFunctionName.value || '函数名'}(${bodyFunctionArgs.value})}`);
+const bodyPathOptions = computed(() => {
+  const keyword = bodyFunctionArgs.value.trim().toLowerCase();
+  return messagePathOptions(currentBodyText()).filter((item) => !keyword || item.value.toLowerCase().includes(keyword));
+});
+
 const moreMenuOpen = ref(false);
 
 const onCaseMoreMenuClick: MenuProps['onClick'] = ({ key }) => {
@@ -1712,6 +1736,14 @@ function handleCardClick(caseId: string) {
   selectCase(caseId);
 }
 
+async function copyCase(caseId: string) {
+  if (apiStore.activeCaseId !== caseId || isNewCase.value) {
+    selectCase(caseId);
+    await nextTick();
+  }
+  await onCopy();
+}
+
 function toggleSelectAll(event: { target: { checked: boolean } }) {
   const checked = event.target.checked;
   if (checked) {
@@ -1885,6 +1917,25 @@ async function onSave() {
     return;
   }
   await persistCase();
+}
+
+async function onCopy() {
+  if (!projectId.value || !transactionId.value) return;
+  const payload = buildSavePayload();
+  if (!payload) return message.warning('请填写案例名称');
+  payload.title = `${form.title.trim()} 副本`;
+  delete payload.caseNo;
+  if (form.metadata?.versionCode) payload.versionCode = form.metadata.versionCode;
+  copying.value = true;
+  try {
+    await apiStore.saveCase(projectId.value, transactionId.value, payload);
+    isNewCase.value = false;
+    message.success('案例已复制');
+  } catch (error) {
+    message.error((error as Error)?.message || '复制失败');
+  } finally {
+    copying.value = false;
+  }
 }
 
 function buildDebugRequest(): ApiCaseRequest {
@@ -2365,7 +2416,7 @@ function onBatchDelete() {
 }
 
 .case-card.browse-card .test-point-card-head {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
 }
@@ -2481,6 +2532,15 @@ function onBatchDelete() {
 .case-card-title small {
   color: #667085;
   font-size: 12px;
+}
+
+.case-card-copy-button {
+  color: #667085;
+}
+
+.case-card-copy-button:hover {
+  color: #b42318;
+  background: #fff1f0;
 }
 
 .case-list-filter-bar {

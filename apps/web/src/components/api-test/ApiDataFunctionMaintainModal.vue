@@ -67,7 +67,7 @@
           <div class="data-function-field data-function-params-field">
             <span class="data-function-field-label">输入参数</span>
             <div class="parameter-rows">
-              <div v-for="(name, index) in parameterNames" :key="`${name}-${index}`" class="parameter-row">
+              <div v-for="(name, index) in parameterNames" :key="index" class="parameter-row">
                 <span class="parameter-index">{{ index + 1 }}</span>
                 <a-input :value="name" size="small" placeholder="参数名" @input="renameParameter(index, $event)" />
                 <div class="parameter-actions">
@@ -135,36 +135,10 @@
               <section class="config-panel">
                 <div class="data-function-basic-grid">
                   <a-form-item label="数据库连接" required>
-                    <a-select v-model:value="form.connection" :options="connectionOptions" />
-                  </a-form-item>
-                  <a-form-item label="配置方式">
-                    <a-segmented v-model:value="sqlMode" :options="sqlModeOptions" block />
+                    <a-select v-model:value="form.connection" show-search option-filter-prop="label" :options="connectionOptions" />
                   </a-form-item>
                 </div>
-                <template v-if="sqlMode === 'builder'">
-                  <div class="data-function-basic-grid">
-                    <a-form-item label="数据表" required>
-                      <a-select v-model:value="sqlTable" :options="sqlTableOptions" />
-                    </a-form-item>
-                    <a-form-item label="返回字段" required>
-                      <a-select v-model:value="sqlReturnFields" mode="multiple" :max-tag-count="'responsive'" :options="sqlFieldOptions" placeholder="选择一个或多个字段" />
-                    </a-form-item>
-                  </div>
-                  <div class="sql-condition-head"><strong>查询条件</strong><a-button type="link" size="small" @click="addSqlCondition"><PlusOutlined /> 添加条件</a-button></div>
-                  <div class="sql-condition-rows">
-                    <div v-for="(condition, index) in sqlConditions" :key="condition.id" class="sql-condition-row">
-                      <span>{{ index + 1 }}</span>
-                      <a-select v-model:value="condition.field" size="small" :options="sqlFieldOptions" />
-                      <a-select v-model:value="condition.operator" size="small" :options="sqlOperatorOptions" />
-                      <a-segmented v-model:value="condition.source" size="small" :options="conditionSourceOptions" />
-                      <a-select v-if="condition.source === 'param'" v-model:value="condition.value" size="small" :options="parameterOptions" placeholder="选择输入参数" />
-                      <a-input v-else v-model:value="condition.value" size="small" placeholder="输入查询值" />
-                      <a-button type="text" size="small" danger @click="sqlConditions.splice(index, 1)"><DeleteOutlined /></a-button>
-                    </div>
-                  </div>
-                  <pre class="sql-generated-preview"><code>{{ generatedSql }}</code></pre>
-                </template>
-                <a-form-item v-else label="查询 SQL" required extra="仅允许 SELECT；入参使用 :参数名 绑定">
+                <a-form-item label="查询 SQL" required extra="仅允许 SELECT；入参使用 :参数名 绑定">
                   <a-textarea v-model:value="form.sql" :rows="6" class="data-function-code-input" />
                 </a-form-item>
               </section>
@@ -235,8 +209,8 @@ import {
   PlayCircleOutlined,
   PlusOutlined,
 } from '@ant-design/icons-vue';
-import { message } from 'ant-design-vue';
-import { IMMERSIVE_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
+import { message, Modal } from 'ant-design-vue';
+import { IMMERSIVE_OVERLAY_Z_INDEX, NESTED_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import { createDataFunction, deleteDataFunction, generateDataFunctionScript, getDatabaseMetadata, listDataFunctions, listDatabaseConnections, previewDataFunction, updateDataFunction } from '@/api/apiTestClient';
 
 type FunctionType = 'template' | 'sql';
@@ -293,14 +267,12 @@ const aiScriptOpen = ref(false);
 const generatingScript = ref(false);
 const scriptRequirement = ref('');
 const selectedPartId = ref('');
-const sqlMode = ref<'builder' | 'raw'>('builder');
 const sqlTable = ref('');
 const sqlReturnFields = ref<string[]>([]);
 const sqlConditions = reactive<SqlCondition[]>([]);
 
 
 const connectionOptions = ref<Array<{ label: string; value: string }>>([]);
-const sqlModeOptions = [{ label: '条件构建', value: 'builder' }, { label: 'SQL 编辑', value: 'raw' }];
 const sqlTableOptions = ref<Array<{ label: string; value: string }>>([]);
 const sqlFieldsByTable = ref<Record<string, string[]>>({});
 const sqlFieldOptions = computed(() => (sqlFieldsByTable.value[sqlTable.value] ?? []).map((value) => ({ label: value, value })));
@@ -311,11 +283,11 @@ const generatedSql = computed(() => {
     .filter((item) => item.field && item.operator && item.value)
     .map((item, index) => `${item.field} ${item.operator} :${item.source === 'param' ? item.value : `__condition_${index}`}`)
     .join(' AND ');
-  return `SELECT ${sqlReturnFields.value.join(', ') || '*'} FROM ${sqlTable.value}${where ? ` WHERE ${where}` : ''} LIMIT 20`;
+  return `SELECT ${sqlReturnFields.value.join(', ') || '*'} FROM ${sqlTable.value}${where ? ` WHERE ${where}` : ''}`;
 });
 const typeOptions = [
   { label: '规则生成', value: 'template' },
-  // { label: '查数据库', value: 'sql' },
+  { label: '查数据库', value: 'sql' },
 ];
 const templateModeOptions = [{ label: '可视化', value: 'builder' }, { label: 'JavaScript', value: 'javascript' }, { label: 'Python', value: 'python' }];
 const scriptHint = computed(() => form.templateMode === 'javascript'
@@ -360,7 +332,7 @@ const generatorExample = computed(() => form.type === 'template' && form.templat
 const usageExpression = computed(() => {
   const name = form.name.trim().toUpperCase() || '函数名';
   const values = previewValues.value.map((value) => `'${value}'`).join(', ');
-  const field = form.type === 'sql' && sqlReturnFields.value[0] ? `.${sqlReturnFields.value[0]}` : '';
+  const field = form.type === 'sql' ? '.字段' : '';
   return values ? `\${${name}(${values})${field}}` : `\${${name}()${field}}`;
 });
 const previewValues = computed(() => parameterNames.value.map((name) => previewParams[name] ?? ''));
@@ -376,7 +348,7 @@ watch(() => form.templateMode, (mode, previous) => {
 async function loadAll() {
   const [rows, connections] = await Promise.all([listDataFunctions(props.projectId), listDatabaseConnections(props.projectId)]);
   connectionOptions.value = connections.map((item) => ({ label: item.name, value: item.id }));
-  functions.value = rows.filter((row) => row.type === 'template').map((row) => fromApi(row));
+  functions.value = rows.map((row) => fromApi(row));
   const current = functions.value.find((item) => item.id === activeId.value) ?? functions.value[0];
   if (current) selectFunction(current.id); else createFunction();
 }
@@ -619,35 +591,41 @@ async function saveFunction() {
   if (form.type === 'template' && form.templateMode === 'builder') {
     form.template = generatedTemplate.value;
   }
-  if (form.type === 'sql' && sqlMode.value === 'builder') {
-    form.sql = generatedSql.value;
-    form.extract = '';
-  }
   const payload = apiPayload();
   const saved = activeId.value ? await updateDataFunction(props.projectId, activeId.value, payload) : await createDataFunction(props.projectId, payload);
   activeId.value = saved.id; await loadAll(); message.success('已保存');
 }
 
-async function removeFunction() {
+function removeFunction() {
   if (!activeId.value) return;
-  await deleteDataFunction(props.projectId, activeId.value); activeId.value = ''; await loadAll(); message.success('已删除');
+  Modal.confirm({
+    title: '删除函数？',
+    content: `确定删除函数「${form.name}」？删除后无法恢复。`,
+    okText: '删除',
+    okType: 'danger',
+    cancelText: '取消',
+    centered: true,
+    zIndex: NESTED_OVERLAY_Z_INDEX,
+    onOk: async () => {
+      await deleteDataFunction(props.projectId, activeId.value);
+      activeId.value = '';
+      await loadAll();
+      message.success('已删除');
+    },
+  });
 }
 
 async function runPreview() {
   previewResult.value = '';
   previewError.value = '';
   previewing.value = true;
-  try { const result = await previewDataFunction(props.projectId, { ...apiPayload(), values: { ...previewParams } }); previewResult.value = typeof result === 'string' ? result : JSON.stringify(result); message.success('运行成功'); }
+  try { const result = await previewDataFunction(props.projectId, { ...apiPayload(), values: { ...previewParams } }); previewResult.value = typeof result === 'string' ? result : JSON.stringify(result, null, 2); message.success('运行成功'); }
   catch (error) { previewError.value = (error as any)?.response?.data?.message ?? (error as Error).message ?? '运行失败'; }
   finally { previewing.value = false; }
 }
 
 function apiPayload() {
-  const fixedValues = Object.fromEntries(sqlConditions.map((condition, index) => [
-    `__condition_${index}`,
-    condition.source === 'literal' ? condition.value : undefined,
-  ]).filter(([, value]) => value !== undefined));
-  return { name: form.name, params: parameterNames.value, type: form.type, description: form.description, config: form.type === 'template' ? { mode: form.templateMode, parts: form.parts, template: generatedTemplate.value, script: activeScript.value, javascriptScript: form.javascriptScript, pythonScript: form.pythonScript } : { connectionId: form.connection, sql: sqlMode.value === 'builder' ? generatedSql.value : form.sql, table: sqlTable.value, returnFields: sqlReturnFields.value, conditions: sqlConditions, fixedValues } };
+  return { name: form.name, params: parameterNames.value, type: form.type, description: form.description, config: form.type === 'template' ? { mode: form.templateMode, parts: form.parts, template: generatedTemplate.value, script: activeScript.value, javascriptScript: form.javascriptScript, pythonScript: form.pythonScript } : { connectionId: form.connection, sql: form.sql } };
 }
 
 function buildGeneratedValue(inputs: string[]) {
@@ -705,7 +683,8 @@ function randomDigits(length: number) {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   gap: 10px;
-  min-height: 560px;
+  height: min(680px, calc(100vh - 140px));
+  min-height: 0;
 }
 
 /* ===== 左侧列表 ===== */
@@ -1126,11 +1105,15 @@ function randomDigits(length: number) {
 }
 
 .data-function-result code {
+  display: block;
+  max-height: 220px;
+  overflow: auto;
   overflow-wrap: anywhere;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13px;
   line-height: 1.5;
   color: #f9fafb;
+  white-space: pre-wrap;
 }
 
 .data-function-result.empty code {

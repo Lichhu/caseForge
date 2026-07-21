@@ -30,6 +30,50 @@ describe("ApiDataFunctionService", () => {
     ).resolves.toEqual({ body: { id: "0023" } });
   });
 
+  it("loads shared functions without project filtering", async () => {
+    await service.resolveDeep("another-project", "${MSG_ID('00', '3')}");
+
+    expect((service as any).functionRepo.find).toHaveBeenLastCalledWith({
+      order: { updatedAt: "DESC" },
+    });
+  });
+
+  it("lists shared database connections without project filtering", async () => {
+    const connectionRepo = {
+      find: jest.fn().mockResolvedValue([
+        {
+          id: "new",
+          name: "公共库",
+          updatedAt: new Date(),
+          passwordEncrypted: "secret",
+        },
+        {
+          id: "old",
+          name: "公共库",
+          updatedAt: new Date(0),
+          passwordEncrypted: "",
+        },
+      ]),
+    };
+    const sharedService = new ApiDataFunctionService(
+      connectionRepo as never,
+      {} as never,
+    );
+
+    await expect(sharedService.listConnections("any-project")).resolves.toEqual(
+      [
+        expect.objectContaining({
+          id: "new",
+          name: "公共库",
+          hasPassword: true,
+        }),
+      ],
+    );
+    expect(connectionRepo.find).toHaveBeenCalledWith({
+      order: { updatedAt: "DESC" },
+    });
+  });
+
   it("rejects unknown functions before sending a request", async () => {
     await expect(
       service.resolveDeep("p1", "${UNKNOWN()}"),
@@ -37,9 +81,11 @@ describe("ApiDataFunctionService", () => {
   });
 
   it("passes a value from the current XML request body to a function", async () => {
-    await expect(service.resolveDeep("p1", {
-      body: "<Transaction><Header><clientCd>003</clientCd><msgId>${MSG_ID($.Transaction.Header.clientCd, '9')}</msgId></Header></Transaction>",
-    })).resolves.toEqual({
+    await expect(
+      service.resolveDeep("p1", {
+        body: "<Transaction><Header><clientCd>003</clientCd><msgId>${MSG_ID($.Transaction.Header.clientCd, '9')}</msgId></Header></Transaction>",
+      }),
+    ).resolves.toEqual({
       body: "<Transaction><Header><clientCd>003</clientCd><msgId>00329</msgId></Header></Transaction>",
     });
   });
@@ -59,6 +105,31 @@ describe("ApiDataFunctionService", () => {
         values: { base: "3" },
       }),
     ).resolves.toBe(5);
+  });
+
+  it("queries one database row", async () => {
+    const query = jest.fn().mockResolvedValue([[{ id: 1 }, { id: 2 }]]);
+    const pool = { query, end: jest.fn() };
+    const sqlService = new ApiDataFunctionService(
+      { findOne: jest.fn().mockResolvedValue({ id: "db" }) } as never,
+      {} as never,
+    );
+    jest.spyOn(sqlService as any, "pool").mockResolvedValue(pool);
+
+    await expect(
+      sqlService.preview("p1", {
+        name: "ROWS",
+        params: [],
+        type: "sql",
+        config: { connectionId: "db", sql: "SELECT id FROM users" },
+        values: {},
+      }),
+    ).resolves.toEqual({ id: 1 });
+
+    expect(query).toHaveBeenCalledWith(
+      expect.objectContaining({ sql: "SELECT id FROM users LIMIT 1" }),
+      [],
+    );
   });
 
   it("supports reading a field from a function result", async () => {
@@ -100,7 +171,8 @@ describe("ApiDataFunctionService", () => {
         type: "template",
         config: {
           mode: "python",
-          script: 'def function():\n    return datetime.now().strftime("%Y-%m-%d")',
+          script:
+            'def function():\n    return datetime.now().strftime("%Y-%m-%d")',
         },
         values: {},
       }),

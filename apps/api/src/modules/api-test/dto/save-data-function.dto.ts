@@ -14,7 +14,23 @@ import {
 
 export class SaveDatabaseConnectionDto {
   @IsString() @IsNotEmpty() @MaxLength(128) name: string;
-  @IsString() @IsNotEmpty() type: string;
+  @IsString()
+  @IsNotEmpty()
+  @IsIn([
+    "MariaDB",
+    "MySQL",
+    "TiDB",
+    "OceanBase-MySQL",
+    "OceanBase-Oracle",
+    "GoldenDB",
+    "PostgreSQL",
+    "KingbaseES",
+    "GaussDB",
+    "GaussDB-MySQL",
+    "Oracle",
+    "DM8",
+  ])
+  type: string;
   @IsString() @IsNotEmpty() host: string;
   @IsInt() @Min(1) @Max(65535) port: number;
   @IsString() @IsNotEmpty() databaseName: string;

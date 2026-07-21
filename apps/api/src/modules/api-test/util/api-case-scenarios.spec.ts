@@ -101,5 +101,6 @@ describe("buildScenarioPrompts", () => {
 
     expect(prompt).toContain("start/startSize/startIndex/beginRow/offset");
     expect(prompt).toContain("size+start、size+startSize");
+    expect(prompt).toContain("示例 start=1 时正向首条使用 1");
   });
 });

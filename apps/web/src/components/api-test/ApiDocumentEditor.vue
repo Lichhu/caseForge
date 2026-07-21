@@ -130,7 +130,10 @@
           v-for="(section, sectionIndex) in sections"
           :key="section.title"
           class="doc-section-block"
-          :class="{ 'doc-section-block--collapsed': isSectionCollapsed(section.title) }"
+          :class="{
+            'doc-section-block--collapsed': isSectionCollapsed(section.title),
+            'doc-section-block--example': section.title === '示例报文',
+          }"
         >
           <button
             type="button"
@@ -147,7 +150,7 @@
             <div v-if="section.title === '示例报文'" class="example-message-block">
               <div class="example-message-shell">
                 <div class="example-message-actions">
-                  <a-button type="link" size="small" :disabled="!hasExampleCursor" @click="openFunctionInsert"><CodeOutlined /> 插入函数</a-button>
+                  <a-button type="link" size="small" class="example-message-action-btn" :disabled="!hasExampleCursor" @click="openFunctionInsert"><CodeOutlined /> 插入函数</a-button>
                   <a-button
                     type="link"
                     size="small"
@@ -229,11 +232,11 @@
 
   <ApiDataFunctionMaintainModal v-model:open="dataFunctionModalOpen" :project-id="apiStore.activeProjectId" />
   <ApiDatabaseConnectionMaintainModal v-model:open="databaseConnectionModalOpen" :project-id="apiStore.activeProjectId" />
-  <a-modal v-model:open="functionInsertOpen" title="插入数据函数" ok-text="插入" @ok="insertFunctionExpression">
+  <a-modal v-model:open="functionInsertOpen" title="插入数据函数" :z-index="NESTED_OVERLAY_Z_INDEX" ok-text="插入" @ok="insertFunctionExpression">
     <a-form layout="vertical">
-      <a-form-item label="函数" required><a-select v-model:value="insertFunctionName" :options="functionOptions" /></a-form-item>
-      <a-form-item label="参数来源" extra="以 $. 开头，引用当前请求体字段；多个参数用英文逗号分隔">
-        <a-input v-model:value="insertFunctionArgs" placeholder="$.Transaction.Header.sysHeader.clientCd" />
+      <a-form-item label="函数" required><a-select v-model:value="insertFunctionName" :options="functionOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }" show-search /></a-form-item>
+      <a-form-item v-if="selectedInsertFunction?.type !== 'sql'" label="参数来源" extra="以 $. 开头，引用当前请求体字段；多个参数用英文逗号分隔">
+        <a-auto-complete v-model:value="insertFunctionArgs" :options="examplePathOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }" filter-option placeholder="$.Transaction.Header.sysHeader.clientCd" />
       </a-form-item>
       <code>{{ functionInsertPreview }}</code>
     </a-form>
@@ -376,7 +379,7 @@ import SmpDocumentViewer from '@/components/api-test/SmpDocumentViewer.vue';
 import ApiCaseGenerateHistoryDrawer from '@/components/api-test/ApiCaseGenerateHistoryDrawer.vue';
 import ApiDataFunctionMaintainModal from '@/components/api-test/ApiDataFunctionMaintainModal.vue';
 import ApiDatabaseConnectionMaintainModal from '@/components/api-test/ApiDatabaseConnectionMaintainModal.vue';
-import { IMMERSIVE_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
+import { IMMERSIVE_OVERLAY_Z_INDEX, NESTED_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import { useApiTestStore } from '@/stores/apiTest';
 import type { ApiDocGenerationProfile } from '@case-forge/shared';
 import * as XLSX from 'xlsx';
@@ -396,10 +399,12 @@ import {
 } from '@/utils/casePayloadFormat.util';
 import { randomUuid } from '@/utils/randomUuid';
 import { listDataFunctions } from '@/api/apiTestClient';
+import { messagePathOptions } from '@/utils/messagePathOptions';
 
 const tableScrollRef = ref<HTMLElement | null>(null);
 const EXAMPLE_MESSAGE_MIN_HEIGHT_PX = 160;
 const apiStore = useApiTestStore();
+const popupContainer = () => document.body;
 const sections = ref<ApiDocTableSection[]>([]);
 const sectionData = ref<Record<string, string>[][]>([]);
 const exampleMessage = ref('');
@@ -408,8 +413,16 @@ const functionInsertRange = reactive({ start: 0, end: 0 });
 const hasExampleCursor = ref(false);
 const insertFunctionName = ref('');
 const insertFunctionArgs = ref('$.Transaction.Header.sysHeader.clientCd');
+const insertFunctions = ref<Awaited<ReturnType<typeof listDataFunctions>>>([]);
 const functionOptions = ref<Array<{ label: string; value: string }>>([]);
-const functionInsertPreview = computed(() => `\${${insertFunctionName.value || '函数名'}(${insertFunctionArgs.value})}`);
+const selectedInsertFunction = computed(() => insertFunctions.value.find((item) => item.name === insertFunctionName.value));
+const examplePathOptions = computed(() => {
+  const keyword = insertFunctionArgs.value.trim().toLowerCase();
+  return messagePathOptions(exampleMessage.value).filter((item) => !keyword || item.value.toLowerCase().includes(keyword));
+});
+const functionInsertPreview = computed(() => selectedInsertFunction.value?.type === 'sql'
+  ? `\${${insertFunctionName.value || '函数名'}().字段}`
+  : `\${${insertFunctionName.value || '函数名'}(${insertFunctionArgs.value})}`);
 const editorText = ref('');
 const autoSaveTimer = ref<number | null>(null);
 const generationProfileSaveTimer = ref<number | null>(null);
@@ -543,6 +556,7 @@ function onExampleMessageBlur() {
 async function openFunctionInsert() {
   if (!hasExampleCursor.value) return;
   const rows = await listDataFunctions(projectId.value);
+  insertFunctions.value = rows;
   functionOptions.value = rows.map((item) => ({ label: item.name, value: item.name }));
   insertFunctionName.value ||= functionOptions.value[0]?.value ?? '';
   functionInsertOpen.value = true;
@@ -1219,6 +1233,10 @@ async function onSave() {
   margin-bottom: 8px;
 }
 
+.doc-section-block--example {
+  overflow: visible;
+}
+
 .doc-section-title-btn {
   display: flex;
   align-items: center;
@@ -1275,15 +1293,20 @@ async function onSave() {
 }
 
 .example-message-actions {
-  position: absolute;
-  top: 2px;
-  right: 4px;
+  position: sticky;
+  top: 0;
+  justify-content: flex-end;
+  min-height: 28px;
+  padding: 2px 4px;
   z-index: 1;
   display: flex;
   align-items: center;
   gap: 2px;
+  border-bottom: 1px solid #f2f4f7;
+  background: rgba(255, 255, 255, 0.96);
 }
 
+.example-message-action-btn,
 .example-message-beautify-btn,
 .example-message-expand-btn {
   height: auto;
@@ -1296,7 +1319,7 @@ async function onSave() {
   display: block;
   width: 100%;
   min-height: 160px;
-  padding: 30px 10px 10px;
+  padding: 10px;
   border: none;
   border-radius: 0;
   background: transparent;

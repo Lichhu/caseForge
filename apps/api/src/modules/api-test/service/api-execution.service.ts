@@ -88,7 +88,7 @@ export class ApiExecutionService {
       MAX_CONCURRENCY,
       Math.max(1, input.concurrency ?? DEFAULT_CONCURRENCY),
     );
-    const cases = await this.caseRepo.find({
+    const foundCases = await this.caseRepo.find({
       where: {
         ...scopedWhere({ projectId: input.projectId }),
         id: In(input.caseIds),
@@ -96,6 +96,10 @@ export class ApiExecutionService {
       },
       relations: ["endpoint"],
     });
+    const caseMap = new Map(foundCases.map((item) => [item.id, item]));
+    const cases = input.caseIds
+      .map((id) => caseMap.get(id))
+      .filter((item): item is ApiTestCaseEntity => Boolean(item));
     if (!cases.length) {
       throw new BadRequestException("未找到可执行的启用案例");
     }
@@ -120,6 +124,7 @@ export class ApiExecutionService {
     const env = runtimeByCase.get(cases[0].id)!;
 
     let run: ApiTestRunEntity;
+    let preservedItems: ApiTestRunItemEntity[] = [];
     if (input.runId) {
       const existing = await this.runRepo.findOne({
         where: scopedWhere({ projectId: input.projectId, id: input.runId }),
@@ -127,13 +132,19 @@ export class ApiExecutionService {
       if (!existing) {
         throw new BadRequestException("执行记录不存在");
       }
-      await this.runItemRepo.delete({ runId: existing.id });
+      const existingItems = await this.runItemRepo.find({ where: { runId: existing.id } });
+      const rerunCaseIds = new Set(cases.map((testCase) => testCase.id));
+      preservedItems = existingItems.filter((item) => !rerunCaseIds.has(item.caseId));
+      await this.runItemRepo.delete({
+        runId: existing.id,
+        caseId: In([...rerunCaseIds]),
+      });
       existing.environmentId = env.id;
       existing.environmentServiceId = input.environmentServiceId;
       existing.executionSetId = input.executionSetId ?? existing.executionSetId;
       existing.transactionId = input.transactionId ?? existing.transactionId;
       existing.status = "running";
-      existing.totalCount = cases.length;
+      existing.totalCount = preservedItems.length + cases.length;
       existing.passedCount = 0;
       existing.failedCount = 0;
       existing.errorCount = 0;
@@ -157,9 +168,9 @@ export class ApiExecutionService {
     }
 
     const items: ApiTestRunItemEntity[] = [];
-    let passed = 0;
-    let failed = 0;
-    let error = 0;
+    let passed = preservedItems.filter((item) => item.status === "passed").length;
+    let failed = preservedItems.filter((item) => item.status === "failed").length;
+    let error = preservedItems.filter((item) => item.status === "error").length;
 
     await this.runWithConcurrency(cases, concurrency, async (testCase) => {
       const caseEnv = runtimeByCase.get(testCase.id)!;
@@ -176,7 +187,7 @@ export class ApiExecutionService {
       else error += 1;
     });
 
-    await this.runItemRepo.save(items);
+    await this.runItemRepo.save([...preservedItems, ...items]);
     run.status = "completed";
     run.passedCount = passed;
     run.failedCount = failed;
@@ -223,7 +234,7 @@ export class ApiExecutionService {
       environmentServiceId: input.environmentServiceId,
       executionSetId: input.executionSetId,
       transactionId: input.transactionId,
-      concurrency: input.concurrency,
+      concurrency: 1,
       encoding: input.encoding,
     });
     await this.executionSetService.updateLastRun(input.executionSetId, {

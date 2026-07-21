@@ -3,22 +3,28 @@ import { assembleBodyFromExample } from "./api-case-body-assembler.util";
 describe("assembleBodyFromExample missing paths", () => {
   it("preserves data functions from the XML example against overrides", () => {
     const result = assembleBodyFromExample({
-      exampleMessage: "<Transaction><Header><msgId>${MSG($.Transaction.Header.clientCd)}</msgId><clientCd>003</clientCd></Header></Transaction>",
+      exampleMessage:
+        "<Transaction><Header><msgId>${MSG($.Transaction.Header.clientCd)}</msgId><clientCd>003</clientCd></Header></Transaction>",
       overrides: { "Transaction/Header/msgId": "generated-value" },
       messageFormat: "xml",
       refreshDynamicHeaders: true,
     });
-    expect(result.body).toContain("<msgId>${MSG($.Transaction.Header.clientCd)}</msgId>");
+    expect(result.body).toContain(
+      "<msgId>${MSG($.Transaction.Header.clientCd)}</msgId>",
+    );
   });
 
   it("preserves data functions from the JSON example against overrides", () => {
     const result = assembleBodyFromExample({
-      exampleMessage: '{"Transaction":{"Header":{"sysHeader":{"msgId":"${MSG($.Transaction.Header.sysHeader.clientCd)}","clientCd":"003"}}}}',
+      exampleMessage:
+        '{"Transaction":{"Header":{"sysHeader":{"msgId":"${MSG($.Transaction.Header.sysHeader.clientCd)}","clientCd":"003"}}}}',
       overrides: { "Transaction/Header/sysHeader/msgId": "generated-value" },
       messageFormat: "json",
       refreshDynamicHeaders: true,
     });
-    expect(result.body).toContain("${MSG($.Transaction.Header.sysHeader.clientCd)}");
+    expect(result.body).toContain(
+      "${MSG($.Transaction.Header.sysHeader.clientCd)}",
+    );
   });
   it("creates missing JSON channel path", () => {
     const result = assembleBodyFromExample({
@@ -47,6 +53,23 @@ describe("assembleBodyFromExample missing paths", () => {
     expect(result.body).toContain(
       "<sysHeader><clientCd>520</clientCd></sysHeader>",
     );
+  });
+
+  it("updates XML by full path without changing a same-name sibling", () => {
+    const result = assembleBodyFromExample({
+      exampleMessage:
+        "<Transaction><Header><sysHeader><msgId>header</msgId></sysHeader></Header><Body><request><bizHeader><msgId>body</msgId></bizHeader><bizBody><size>10</size><start>1</start></bizBody></request></Body></Transaction>",
+      overrides: {
+        "Transaction/Body/request/bizHeader/msgId": "new-body",
+        "Transaction/Body/request/bizBody/size": "20",
+        "Transaction/Body/request/bizBody/start": "10",
+      },
+      messageFormat: "xml",
+    });
+    expect(result.body).toContain("<msgId>header</msgId>");
+    expect(result.body).toContain("<msgId>new-body</msgId>");
+    expect(result.body).toContain("<size>20</size>");
+    expect(result.body).toContain("<start>10</start>");
   });
 
   it("appends missing TEXT key-value fields", () => {

@@ -1508,6 +1508,7 @@ export const useApiTestStore = defineStore("apiTest", {
       options?: {
         encoding?: string;
         executionSetId?: string;
+        caseIds?: string[];
       },
     ) {
       if (this.running) {
@@ -1515,7 +1516,9 @@ export const useApiTestStore = defineStore("apiTest", {
         return;
       }
       const detail = await getApiRun(projectId, runId);
-      const caseIds = detail.items.map((item) => item.caseId);
+      const caseIds = options?.caseIds?.length
+        ? detail.items.map((item) => item.caseId).filter((id) => options.caseIds?.includes(id))
+        : detail.items.map((item) => item.caseId);
       if (!caseIds.length) {
         message.warning("该次执行没有可重跑的案例");
         return;

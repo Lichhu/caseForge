@@ -501,6 +501,34 @@ export class ApiCaseService {
       task.errorMessage = null;
       await this.scenarioRepo.save(task);
       try {
+        if (task.scenarioKey === "positive_flow") {
+          const result = {
+            applicable: true,
+            reason: "沿用示例报文生成正向流程案例",
+            cases: [
+              {
+                title: "正向流程",
+                polarity: "positive" as const,
+                changes: [],
+              },
+            ],
+          };
+          task.result = result;
+          task.applicableReason = result.reason;
+          task.status = "completed";
+          task.resultCount = await this.persistScenarioCases(
+            job,
+            endpoint,
+            transaction.code,
+            task,
+            result.cases,
+          );
+          createdCount += task.resultCount;
+          task.durationMs = Date.now() - started;
+          task.finishedAt = new Date();
+          await this.scenarioRepo.save(task);
+          continue;
+        }
         const prompts = buildScenarioPrompts({
           scenarioKey: task.scenarioKey as ApiCaseScenarioKey,
           scenarioName: task.scenarioName,

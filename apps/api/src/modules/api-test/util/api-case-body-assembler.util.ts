@@ -1,5 +1,6 @@
 import { minifyXml, prettyPrintXml } from "@case-forge/shared";
 import { Logger } from "@nestjs/common";
+import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
 
 const assemblerLogger = new Logger("ApiCaseBodyAssembler");
 
@@ -320,7 +321,16 @@ function assembleXmlBody(
     if (!segments.length) continue;
 
     const lastTag = segments[segments.length - 1];
-    const replaced = replaceXmlFieldValue(result, lastTag, value);
+    let replaced = replaceXmlFieldValueByPath(result, segments, value);
+
+    if (!replaced.changed && countXmlTags(result, lastTag) === 1) {
+      replaced = replaceXmlFieldValue(result, lastTag, value);
+      if (replaced.changed) {
+        warnings.push(
+          `路径 "${path}" 全路径未命中，按唯一节点 "${lastTag}" 回退匹配`,
+        );
+      }
+    }
 
     if (replaced.changed) {
       result = replaced.xml;
@@ -339,6 +349,46 @@ function assembleXmlBody(
 
   const body = isCompact ? minifyXml(result) : prettyPrintXml(result);
   return { body, warnings };
+}
+
+function replaceXmlFieldValueByPath(
+  xml: string,
+  segments: string[],
+  value: string,
+): { xml: string; changed: boolean } {
+  const document = new DOMParser().parseFromString(xml, "application/xml");
+  type XmlElement = NonNullable<typeof document.documentElement>;
+  let current: XmlElement | undefined = document.documentElement ?? undefined;
+  let index =
+    current?.tagName.toLowerCase() === segments[0]?.toLowerCase() ? 1 : 0;
+
+  for (; current && index < segments.length; index++) {
+    const name = segments[index].toLowerCase();
+    current = Array.from(current.childNodes).find(
+      (node) =>
+        node.nodeType === 1 &&
+        (node as XmlElement).tagName.toLowerCase() === name,
+    ) as XmlElement | undefined;
+  }
+
+  if (
+    !current ||
+    index !== segments.length ||
+    isDataFunctionExpression(current.textContent)
+  ) {
+    return { xml, changed: false };
+  }
+  current.textContent = value;
+  return {
+    xml: new XMLSerializer().serializeToString(document),
+    changed: true,
+  };
+}
+
+function countXmlTags(xml: string, tag: string): number {
+  return (
+    xml.match(new RegExp(`<${tag}(?:\\s[^>]*)?(?:>|/>)`, "g"))?.length ?? 0
+  );
 }
 
 function createXmlPath(xml: string, segments: string[], value: string) {
@@ -378,11 +428,14 @@ function replaceXmlFieldValue(
   const escaped = escapeXmlValue(value);
   let changed = false;
 
-  let result = xml.replace(new RegExp(`<${tag}>([^<]*)</${tag}>`, "g"), (match, current) => {
-    if (isDataFunctionExpression(current)) return match;
-    changed = true;
-    return `<${tag}>${escaped}</${tag}>`;
-  });
+  let result = xml.replace(
+    new RegExp(`<${tag}>([^<]*)</${tag}>`, "g"),
+    (match, current) => {
+      if (isDataFunctionExpression(current)) return match;
+      changed = true;
+      return `<${tag}>${escaped}</${tag}>`;
+    },
+  );
 
   result = result.replace(new RegExp(`<${tag}/>`, "g"), () => {
     changed = true;
@@ -531,7 +584,10 @@ function setJsonValueByLastSegment(
 }
 
 function isDataFunctionExpression(value: unknown): boolean {
-  return typeof value === "string" && /\$\{[A-Z][A-Z0-9_]*\([^{}]*\)(?:\.[A-Za-z_][\w]*)?\}/.test(value);
+  return (
+    typeof value === "string" &&
+    /\$\{[A-Z][A-Z0-9_]*\([^{}]*\)(?:\.[A-Za-z_][\w]*)?\}/.test(value)
+  );
 }
 
 function refreshJsonDynamicHeaders(obj: unknown): void {
