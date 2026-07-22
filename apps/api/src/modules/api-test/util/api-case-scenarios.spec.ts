@@ -2,6 +2,7 @@ import {
   assertScenarioCoverage,
   buildScenarioPrompts,
   parseScenarioAiResult,
+  validateScenarioAiResult,
 } from "./api-case-scenarios.util";
 
 describe("parseScenarioAiResult", () => {
@@ -22,6 +23,56 @@ describe("parseScenarioAiResult", () => {
       }),
     );
     expect(result?.cases[0].changes[0].value).toBe("1");
+  });
+
+  it("trims change paths before validation", () => {
+    const result = parseScenarioAiResult(
+      JSON.stringify({
+        applicable: true,
+        cases: [
+          {
+            title: "单页单条",
+            polarity: "positive",
+            changes: [{ path: " path/to/pageNum\n", value: "1" }],
+          },
+        ],
+      }),
+    );
+
+    expect(result?.cases[0].changes[0].path).toBe("path/to/pageNum");
+  });
+});
+
+describe("validateScenarioAiResult", () => {
+  it("matches paths case-insensitively and restores the documented path", () => {
+    const result = validateScenarioAiResult(
+      {
+        applicable: true,
+        reason: "适用",
+        cases: [
+          {
+            title: "起始位置",
+            polarity: "positive",
+            changes: [
+              {
+                path: "Transaction/Body/request/bizBody/start",
+                value: "1",
+              },
+            ],
+          },
+        ],
+      },
+      [
+        "请求报文",
+        "----",
+        "节点路径 | 节点代码 | 节点名称",
+        "Transaction/Body/request/bizbody | start | 起始位置",
+      ].join("\n"),
+    );
+
+    expect(result.cases[0].changes[0].path).toBe(
+      "Transaction/Body/request/bizbody/start",
+    );
   });
 });
 

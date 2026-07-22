@@ -140,16 +140,21 @@ export function validateScenarioAiResult(
   result: ScenarioAiResult,
   structuredMarkdown: string,
 ) {
-  const allowed = new Set(
+  const allowed = new Map(
     requestFieldLines(structuredMarkdown)
       .slice(1)
       .map((line) => line.split("|").map((cell) => cell.trim()))
       .filter((cells) => cells[0] && cells[1])
-      .map((cells) => `${cells[0].replace(/\/$/, "")}/${cells[1]}`),
+      .map((cells) => `${cells[0].replace(/\/$/, "")}/${cells[1]}`)
+      .map((path) => [path.toLowerCase(), path]),
   );
   const seen = new Set<string>();
   result.cases = result.cases.filter((item) => {
-    item.changes = item.changes.filter((change) => allowed.has(change.path));
+    item.changes = item.changes.filter((change) => {
+      const path = allowed.get(change.path.toLowerCase());
+      if (path) change.path = path;
+      return Boolean(path);
+    });
     if (!item.changes.length && item.polarity === "negative") return false;
     const key = `${item.title}|${JSON.stringify(item.changes)}`;
     if (seen.has(key)) return false;
@@ -285,7 +290,7 @@ export function parseScenarioAiResult(text: string): ScenarioAiResult | null {
         changes: item.changes
           .filter((change) => change && typeof change.path === "string")
           .map((change) => ({
-            path: change.path,
+            path: change.path.trim(),
             value: String(change.value ?? ""),
           })),
       }));
