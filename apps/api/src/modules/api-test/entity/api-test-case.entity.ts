@@ -5,6 +5,7 @@ import type {
   ApiCaseRequest,
   ApiCaseSource,
   ApiCaseStatus,
+  ApiCaseExport,
 } from "@case-forge/shared";
 import { ApiEndpointEntity } from "./api-endpoint.entity";
 import {
@@ -79,6 +80,7 @@ export class ApiTestCaseEntity {
 
   @Column({ type: "json", nullable: true })
   metadata?: {
+    exports?: ApiCaseExport[];
     source?: ApiCaseSource;
     inferredFields?: string[];
     promptIds?: string[];

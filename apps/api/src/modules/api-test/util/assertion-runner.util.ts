@@ -19,6 +19,29 @@ export interface AssertionRunInput {
   polarity?: "positive" | "negative";
 }
 
+export function extractResponseValue(
+  source: "body" | "header" | "status",
+  expression: string | undefined,
+  input: Pick<AssertionRunInput, "body" | "headers" | "statusCode">,
+): unknown {
+  if (source === "status") return input.statusCode;
+  if (source === "header") {
+    const key = expression ?? "";
+    return input.headers[key] ?? input.headers[key.toLowerCase()] ?? "";
+  }
+  if (!expression) return undefined;
+  const body = coerceAssertionBody(input.body);
+  try {
+    if (expression.startsWith("$") ) {
+      const value = JSONPath({ path: expression, json: body as object });
+      return Array.isArray(value) ? value[0] : value;
+    }
+    return evaluateJmespath(body, expression);
+  } catch {
+    return undefined;
+  }
+}
+
 function compareValues(
   actual: unknown,
   expected: unknown,

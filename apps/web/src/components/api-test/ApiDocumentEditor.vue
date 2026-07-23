@@ -253,13 +253,16 @@
 
   <ApiDataFunctionMaintainModal v-model:open="dataFunctionModalOpen" :project-id="apiStore.activeProjectId" />
   <ApiDatabaseConnectionMaintainModal v-model:open="databaseConnectionModalOpen" :project-id="apiStore.activeProjectId" />
-  <a-modal v-model:open="functionInsertOpen" title="插入数据函数" :z-index="NESTED_OVERLAY_Z_INDEX" ok-text="插入" @ok="insertFunctionExpression">
+  <a-modal v-model:open="functionInsertOpen" title="插入数据函数" :width="680" :z-index="NESTED_OVERLAY_Z_INDEX" ok-text="插入" @ok="insertFunctionExpression">
     <a-form layout="vertical">
       <a-form-item label="函数" required><a-select v-model:value="insertFunctionName" :options="functionOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }" show-search /></a-form-item>
-      <a-form-item v-if="selectedInsertFunction?.type !== 'sql'" label="参数来源" extra="以 $. 开头，引用当前请求体字段；多个参数用英文逗号分隔">
-        <a-auto-complete v-model:value="insertFunctionArgs" :options="examplePathOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }" filter-option placeholder="$.Transaction.Header.sysHeader.clientCd" />
-      </a-form-item>
-      <code>{{ functionInsertPreview }}</code>
+      <div v-if="selectedInsertFunction?.params.length" class="function-argument-list">
+        <label v-for="(param, index) in selectedInsertFunction.params" :key="`${param}-${index}`" class="function-argument-row">
+          <span :title="param">{{ index + 1 }}. {{ param }}</span>
+          <a-auto-complete v-model:value="insertFunctionArgs[index]" :options="examplePathOptions(index)" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }" filter-option placeholder="选择或输入参数来源" />
+        </label>
+      </div>
+      <div class="function-expression-preview"><span>调用预览</span><code>{{ functionInsertPreview }}</code></div>
     </a-form>
   </a-modal>
 
@@ -433,17 +436,21 @@ const functionInsertOpen = ref(false);
 const functionInsertRange = reactive({ start: 0, end: 0 });
 const hasExampleCursor = ref(false);
 const insertFunctionName = ref('');
-const insertFunctionArgs = ref('$.Transaction.Header.sysHeader.clientCd');
+const insertFunctionArgs = ref<string[]>([]);
 const insertFunctions = ref<Awaited<ReturnType<typeof listDataFunctions>>>([]);
 const functionOptions = ref<Array<{ label: string; value: string }>>([]);
 const selectedInsertFunction = computed(() => insertFunctions.value.find((item) => item.name === insertFunctionName.value));
-const examplePathOptions = computed(() => {
-  const keyword = insertFunctionArgs.value.trim().toLowerCase();
+function examplePathOptions(index: number) {
+  const keyword = (insertFunctionArgs.value[index] ?? '').trim().toLowerCase();
   return messagePathOptions(exampleMessage.value).filter((item) => !keyword || item.value.toLowerCase().includes(keyword));
+}
+const functionInsertPreview = computed(() => {
+  const call = `\${${insertFunctionName.value || '函数名'}(${insertFunctionArgs.value.join(', ')})`;
+  return selectedInsertFunction.value?.type === 'sql' ? `${call}.字段}` : `${call}}`;
 });
-const functionInsertPreview = computed(() => selectedInsertFunction.value?.type === 'sql'
-  ? `\${${insertFunctionName.value || '函数名'}().字段}`
-  : `\${${insertFunctionName.value || '函数名'}(${insertFunctionArgs.value})}`);
+watch(selectedInsertFunction, (fn) => {
+  insertFunctionArgs.value = (fn?.params ?? []).map((_, index) => insertFunctionArgs.value[index] ?? '');
+});
 const editorText = ref('');
 const autoSaveTimer = ref<number | null>(null);
 const generationProfileSaveTimer = ref<number | null>(null);
@@ -1050,6 +1057,13 @@ async function onSave() {
 </script>
 
 <style scoped>
+.function-argument-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-height: 300px; margin-bottom: 16px; padding-right: 4px; overflow-y: auto; }
+.function-argument-row { display: grid; gap: 5px; min-width: 0; }
+.function-argument-row > span { overflow: hidden; color: var(--cf-text-secondary, #667085); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.function-expression-preview { display: grid; gap: 5px; padding: 10px 12px; border-radius: 6px; background: var(--cf-surface-soft, #f8f9fb); }
+.function-expression-preview > span { color: var(--cf-text-muted, #98a2b3); font-size: 11px; }
+.function-expression-preview code { overflow-wrap: anywhere; }
+@media (max-width: 640px) { .function-argument-list { grid-template-columns: 1fr; } }
 .document-panel-header {
   align-items: flex-start;
 }

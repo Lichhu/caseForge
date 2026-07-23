@@ -1438,7 +1438,7 @@ export const useApiTestStore = defineStore("apiTest", {
         };
       }
       await this.refreshExecutionSets(projectId, transactionId);
-      message.success("执行集案例已更新");
+      return nextCaseIds;
     },
     async runExecutionSet(
       projectId: string,

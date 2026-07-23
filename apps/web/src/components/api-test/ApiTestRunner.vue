@@ -1225,22 +1225,56 @@ function removeLinkedCase(caseId: string) {
   const transactionId = apiStore.activeTransactionId;
   const setId = apiStore.activeExecutionSetId;
   if (!projectId || !transactionId || !setId || !activeSet.value) return;
-  const nextCaseIds = (activeSet.value.caseIds ?? []).filter((id) => id !== caseId);
+  const linkedCases = linkedSetCases.value;
+  const removedIds = collectDependentCaseIds(caseId, linkedCases);
+  const nextCaseIds = (activeSet.value.caseIds ?? []).filter((id) => !removedIds.has(id));
+  const removedCases = linkedCases.filter((item) => removedIds.has(item.id));
   Modal.confirm({
-    title: '移除该案例？',
-    content: '仅从当前执行集中移除，不会删除案例本身。',
+    title: removedIds.size > 1 ? `移除该案例及 ${removedIds.size - 1} 条依赖案例？` : '移除该案例？',
+    content: removedIds.size > 1
+      ? `以下案例依赖该变量来源，将一并从执行集移除：${removedCases.map((item) => item.caseNo || item.title).join('、')}。不会删除案例本身。`
+      : '仅从当前执行集中移除，不会删除案例本身。',
     centered: true,
     okText: '移除',
     cancelText: '取消',
     okType: 'danger',
-    onOk: () =>
-      apiStore.replaceExecutionSetCases(
-        projectId,
-        transactionId,
-        setId,
-        nextCaseIds,
-      ),
+    onOk: async () => {
+      try {
+        await apiStore.replaceExecutionSetCases(
+          projectId,
+          transactionId,
+          setId,
+          nextCaseIds,
+        );
+        await apiStore.refreshRunnerCases(projectId, transactionId);
+        message.success('案例已从执行集移除');
+      } catch (error) {
+        const responseMessage = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+        message.error(responseMessage || (error as Error)?.message || '移除案例失败');
+      }
+    },
   });
+}
+
+function collectDependentCaseIds(caseId: string, cases: ApiTestCaseRow[]) {
+  const removed = new Set([caseId]);
+  const caseNoById = new Map(cases.map((item) => [item.id, item.caseNo]));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const removedCaseNumbers = new Set(
+      [...removed].map((id) => caseNoById.get(id)).filter(Boolean),
+    );
+    for (const item of cases) {
+      if (removed.has(item.id)) continue;
+      const request = JSON.stringify(item.request);
+      if ([...removedCaseNumbers].some((caseNo) => request.includes(`\${${caseNo}.`))) {
+        removed.add(item.id);
+        changed = true;
+      }
+    }
+  }
+  return removed;
 }
 
 async function moveLinkedCase(caseId: string, offset: -1 | 1) {
@@ -1252,7 +1286,17 @@ async function moveLinkedCase(caseId: string, offset: -1 | 1) {
   const target = index + offset;
   if (!projectId || !transactionId || !setId || index < 0 || target < 0 || target >= caseIds.length) return;
   [caseIds[index], caseIds[target]] = [caseIds[target], caseIds[index]];
-  await apiStore.replaceExecutionSetCases(projectId, transactionId, setId, caseIds);
+  try {
+    const savedCaseIds = await apiStore.replaceExecutionSetCases(projectId, transactionId, setId, caseIds);
+    if (savedCaseIds[index] === caseId) {
+      message.warning('该案例顺序受共享变量依赖约束，不能移动到此位置');
+    } else {
+      message.success('案例顺序已更新');
+    }
+  } catch (error) {
+    const responseMessage = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+    message.error(responseMessage || '该排序不满足案例变量依赖');
+  }
 }
 
 function onDeleteSet() {

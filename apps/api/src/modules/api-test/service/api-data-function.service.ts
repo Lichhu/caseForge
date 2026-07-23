@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
@@ -109,6 +110,8 @@ const BUILTIN_FUNCTIONS = [
 
 @Injectable()
 export class ApiDataFunctionService {
+  private readonly logger = new Logger(ApiDataFunctionService.name);
+
   constructor(
     @InjectRepository(ApiDatabaseConnectionEntity)
     private readonly connectionRepo: Repository<ApiDatabaseConnectionEntity>,
@@ -127,6 +130,16 @@ export class ApiDataFunctionService {
     body: SaveDatabaseConnectionDto,
     id?: string,
   ) {
+    const databaseName = body.databaseName?.trim() ?? "";
+    if (
+      ["Oracle", "OceanBase-Oracle", "PostgreSQL", "KingbaseES", "GaussDB"].includes(
+        body.type,
+      ) &&
+      !databaseName
+    )
+      throw new BadRequestException(
+        body.type === "Oracle" ? "请填写服务名" : "请填写数据库名",
+      );
     const row = id
       ? await this.requireConnection(id)
       : this.connectionRepo.create({ projectId, ...auditFieldsForCreate() });
@@ -135,7 +148,7 @@ export class ApiDataFunctionService {
       type: body.type,
       host: body.host.trim(),
       port: body.port,
-      databaseName: body.databaseName.trim(),
+      databaseName,
       username: body.username.trim(),
       readonly: body.readonly ?? true,
       ...(id ? auditFieldsForUpdate() : {}),
@@ -151,12 +164,17 @@ export class ApiDataFunctionService {
   }
   async testConnection(projectId: string, id: string) {
     const row = await this.requireConnection(id);
-    const pool = await this.pool(row);
+    let pool: DbPool | undefined;
     try {
+      pool = await this.pool(row);
       await pool.query(this.testSql(row.type));
       return { ok: true };
+    } catch (error) {
+      throw new BadRequestException(
+        `数据库连接失败: ${error instanceof Error ? error.message : String(error)}`,
+      );
     } finally {
-      await pool.end();
+      if (pool) await pool.end().catch(() => undefined);
     }
   }
   async metadata(projectId: string, id: string) {
@@ -522,7 +540,7 @@ export class ApiDataFunctionService {
       return createPool({
         host: row.host,
         port: row.port,
-        database: row.databaseName,
+        ...(row.databaseName ? { database: row.databaseName } : {}),
         user: row.username,
         password,
         connectionLimit: 1,
@@ -533,12 +551,15 @@ export class ApiDataFunctionService {
       const pool = new Pool({
         host: row.host,
         port: row.port,
-        database: row.databaseName,
+        ...(row.databaseName ? { database: row.databaseName } : {}),
         user: row.username,
         password,
         max: 1,
         connectionTimeoutMillis: 5000,
       });
+      pool.on("error", (error: Error) =>
+        this.logger.error(`PostgreSQL 连接池异常: ${error.message}`),
+      );
       return {
         query: async (input: any, params: unknown[] = []) => {
           const sql = typeof input === "string" ? input : input.sql;

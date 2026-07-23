@@ -139,6 +139,7 @@ export interface ApiTestCasePayload {
   request: ApiCaseRequest;
   expected: ApiCaseExpected;
   metadata?: {
+    exports?: ApiCaseExport[];
     source?: ApiCaseSource;
     inferredFields?: string[];
     promptIds?: string[];
@@ -152,6 +153,13 @@ export interface ApiTestCasePayload {
     debugEncoding?: string;
     lastDebugRun?: CaseLastDebugRun;
   };
+}
+
+export interface ApiCaseExport {
+  name: string;
+  source: "body" | "header" | "status";
+  expression?: string;
+  required?: boolean;
 }
 
 export interface ApiEndpointPayload {

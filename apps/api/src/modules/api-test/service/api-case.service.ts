@@ -179,6 +179,7 @@ export class ApiCaseService {
           ? { debugEncoding: payload.debugEncoding }
           : {}),
         ...(payload.lastDebugRun ? { lastDebugRun: payload.lastDebugRun } : {}),
+        ...(payload.exports ? { exports: payload.exports } : {}),
       },
       ...auditFieldsForCreate(),
     });
@@ -204,6 +205,7 @@ export class ApiCaseService {
     if (!existing) {
       throw new NotFoundException("案例不存在");
     }
+    await this.assertNoMutualCaseDependency(projectId, existing.caseNo, payload.request);
     if (payload.endpointId && payload.endpointId !== existing.endpointId) {
       await this.requireEndpoint(projectId, payload.endpointId, transactionId);
       existing.endpointId = payload.endpointId;
@@ -236,6 +238,7 @@ export class ApiCaseService {
       ...(payload.lastDebugRun !== undefined
         ? { lastDebugRun: payload.lastDebugRun }
         : {}),
+      ...(payload.exports !== undefined ? { exports: payload.exports } : {}),
     };
     const saved = await this.caseRepo.save({
       ...existing,
@@ -831,6 +834,11 @@ export class ApiCaseService {
   }
 
   private validateCasePayload(payload: SaveApiCaseDto) {
+    const exportNames = (payload.exports ?? []).map((item) => item.name.trim());
+    if (new Set(exportNames).size !== exportNames.length) {
+      throw new BadRequestException("同一案例内共享变量名不能重复");
+    }
+
     const transport =
       payload.request?.transport ??
       (payload.request?.framing?.type === "length-prefix" ? "tcp" : "http");
@@ -848,6 +856,27 @@ export class ApiCaseService {
       (typeof payload.request.body === "string" && !payload.request.body.trim())
     ) {
       throw new BadRequestException("TCP 案例必须配置请求报文体");
+    }
+  }
+
+  private async assertNoMutualCaseDependency(
+    projectId: string,
+    caseNo: string | undefined,
+    request: ApiCaseRequest,
+  ) {
+    if (!caseNo) return;
+    const referencedNumbers = extractReferencedCaseNumbers(request);
+    if (!referencedNumbers.size) return;
+    const referencedCases = await this.caseRepo.find({
+      where: { projectId, caseNo: In([...referencedNumbers]) },
+      select: ["caseNo", "request"],
+    });
+    for (const referenced of referencedCases) {
+      if (extractReferencedCaseNumbers(referenced.request).has(caseNo)) {
+        throw new BadRequestException(
+          `案例 ${caseNo} 与 ${referenced.caseNo} 不能相互引用共享变量`,
+        );
+      }
     }
   }
 
@@ -884,4 +913,13 @@ export class ApiCaseService {
     }
     return transaction;
   }
+}
+
+function extractReferencedCaseNumbers(request: ApiCaseRequest) {
+  const result = new Set<string>();
+  for (const match of JSON.stringify(request).matchAll(/\$\{([^{}]+)\}/g)) {
+    const dot = match[1].lastIndexOf(".");
+    if (dot > 0) result.add(match[1].slice(0, dot));
+  }
+  return result;
 }

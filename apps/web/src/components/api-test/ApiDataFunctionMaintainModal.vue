@@ -145,16 +145,16 @@
             </template>
 
           </a-form>
-        </div>
 
-        <section class="data-function-preview-card">
-          <div class="data-function-preview-head">
-            <strong>试运行</strong>
-            <a-button type="primary" size="small" :loading="previewing" @click="runPreview">
+          <section class="data-function-preview-card">
+          <div class="data-function-preview-head" :class="{ expanded: previewExpanded }" role="button" @click="previewExpanded = !previewExpanded">
+            <strong>试运行 <DownOutlined :class="['preview-chevron', { 'is-open': previewExpanded }]" /></strong>
+            <a-button v-if="previewExpanded" type="primary" size="small" :loading="previewing" @click.stop="runPreview">
               运行一次
             </a-button>
           </div>
 
+          <template v-if="previewExpanded">
           <div v-if="parameterNames.length" class="data-function-preview-params">
             <label
               v-for="name in parameterNames"
@@ -171,7 +171,9 @@
             <span class="data-function-result-label">输出结果</span>
             <code>{{ previewError || previewResult || generatorExample || '点击「运行一次」查看结果' }}</code>
           </div>
+          </template>
         </section>
+        </div>
 
         <footer class="data-function-footer">
           <a-button danger :disabled="!activeId || isBuiltin" @click="removeFunction">
@@ -263,6 +265,7 @@ const previewParams = reactive<Record<string, string>>({ base: '0003' });
 const previewResult = ref('');
 const previewError = ref('');
 const previewing = ref(false);
+const previewExpanded = ref(false);
 const aiScriptOpen = ref(false);
 const generatingScript = ref(false);
 const scriptRequirement = ref('');
@@ -616,6 +619,7 @@ function removeFunction() {
 }
 
 async function runPreview() {
+  previewExpanded.value = true;
   previewResult.value = '';
   previewError.value = '';
   previewing.value = true;
@@ -1034,7 +1038,7 @@ function randomDigits(length: number) {
 
 /* ===== 试运行 ===== */
 .data-function-preview-card {
-  margin: 12px 20px 0;
+  margin: 12px 0 0;
   padding: 14px 16px;
   border: 1px solid var(--cf-border, #e4e7ec);
   border-radius: 10px;
@@ -1046,8 +1050,12 @@ function randomDigits(length: number) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  cursor: pointer;
 }
+
+.data-function-preview-head.expanded { margin-bottom: 12px; }
+.preview-chevron { transition: transform .15s ease; }
+.preview-chevron.is-open { transform: rotate(180deg); }
 
 .data-function-preview-head strong {
   display: inline-flex;

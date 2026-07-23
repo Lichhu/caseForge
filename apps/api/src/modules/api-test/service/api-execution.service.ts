@@ -17,6 +17,7 @@ import {
 import {
   isAllPassed,
   runAssertions,
+  extractResponseValue,
 } from "@api-test/util/assertion-runner.util";
 import type {
   ApiCaseExpected,
@@ -103,6 +104,9 @@ export class ApiExecutionService {
     if (!cases.length) {
       throw new BadRequestException("未找到可执行的启用案例");
     }
+    if (input.executionSetId) {
+      assertCaseDependencyOrder(cases);
+    }
     const runtimeByCase = new Map<string, RuntimeEnvironment>();
     for (const testCase of cases) {
       const environmentId =
@@ -172,16 +176,37 @@ export class ApiExecutionService {
     let failed = preservedItems.filter((item) => item.status === "failed").length;
     let error = preservedItems.filter((item) => item.status === "error").length;
 
-    await this.runWithConcurrency(cases, concurrency, async (testCase) => {
+    const sharedVars: Record<string, string> = {};
+    await this.runWithConcurrency(cases, input.executionSetId ? 1 : concurrency, async (testCase) => {
       const caseEnv = runtimeByCase.get(testCase.id)!;
       const item = await this.executeSingleCase({
         runId: run.id,
         testCase,
         env: caseEnv,
-        vars: buildRuntimeVariables(caseEnv.variables, caseEnv.secrets),
+        vars: {
+          ...buildRuntimeVariables(caseEnv.variables, caseEnv.secrets),
+          ...sharedVars,
+        },
         encoding: testCase.metadata?.debugEncoding ?? input.encoding,
       });
       items.push(item);
+      const exports = testCase.metadata?.exports ?? [];
+      for (const binding of exports) {
+        const value = extractResponseValue(binding.source, binding.expression, {
+          body: item.responseSnapshot?.body,
+          headers: item.responseSnapshot?.headers ?? {},
+          statusCode: item.responseSnapshot?.status ?? 0,
+        });
+        if (value !== undefined && value !== null && String(value) !== "") {
+          sharedVars[`${testCase.caseNo ?? testCase.id}.${binding.name}`] = String(value);
+        } else if (binding.required) {
+          item.status = "error";
+          item.responseSnapshot = {
+            ...(item.responseSnapshot ?? { status: 0, headers: {}, body: null }),
+            error: `共享变量提取失败：${binding.name}`,
+          };
+        }
+      }
       if (item.status === "passed") passed += 1;
       else if (item.status === "failed") failed += 1;
       else error += 1;
@@ -814,6 +839,22 @@ export class ApiExecutionService {
       }
     });
     await Promise.all(runners);
+  }
+}
+
+function assertCaseDependencyOrder(cases: ApiTestCaseEntity[]) {
+  const indexByNumber = new Map(cases.filter((item) => item.caseNo).map((item, index) => [item.caseNo!, index]));
+  for (const [index, testCase] of cases.entries()) {
+    for (const match of JSON.stringify(testCase.request).matchAll(/\$\{([^{}]+)\}/g)) {
+      const dot = match[1].lastIndexOf(".");
+      if (dot < 1) continue;
+      const producerNo = match[1].slice(0, dot);
+      const producerIndex = indexByNumber.get(producerNo);
+      if (producerIndex === undefined) continue;
+      if (producerIndex >= index) {
+        throw new BadRequestException(`案例 ${testCase.caseNo} 引用了 ${producerNo} 的变量，请将 ${producerNo} 排在前面`);
+      }
+    }
   }
 }
 

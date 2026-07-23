@@ -4,6 +4,7 @@ import {
   normalizeCaseForgePageSize,
 } from "@case-forge/shared";
 import type {
+  ApiCaseExport,
   ApiAssertion,
   ApiCaseExpected,
   ApiCasePolarity,
@@ -116,6 +117,7 @@ export interface ApiTestCaseRow {
   endpoint?: ApiEndpointRow;
   createdBy?: string;
   metadata?: {
+    exports?: ApiCaseExport[];
     source?: string;
     promptIds?: string[];
     generateVersion?: number;

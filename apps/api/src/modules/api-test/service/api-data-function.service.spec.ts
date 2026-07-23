@@ -74,6 +74,38 @@ describe("ApiDataFunctionService", () => {
     });
   });
 
+  it("returns a readable error when testing a database connection fails", async () => {
+    const connectionService = new ApiDataFunctionService(
+      { findOne: jest.fn().mockResolvedValue({ id: "db", type: "MySQL" }) } as never,
+      {} as never,
+    );
+    jest
+      .spyOn(connectionService as any, "pool")
+      .mockRejectedValue(new Error("connect ECONNREFUSED"));
+
+    await expect(connectionService.testConnection("p1", "db")).rejects.toThrow(
+      "数据库连接失败: connect ECONNREFUSED",
+    );
+  });
+
+  it("requires a database only for database types that need one", async () => {
+    const connectionRepo = { create: jest.fn(), save: jest.fn() };
+    const connectionService = new ApiDataFunctionService(
+      connectionRepo as never,
+      {} as never,
+    );
+
+    await expect(
+      connectionService.saveConnection("p1", {
+        name: "pg",
+        type: "PostgreSQL",
+        host: "localhost",
+        port: 5432,
+        username: "user",
+      }),
+    ).rejects.toThrow("请填写数据库名");
+  });
+
   it("rejects unknown functions before sending a request", async () => {
     await expect(
       service.resolveDeep("p1", "${UNKNOWN()}"),

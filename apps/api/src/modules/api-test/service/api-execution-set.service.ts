@@ -24,6 +24,7 @@ import {
   DEFAULT_CASE_FORGE_PAGE_SIZE,
   normalizeCaseForgePageSize,
 } from "@case-forge/shared";
+import { sortCaseIdsByDependencies } from "@api-test/util/case-dependency-order.util";
 
 @Injectable()
 export class ApiExecutionSetService {
@@ -150,11 +151,12 @@ export class ApiExecutionSetService {
       transactionId,
       uniqueCaseIds,
     );
+    const sortedCaseIds = await this.sortByDependencies(projectId, uniqueCaseIds);
     await this.setCaseRepo.delete({ executionSetId: setId });
-    if (!uniqueCaseIds.length) {
+    if (!sortedCaseIds.length) {
       return { caseIds: [] as string[], caseCount: 0 };
     }
-    const rows = uniqueCaseIds.map((caseId, index) =>
+    const rows = sortedCaseIds.map((caseId, index) =>
       this.setCaseRepo.create({
         executionSetId: setId,
         caseId,
@@ -162,7 +164,7 @@ export class ApiExecutionSetService {
       }),
     );
     await this.setCaseRepo.save(rows);
-    return { caseIds: uniqueCaseIds, caseCount: uniqueCaseIds.length };
+    return { caseIds: sortedCaseIds, caseCount: sortedCaseIds.length };
   }
 
   async getCaseIds(setId: string) {
@@ -171,6 +173,15 @@ export class ApiExecutionSetService {
       order: { sortOrder: "ASC", createdAt: "ASC" },
     });
     return links.map((item) => item.caseId);
+  }
+
+  private async sortByDependencies(projectId: string, caseIds: string[]) {
+    if (!caseIds.length) return caseIds;
+    const allCases = await this.caseRepo.find({
+      where: { projectId },
+      select: ["id", "caseNo", "request"],
+    });
+    return sortCaseIdsByDependencies(caseIds, allCases);
   }
 
   async updateLastRun(

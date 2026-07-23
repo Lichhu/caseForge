@@ -1025,11 +1025,7 @@ export const useCaseForgeStore = defineStore("caseForge", {
             await this.loadDynamicWorkspace();
           }
         }
-        message.success(
-          uploaded.length > 1
-            ? `需求文档已拆分为 ${uploaded.length} 个部分并上传`
-            : "需求文档已上传",
-        );
+        message.success("需求文档已上传");
       } catch (error) {
         message.error((error as Error)?.message || "上传需求文档失败");
         throw error;

@@ -476,6 +476,7 @@
                             </button>
                           </div>
                           <div v-if="canBeautifyBody" class="case-editor-chrome-actions">
+                            <a-button type="link" size="small" :disabled="!hasBodyCursor || !sharedVariableOptions.length" @click="openSharedVariableInsert"><LinkOutlined /> 插入变量</a-button>
                             <a-button type="link" size="small" :disabled="!hasBodyCursor" @click="openBodyFunctionInsert"><CodeOutlined /> 插入函数</a-button>
                             <a-button
                               type="link"
@@ -576,6 +577,39 @@
                   />
                 </div>
               </div>
+
+              <div v-show="editorMainTab === 'variables'" class="case-editor-panel case-assertion-panel">
+                <div class="case-assertion-shell">
+                  <div class="case-assertion-toolbar">
+                    <div><strong>响应提取（{{ form.exports.length }}）</strong></div>
+                    <div class="case-assertion-toolbar-actions">
+                      <a-button size="small" :loading="debugRunning" @click="addExportFromDebug">调试添加</a-button>
+                      <a-button size="small" @click="addExportRow">手动添加</a-button>
+                    </div>
+                  </div>
+                  <a-table :data-source="form.exports" :pagination="false" size="small" row-key="rowId">
+                    <a-table-column title="变量名" key="name">
+                      <template #default="{ record }"><a-input v-model:value="record.name" placeholder="accessToken" /></template>
+                    </a-table-column>
+                    <a-table-column title="来源" key="source" :width="130">
+                      <template #default="{ record }"><a-select v-model:value="record.source" :options="exportSourceOptions" /></template>
+                    </a-table-column>
+                    <a-table-column title="提取表达式" key="expression">
+                      <template #default="{ record }"><a-input v-model:value="record.expression" :disabled="record.source === 'status'" :placeholder="record.source === 'header' ? 'x-trace-id' : '$.data.accessToken'" /></template>
+                    </a-table-column>
+                    <a-table-column title="必需" key="required" :width="70">
+                      <template #default="{ record }"><a-checkbox v-model:checked="record.required" /></template>
+                    </a-table-column>
+                    <a-table-column title="引用" key="reference" :width="160">
+                      <template #default="{ record }"><code v-if="record.name">${{ '{' }}{{ form.caseNo || '案例编号' }}.{{ record.name }}}</code></template>
+                    </a-table-column>
+                    <a-table-column key="action" :width="60">
+                      <template #default="{ index }"><a-button type="link" danger @click="form.exports.splice(index, 1)">删除</a-button></template>
+                    </a-table-column>
+                  </a-table>
+                  <a-empty v-if="!form.exports.length" description="先调试，再从响应中添加要共享的字段" />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -584,7 +618,7 @@
               <a-button
                 :loading="debugRunning"
                 :disabled="!apiStore.selectedEnvironmentId || (debugServiceOptions.length > 0 && !debugServiceId)"
-                @click="onDebugRun"
+                @click="onDebugRun()"
               >
                 <template #icon><ThunderboltOutlined /></template>
                 调试
@@ -637,6 +671,18 @@
         <div v-if="debugResult.error" class="case-debug-result-error">{{ debugResult.error }}</div>
         <pre v-else class="case-debug-result-body">{{ debugResultBodyText }}</pre>
       </div>
+    </a-modal>
+
+    <a-modal v-model:open="sharedVariableInsertOpen" title="插入变量" ok-text="插入" @ok="insertSharedVariable">
+      <a-select v-model:value="sharedVariableName" style="width: 100%" :options="sharedVariableOptions" placeholder="选择变量" />
+    </a-modal>
+
+    <a-modal v-model:open="debugExportOpen" title="手动添加" ok-text="添加" @ok="confirmDebugExport">
+      <a-form layout="vertical">
+        <a-form-item label="响应字段路径"><a-select v-model:value="debugExportPath" show-search :options="debugResponsePathOptions" placeholder="选择字段" /></a-form-item>
+        <a-form-item label="变量名"><a-input v-model:value="debugExportName" placeholder="accessToken" /></a-form-item>
+        <a-form-item><a-checkbox v-model:checked="debugExportRequired">提取失败时终止该案例</a-checkbox></a-form-item>
+      </a-form>
     </a-modal>
 
     <a-modal
@@ -715,13 +761,16 @@
       :transaction-id="transactionId"
     />
   </section>
-  <a-modal v-model:open="bodyFunctionInsertOpen" title="插入数据函数" :z-index="NESTED_OVERLAY_Z_INDEX" ok-text="插入" @ok="insertBodyFunction">
+  <a-modal v-model:open="bodyFunctionInsertOpen" title="插入数据函数" :width="680" :z-index="NESTED_OVERLAY_Z_INDEX" ok-text="插入" @ok="insertBodyFunction">
     <a-form layout="vertical">
       <a-form-item label="函数" required><a-select v-model:value="bodyFunctionName" :options="bodyFunctionOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }" show-search /></a-form-item>
-      <a-form-item v-if="selectedBodyFunction?.type !== 'sql'" label="参数来源" extra="以 $. 开头引用当前请求体字段；多个参数用英文逗号分隔">
-        <a-auto-complete v-model:value="bodyFunctionArgs" :options="bodyPathOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }" filter-option placeholder="$.Transaction.Header.sysHeader.clientCd" />
-      </a-form-item>
-      <code>{{ bodyFunctionPreview }}</code>
+      <div v-if="selectedBodyFunction?.params.length" class="function-argument-list">
+        <label v-for="(param, index) in selectedBodyFunction.params" :key="`${param}-${index}`" class="function-argument-row">
+          <span :title="param">{{ index + 1 }}. {{ param }}</span>
+          <a-auto-complete v-model:value="bodyFunctionArgs[index]" :options="bodyPathOptions(index)" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }" filter-option placeholder="选择或输入参数来源" />
+        </label>
+      </div>
+      <div class="function-expression-preview"><span>调用预览</span><code>{{ bodyFunctionPreview }}</code></div>
     </a-form>
   </a-modal>
 </template>
@@ -736,6 +785,7 @@ import {
   ExportOutlined,
   FormatPainterOutlined,
   InboxOutlined,
+  LinkOutlined,
   PlusOutlined,
   RobotOutlined,
   SaveOutlined,
@@ -856,18 +906,23 @@ const exportModalOpen = ref(false);
 const bodyExpandModalOpen = ref(false);
 const bodyFunctionInsertOpen = ref(false);
 const bodyFunctionName = ref('');
-const bodyFunctionArgs = ref('$.Transaction.Header.sysHeader.clientCd');
+const bodyFunctionArgs = ref<string[]>([]);
 const bodyFunctions = ref<Awaited<ReturnType<typeof listDataFunctions>>>([]);
 const bodyFunctionOptions = ref<Array<{ label: string; value: string }>>([]);
 const bodyFunctionCursor = reactive({ start: 0, end: 0 });
 const hasBodyCursor = ref(false);
 const selectedBodyFunction = computed(() => bodyFunctions.value.find((item) => item.name === bodyFunctionName.value));
-const bodyFunctionPreview = computed(() => selectedBodyFunction.value?.type === 'sql'
-  ? `\${${bodyFunctionName.value || '函数名'}().字段}`
-  : `\${${bodyFunctionName.value || '函数名'}(${bodyFunctionArgs.value})}`);
-const bodyPathOptions = computed(() => {
-  const keyword = bodyFunctionArgs.value.trim().toLowerCase();
+const bodyFunctionPreview = computed(() => {
+  const call = `\${${bodyFunctionName.value || '函数名'}(${bodyFunctionArgs.value.join(', ')})`;
+  return selectedBodyFunction.value?.type === 'sql' ? `${call}.字段}` : `${call}}`;
+});
+function bodyPathOptions(index: number) {
+  const keyword = (bodyFunctionArgs.value[index] ?? '').trim().toLowerCase();
   return messagePathOptions(currentBodyText()).filter((item) => !keyword || item.value.toLowerCase().includes(keyword));
+}
+
+watch(selectedBodyFunction, (fn) => {
+  bodyFunctionArgs.value = (fn?.params ?? []).map((_, index) => bodyFunctionArgs.value[index] ?? '');
 });
 
 const moreMenuOpen = ref(false);
@@ -1055,11 +1110,12 @@ function syncDebugServiceSelection() {
   }
   debugServiceId.value = debugServiceOptions.value[0]?.value ?? '';
 }
-const editorMainTab = ref<'basic' | 'request' | 'assertion'>('request');
+const editorMainTab = ref<'basic' | 'request' | 'assertion' | 'variables'>('request');
 const editorMainTabs = [
   { key: 'basic' as const, label: '基础信息' },
   { key: 'request' as const, label: '请求报文' },
   { key: 'assertion' as const, label: '断言' },
+  { key: 'variables' as const, label: '响应提取' },
 ];
 const requestTab = ref<'params' | 'body' | 'headers'>('body');
 const requestViewMode = ref<'template' | 'curl'>('template');
@@ -1328,7 +1384,87 @@ const form = reactive({
   requestTcpMeta: null as SocketRequestMeta | null,
   requestBodyXml: '',
   assertionRows: [] as AssertionRow[],
+  exports: [] as Array<{ rowId: string; name: string; source: 'body' | 'header' | 'status'; expression: string; required: boolean }>,
 });
+
+const exportSourceOptions = [
+  { label: '响应体', value: 'body' },
+  { label: '响应头', value: 'header' },
+  { label: '状态码', value: 'status' },
+];
+const sharedVariableInsertOpen = ref(false);
+const sharedVariableName = ref('');
+const sharedVariableOptions = computed(() => {
+  const variables = new Map<string, string>();
+  const currentCaseNo = form.caseNo.trim();
+  for (const row of apiStore.cases) {
+    if (row.id === apiStore.activeCaseId) continue;
+    if (currentCaseNo && JSON.stringify(row.request).includes(`\${${currentCaseNo}.`)) continue;
+    for (const item of row.metadata?.exports ?? []) {
+      if (!item.name.trim()) continue;
+      const value = `${row.caseNo || row.id}.${item.name.trim()}`;
+      variables.set(value, `${row.caseNo || row.title} · ${item.name.trim()}`);
+    }
+  }
+  return [...variables].map(([value, label]) => ({ label, value }));
+});
+const debugExportOpen = ref(false);
+const debugExportPath = ref('');
+const debugExportName = ref('');
+const debugExportRequired = ref(true);
+const debugResponseBody = computed(() => {
+  const body = debugResult.value?.body;
+  if (typeof body !== 'string') return body;
+  try { return JSON.parse(body); } catch { return body; }
+});
+const debugResponsePathOptions = computed(() => responsePaths(debugResponseBody.value).map((value) => ({ label: value, value })));
+
+function responsePaths(value: unknown, path = '$', out: string[] = []): string[] {
+  if (value === null || typeof value !== 'object') {
+    out.push(path);
+    return out;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    responsePaths(child, Array.isArray(value) ? `${path}[${key}]` : `${path}.${key}`, out);
+  }
+  return out;
+}
+
+function addExportRow() {
+  form.exports.push({ rowId: crypto.randomUUID(), name: '', source: 'body', expression: '', required: true });
+}
+
+async function addExportFromDebug() {
+  await onDebugRun(false);
+  if (!debugResult.value) return;
+  if (debugResult.value.error) return message.warning(`调试请求失败：${debugResult.value.error}`);
+  if (!debugResponsePathOptions.value.length) return message.warning('响应体没有可提取字段，可使用“手动添加”提取响应头或状态码');
+  debugExportPath.value = debugResponsePathOptions.value[0]?.value ?? '';
+  const pathParts = debugExportPath.value.split(/[.\[\]]/).filter(Boolean);
+  debugExportName.value = pathParts[pathParts.length - 1] ?? '';
+  debugExportRequired.value = true;
+  debugExportOpen.value = true;
+}
+
+function confirmDebugExport() {
+  if (!debugExportPath.value || !debugExportName.value.trim()) return message.warning('请选择字段并填写变量名');
+  if (form.exports.some((item) => item.name.trim() === debugExportName.value.trim())) return message.warning('同一案例内共享变量名不能重复');
+  form.exports.push({ rowId: crypto.randomUUID(), name: debugExportName.value.trim(), source: 'body', expression: debugExportPath.value, required: debugExportRequired.value });
+  debugExportOpen.value = false;
+}
+
+function openSharedVariableInsert() {
+  sharedVariableName.value = sharedVariableOptions.value[0]?.value ?? '';
+  sharedVariableInsertOpen.value = true;
+}
+
+function insertSharedVariable() {
+  if (!sharedVariableName.value) return message.warning('请选择变量');
+  const body = currentBodyText();
+  const expression = `\${${sharedVariableName.value}}`;
+  setCurrentBodyText(`${body.slice(0, bodyFunctionCursor.start)}${expression}${body.slice(bodyFunctionCursor.end)}`);
+  sharedVariableInsertOpen.value = false;
+}
 
 const requestEditorMode = computed(() =>
   resolveEditorMode(form.protocol, form.bodyFormat),
@@ -1647,6 +1783,13 @@ function loadForm(row: ApiTestCaseRow) {
   form.enabled = row.enabled;
   applyRequestToForm(row.request);
   form.assertionRows = assertionsToRows(row.expected?.assertions);
+  form.exports = (row.metadata?.exports ?? []).map((item) => ({
+    rowId: crypto.randomUUID(),
+    name: item.name,
+    source: item.source,
+    expression: item.expression ?? '',
+    required: item.required ?? false,
+  }));
   loadedCaseId.value = row.id;
   syncingForm.value = false;
   debugEncoding.value = row.metadata?.debugEncoding ?? inferDebugEncoding();
@@ -1834,6 +1977,7 @@ function onCreate() {
   requestTab.value = 'body';
   editorMainTab.value = 'basic';
   form.assertionRows = [];
+  form.exports = [];
   debugResult.value = null;
   debugResponseTab.value = 'expected';
   debugEncoding.value = inferDebugEncoding();
@@ -1842,6 +1986,11 @@ function onCreate() {
 
 function buildSavePayload(): Record<string, unknown> | null {
   if (!form.title.trim()) return null;
+  const exportNames = form.exports.map((item) => item.name.trim()).filter(Boolean);
+  if (new Set(exportNames).size !== exportNames.length) {
+    message.warning('同一案例内共享变量名不能重复');
+    return null;
+  }
   const expected = buildExpectedFromRows(form.assertionRows);
   const payload: Record<string, unknown> = {
     endpointId: form.endpointId,
@@ -1871,6 +2020,12 @@ function buildSavePayload(): Record<string, unknown> | null {
       requestBodyXml: form.requestBodyXml,
     }),
     expected,
+    exports: form.exports.filter((item) => item.name.trim()).map(({ name, source, expression, required }) => ({
+      name: name.trim(),
+      source,
+      expression: source === 'status' ? undefined : expression.trim(),
+      required,
+    })),
       debugEnvironmentId: apiStore.selectedEnvironmentId || undefined,
       debugEnvironmentServiceId: debugServiceId.value || undefined,
       debugEncoding: debugEncoding.value || undefined,
@@ -1957,7 +2112,7 @@ function buildDebugRequest(): ApiCaseRequest {
   });
 }
 
-async function onDebugRun() {
+async function onDebugRun(showResult = true) {
   if (!projectId.value || !transactionId.value) return;
   if (!apiStore.selectedEnvironmentId) {
     message.warning('请选择调试环境');
@@ -1984,7 +2139,7 @@ async function onDebugRun() {
     );
     if (!isStillOnCase(caseKey)) return;
     debugResult.value = result;
-    debugResultModalOpen.value = true;
+    debugResultModalOpen.value = showResult;
   } catch (error) {
     if (isStillOnCase(caseKey)) {
       debugResult.value = {
@@ -1996,7 +2151,7 @@ async function onDebugRun() {
         error: error instanceof Error ? error.message : '调试执行失败，请检查环境配置和请求报文',
         assertions: [],
       };
-      debugResultModalOpen.value = true;
+      debugResultModalOpen.value = showResult;
     }
   } finally {
     releaseCaseTask(debugRunningCaseKey, caseKey);
@@ -2336,6 +2491,13 @@ function onBatchDelete() {
 </script>
 
 <style scoped>
+.function-argument-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-height: 300px; margin-bottom: 16px; padding-right: 4px; overflow-y: auto; }
+.function-argument-row { display: grid; gap: 5px; min-width: 0; }
+.function-argument-row > span { overflow: hidden; color: var(--cf-text-secondary, #667085); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.function-expression-preview { display: grid; gap: 5px; padding: 10px 12px; border-radius: 6px; background: var(--cf-surface-soft, #f8f9fb); }
+.function-expression-preview > span { color: var(--cf-text-muted, #98a2b3); font-size: 11px; }
+.function-expression-preview code { overflow-wrap: anywhere; }
+@media (max-width: 640px) { .function-argument-list { grid-template-columns: 1fr; } }
 .api-case-panel {
   display: flex;
   flex-direction: column;

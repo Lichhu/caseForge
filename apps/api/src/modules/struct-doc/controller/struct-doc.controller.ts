@@ -32,11 +32,9 @@ import { findOwnedProject } from "@common/audit/user-scope";
 import { touchProjectUpdatedAt } from "@common/project/touch-project.util";
 import { StructDocService } from "@struct-doc/service/struct-doc.service";
 import {
-  MAX_REQUIREMENT_DOC_CHINESE_CHARS,
   MAX_REQUIREMENT_DOC_SIZE_BYTES,
   MAX_REQUIREMENT_DOC_SIZE_MB,
 } from "@case-forge/shared";
-import { splitDocumentText } from "@struct-doc/util/document-splitter.util";
 import { Repository } from "typeorm";
 
 @ApiTags("struct-doc")
@@ -93,36 +91,8 @@ export class StructDocController {
       contentType: file.mimetype,
     });
     assertReadableText(extractedText, "需求文档");
-    const chineseChars = (extractedText.match(/[\u4e00-\u9fa5]/g) || []).length;
 
     await findOwnedProject(this.projectRepo, projectId);
-
-    if (chineseChars > MAX_REQUIREMENT_DOC_CHINESE_CHARS) {
-      const chunks = splitDocumentText(extractedText);
-      const baseName = this.normalizeUploadFileName(file.originalname);
-      const stem = baseName.replace(/\.(doc|docx|md)$/i, "");
-      const results = [];
-      for (const chunk of chunks) {
-        const partName = chunk.title
-          ? `${stem} - 第${chunk.index}部分 ${chunk.title}.md`
-          : `${stem} - 第${chunk.index}部分.md`;
-        const objectPath = this.minioService.buildProjectObjectPath(
-          projectId,
-          partName,
-        );
-        await this.minioService.uploadFile(
-          objectPath,
-          Buffer.from(chunk.content, "utf8"),
-        );
-        const saved = await this.structDocService.saveUploadedRequirement(
-          projectId,
-          { reqDocName: partName, reqDocPath: objectPath },
-        );
-        results.push(saved);
-      }
-      await touchProjectUpdatedAt(this.projectRepo, projectId);
-      return results;
-    }
 
     const fileName = this.normalizeUploadFileName(file.originalname);
     const objectPath = this.minioService.buildProjectObjectPath(

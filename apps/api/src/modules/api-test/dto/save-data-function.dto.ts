@@ -33,7 +33,7 @@ export class SaveDatabaseConnectionDto {
   type: string;
   @IsString() @IsNotEmpty() host: string;
   @IsInt() @Min(1) @Max(65535) port: number;
-  @IsString() @IsNotEmpty() databaseName: string;
+  @IsOptional() @IsString() databaseName?: string;
   @IsString() @IsNotEmpty() username: string;
   @IsOptional() @IsString() password?: string;
   @IsOptional() @IsBoolean() readonly?: boolean;

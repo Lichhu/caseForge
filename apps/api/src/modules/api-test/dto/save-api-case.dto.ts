@@ -15,6 +15,7 @@ import type {
   ApiCasePriority,
   ApiCaseRequest,
   ApiCaseStatus,
+  ApiCaseExport,
   CaseLastDebugRun,
 } from "@case-forge/shared";
 
@@ -115,6 +116,11 @@ export class SaveApiCaseDto {
   @IsOptional()
   @IsObject()
   lastDebugRun?: CaseLastDebugRun;
+
+  @ApiPropertyOptional({ type: Array })
+  @IsOptional()
+  @IsArray()
+  exports?: ApiCaseExport[];
 
   @ApiProperty()
   @IsObject()
