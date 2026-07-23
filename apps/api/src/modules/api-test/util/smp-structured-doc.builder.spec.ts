@@ -124,6 +124,15 @@ describe("buildStructuredMarkdownFromSmp", () => {
     expect(getApiDocFieldValue(techSection, "报文类型")).toBe("JSON");
   });
 
+  it("uses SMP requestBody as 示例报文", () => {
+    const md = buildStructuredMarkdownFromSmp(
+      [makeCallItem()],
+      [makeTestItem()],
+    );
+
+    expect(extractApiDocSection(md, "示例报文")).toBe(NESTED_REQUEST_BODY);
+  });
+
   it("includes 基础信息 with 服务URL and 交易码", () => {
     const md = buildStructuredMarkdownFromSmp(
       [makeCallItem()],

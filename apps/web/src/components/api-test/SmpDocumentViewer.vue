@@ -75,15 +75,13 @@
             class="smp-test-info-card"
             size="small"
           >
-            <div class="smp-test-info-header">
-              <a-tag color="blue">{{ (item as Record<string, unknown>).requestMethod || '—' }}</a-tag>
-              <span class="smp-test-info-url">{{ (item as Record<string, unknown>).requestUrl || '—' }}</span>
-            </div>
             <a-row :gutter="16" class="smp-test-payload-row">
               <a-col :xs="24">
                 <div class="smp-json-block">
-                  <div class="smp-json-block-title">请求报文</div>
-                  <pre class="smp-json-body">{{ formatJsonBody((item as Record<string, unknown>).requestBody) }}</pre>
+                  <div class="smp-json-block-title">示例报文</div>
+                  <slot name="example-message" :item="item">
+                    <pre class="smp-json-body">{{ formatJsonBody((item as Record<string, unknown>).requestBody) }}</pre>
+                  </slot>
                 </div>
               </a-col>
             </a-row>
@@ -254,21 +252,6 @@ function formatJsonBody(value: unknown): string {
   color: #101828;
   font-size: 13px;
   font-weight: 500;
-}
-
-.smp-test-info-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #f2f4f7;
-}
-
-.smp-test-info-url {
-  color: #344054;
-  font-size: 13px;
-  word-break: break-all;
 }
 
 .smp-test-payload-row {

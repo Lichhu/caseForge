@@ -119,7 +119,28 @@
     <div ref="tableScrollRef" class="document-table-scroll">
       <template v-if="showSmpData">
         <div class="smp-doc-source-tag">来源：服管平台</div>
-        <SmpDocumentViewer :data="apiStore.apiDoc!.smpData!" />
+        <SmpDocumentViewer :data="apiStore.apiDoc!.smpData!">
+          <template #example-message>
+            <div class="example-message-shell">
+              <div class="example-message-actions">
+                <a-button type="link" size="small" class="example-message-action-btn" :disabled="!hasExampleCursor" @click="openFunctionInsert"><CodeOutlined /> 插入函数</a-button>
+                <a-button type="link" size="small" class="example-message-beautify-btn" :disabled="!exampleMessage.trim()" @click="beautifyExampleMessage"><template #icon><FormatPainterOutlined /></template>美化</a-button>
+                <a-button type="link" size="small" class="example-message-expand-btn" @click="exampleExpandModalOpen = true"><template #icon><ExpandOutlined /></template>编辑</a-button>
+              </div>
+              <textarea
+                v-model="exampleMessage"
+                class="example-message-input"
+                spellcheck="false"
+                @focus="rememberExampleCursor"
+                @click="rememberExampleCursor"
+                @keyup="rememberExampleCursor"
+                @input="onExampleMessageInput"
+                @blur="onExampleMessageBlur"
+                @paste="onExampleMessagePaste"
+              />
+            </div>
+          </template>
+        </SmpDocumentViewer>
       </template>
       <template v-else>
         <a-empty
@@ -528,7 +549,8 @@ function loadFromText(text: string) {
     parsed.push({ title: '示例报文', rows: [], freeText: '' });
   }
   const exampleSection = parsed.find((section) => section.title === '示例报文');
-  exampleMessage.value = exampleSection?.freeText ?? '';
+  const smpRequestBody = apiStore.apiDoc?.smpData?.serviceTestList?.[0] as Record<string, unknown> | undefined;
+  exampleMessage.value = exampleSection?.freeText || String(smpRequestBody?.requestBody ?? '');
   hasExampleCursor.value = false;
   sections.value = parsed;
   sectionData.value = sections.value.map((section) => sectionTableData(section));
@@ -713,11 +735,14 @@ watch(
 );
 
 watch(
-  () => apiStore.apiDoc?.tempStructuredMarkdown ?? apiStore.apiDoc?.structuredMarkdown,
-  (value) => {
+  () => [
+    apiStore.apiDoc?.tempStructuredMarkdown ?? apiStore.apiDoc?.structuredMarkdown,
+    (apiStore.apiDoc?.smpData?.serviceTestList?.[0] as Record<string, unknown> | undefined)?.requestBody,
+  ] as const,
+  ([value, smpRequestBody]) => {
     if (!panelActive.value) return;
     const next = value || '';
-    if (next === editorText.value) return;
+    if (next === editorText.value && (exampleMessage.value || !smpRequestBody)) return;
     if (autoSaveTimer.value) {
       window.clearTimeout(autoSaveTimer.value);
       autoSaveTimer.value = null;

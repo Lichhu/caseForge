@@ -105,6 +105,12 @@ export function buildStructuredMarkdownFromSmp(
     sections.push(`请求报文\n${API_DOC_SECTION_SEPARATOR}\n${requestSection}`);
   }
 
+  if (testItem.requestBody?.trim()) {
+    sections.push(
+      `示例报文\n${API_DOC_SECTION_SEPARATOR}\n${testItem.requestBody.trim()}`,
+    );
+  }
+
   return sections.join("\n\n");
 }
 

@@ -387,7 +387,7 @@ function replaceXmlFieldValueByPath(
 
 function countXmlTags(xml: string, tag: string): number {
   return (
-    xml.match(new RegExp(`<${tag}(?:\\s[^>]*)?(?:>|/>)`, "g"))?.length ?? 0
+    xml.match(new RegExp(`<${tag}(?:\\s[^>]*)?(?:>|/>)`, "gi"))?.length ?? 0
   );
 }
 
@@ -396,13 +396,13 @@ function createXmlPath(xml: string, segments: string[], value: string) {
   let parentIndex = parentSegments.length - 1;
   while (
     parentIndex >= 0 &&
-    !new RegExp(`<${parentSegments[parentIndex]}(?:\s[^>]*)?>`).test(xml)
+    !new RegExp(`<${parentSegments[parentIndex]}(?:\\s[^>]*)?>`, "i").test(xml)
   ) {
     parentIndex -= 1;
   }
   if (parentIndex < 0) return { xml, changed: false };
   const parent = parentSegments[parentIndex];
-  const missing = segments.slice(parentIndex + 1);
+  const missing = segments.slice(parentIndex + 1).map((segment) => segment.toLowerCase());
   const escaped = escapeXmlValue(value);
   const nested = missing.reduceRight(
     (content, tag, index) =>
@@ -411,9 +411,9 @@ function createXmlPath(xml: string, segments: string[], value: string) {
         : `<${tag}>${content}</${tag}>`,
     "",
   );
-  const close = `</${parent}>`;
-  const closeIndex = xml.indexOf(close);
-  if (closeIndex < 0) return { xml, changed: false };
+  const closeMatch = new RegExp(`</${parent}>`, "i").exec(xml);
+  if (!closeMatch) return { xml, changed: false };
+  const closeIndex = closeMatch.index;
   return {
     xml: `${xml.slice(0, closeIndex)}${nested}${xml.slice(closeIndex)}`,
     changed: true,

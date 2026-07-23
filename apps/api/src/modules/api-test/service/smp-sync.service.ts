@@ -245,7 +245,7 @@ export class SmpSyncService {
     }
 
     const callServiceHash = this.hashData(callService.data);
-    const testInfoHash = this.hashData(testInfo.data);
+    const testInfoHash = this.hashData(testInfo.data, "requestBody");
 
     let doc = await this.apiDocRepo.findOne({
       where: scopedWhere({ projectId, transactionId }),
@@ -393,8 +393,14 @@ export class SmpSyncService {
     }
   }
 
-  private hashData(data: unknown): string {
-    return createHash("sha256").update(JSON.stringify(data)).digest("hex");
+  private hashData(data: unknown, ignoredKey?: string): string {
+    return createHash("sha256")
+      .update(
+        JSON.stringify(data, (key, value) =>
+          key === ignoredKey ? undefined : value,
+        ),
+      )
+      .digest("hex");
   }
 
   private async getApiTestProject(projectId: string) {

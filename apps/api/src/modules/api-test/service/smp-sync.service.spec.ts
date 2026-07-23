@@ -4,8 +4,14 @@ import { RequestContext } from "@common/audit/request-context";
 import { SmpSyncService } from "@api-test/service/smp-sync.service";
 import type { SmpTransactionCandidate } from "@api-test/service/smp-sync.service";
 
-function hashData(data: unknown) {
-  return createHash("sha256").update(JSON.stringify(data)).digest("hex");
+function hashData(data: unknown, ignoredKey?: string) {
+  return createHash("sha256")
+    .update(
+      JSON.stringify(data, (key, value) =>
+        key === ignoredKey ? undefined : value,
+      ),
+    )
+    .digest("hex");
 }
 
 function createRepoMock() {
@@ -371,7 +377,7 @@ describe("SmpSyncService.refreshTransactionDocumentFromSmp", () => {
     const data = [{ id: "same" }];
     const hash = hashData(data);
     const testInfoData = [{ id: "test" }];
-    const testInfoHash = hashData(testInfoData);
+    const testInfoHash = hashData(testInfoData, "requestBody");
     transactionRepo.findOne.mockResolvedValue(
       makeTransaction({ syncStatus: "success" }),
     );
@@ -529,7 +535,7 @@ describe("SmpSyncService.refreshTransactionDocumentFromSmp", () => {
     const callServiceData = [{ id: "same" }];
     const callServiceHash = hashData(callServiceData);
     const oldTestInfoData = [{ id: "old-test" }];
-    const oldTestInfoHash = hashData(oldTestInfoData);
+    const oldTestInfoHash = hashData(oldTestInfoData, "requestBody");
     transactionRepo.findOne.mockResolvedValue(
       makeTransaction({ syncStatus: "success" }),
     );
@@ -558,12 +564,47 @@ describe("SmpSyncService.refreshTransactionDocumentFromSmp", () => {
     expect(transactionRepo.save).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores requestBody changes when checking SMP changes", async () => {
+    const { service, transactionRepo, apiDocRepo, smpClient } = buildService();
+    const callServiceData = [{ id: "same" }];
+    const callServiceHash = hashData(callServiceData);
+    const oldTestInfoData = [{ requestBody: '{"custId":"old"}', requestUrl: "/test" }];
+    const testInfoHash = hashData(oldTestInfoData, "requestBody");
+    transactionRepo.findOne.mockResolvedValue(
+      makeTransaction({ syncStatus: "success" }),
+    );
+    apiDocRepo.findOne.mockResolvedValue(
+      makeDoc({
+        lastSmpCallServiceHash: callServiceHash,
+        lastSmpTestInfoHash: testInfoHash,
+        lastGeneratedSmpCallServiceHash: callServiceHash,
+        lastGeneratedSmpTestInfoHash: testInfoHash,
+      }),
+    );
+    smpClient.selectCallServiceInfoList.mockResolvedValue(
+      makeCallServiceResponse(callServiceData),
+    );
+    smpClient.selectTestInfoList.mockResolvedValue(
+      makeTestInfoResponse([
+        { requestBody: '{"custId":"${FUNC()}"}', requestUrl: "/test" },
+      ]),
+    );
+
+    const result = await RequestContext.run("test-user", () =>
+      service.refreshTransactionDocumentFromSmp("p1", "tx-1"),
+    );
+
+    expect(result.changed).toBe(false);
+    expect(result.needsRegenerate).toBe(false);
+    expect(result.syncStatus).toBe("success");
+  });
+
   it("keeps pending when only testInfo changes and no successful generation", async () => {
     const { service, transactionRepo, apiDocRepo, smpClient } = buildService();
     const callServiceData = [{ id: "same" }];
     const callServiceHash = hashData(callServiceData);
     const oldTestInfoData = [{ id: "old-test" }];
-    const oldTestInfoHash = hashData(oldTestInfoData);
+    const oldTestInfoHash = hashData(oldTestInfoData, "requestBody");
     transactionRepo.findOne.mockResolvedValue(
       makeTransaction({ syncStatus: "pending" }),
     );

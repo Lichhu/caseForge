@@ -51,7 +51,7 @@ describe("assembleBodyFromExample missing paths", () => {
       createMissingPaths: true,
     });
     expect(result.body).toContain(
-      "<sysHeader><clientCd>520</clientCd></sysHeader>",
+      "<sysheader><clientcd>520</clientcd></sysheader>",
     );
   });
 
@@ -70,6 +70,21 @@ describe("assembleBodyFromExample missing paths", () => {
     expect(result.body).toContain("<msgId>new-body</msgId>");
     expect(result.body).toContain("<size>20</size>");
     expect(result.body).toContain("<start>10</start>");
+  });
+
+  it("matches XML paths case-insensitively without creating duplicate bizBody", () => {
+    const result = assembleBodyFromExample({
+      exampleMessage:
+        "<Transaction><Body><request><bizBody><CUST_ID>old</CUST_ID></bizBody></request></Body></Transaction>",
+      overrides: {
+        "transaction/body/request/bizbody/cust_id": "new",
+      },
+      messageFormat: "xml",
+      createMissingPaths: true,
+    });
+
+    expect(result.body).toContain("<CUST_ID>new</CUST_ID>");
+    expect(result.body.match(/<bizbody>/gi)).toHaveLength(1);
   });
 
   it("appends missing TEXT key-value fields", () => {
