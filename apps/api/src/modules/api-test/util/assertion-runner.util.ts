@@ -84,7 +84,7 @@ function compareValues(
 /** 剥离 TCP 响应常见的数字长度头，如 00009732<xml>...</xml> */
 export function stripTcpLengthPrefix(body: string): string {
   const trimmed = body.trim();
-  const matched = trimmed.match(/^(\d{4,8})(<[\s\S]+)$/);
+  const matched = trimmed.match(/^(\d{4,8})\s*(<[\s\S]+)$/);
   return matched ? matched[2] : trimmed;
 }
 

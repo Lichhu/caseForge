@@ -591,14 +591,8 @@
                     <a-table-column title="变量名" key="name">
                       <template #default="{ record }"><a-input v-model:value="record.name" placeholder="accessToken" /></template>
                     </a-table-column>
-                    <a-table-column title="来源" key="source" :width="130">
-                      <template #default="{ record }"><a-select v-model:value="record.source" :options="exportSourceOptions" /></template>
-                    </a-table-column>
                     <a-table-column title="提取表达式" key="expression">
-                      <template #default="{ record }"><a-input v-model:value="record.expression" :disabled="record.source === 'status'" :placeholder="record.source === 'header' ? 'x-trace-id' : '$.data.accessToken'" /></template>
-                    </a-table-column>
-                    <a-table-column title="必需" key="required" :width="70">
-                      <template #default="{ record }"><a-checkbox v-model:checked="record.required" /></template>
+                      <template #default="{ record }"><a-input v-model:value="record.expression" placeholder="josn:$.Transaction... | xml:/Transaction/./. " /></template>
                     </a-table-column>
                     <a-table-column title="引用" key="reference" :width="160">
                       <template #default="{ record }"><code v-if="record.name">${{ '{' }}{{ form.caseNo || '案例编号' }}.{{ record.name }}}</code></template>
@@ -681,7 +675,6 @@
       <a-form layout="vertical">
         <a-form-item label="响应字段路径"><a-select v-model:value="debugExportPath" show-search :options="debugResponsePathOptions" placeholder="选择字段" /></a-form-item>
         <a-form-item label="变量名"><a-input v-model:value="debugExportName" placeholder="accessToken" /></a-form-item>
-        <a-form-item><a-checkbox v-model:checked="debugExportRequired">提取失败时终止该案例</a-checkbox></a-form-item>
       </a-form>
     </a-modal>
 
@@ -1387,11 +1380,6 @@ const form = reactive({
   exports: [] as Array<{ rowId: string; name: string; source: 'body' | 'header' | 'status'; expression: string; required: boolean }>,
 });
 
-const exportSourceOptions = [
-  { label: '响应体', value: 'body' },
-  { label: '响应头', value: 'header' },
-  { label: '状态码', value: 'status' },
-];
 const sharedVariableInsertOpen = ref(false);
 const sharedVariableName = ref('');
 const sharedVariableOptions = computed(() => {
@@ -1411,19 +1399,20 @@ const sharedVariableOptions = computed(() => {
 const debugExportOpen = ref(false);
 const debugExportPath = ref('');
 const debugExportName = ref('');
-const debugExportRequired = ref(true);
 const debugResponseBody = computed(() => {
   const body = debugResult.value?.body;
   if (typeof body !== 'string') return body;
-  try { return JSON.parse(body); } catch { return body; }
+  const normalized = body.trim().replace(/^\d{4,8}\s*(?=[<{\[])/, '');
+  try { return JSON.parse(normalized); } catch { return normalized; }
 });
 const debugResponsePathOptions = computed(() => responsePaths(debugResponseBody.value).map((value) => ({ label: value, value })));
 
 function responsePaths(value: unknown, path = '$', out: string[] = []): string[] {
   if (typeof value === 'string') {
-    const xml = value.trim().replace(/^\d{4,8}(?=<)/, '');
+    const xml = value.trim();
+    if (!xml.startsWith('<')) return out;
     const root = new DOMParser().parseFromString(xml, 'application/xml').documentElement;
-    if (root?.tagName !== 'parsererror') {
+    if (root && !root.closest('parsererror') && !root.querySelector('parsererror')) {
       const walk = (element: Element, parent = '') => {
         const next = `${parent}/${element.tagName}`;
         const children = [...element.children];
@@ -1456,14 +1445,13 @@ async function addExportFromDebug() {
   debugExportPath.value = debugResponsePathOptions.value[0]?.value ?? '';
   const pathParts = debugExportPath.value.split(/[.\[\]]/).filter(Boolean);
   debugExportName.value = pathParts[pathParts.length - 1] ?? '';
-  debugExportRequired.value = true;
   debugExportOpen.value = true;
 }
 
 function confirmDebugExport() {
   if (!debugExportPath.value || !debugExportName.value.trim()) return message.warning('请选择字段并填写变量名');
   if (form.exports.some((item) => item.name.trim() === debugExportName.value.trim())) return message.warning('同一案例内共享变量名不能重复');
-  form.exports.push({ rowId: crypto.randomUUID(), name: debugExportName.value.trim(), source: 'body', expression: debugExportPath.value, required: debugExportRequired.value });
+  form.exports.push({ rowId: crypto.randomUUID(), name: debugExportName.value.trim(), source: 'body', expression: debugExportPath.value, required: true });
   debugExportOpen.value = false;
 }
 

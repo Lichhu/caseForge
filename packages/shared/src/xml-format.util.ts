@@ -1,7 +1,7 @@
 /** 将紧凑或杂乱 XML 格式化为 Tab 缩进（与 ESB 报文示例一致） */
 export function prettyPrintXml(xml: string, indentChar = '\t'): string {
   const trimmed = unescapeLiteralXmlEscapes(xml).trim();
-  const matched = trimmed.match(/^(\d{4,8})(<[\s\S]+)$/);
+  const matched = trimmed.match(/^(\d{4,8})\s*(<[\s\S]+)$/);
   const prefix = matched?.[1];
   const source = (matched?.[2] ?? trimmed).replace(/>\s+</g, '><');
   if (!source.startsWith('<')) return xml;
@@ -47,5 +47,5 @@ export function unescapeLiteralXmlEscapes(value: string): string {
 
 export function looksLikeXml(value: string): boolean {
   const trimmed = unescapeLiteralXmlEscapes(value).trim();
-  return /^(?:\d{4,8})?</.test(trimmed) && trimmed.includes('</');
+  return /^(?:\d{4,8}\s*)?</.test(trimmed) && trimmed.includes('</');
 }

@@ -38,7 +38,7 @@ function runSingle(
 
 describe("TCP XML display formatting", () => {
   it("keeps the length prefix and formats the XML body", () => {
-    const body = "00001754<?xml version=\"1.0\"?><root><bizcode>0000</bizcode></root>";
+    const body = "00001754\r\n<?xml version=\"1.0\"?><root><bizcode>0000</bizcode></root>";
 
     expect(looksLikeXml(body)).toBe(true);
     expect(prettyPrintXml(body)).toBe(

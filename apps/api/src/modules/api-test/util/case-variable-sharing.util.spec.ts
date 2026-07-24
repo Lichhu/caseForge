@@ -45,12 +45,12 @@ describe("接口案例共享变量", () => {
     ).toEqual({ headers: { "X-Trace-Id": "trace-001" } });
   });
 
-  it("提取带长度头的 XML 响应字段", () => {
+  it.each(["", "\r\n"])("提取长度头后间隔为 %j 的 XML 响应字段", (separator) => {
     expect(
       extractResponseValue("body", "/Transaction/Header/resCode/text()", {
         statusCode: -1,
         headers: {},
-        body: "00000925<?xml version=\"1.0\"?><Transaction><Header><resCode>000000</resCode></Header></Transaction>",
+        body: `00000925${separator}<?xml version="1.0"?><Transaction><Header><resCode>000000</resCode></Header></Transaction>`,
       }),
     ).toBe("000000");
   });
