@@ -1091,7 +1091,6 @@ export const useCaseForgeStore = defineStore("caseForge", {
       if (options?.successMessage) {
         message.success(options.successMessage);
       }
-      await this.bumpSidebarProjectOrder(targetProjectId);
     },
     async saveDocument(markdown: string) {
       if (!this.activeProject) return;
