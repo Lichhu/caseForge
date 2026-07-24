@@ -596,12 +596,9 @@ export class ApiDataFunctionService {
     }
     if (row.type === "DM8") {
       const dmdb = nodeRequire("dmdb");
-      const pool = dmdb.createPool({
-        connectString: `dm://${encodeURIComponent(row.username)}:${encodeURIComponent(password)}@${row.host}:${row.port}`,
-        poolMax: 1,
-        poolMin: 1,
-      });
-      const conn = await pool.getConnection();
+      const conn = await dmdb.getConnection(
+        `dm://${encodeURIComponent(row.username)}:${encodeURIComponent(password)}@${row.host}:${row.port}`,
+      );
       return {
         query: async (input: any, params: unknown[] = []) => {
           const sql = typeof input === "string" ? input : input.sql;
@@ -612,10 +609,7 @@ export class ApiDataFunctionService {
           );
           return [result.rows ?? [], result.metaData ?? []];
         },
-        end: async () => {
-          await conn.close();
-          await pool.close();
-        },
+        end: () => conn.close(),
       } satisfies DbPool;
     }
     throw new BadRequestException(`${row.type} 驱动尚未配置`);

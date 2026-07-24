@@ -45,6 +45,16 @@ describe("接口案例共享变量", () => {
     ).toEqual({ headers: { "X-Trace-Id": "trace-001" } });
   });
 
+  it("提取带长度头的 XML 响应字段", () => {
+    expect(
+      extractResponseValue("body", "/Transaction/Header/resCode/text()", {
+        statusCode: -1,
+        headers: {},
+        body: "00000925<?xml version=\"1.0\"?><Transaction><Header><resCode>000000</resCode></Header></Transaction>",
+      }),
+    ).toBe("000000");
+  });
+
   it("Case A 订单号可传给 Case B，再由 Case B 传给 Case C", () => {
     const sharedVars = {
       orderId: String(

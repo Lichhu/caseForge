@@ -222,6 +222,16 @@ describe("ApiAssertionGenerateQueueService", () => {
     ]);
   });
 
+  it("logs rejected background work instead of leaving it unhandled", async () => {
+    const { service } = buildService();
+    const error = jest.spyOn((service as any).logger, "error").mockImplementation();
+
+    (service as any).background(Promise.reject(new Error("database down")));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(error).toHaveBeenCalledWith("后台队列异常: database down");
+  });
+
   describe("enqueue", () => {
     it("creates a new queued job when none exists", async () => {
       const { service, jobRepo } = buildService({ suppressPump: true });

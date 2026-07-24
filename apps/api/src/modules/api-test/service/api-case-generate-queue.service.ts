@@ -86,9 +86,9 @@ export class ApiCaseGenerateQueueService
 
   onModuleInit() {
     this.unregisterSlotHook = registerCaseGenerateSlotReleaseHook(() => {
-      void this.pump();
+      this.background(this.pump());
     });
-    void this.recoverInterruptedJobs().then(() => this.pump());
+    this.background(this.recoverInterruptedJobs().then(() => this.pump()));
   }
 
   onModuleDestroy() {
@@ -185,12 +185,12 @@ export class ApiCaseGenerateQueueService
       transactionId,
       "generating",
     );
-    void this.pump();
+    this.background(this.pump());
     return job;
   }
 
   triggerPump() {
-    void this.pump();
+    this.background(this.pump());
   }
 
   private formatVersionCode(date: Date) {
@@ -334,7 +334,7 @@ export class ApiCaseGenerateQueueService
         if (!job) {
           break;
         }
-        void this.runJob(job);
+        this.background(this.runJob(job));
       }
     } finally {
       this.pumping = false;
@@ -588,7 +588,13 @@ export class ApiCaseGenerateQueueService
         );
       }
     });
-    void this.pump();
+    this.background(this.pump());
+  }
+
+  private background(task: Promise<unknown>) {
+    void task.catch((error) =>
+      this.logger.error(`后台队列异常: ${(error as Error)?.message ?? error}`),
+    );
   }
 
   private async updateTransactionSyncStatus(

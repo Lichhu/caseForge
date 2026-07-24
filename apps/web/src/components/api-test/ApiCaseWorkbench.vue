@@ -1420,6 +1420,20 @@ const debugResponseBody = computed(() => {
 const debugResponsePathOptions = computed(() => responsePaths(debugResponseBody.value).map((value) => ({ label: value, value })));
 
 function responsePaths(value: unknown, path = '$', out: string[] = []): string[] {
+  if (typeof value === 'string') {
+    const xml = value.trim().replace(/^\d{4,8}(?=<)/, '');
+    const root = new DOMParser().parseFromString(xml, 'application/xml').documentElement;
+    if (root?.tagName !== 'parsererror') {
+      const walk = (element: Element, parent = '') => {
+        const next = `${parent}/${element.tagName}`;
+        const children = [...element.children];
+        if (!children.length) out.push(`${next}/text()`);
+        for (const child of children) walk(child, next);
+      };
+      walk(root);
+      return out;
+    }
+  }
   if (value === null || typeof value !== 'object') {
     out.push(path);
     return out;

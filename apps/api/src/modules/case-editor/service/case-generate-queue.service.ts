@@ -89,11 +89,11 @@ export class CaseGenerateQueueService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit() {
     this.unregisterSlotHook = registerCaseGenerateSlotReleaseHook(() => {
-      void this.pump();
+      this.background(this.pump());
     });
-    void this.recoverInterruptedJobs()
+    this.background(this.recoverInterruptedJobs()
       .then(() => this.reconcileGeneratingInstructs())
-      .then(() => this.pump());
+      .then(() => this.pump()));
   }
 
   onModuleDestroy() {
@@ -207,7 +207,7 @@ export class CaseGenerateQueueService implements OnModuleInit, OnModuleDestroy {
     if (created.length) {
       await this.jobRepo.save(created);
     }
-    void this.pump();
+    this.background(this.pump());
     return [...existing, ...created];
   }
 
@@ -363,7 +363,7 @@ export class CaseGenerateQueueService implements OnModuleInit, OnModuleDestroy {
         if (!job) {
           break;
         }
-        void this.runJob(job);
+        this.background(this.runJob(job));
       }
     } finally {
       this.pumping = false;
@@ -531,6 +531,12 @@ export class CaseGenerateQueueService implements OnModuleInit, OnModuleDestroy {
         );
       }
     });
-    void this.pump();
+    this.background(this.pump());
+  }
+
+  private background(task: Promise<unknown>) {
+    void task.catch((error) =>
+      this.logger.error(`后台队列异常: ${(error as Error)?.message ?? error}`),
+    );
   }
 }

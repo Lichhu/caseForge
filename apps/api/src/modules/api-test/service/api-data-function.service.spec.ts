@@ -1,5 +1,8 @@
 import { BadRequestException } from "@nestjs/common";
+import { encryptSecrets } from "@api-test/util/secret-crypto.util";
 import { ApiDataFunctionService } from "./api-data-function.service";
+
+jest.mock("dmdb", () => ({ getConnection: jest.fn() }));
 
 describe("ApiDataFunctionService", () => {
   const functions = [
@@ -86,6 +89,22 @@ describe("ApiDataFunctionService", () => {
     await expect(connectionService.testConnection("p1", "db")).rejects.toThrow(
       "数据库连接失败: connect ECONNREFUSED",
     );
+  });
+
+  it("awaits DM8 connection failures", async () => {
+    const dmdb = require("dmdb");
+    dmdb.getConnection.mockRejectedValueOnce(new Error("[20009] 连接超时"));
+    const connectionService = new ApiDataFunctionService({} as never, {} as never);
+
+    await expect(
+      (connectionService as any).pool({
+        type: "DM8",
+        host: "10.0.0.1",
+        port: 5236,
+        username: "SYSDBA",
+        passwordEncrypted: encryptSecrets({ password: "secret" }),
+      }),
+    ).rejects.toThrow("[20009] 连接超时");
   });
 
   it("requires a database only for database types that need one", async () => {

@@ -36,11 +36,11 @@ export class StructRequirementQueueService implements OnModuleInit {
 
   onModuleInit() {
     setStructuringSlotReleaseHook(() => {
-      void this.pump();
+      this.background(this.pump());
     });
-    void this.recoverInterruptedJobs()
+    this.background(this.recoverInterruptedJobs()
       .then(() => this.reconcileProcessingStructDocs())
-      .then(() => this.pump());
+      .then(() => this.pump()));
   }
 
   async findActiveJob(projectId: string, structDocId?: string) {
@@ -109,7 +109,7 @@ export class StructRequirementQueueService implements OnModuleInit {
         createdBy: userName,
       }),
     );
-    void this.pump();
+    this.background(this.pump());
     return job;
   }
 
@@ -202,7 +202,7 @@ export class StructRequirementQueueService implements OnModuleInit {
         if (!job) {
           break;
         }
-        void this.runJob(job);
+        this.background(this.runJob(job));
         available -= 1;
       }
     } finally {
@@ -283,7 +283,13 @@ export class StructRequirementQueueService implements OnModuleInit {
       }
       this.logger.warn(`结构化任务失败 projectId=${job.projectId}: ${message}`);
     } finally {
-      void this.pump();
+      this.background(this.pump());
     }
+  }
+
+  private background(task: Promise<unknown>) {
+    void task.catch((error) =>
+      this.logger.error(`后台队列异常: ${(error as Error)?.message ?? error}`),
+    );
   }
 }

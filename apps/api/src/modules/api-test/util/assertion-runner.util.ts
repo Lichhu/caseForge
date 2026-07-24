@@ -30,6 +30,19 @@ export function extractResponseValue(
     return input.headers[key] ?? input.headers[key.toLowerCase()] ?? "";
   }
   if (!expression) return undefined;
+  if (typeof input.body === "string" && expression.startsWith("/")) {
+    try {
+      const doc = new DOMParser().parseFromString(
+        stripTcpLengthPrefix(input.body),
+        "text/xml",
+      );
+      const nodes = select(expression, doc as any);
+      const node = Array.isArray(nodes) ? nodes[0] : nodes;
+      return extractXPathText(node);
+    } catch {
+      return undefined;
+    }
+  }
   const body = coerceAssertionBody(input.body);
   try {
     if (expression.startsWith("$") ) {
