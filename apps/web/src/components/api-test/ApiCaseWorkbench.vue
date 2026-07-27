@@ -1409,8 +1409,15 @@ const debugResponsePathOptions = computed(() => responsePaths(debugResponseBody.
 
 function responsePaths(value: unknown, path = '$', out: string[] = []): string[] {
   if (typeof value === 'string') {
-    const xml = value.trim();
-    if (!xml.startsWith('<')) return out;
+    const xml = value.trim().replace(/^\d{4,8}\s*(?=[<{\[])/, '');
+    try {
+      const json = JSON.parse(xml);
+      if (json && typeof json === 'object') return responsePaths(json, path, out);
+    } catch { /* not JSON */ }
+    if (!xml.startsWith('<')) {
+      if (path !== '$') out.push(path);
+      return out;
+    }
     const root = new DOMParser().parseFromString(xml, 'application/xml').documentElement;
     if (root && !root.closest('parsererror') && !root.querySelector('parsererror')) {
       const walk = (element: Element, parent = '') => {
@@ -1441,9 +1448,9 @@ async function addExportFromDebug() {
   await onDebugRun(false);
   if (!debugResult.value) return;
   if (debugResult.value.error) return message.warning(`调试请求失败：${debugResult.value.error}`);
-  if (!debugResponsePathOptions.value.length) return message.warning('响应体没有可提取字段，可使用“手动添加”提取响应头或状态码');
+  if (!debugResponsePathOptions.value.length) return message.warning('响应体中没有识别到 JSON 或 XML 字段');
   debugExportPath.value = debugResponsePathOptions.value[0]?.value ?? '';
-  const pathParts = debugExportPath.value.split(/[.\[\]]/).filter(Boolean);
+  const pathParts = debugExportPath.value.split(/[./\[\]]/).filter((item) => item && item !== 'text()');
   debugExportName.value = pathParts[pathParts.length - 1] ?? '';
   debugExportOpen.value = true;
 }
