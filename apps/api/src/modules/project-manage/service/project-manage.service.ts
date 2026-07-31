@@ -135,7 +135,8 @@ export class ProjectManageService {
       this.projectRepo
         .createQueryBuilder("project")
         .where("project.platform = :platform", { platform })
-        .orderBy("project.updatedAt", "DESC")
+        .orderBy("project.createdAt", "DESC")
+        .addOrderBy("project.id", "DESC")
         .skip((page - 1) * size)
         .take(size),
       "project",

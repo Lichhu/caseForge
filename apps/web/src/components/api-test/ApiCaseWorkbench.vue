@@ -798,6 +798,7 @@ import { copyText } from '@/utils/copyText';
 import type { ApiTestCaseRow, DebugRunResult } from '@/api/apiTestClient';
 import { batchPatchApiCaseRequest, listAllApiCases, listDataFunctions, debugRunCase, generateAssertions, getAssertionGenerateStatus, getAssertionGenerateResult } from '@/api/apiTestClient';
 import { useApiTestStore } from '@/stores/apiTest';
+import { randomUuid } from '@/utils/randomUuid';
 import KeyValueRowsEditor from '@/components/api-test/KeyValueRowsEditor.vue';
 import AssertionRowsEditor from '@/components/api-test/AssertionRowsEditor.vue';
 import ApiEnvironmentMaintainModal from '@/components/api-test/ApiEnvironmentMaintainModal.vue';
@@ -1441,7 +1442,7 @@ function responsePaths(value: unknown, path = '$', out: string[] = []): string[]
 }
 
 function addExportRow() {
-  form.exports.push({ rowId: crypto.randomUUID(), name: '', source: 'body', expression: '', required: true });
+  form.exports.push({ rowId: randomUuid(), name: '', source: 'body', expression: '', required: true });
 }
 
 async function addExportFromDebug() {
@@ -1458,7 +1459,7 @@ async function addExportFromDebug() {
 function confirmDebugExport() {
   if (!debugExportPath.value || !debugExportName.value.trim()) return message.warning('请选择字段并填写变量名');
   if (form.exports.some((item) => item.name.trim() === debugExportName.value.trim())) return message.warning('同一案例内共享变量名不能重复');
-  form.exports.push({ rowId: crypto.randomUUID(), name: debugExportName.value.trim(), source: 'body', expression: debugExportPath.value, required: true });
+  form.exports.push({ rowId: randomUuid(), name: debugExportName.value.trim(), source: 'body', expression: debugExportPath.value, required: true });
   debugExportOpen.value = false;
 }
 
@@ -1793,7 +1794,7 @@ function loadForm(row: ApiTestCaseRow) {
   applyRequestToForm(row.request);
   form.assertionRows = assertionsToRows(row.expected?.assertions);
   form.exports = (row.metadata?.exports ?? []).map((item) => ({
-    rowId: crypto.randomUUID(),
+    rowId: randomUuid(),
     name: item.name,
     source: item.source,
     expression: item.expression ?? '',

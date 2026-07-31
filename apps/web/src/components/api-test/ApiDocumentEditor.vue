@@ -167,7 +167,7 @@
             </span>
             <span class="doc-section-title">{{ section.title }}</span>
           </button>
-          <div v-show="!isSectionCollapsed(section.title)" class="doc-section-body">
+          <div v-if="!isSectionCollapsed(section.title)" class="doc-section-body">
             <div v-if="section.title === '示例报文'" class="example-message-block">
               <div class="example-message-shell">
                 <div class="example-message-actions">
@@ -220,7 +220,7 @@
                 </thead>
                 <tbody>
                   <tr
-                    v-for="record in sectionData[sectionIndex]"
+                    v-for="record in visibleSectionData(sectionIndex)"
                     :key="record.key"
                   >
                     <td
@@ -238,6 +238,16 @@
                   </tr>
                 </tbody>
               </table>
+              <a-pagination
+                v-if="sectionData[sectionIndex].length > DOC_TABLE_PAGE_SIZE"
+                v-model:current="sectionPages[sectionIndex]"
+                :page-size="DOC_TABLE_PAGE_SIZE"
+                :total="sectionData[sectionIndex].length"
+                :show-size-changer="false"
+                size="small"
+                show-less-items
+                @change="resizeAllDocCellInputs"
+              />
             </div>
           </div>
         </div>
@@ -427,10 +437,12 @@ import { messagePathOptions } from '@/utils/messagePathOptions';
 
 const tableScrollRef = ref<HTMLElement | null>(null);
 const EXAMPLE_MESSAGE_MIN_HEIGHT_PX = 160;
+const DOC_TABLE_PAGE_SIZE = 100;
 const apiStore = useApiTestStore();
 const popupContainer = () => document.body;
 const sections = ref<ApiDocTableSection[]>([]);
 const sectionData = ref<Record<string, string>[][]>([]);
+const sectionPages = ref<number[]>([]);
 const exampleMessage = ref('');
 const functionInsertOpen = ref(false);
 const functionInsertRange = reactive({ start: 0, end: 0 });
@@ -453,6 +465,7 @@ watch(selectedInsertFunction, (fn) => {
 });
 const editorText = ref('');
 const autoSaveTimer = ref<number | null>(null);
+const autoSaveInFlight = ref(false);
 const generationProfileSaveTimer = ref<number | null>(null);
 const syncingFromStore = ref(false);
 const panelActive = ref(true);
@@ -518,6 +531,12 @@ function resetSectionCollapseState() {
   }
 }
 
+function visibleSectionData(sectionIndex: number) {
+  const page = sectionPages.value[sectionIndex] ?? 1;
+  const start = (page - 1) * DOC_TABLE_PAGE_SIZE;
+  return sectionData.value[sectionIndex]?.slice(start, start + DOC_TABLE_PAGE_SIZE) ?? [];
+}
+
 const projectId = computed(() => apiStore.activeProjectId ?? '');
 const transactionId = computed(() => apiStore.activeTransactionId ?? '');
 const generatingCases = computed(() =>
@@ -561,6 +580,7 @@ function loadFromText(text: string) {
   hasExampleCursor.value = false;
   sections.value = parsed;
   sectionData.value = sections.value.map((section) => sectionTableData(section));
+  sectionPages.value = sections.value.map(() => 1);
   editorText.value = serializeApiDocTableText(parsed);
   resetSectionCollapseState();
   syncingFromStore.value = false;
@@ -646,7 +666,7 @@ function beautifyExampleMessage() {
       return;
     }
     syncExampleMessageToText();
-    scheduleAutoSave();
+    void flushAutoSave();
     message.success('示例报文已美化');
     resizeExampleMessageInput();
   } catch {
@@ -747,7 +767,7 @@ watch(
     (apiStore.apiDoc?.smpData?.serviceTestList?.[0] as Record<string, unknown> | undefined)?.requestBody,
   ] as const,
   ([value, smpRequestBody]) => {
-    if (!panelActive.value) return;
+    if (!panelActive.value || autoSaveInFlight.value) return;
     const next = value || '';
     if (next === editorText.value && (exampleMessage.value || !smpRequestBody)) return;
     if (autoSaveTimer.value) {
@@ -843,19 +863,23 @@ async function flushAutoSave(options?: { notify?: boolean }) {
     window.clearTimeout(autoSaveTimer.value);
     autoSaveTimer.value = null;
   }
-  if (syncingFromStore.value) return;
+  if (syncingFromStore.value || autoSaveInFlight.value) return;
   const pid = projectId.value;
   const tid = transactionId.value;
   const saved =
     apiStore.apiDoc?.tempStructuredMarkdown ?? apiStore.apiDoc?.structuredMarkdown ?? '';
   if (!pid || !tid || editorText.value === saved) return;
 
+  autoSaveInFlight.value = true;
   try {
     await apiStore.autoSave(pid, tid, editorText.value, {
       successMessage: options?.notify ? '已自动保存' : undefined,
     });
   } catch (error) {
     message.error((error as Error)?.message || '自动保存失败');
+  } finally {
+    autoSaveInFlight.value = false;
+    scheduleAutoSave();
   }
 }
 
