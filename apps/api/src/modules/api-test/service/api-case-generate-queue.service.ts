@@ -12,6 +12,7 @@ import {
 import { InjectRepository } from "@nestjs/typeorm";
 import { In, Repository } from "typeorm";
 import { RequestContext } from "@common/audit/request-context";
+import type { ApiCaseStep } from "@case-forge/shared";
 import { buildCaseGenerateInterruptedMessage } from "@case-editor/util/case-generate-interrupted.util";
 import {
   getCaseGenerateActiveCount,
@@ -118,7 +119,7 @@ export class ApiCaseGenerateQueueService
   async enqueue(
     projectId: string,
     transactionId: string,
-    options?: { channelIds?: string[] },
+    options?: { channelIds?: string[]; beforeSteps?: ApiCaseStep[]; afterSteps?: ApiCaseStep[] },
   ): Promise<ApiCaseGenerateJobEntity> {
     const existing = await this.jobRepo.findOne({
       where: {
@@ -162,6 +163,8 @@ export class ApiCaseGenerateQueueService
             doc.tempStructuredMarkdown?.trim() ||
             doc.structuredMarkdown?.trim() ||
             "",
+          beforeSteps: structuredClone(options?.beforeSteps ?? []),
+          afterSteps: structuredClone(options?.afterSteps ?? []),
         },
         scenarioCount: scenarios.length,
         queuedAt: new Date(),

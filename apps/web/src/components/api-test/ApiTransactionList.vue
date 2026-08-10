@@ -49,6 +49,22 @@
             <template v-if="column.key === 'code'">
               <span class="transaction-code">{{ record.code }}</span>
             </template>
+            <template v-else-if="column.key === 'caseCount'">
+              <span class="transaction-case-count">{{ record.caseCount ?? 0 }}</span>
+            </template>
+            <template v-else-if="column.key === 'report'">
+              <a-button
+                v-if="record.lastReportExport"
+                type="link"
+                size="small"
+                class="transaction-report-link"
+                :title="`下载最新导出（${record.lastReportExport.fileName}）`"
+                @click.stop="downloadLatestReport(record)"
+              >
+                已导出
+              </a-button>
+              <span v-else class="transaction-muted">—</span>
+            </template>
             <template v-else-if="column.key === 'name'">
               <span class="transaction-muted">{{ displayTransactionName(record) }}</span>
             </template>
@@ -153,6 +169,7 @@ import {
 import { useApiTestStore } from '@/stores/apiTest';
 import ApiTransactionSmpSyncModal from '@/components/api-test/ApiTransactionSmpSyncModal.vue';
 import type { ApiTransactionRow } from '@/api/apiTestClient';
+import { downloadBase64Report, getReportExport } from '@/api/apiTestClient';
 
 const apiStore = useApiTestStore();
 const modalOpen = ref(false);
@@ -187,6 +204,8 @@ watch(keyword, () => {
 
 const columns = [
   { title: '交易码', dataIndex: 'code', key: 'code', width: 180, fixed: 'left' as const },
+  { title: '案例', key: 'caseCount', width: 72, align: 'center' as const },
+  { title: '报表', key: 'report', width: 96, align: 'center' as const },
   { title: '接口名称', dataIndex: 'name', key: 'name', width: 200, ellipsis: true },
   { title: '需求编号', dataIndex: 'reqCode', key: 'reqCode', width: 140, ellipsis: true },
   { title: '服务编码', dataIndex: 'serviceCode', key: 'serviceCode', width: 140, ellipsis: true },
@@ -380,6 +399,17 @@ function displayTransactionName(item: ApiTransactionRow) {
   return name;
 }
 
+async function downloadLatestReport(item: ApiTransactionRow) {
+  const projectId = apiStore.activeProjectId;
+  if (!projectId || !item.lastReportExport) return;
+  try {
+    const row = await getReportExport(projectId, item.id, item.lastReportExport.id);
+    downloadBase64Report(row);
+  } catch {
+    message.warning('获取导出记录失败');
+  }
+}
+
 async function onSave() {
   const code = form.code.trim();
   if (!code) {
@@ -523,6 +553,24 @@ function onBatchDelete() {
 
 .transaction-muted {
   color: #667085;
+}
+
+.transaction-case-count {
+  display: inline-block;
+  min-width: 28px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #f2f4f7;
+  color: #475467;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.transaction-report-link {
+  height: auto;
+  padding: 0;
+  font-size: 12px;
 }
 
 .transaction-status {

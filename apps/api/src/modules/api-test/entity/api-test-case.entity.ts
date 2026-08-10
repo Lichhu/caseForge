@@ -6,6 +6,7 @@ import type {
   ApiCaseSource,
   ApiCaseStatus,
   ApiCaseExport,
+  ApiCaseStep,
 } from "@case-forge/shared";
 import { ApiEndpointEntity } from "./api-endpoint.entity";
 import {
@@ -77,6 +78,9 @@ export class ApiTestCaseEntity {
 
   @Column({ type: "json" })
   expected: ApiCaseExpected;
+
+  @Column({ type: "json", nullable: true })
+  steps?: ApiCaseStep[];
 
   @Column({ type: "json", nullable: true })
   metadata?: {

@@ -28,6 +28,8 @@
           class="assertion-col assertion-col--type"
           placeholder="类型"
           :options="typeOptions"
+          :get-popup-container="popupContainer"
+          :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }"
           @update:value="(v: AssertionType) => onTypeChange(index, v)"
         />
         <a-select
@@ -36,6 +38,8 @@
           class="assertion-col assertion-col--operator"
           placeholder="比较"
           :options="ASSERTION_OPERATOR_OPTIONS"
+          :get-popup-container="popupContainer"
+          :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }"
           @update:value="(v: AssertionOperator) => updateRow(index, 'operator', v)"
         />
         <a-input
@@ -71,6 +75,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { MinusOutlined, PlusOutlined } from '@ant-design/icons-vue';
+import { NESTED_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import type { AssertionOperator, AssertionType } from '@case-forge/shared';
 import type { CaseProtocol } from '@/utils/casePayloadFormat.util';
 import {
@@ -82,6 +87,8 @@ import {
   showsExpectedField,
   type AssertionRow,
 } from '@/utils/assertionRows.util';
+
+const popupContainer = () => document.body;
 
 const props = defineProps<{
   protocol: CaseProtocol;

@@ -126,6 +126,13 @@ export class ReplaceExecutionSetCasesDto {
   caseIds!: string[];
 }
 
+export class ReplaceRunnerCasesDto {
+  @ApiProperty({ type: [String] })
+  @IsArray()
+  @IsString({ each: true })
+  caseIds!: string[];
+}
+
 export class RunExecutionSetDto {
   @ApiPropertyOptional()
   @IsOptional()

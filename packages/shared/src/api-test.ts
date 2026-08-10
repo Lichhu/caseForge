@@ -124,6 +124,21 @@ export interface ApiCaseExpected {
   assertions?: ApiAssertion[];
 }
 
+export interface ApiStepTarget {
+  name: string;
+  address: string;
+  headers?: Record<string, string>;
+}
+
+export interface ApiCaseStep {
+  id: string;
+  name: string;
+  target?: ApiStepTarget;
+  request: ApiCaseRequest;
+  expected: ApiCaseExpected;
+  exports: ApiCaseExport[];
+}
+
 export interface ApiTestCasePayload {
   title: string;
   caseNo?: string;
@@ -136,6 +151,7 @@ export interface ApiTestCasePayload {
   enabled: boolean;
   status: ApiCaseStatus;
   preconditions: string[];
+  steps?: ApiCaseStep[];
   request: ApiCaseRequest;
   expected: ApiCaseExpected;
   metadata?: {
@@ -191,6 +207,15 @@ export interface CaseLastDebugRun {
   error?: string;
   assertions: AssertionResult[];
   executedAt?: string;
+}
+
+export interface ApiStepDebugRecord extends CaseLastDebugRun {
+  id: string;
+  stepId: string;
+  request: Record<string, unknown>;
+  response: Record<string, unknown>;
+  extracted: Record<string, string>;
+  target?: { name: string; address: string } | null;
 }
 
 export interface AiCasePlanItem {

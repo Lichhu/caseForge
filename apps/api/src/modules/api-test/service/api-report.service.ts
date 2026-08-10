@@ -13,6 +13,7 @@ import {
 } from "@common/pdf/pdf-cjk-font.util";
 import {
   buildApiReportHtml,
+  extractReportSteps,
   type ApiReportContext,
   type ReportAssertionMeta,
   type ReportCaseMeta,
@@ -21,8 +22,9 @@ import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
 import { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
 import { ApiTransactionEntity } from "@api-test/entity/api-transaction.entity";
 import { ApiTestEnvironmentEntity } from "@api-test/entity/api-test-environment.entity";
-import { ApiTestExecutionSetEntity } from "@api-test/entity/api-test-execution-set.entity";
+import { ApiReportExportEntity } from "@api-test/entity/api-report-export.entity";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
+import { auditFieldsForCreate } from "@common/audit/request-context";
 import { ApiExecutionService } from "./api-execution.service";
 
 function sanitizeExportFileToken(value: string) {
@@ -65,13 +67,72 @@ export class ApiReportService {
     private readonly endpointRepo: Repository<ApiEndpointEntity>,
     @InjectRepository(ApiTestEnvironmentEntity)
     private readonly envRepo: Repository<ApiTestEnvironmentEntity>,
-    @InjectRepository(ApiTestExecutionSetEntity)
-    private readonly execSetRepo: Repository<ApiTestExecutionSetEntity>,
     @InjectRepository(CaseProjectEntity)
     private readonly projectRepo: Repository<CaseProjectEntity>,
     @InjectRepository(ApiTransactionEntity)
     private readonly transactionRepo: Repository<ApiTransactionEntity>,
+    @InjectRepository(ApiReportExportEntity)
+    private readonly exportRepo: Repository<ApiReportExportEntity>,
   ) {}
+
+  async recordExport(input: {
+    projectId: string;
+    transactionId: string;
+    format: string;
+    runId: string;
+    fileName: string;
+    contentType: string;
+    buffer: Buffer;
+  }) {
+    await this.exportRepo.save(
+      this.exportRepo.create({
+        projectId: input.projectId,
+        transactionId: input.transactionId,
+        format: input.format,
+        runId: input.runId,
+        fileName: input.fileName,
+        contentType: input.contentType,
+        contentBase64: input.buffer.toString("base64"),
+        ...auditFieldsForCreate(),
+      }),
+    );
+    const old = await this.exportRepo.find({
+      where: { projectId: input.projectId, transactionId: input.transactionId },
+      order: { createdAt: "DESC" },
+      skip: 20,
+      take: 100,
+    });
+    if (old.length) await this.exportRepo.delete(old.map((row) => row.id));
+  }
+
+  async listReportExports(projectId: string, transactionId: string) {
+    const rows = await this.exportRepo.find({
+      where: { projectId, transactionId },
+      order: { createdAt: "DESC" },
+      take: 20,
+    });
+    return rows.map(({ contentBase64, ...rest }) => rest);
+  }
+
+  async getReportExport(projectId: string, transactionId: string, id: string) {
+    const row = await this.exportRepo.findOne({ where: { id, projectId, transactionId } });
+    if (!row) throw new NotFoundException("导出记录不存在");
+    return row;
+  }
+
+  async lastReportExportByTransaction(projectId: string) {
+    const rows = await this.exportRepo.find({
+      where: { projectId },
+      order: { createdAt: "DESC" },
+    });
+    const map = new Map<string, { id: string; format: string; fileName: string; createdAt: Date }>();
+    for (const row of rows) {
+      if (!map.has(row.transactionId)) {
+        map.set(row.transactionId, { id: row.id, format: row.format, fileName: row.fileName, createdAt: row.createdAt });
+      }
+    }
+    return map;
+  }
 
   async summary(projectId: string, runId?: string, transactionId?: string) {
     if (runId) {
@@ -228,17 +289,17 @@ export class ApiReportService {
   private async buildReportContext(
     run: RunDetail,
   ): Promise<Partial<ApiReportContext>> {
-    const [env, execSet, project] = await Promise.all([
+    const [env, transaction, project] = await Promise.all([
       run.environmentId
         ? this.envRepo.findOne({
             where: { id: run.environmentId },
             select: ["id", "name"],
           })
         : null,
-      run.executionSetId
-        ? this.execSetRepo.findOne({
-            where: { id: run.executionSetId },
-            select: ["id", "name"],
+      run.transactionId
+        ? this.transactionRepo.findOne({
+            where: { id: run.transactionId },
+            select: ["id", "code", "name"],
           })
         : null,
       this.projectRepo.findOne({
@@ -299,7 +360,9 @@ export class ApiReportService {
 
     return {
       reportCode,
-      setName: execSet?.name ?? "—",
+      setName: transaction
+        ? `${transaction.code} ${transaction.name}`
+        : "—",
       envName: env?.name ?? "—",
       transactionCount: transactionCodes.size,
       caseMeta,
@@ -322,6 +385,7 @@ export class ApiReportService {
     const sheet = workbook.addWorksheet("明细");
     sheet.columns = [
       { header: "案例", key: "title", width: 28 },
+      { header: "步骤", key: "step", width: 24 },
       { header: "状态", key: "status", width: 12 },
       { header: "耗时(ms)", key: "duration", width: 12 },
       { header: "URL", key: "url", width: 40 },
@@ -330,9 +394,31 @@ export class ApiReportService {
     ];
     sheet.getRow(1).font = { bold: true };
     for (const item of run.items) {
+      const steps = extractReportSteps(item.requestSnapshot);
+      if (steps.length) {
+        for (const [index, step] of steps.entries()) {
+          const stepAssertions = step.assertions ?? [];
+          const failedAssertions = stepAssertions.filter((a) => !a.passed);
+          sheet.addRow({
+            title: item.caseTitle,
+            step: `步骤${index + 1}：${step.stepName ?? "未命名步骤"}`,
+            status: formatRunItemStatus(step.status ?? item.status),
+            duration: step.durationMs ?? "",
+            url: String(step.request?.url ?? ""),
+            http: step.response?.status ?? "",
+            assertions: failedAssertions.length
+              ? failedAssertions.map((a) => a.name).join("; ")
+              : stepAssertions.length
+                ? "全部通过"
+                : "—",
+          });
+        }
+        continue;
+      }
       const failedAssertions = item.assertions.filter((a) => !a.passed);
       sheet.addRow({
         title: item.caseTitle,
+        step: "—",
         status: formatRunItemStatus(item.status),
         duration: item.durationMs,
         url: String(item.requestSnapshot.url ?? ""),
@@ -408,6 +494,12 @@ export class ApiReportService {
           .fillColor("#667085")
           .fontSize(9)
           .text(`  请求：${String(item.requestSnapshot.url ?? "—")}`);
+        const steps = extractReportSteps(item.requestSnapshot);
+        for (const [index, step] of steps.entries()) {
+          doc.text(
+            `  步骤${index + 1}：${step.stepName ?? "未命名步骤"} ［${formatRunItemStatus(step.status ?? item.status)}］ ${step.durationMs ?? 0}ms — ${String(step.request?.url ?? "")}`,
+          );
+        }
         if (item.status !== "passed") {
           const failed = item.assertions.filter((a) => !a.passed);
           for (const assertion of failed.slice(0, 3)) {

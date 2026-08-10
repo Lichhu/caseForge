@@ -67,6 +67,7 @@ async function alignUuidColumn(
 }
 
 export async function applyApiTestSchemaMigrations(runner: Queryable) {
+  await ensureApiStepTables(runner);
   await ensureApiDataFunctionTables(runner);
   await ensureApiAssertionGenerateJobTable(runner);
   await ensureApiCaseGenerateScenarioTable(runner);
@@ -80,6 +81,35 @@ export async function applyApiTestSchemaMigrations(runner: Queryable) {
   await ensureApiTestCaseColumns(runner);
   await ensureApiCaseGenerateJobColumns(runner);
   await ensureExecutionPlatformTables(runner);
+  await ensureRunnerPlatformColumns(runner);
+}
+
+async function ensureApiStepTables(runner: Queryable) {
+  if (!(await tableExists(runner, "api_step_library")))
+    await runner.query(`
+    CREATE TABLE api_step_library (
+      id VARCHAR(36) CHARACTER SET utf8 NOT NULL PRIMARY KEY, name VARCHAR(255) NOT NULL, step JSON NOT NULL,
+      createdBy VARCHAR(255) NULL DEFAULT 'system', modifiedBy VARCHAR(255) NULL DEFAULT 'system',
+      createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+      INDEX idx_api_step_library_user (createdBy, updatedAt)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  if (!(await tableExists(runner, "api_step_debug_record")))
+    await runner.query(`
+    CREATE TABLE api_step_debug_record (
+      id VARCHAR(36) CHARACTER SET utf8 NOT NULL PRIMARY KEY, projectId VARCHAR(36) CHARACTER SET utf8 NOT NULL,
+      caseId VARCHAR(36) CHARACTER SET utf8 NOT NULL, stepId VARCHAR(36) CHARACTER SET utf8 NOT NULL, record JSON NOT NULL,
+      createdBy VARCHAR(255) NULL DEFAULT 'system', createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+      INDEX idx_api_step_debug_case_step (caseId, stepId, createdAt)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  if (
+    (await tableExists(runner, "api_test_case")) &&
+    !(await columnExists(runner, "api_test_case", "steps"))
+  )
+    await runner.query(
+      "ALTER TABLE api_test_case ADD COLUMN steps JSON NULL AFTER expected",
+    );
 }
 
 async function ensureApiDataFunctionTables(runner: Queryable) {
@@ -348,6 +378,25 @@ async function ensureApiTestCaseColumns(runner: Queryable) {
         ADD COLUMN transactionCode VARCHAR(128) NULL AFTER remark,
         ADD COLUMN owner VARCHAR(255) NULL AFTER transactionCode
     `);
+  }
+}
+
+async function ensureRunnerPlatformColumns(runner: Queryable) {
+  if (
+    (await tableExists(runner, "api_transaction")) &&
+    !(await columnExists(runner, "api_transaction", "runner_case_ids"))
+  ) {
+    await runner.query(
+      "ALTER TABLE api_transaction ADD COLUMN runner_case_ids JSON NULL",
+    );
+  }
+  if (
+    (await tableExists(runner, "api_test_run")) &&
+    !(await columnExists(runner, "api_test_run", "versionCode"))
+  ) {
+    await runner.query(
+      "ALTER TABLE api_test_run ADD COLUMN versionCode VARCHAR(32) NULL",
+    );
   }
 }
 

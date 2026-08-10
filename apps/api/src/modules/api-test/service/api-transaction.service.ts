@@ -5,7 +5,7 @@ import {
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
-import { Repository } from "typeorm";
+import { In, Repository } from "typeorm";
 import {
   auditFieldsForCreate,
   auditFieldsForUpdate,
@@ -14,7 +14,9 @@ import { scopedWhere } from "@common/audit/user-scope";
 import { assertApiTestProject } from "@api-test/util/assert-api-project.util";
 import { touchProjectUpdatedAt } from "@common/project/touch-project.util";
 import { ApiDocEntity } from "@api-test/entity/api-doc.entity";
+import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
 import { ApiTransactionEntity } from "@api-test/entity/api-transaction.entity";
+import { ApiReportExportEntity } from "@api-test/entity/api-report-export.entity";
 import { SaveApiTransactionDto } from "@api-test/dto/save-transaction.dto";
 import { toPublicApiTransaction } from "@common/http/public-response.util";
 import { ApiCaseGenerateQueueService } from "./api-case-generate-queue.service";
@@ -26,6 +28,10 @@ export class ApiTransactionService {
     private readonly transactionRepo: Repository<ApiTransactionEntity>,
     @InjectRepository(ApiDocEntity)
     private readonly apiDocRepo: Repository<ApiDocEntity>,
+    @InjectRepository(ApiTestCaseEntity)
+    private readonly caseRepo: Repository<ApiTestCaseEntity>,
+    @InjectRepository(ApiReportExportEntity)
+    private readonly exportRepo: Repository<ApiReportExportEntity>,
     @InjectRepository(CaseProjectEntity)
     private readonly projectRepo: Repository<CaseProjectEntity>,
     private readonly generateQueueService: ApiCaseGenerateQueueService,
@@ -44,11 +50,56 @@ export class ApiTransactionService {
     const docByTransaction = new Map(
       docs.map((doc) => [doc.transactionId, doc]),
     );
+    const caseCountRows = await this.caseRepo
+      .createQueryBuilder("c")
+      .innerJoin("c.endpoint", "e")
+      .select("e.transactionId", "transactionId")
+      .addSelect("COUNT(c.id)", "caseCount")
+      .where("c.projectId = :projectId", { projectId })
+      .groupBy("e.transactionId")
+      .getRawMany<{ transactionId: string; caseCount: string }>();
+    const caseCountByTransaction = new Map(
+      caseCountRows.map((row) => [row.transactionId, Number(row.caseCount)]),
+    );
+    const exportRows = await this.exportRepo
+      .createQueryBuilder("x")
+      .select([
+        "x.transactionId AS transactionId",
+        "x.id AS id",
+        "x.format AS format",
+        "x.fileName AS fileName",
+        "x.createdAt AS createdAt",
+      ])
+      .where("x.projectId = :projectId", { projectId })
+      .orderBy("x.createdAt", "DESC")
+      .getRawMany<{
+        transactionId: string;
+        id: string;
+        format: string;
+        fileName: string;
+        createdAt: Date;
+      }>();
+    const lastExportByTransaction = new Map<
+      string,
+      { id: string; format: string; fileName: string; createdAt: Date }
+    >();
+    for (const row of exportRows) {
+      if (!lastExportByTransaction.has(row.transactionId)) {
+        lastExportByTransaction.set(row.transactionId, {
+          id: row.id,
+          format: row.format,
+          fileName: row.fileName,
+          createdAt: row.createdAt,
+        });
+      }
+    }
     return rows.map((row) => {
       const doc = docByTransaction.get(row.id);
       return toPublicApiTransaction(row, {
         docStatus: doc?.structuringStatus ?? "idle",
         hasDocument: Boolean(doc?.sourceDocName),
+        caseCount: caseCountByTransaction.get(row.id) ?? 0,
+        lastReportExport: lastExportByTransaction.get(row.id) ?? null,
       });
     });
   }
@@ -161,5 +212,45 @@ export class ApiTransactionService {
       throw new NotFoundException("交易码不存在");
     }
     return toPublicApiTransaction(transaction);
+  }
+
+  async listRunnerCaseIds(projectId: string, transactionId: string) {
+    const transaction = await this.transactionRepo.findOne({
+      where: scopedWhere({ projectId, id: transactionId }),
+    });
+    if (!transaction) {
+      throw new NotFoundException("交易码不存在");
+    }
+    return transaction.runnerCaseIds ?? [];
+  }
+
+  async replaceRunnerCases(
+    projectId: string,
+    transactionId: string,
+    caseIds: string[],
+  ) {
+    const transaction = await this.transactionRepo.findOne({
+      where: scopedWhere({ projectId, id: transactionId }),
+    });
+    if (!transaction) {
+      throw new NotFoundException("交易码不存在");
+    }
+    const uniqueIds = [...new Set(caseIds.map((id) => id.trim()).filter(Boolean))];
+    let nextIds: string[] = [];
+    if (uniqueIds.length) {
+      const existing = await this.caseRepo.find({
+        where: scopedWhere({ projectId, id: In(uniqueIds) }),
+        select: ["id"],
+      });
+      const existingIds = new Set(existing.map((item) => item.id));
+      nextIds = uniqueIds.filter((id) => existingIds.has(id));
+    }
+    transaction.runnerCaseIds = nextIds;
+    await this.transactionRepo.save({
+      ...transaction,
+      ...auditFieldsForUpdate(),
+    });
+    await touchProjectUpdatedAt(this.projectRepo, projectId);
+    return { caseIds: nextIds, caseCount: nextIds.length };
   }
 }

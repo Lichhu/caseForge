@@ -29,6 +29,10 @@ export class ApiTestRunEntity {
   @Column({ nullable: true })
   transactionId?: string;
 
+  /** 执行版本号（YYYYMMDD-HHMMSS），每次执行生成 */
+  @Column({ type: "varchar", length: 32, nullable: true })
+  versionCode?: string;
+
   @Column({ type: "varchar", length: 32, default: "completed" })
   status: "running" | "completed" | "failed";
 

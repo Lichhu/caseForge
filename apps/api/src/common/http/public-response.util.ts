@@ -111,7 +111,17 @@ export function toPublicStructDocDetail(
 
 export function toPublicApiTransaction(
   row: ApiTransactionEntity,
-  extra?: { docStatus?: string; hasDocument?: boolean },
+  extra?: {
+    docStatus?: string;
+    hasDocument?: boolean;
+    caseCount?: number;
+    lastReportExport?: {
+      id: string;
+      format: string;
+      fileName: string;
+      createdAt: Date;
+    } | null;
+  },
 ) {
   return {
     id: row.id,
@@ -127,9 +137,14 @@ export function toPublicApiTransaction(
     reqSystemId: row.reqSystemId,
     syncStatus: row.syncStatus,
     syncError: row.syncError,
+    runnerCaseIds: row.runnerCaseIds ?? [],
     ...(extra?.docStatus !== undefined ? { docStatus: extra.docStatus } : {}),
     ...(extra?.hasDocument !== undefined
       ? { hasDocument: extra.hasDocument }
+      : {}),
+    ...(extra?.caseCount !== undefined ? { caseCount: extra.caseCount } : {}),
+    ...(extra?.lastReportExport !== undefined
+      ? { lastReportExport: extra.lastReportExport }
       : {}),
   };
 }
@@ -183,6 +198,15 @@ export function toPublicApiDoc(
 }
 
 export function toPublicApiCase(testCase: ApiTestCaseEntity) {
+  const steps = testCase.steps?.length
+    ? testCase.steps
+    : [{
+        id: testCase.id,
+        name: testCase.title,
+        request: testCase.request,
+        expected: testCase.expected,
+        exports: testCase.metadata?.exports ?? [],
+      }];
   return {
     id: testCase.id,
     projectId: testCase.projectId,
@@ -198,6 +222,7 @@ export function toPublicApiCase(testCase: ApiTestCaseEntity) {
     status: testCase.status,
     enabled: testCase.enabled,
     preconditions: testCase.preconditions,
+    steps,
     request: testCase.request,
     expected: testCase.expected,
     metadata: testCase.metadata,
@@ -282,6 +307,7 @@ export function toPublicApiRun(
     environmentServiceId: run.environmentServiceId,
     executionSetId: run.executionSetId,
     transactionId: run.transactionId,
+    versionCode: run.versionCode ?? null,
     status: run.status,
     totalCount: run.totalCount,
     passedCount: run.passedCount,

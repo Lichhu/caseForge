@@ -19,6 +19,8 @@ import type {
   AssertionResult,
   ApiRunItemStatus,
   ApiDocGenerationProfile,
+  ApiCaseStep,
+  ApiStepDebugRecord,
 } from "@case-forge/shared";
 
 export interface ApiTransactionRow {
@@ -43,6 +45,14 @@ export interface ApiTransactionRow {
     | "cancelled"
     | "changed";
   syncError?: string;
+  runnerCaseIds?: string[];
+  caseCount?: number;
+  lastReportExport?: {
+    id: string;
+    format: string;
+    fileName: string;
+    createdAt: string;
+  } | null;
 }
 
 export interface SmpTransactionCandidate {
@@ -112,6 +122,7 @@ export interface ApiTestCaseRow {
   status: ApiCaseStatus;
   enabled: boolean;
   preconditions?: string[];
+  steps?: ApiCaseStep[];
   request: ApiCaseRequest;
   expected: ApiCaseExpected;
   endpoint?: ApiEndpointRow;
@@ -185,22 +196,6 @@ export interface ApiEnvironmentServiceRow {
   enabled: boolean;
 }
 
-export interface ApiExecutionSetRow {
-  id: string;
-  projectId: string;
-  transactionId: string;
-  name: string;
-  description?: string;
-  enabled: boolean;
-  caseCount?: number;
-  caseIds?: string[];
-  lastRunId?: string;
-  lastRunStatus?: "running" | "completed" | "failed";
-  lastRunAt?: string;
-  lastPassedCount?: number;
-  lastTotalCount?: number;
-}
-
 export interface ApiRunDetail {
   id: string;
   projectId: string;
@@ -208,6 +203,7 @@ export interface ApiRunDetail {
   environmentServiceId?: string;
   executionSetId?: string;
   transactionId?: string;
+  versionCode?: string | null;
   status: string;
   totalCount: number;
   passedCount: number;
@@ -507,7 +503,7 @@ export async function batchPatchApiCaseRequest(
 export async function generateApiCases(
   projectId: string,
   transactionId: string,
-  options?: { channelIds?: string[] },
+  options?: { channelIds?: string[]; beforeSteps?: ApiCaseStep[]; afterSteps?: ApiCaseStep[] },
 ) {
   const { data } = await http.post<{
     jobId: string;
@@ -521,6 +517,19 @@ export async function generateApiCases(
     },
   );
   return data;
+}
+
+export interface ApiStepLibraryRow { id: string; name: string; step: ApiCaseStep; updatedAt: string }
+export async function listStepLibrary() { return (await http.get<ApiStepLibraryRow[]>("api-test/step-library")).data; }
+export async function saveStepLibrary(payload: { name: string; step: ApiCaseStep }, id?: string) {
+  return (await (id ? http.patch<ApiStepLibraryRow>(`api-test/step-library/${id}`, payload) : http.post<ApiStepLibraryRow>("api-test/step-library", payload))).data;
+}
+export async function deleteStepLibrary(id: string) { return (await http.delete(`api-test/step-library/${id}`)).data; }
+export async function listStepDebugRecords(projectId: string, caseId: string, stepId: string) {
+  return (await http.get<Array<{ id: string; createdAt: string; record: ApiStepDebugRecord }>>(`api-test/${projectId}/cases/${caseId}/steps/${stepId}/debug-records`)).data;
+}
+export async function clearStepDebugRecords(projectId: string, caseId: string, stepId: string) {
+  return (await http.delete(`api-test/${projectId}/cases/${caseId}/steps/${stepId}/debug-records`)).data;
 }
 
 export interface DocReadinessEndpointResult {
@@ -774,94 +783,24 @@ export async function reorderApiEnvironmentService(
   );
 }
 
-export interface ApiExecutionSetListResult {
-  rows: ApiExecutionSetRow[];
-  count: number;
-  page: number;
-  pageSize: number;
-}
-
-export async function listApiExecutionSets(
+export async function listRunnerCaseIds(
   projectId: string,
   transactionId: string,
-  params?: { page?: number; pageSize?: number },
-): Promise<ApiExecutionSetListResult> {
-  const page = Math.max(1, params?.page ?? 1);
-  const pageSize = normalizeCaseForgePageSize(
-    params?.pageSize ?? DEFAULT_CASE_FORGE_PAGE_SIZE,
+): Promise<string[]> {
+  const { data } = await http.get<string[]>(
+    `${transactionBase(projectId, transactionId)}/runner-cases`,
   );
-  const { data } = await http.get<ApiExecutionSetListResult>(
-    `${transactionBase(projectId, transactionId)}/execution-sets`,
-    {
-      params: { page, pageSize },
-      headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
-    },
-  );
-  return data;
+  return data ?? [];
 }
 
-export async function createApiExecutionSet(
+export async function replaceRunnerCases(
   projectId: string,
   transactionId: string,
-  payload: { name: string; description?: string },
-) {
-  const { data } = await http.post<ApiExecutionSetRow>(
-    `${transactionBase(projectId, transactionId)}/execution-sets`,
-    payload,
-  );
-  return data;
-}
-
-export async function updateApiExecutionSet(
-  projectId: string,
-  transactionId: string,
-  setId: string,
-  payload: { name: string; description?: string },
-) {
-  const { data } = await http.patch<ApiExecutionSetRow>(
-    `${transactionBase(projectId, transactionId)}/execution-sets/${setId}`,
-    payload,
-  );
-  return data;
-}
-
-export async function deleteApiExecutionSet(
-  projectId: string,
-  transactionId: string,
-  setId: string,
-) {
-  await http.delete(
-    `${transactionBase(projectId, transactionId)}/execution-sets/${setId}`,
-  );
-}
-
-export async function replaceApiExecutionSetCases(
-  projectId: string,
-  transactionId: string,
-  setId: string,
   caseIds: string[],
-) {
+): Promise<{ caseIds: string[]; caseCount: number }> {
   const { data } = await http.put<{ caseIds: string[]; caseCount: number }>(
-    `${transactionBase(projectId, transactionId)}/execution-sets/${setId}/cases`,
+    `${transactionBase(projectId, transactionId)}/runner-cases`,
     { caseIds },
-  );
-  return data;
-}
-
-export async function runApiExecutionSet(
-  projectId: string,
-  transactionId: string,
-  setId: string,
-  payload: {
-    environmentId?: string;
-    environmentServiceId?: string;
-    concurrency?: number;
-    encoding?: string;
-  },
-) {
-  const { data } = await http.post<ApiRunDetail>(
-    `${transactionBase(projectId, transactionId)}/execution-sets/${setId}/runs`,
-    payload,
   );
   return data;
 }
@@ -903,7 +842,9 @@ export async function debugRunCase(
     request: ApiCaseRequest;
     expected?: ApiCaseExpected;
     polarity?: "positive" | "negative";
-    environmentId: string;
+    environmentId?: string;
+    target?: { name: string; address: string; headers?: Record<string, string> };
+    stepId?: string;
     environmentServiceId?: string;
     caseId?: string;
     encoding?: string;
@@ -1095,6 +1036,32 @@ export function downloadBlob(blob: Blob, fileName: string) {
   anchor.download = fileName;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+export interface ApiReportExportRow {
+  id: string;
+  transactionId: string;
+  format: string;
+  runId: string;
+  fileName: string;
+  contentType: string;
+  createdBy?: string;
+  createdAt: string;
+}
+
+export async function listReportExports(projectId: string, transactionId: string) {
+  return (await http.get<ApiReportExportRow[]>(`${transactionBase(projectId, transactionId)}/report-exports`)).data;
+}
+
+export async function getReportExport(projectId: string, transactionId: string, id: string) {
+  return (await http.get<ApiReportExportRow & { contentBase64: string }>(`${transactionBase(projectId, transactionId)}/report-exports/${id}`)).data;
+}
+
+export function downloadBase64Report(row: { contentBase64: string; contentType: string; fileName: string }) {
+  const binary = atob(row.contentBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  downloadBlob(new Blob([bytes], { type: row.contentType }), row.fileName);
 }
 
 export interface ApiDatabaseConnectionRow {

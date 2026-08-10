@@ -44,6 +44,7 @@ import { ApiExecutionSetService } from "@api-test/service/api-execution-set.serv
 import { SmpSyncService } from "@api-test/service/smp-sync.service";
 import {
   ReplaceExecutionSetCasesDto,
+  ReplaceRunnerCasesDto,
   RunExecutionSetDto,
   ReorderEnvironmentServiceDto,
   SaveApiEnvironmentServiceDto,
@@ -58,6 +59,10 @@ import { ListApiExecutionSetsDto } from "@api-test/dto/list-api-execution-sets.d
 import { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
 import { ApiAssertionGenerateQueueService } from "@api-test/service/api-assertion-generate-queue.service";
 import { ApiDataFunctionService } from "@api-test/service/api-data-function.service";
+import { ApiStepLibraryService } from "@api-test/service/api-step-library.service";
+import type { ApiCaseStep } from "@case-forge/shared";
+import { ApiStepDebugRecordEntity } from "@api-test/entity/api-step-debug-record.entity";
+import { RequestContext, auditFieldsForCreate } from "@common/audit/request-context";
 import {
   GenerateDataFunctionScriptDto,
   PreviewDataFunctionDto,
@@ -83,9 +88,35 @@ export class ApiTestController {
     private readonly aiWorkflow: AiWorkflowService,
     private readonly assertionGenerateQueueService: ApiAssertionGenerateQueueService,
     private readonly dataFunctionService: ApiDataFunctionService,
+    private readonly stepLibraryService: ApiStepLibraryService,
     @InjectRepository(CaseProjectEntity)
     private readonly projectRepo: Repository<CaseProjectEntity>,
+    @InjectRepository(ApiStepDebugRecordEntity)
+    private readonly stepDebugRepo: Repository<ApiStepDebugRecordEntity>,
   ) {}
+
+  @Get("step-library")
+  listStepLibrary() {
+    return this.stepLibraryService.list();
+  }
+
+  @Post("step-library")
+  createStepLibrary(@Body() body: { name: string; step: ApiCaseStep }) {
+    return this.stepLibraryService.save(body);
+  }
+
+  @Patch("step-library/:id")
+  updateStepLibrary(
+    @Param("id") id: string,
+    @Body() body: { name: string; step: ApiCaseStep },
+  ) {
+    return this.stepLibraryService.save(body, id);
+  }
+
+  @Delete("step-library/:id")
+  deleteStepLibrary(@Param("id") id: string) {
+    return this.stepLibraryService.remove(id);
+  }
 
   @Get(":projectId/database-connections")
   listDatabaseConnections(@Param("projectId") projectId: string) {
@@ -165,16 +196,21 @@ export class ApiTestController {
   async generateDataFunctionScript(
     @Body() body: GenerateDataFunctionScriptDto,
   ) {
-    const syntax = body.language === "javascript"
-      ? `function(${body.params.join(", ")}) { ... }`
-      : `def function(${body.params.join(", ")}):`;
-    const { text } = await this.aiWorkflow.runWithAiChat([
-      `生成一个 ${body.language} 数据处理函数。`,
-      `函数入口必须严格为：${syntax}`,
-      `需求：${body.requirement}`,
-      body.language === "python" ? "可直接使用 datetime 和 random，不要写 import。" : "可使用 JavaScript 标准内置对象。",
-      "只输出完整函数代码，不要 Markdown 代码块、解释或依赖第三方库。",
-    ].join("\n"));
+    const syntax =
+      body.language === "javascript"
+        ? `function(${body.params.join(", ")}) { ... }`
+        : `def function(${body.params.join(", ")}):`;
+    const { text } = await this.aiWorkflow.runWithAiChat(
+      [
+        `生成一个 ${body.language} 数据处理函数。`,
+        `函数入口必须严格为：${syntax}`,
+        `需求：${body.requirement}`,
+        body.language === "python"
+          ? "可直接使用 datetime 和 random，不要写 import。"
+          : "可使用 JavaScript 标准内置对象。",
+        "只输出完整函数代码，不要 Markdown 代码块、解释或依赖第三方库。",
+      ].join("\n"),
+    );
     return { script: text.trim().replace(/^```\w*\s*|\s*```$/g, "") };
   }
 
@@ -453,6 +489,8 @@ export class ApiTestController {
   ) {
     return this.apiCaseService.generateCases(projectId, transactionId, {
       channelIds: body.channelIds,
+      beforeSteps: body.beforeSteps,
+      afterSteps: body.afterSteps,
     });
   }
 
@@ -717,6 +755,30 @@ export class ApiTestController {
     });
   }
 
+  @Get(":projectId/transactions/:transactionId/runner-cases")
+  listRunnerCases(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+  ) {
+    return this.apiTransactionService.listRunnerCaseIds(
+      projectId,
+      transactionId,
+    );
+  }
+
+  @Put(":projectId/transactions/:transactionId/runner-cases")
+  replaceRunnerCases(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+    @Body() body: ReplaceRunnerCasesDto,
+  ) {
+    return this.apiTransactionService.replaceRunnerCases(
+      projectId,
+      transactionId,
+      body.caseIds,
+    );
+  }
+
   @Post(":projectId/transactions/:transactionId/cases/debug-run")
   @ApiOperation({ summary: "调试执行单案例（不保存执行记录）" })
   async debugRunCase(
@@ -726,18 +788,22 @@ export class ApiTestController {
       request: Record<string, unknown>;
       expected?: Record<string, unknown>;
       polarity?: "positive" | "negative";
-      environmentId: string;
+      environmentId?: string;
+      target?: { name: string; address: string; headers?: Record<string, string> };
+      stepId?: string;
       environmentServiceId?: string;
       caseId?: string;
       encoding?: string;
     },
   ) {
+    if (!body.target?.address && !body.environmentId) throw new BadRequestException("请指定环境地址");
     const result = await this.apiExecutionService.debugRun({
       projectId,
       request: body.request as any,
       expected: body.expected as any,
       polarity: body.polarity,
       environmentId: body.environmentId,
+      target: body.target,
       environmentServiceId: body.environmentServiceId,
       encoding: body.encoding,
     });
@@ -752,8 +818,24 @@ export class ApiTestController {
         assertions: result.assertions,
         executedAt: new Date().toISOString(),
       });
+      if (body.stepId) {
+        const record = { id: crypto.randomUUID(), stepId: body.stepId, request: body.request, response: { statusCode: result.statusCode, headers: result.headers, body: result.body, error: result.error }, extracted: {}, target: body.target ?? null, ...result, executedAt: new Date().toISOString() };
+        await this.stepDebugRepo.save(this.stepDebugRepo.create({ projectId, caseId: body.caseId, stepId: body.stepId, record, ...auditFieldsForCreate() }));
+        const rows = await this.stepDebugRepo.find({ where: { caseId: body.caseId, stepId: body.stepId, createdBy: RequestContext.getUserName() }, order: { createdAt: "DESC" }, skip: 30, take: 1000 });
+        if (rows.length) await this.stepDebugRepo.delete(rows.map((row) => row.id));
+      }
     }
     return result;
+  }
+
+  @Get(":projectId/cases/:caseId/steps/:stepId/debug-records")
+  listStepDebugRecords(@Param("projectId") projectId: string, @Param("caseId") caseId: string, @Param("stepId") stepId: string) {
+    return this.stepDebugRepo.find({ where: { projectId, caseId, stepId, createdBy: RequestContext.getUserName() }, order: { createdAt: "DESC" }, take: 30 });
+  }
+
+  @Delete(":projectId/cases/:caseId/steps/:stepId/debug-records")
+  clearStepDebugRecords(@Param("projectId") projectId: string, @Param("caseId") caseId: string, @Param("stepId") stepId: string) {
+    return this.stepDebugRepo.delete({ projectId, caseId, stepId, createdBy: RequestContext.getUserName() });
   }
 
   @Post(":projectId/transactions/:transactionId/cases/generate-assertions")
@@ -905,11 +987,41 @@ export class ApiTestController {
       body.format,
       transactionId,
     );
+    try {
+      await this.apiReportService.recordExport({
+        projectId,
+        transactionId,
+        format: body.format,
+        runId: body.runId,
+        fileName: result.fileName,
+        contentType: result.contentType,
+        buffer: result.buffer,
+      });
+    } catch {
+      /* 历史记录失败不影响导出 */
+    }
     res.setHeader("Content-Type", result.contentType);
     res.setHeader(
       "Content-Disposition",
       `attachment; filename="${result.fileName}"`,
     );
     res.send(result.buffer);
+  }
+
+  @Get(":projectId/transactions/:transactionId/report-exports")
+  listReportExports(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+  ) {
+    return this.apiReportService.listReportExports(projectId, transactionId);
+  }
+
+  @Get(":projectId/transactions/:transactionId/report-exports/:id")
+  getReportExport(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+    @Param("id") id: string,
+  ) {
+    return this.apiReportService.getReportExport(projectId, transactionId, id);
   }
 }

@@ -55,6 +55,24 @@ interface HtmlRunItem {
   }>;
 }
 
+export interface HtmlStepSnapshot {
+  stepId?: string;
+  stepName?: string;
+  status?: string;
+  durationMs?: number;
+  request?: Record<string, unknown>;
+  response?: { status?: unknown; body?: unknown; error?: string };
+  assertions?: HtmlRunItem["assertions"];
+}
+
+/** 多步骤案例的执行明细存于 requestSnapshot.steps，提取为步骤列表 */
+export function extractReportSteps(
+  requestSnapshot?: Record<string, unknown> | null,
+): HtmlStepSnapshot[] {
+  const steps = (requestSnapshot as { steps?: unknown } | null | undefined)?.steps;
+  return Array.isArray(steps) ? (steps as HtmlStepSnapshot[]) : [];
+}
+
 interface HtmlRunDetail {
   id: string;
   totalCount: number;
@@ -210,34 +228,61 @@ function buildCaseHeaderRow(
   return header + row;
 }
 
-/** 请求 / 响应体区块 */
+/** 请求 / 响应体区块（多步骤案例按步骤分块展示） */
 function buildPayloadSection(item: HtmlRunItem) {
-  const requestBody = prettyPayload(item.requestSnapshot?.body);
-  const responseBody = prettyPayload(item.responseSnapshot?.body);
-  const sections: string[] = [];
-  sections.push(
-    `<div class="step-bar">步骤1：${escapeHtml(requestMethodLabel(item.requestSnapshot))}</div>`,
-  );
-  sections.push(
-    `<div class="step-bar step-bar--url">请求地址：${escapeHtml(requestUrl(item.requestSnapshot))}</div>`,
-  );
-  sections.push(`<div class="step-bar">请求报文</div>`);
-  sections.push(
-    `<pre class="payload"><code>${escapeHtml(requestBody || "（无请求报文）")}</code></pre>`,
-  );
-  sections.push(`<div class="step-bar">响应体</div>`);
-  sections.push(
-    `<pre class="payload"><code>${escapeHtml(responseBody || "（无响应体）")}</code></pre>`,
-  );
-  return sections.join("\n");
+  const steps = extractReportSteps(item.requestSnapshot);
+  if (!steps.length) {
+    const requestBody = prettyPayload(item.requestSnapshot?.body);
+    const responseBody = prettyPayload(item.responseSnapshot?.body);
+    const sections: string[] = [];
+    sections.push(
+      `<div class="step-bar">步骤1：${escapeHtml(requestMethodLabel(item.requestSnapshot))}</div>`,
+    );
+    sections.push(
+      `<div class="step-bar step-bar--url">请求地址：${escapeHtml(requestUrl(item.requestSnapshot))}</div>`,
+    );
+    sections.push(`<div class="step-bar">请求报文</div>`);
+    sections.push(
+      `<pre class="payload"><code>${escapeHtml(requestBody || "（无请求报文）")}</code></pre>`,
+    );
+    sections.push(`<div class="step-bar">响应体</div>`);
+    sections.push(
+      `<pre class="payload"><code>${escapeHtml(responseBody || "（无响应体）")}</code></pre>`,
+    );
+    return sections.join("\n");
+  }
+  return steps
+    .map((step, index) => {
+      const statusText = step.status ? `［${resultLabel(step.status)}］` : "";
+      const sections: string[] = [];
+      sections.push(
+        `<div class="step-bar">步骤${index + 1}：${escapeHtml(step.stepName || "未命名步骤")}${statusText} ${step.durationMs ?? 0}ms</div>`,
+      );
+      sections.push(
+        `<div class="step-bar step-bar--url">请求地址：${escapeHtml(requestUrl(step.request))}</div>`,
+      );
+      sections.push(`<div class="step-bar">请求报文</div>`);
+      sections.push(
+        `<pre class="payload"><code>${escapeHtml(prettyPayload(step.request?.body) || "（无请求报文）")}</code></pre>`,
+      );
+      sections.push(`<div class="step-bar">响应体</div>`);
+      sections.push(
+        `<pre class="payload"><code>${escapeHtml(prettyPayload(step.response?.body) || "（无响应体）")}</code></pre>`,
+      );
+      if (step.assertions?.length) {
+        sections.push(buildAssertionSection(step.assertions, undefined));
+      }
+      return sections.join("\n");
+    })
+    .join("\n");
 }
 
 /** 断言检查表 */
 function buildAssertionSection(
-  item: HtmlRunItem,
+  assertions: HtmlRunItem["assertions"],
   meta: ReportCaseMeta | undefined,
 ) {
-  if (!item.assertions.length) return "";
+  if (!assertions.length) return "";
   const header = `
     <div class="step-bar">断言检查</div>
     <div class="testcase-tr testcase-head assertion-tr">
@@ -249,7 +294,7 @@ function buildAssertionSection(
       <div style="width:18%;">比较值</div>
       <div style="width:12%;">结果</div>
     </div>`;
-  const rows = item.assertions
+  const rows = assertions
     .map((assertion, idx) => {
       const def = meta?.assertionMeta[assertion.name];
       const color = assertion.passed ? PASS_COLOR : FAIL_COLOR;
@@ -299,7 +344,7 @@ export function buildApiReportHtml(
     ${buildCaseHeaderRow(idx + 1, item, meta)}
     <div class="testcase-detail">
       ${buildPayloadSection(item)}
-      ${buildAssertionSection(item, meta)}
+      ${buildAssertionSection(item.assertions, meta)}
     </div>
   </div>`;
     })
@@ -447,7 +492,7 @@ ${outline}
         <thead>
           <tr>
             <th>编号</th>
-            <th>测试集</th>
+            <th>交易</th>
             <th>测试环境</th>
             <th>总交易数</th>
             <th>总案例数</th>

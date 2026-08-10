@@ -17,6 +17,7 @@ import type {
   ApiCaseStatus,
   ApiCaseExport,
   CaseLastDebugRun,
+  ApiCaseStep,
 } from "@case-forge/shared";
 
 export class SaveApiCaseDto {
@@ -79,6 +80,11 @@ export class SaveApiCaseDto {
   @IsArray()
   preconditions?: string[];
 
+  @ApiPropertyOptional({ type: Array })
+  @IsOptional()
+  @IsArray()
+  steps?: ApiCaseStep[];
+
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()
   @IsArray()
@@ -137,6 +143,16 @@ export class GenerateApiCasesDto {
   @IsArray()
   @IsString({ each: true })
   channelIds?: string[];
+
+  @ApiPropertyOptional({ type: Array })
+  @IsOptional()
+  @IsArray()
+  beforeSteps?: ApiCaseStep[];
+
+  @ApiPropertyOptional({ type: Array })
+  @IsOptional()
+  @IsArray()
+  afterSteps?: ApiCaseStep[];
 }
 
 export class BatchPatchApiCaseRequestDto {

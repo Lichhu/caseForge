@@ -9,7 +9,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from "typeorm";
-import type { ApiDocGenerationProfile } from "@case-forge/shared";
+import type { ApiCaseStep, ApiDocGenerationProfile } from "@case-forge/shared";
 
 export const API_CASE_GENERATE_JOB_STATUS = [
   "queued",
@@ -78,6 +78,8 @@ export class ApiCaseGenerateJobEntity {
   snapshot?: {
     profile: ApiDocGenerationProfile;
     structuredMarkdown: string;
+    beforeSteps?: ApiCaseStep[];
+    afterSteps?: ApiCaseStep[];
   } | null;
 
   @Column({ type: "int", default: 0 })

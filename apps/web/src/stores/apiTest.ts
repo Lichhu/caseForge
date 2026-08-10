@@ -26,13 +26,11 @@ import {
   createApiCase,
   createApiEnvironment,
   createApiEnvironmentService,
-  createApiExecutionSet,
   createApiTransaction,
   deleteApiCase,
   deleteApiEnvironment,
   deleteApiEnvironmentService,
   reorderApiEnvironmentService,
-  deleteApiExecutionSet,
   batchDeleteApiTransactions,
   exportApiReport,
   fetchSmpTransactions,
@@ -51,12 +49,11 @@ import {
   listAllApiCases,
   listApiEnvironments,
   listApiEnvironmentServices,
-  listApiExecutionSets,
   listApiRuns,
   listApiTransactions,
-  replaceApiExecutionSetCases,
+  listRunnerCaseIds,
+  replaceRunnerCases,
   runApiCases,
-  runApiExecutionSet,
   saveApiDocument,
   saveApiDocumentGeneration,
   structureApiDocument,
@@ -70,7 +67,6 @@ import {
   type ApiDocDetail,
   type ApiEnvironmentRow,
   type ApiEnvironmentServiceRow,
-  type ApiExecutionSetRow,
   type ApiRunDetail,
   type ApiTestCaseRow,
   type ApiTransactionRow,
@@ -150,12 +146,7 @@ interface State {
   caseListChannelFilter: string | null;
   environments: ApiEnvironmentRow[];
   environmentServices: Record<string, ApiEnvironmentServiceRow[]>;
-  executionSets: ApiExecutionSetRow[];
-  executionSetListPage: number;
-  executionSetListPageSize: number;
-  executionSetListTotal: number;
-  activeExecutionSetId: string;
-  activeExecutionSet: ApiExecutionSetRow | null;
+  runnerCaseIds: string[];
   runs: ApiRunDetail[];
   activeRun: ApiRunDetail | null;
   selectedCaseIds: string[];
@@ -193,12 +184,7 @@ export const useApiTestStore = defineStore("apiTest", {
     caseListChannelFilter: null,
     environments: [],
     environmentServices: {},
-    executionSets: [],
-    executionSetListPage: 1,
-    executionSetListPageSize: DEFAULT_CASE_FORGE_PAGE_SIZE,
-    executionSetListTotal: 0,
-    activeExecutionSetId: "",
-    activeExecutionSet: null,
+    runnerCaseIds: [],
     runs: [],
     activeRun: null,
     selectedCaseIds: [],
@@ -249,16 +235,13 @@ export const useApiTestStore = defineStore("apiTest", {
     },
     transactionRuns(state): ApiRunDetail[] {
       return state.runs.filter((run) => {
-        if (state.activeExecutionSetId) {
-          return run.executionSetId === state.activeExecutionSetId;
-        }
         if (run.transactionId) {
           return run.transactionId === state.activeTransactionId;
         }
         return true;
       });
     },
-    /** 执行历史 / 结果报表：优先按当前执行集，否则按交易码 */
+    /** 执行历史 / 结果报表：按交易码过滤 */
     reportRuns(): ApiRunDetail[] {
       return this.transactionRuns;
     },
@@ -361,12 +344,7 @@ export const useApiTestStore = defineStore("apiTest", {
       this.caseListChannelFilter = null;
       this.environments = [];
       this.environmentServices = {};
-      this.executionSets = [];
-      this.executionSetListPage = 1;
-      this.executionSetListPageSize = DEFAULT_CASE_FORGE_PAGE_SIZE;
-      this.executionSetListTotal = 0;
-      this.activeExecutionSetId = "";
-      this.activeExecutionSet = null;
+      this.runnerCaseIds = [];
       this.runs = [];
       this.activeRun = null;
       this.selectedCaseIds = [];
@@ -586,12 +564,7 @@ export const useApiTestStore = defineStore("apiTest", {
       this.caseListChannelFilter = null;
       this.environments = [];
       this.environmentServices = {};
-      this.executionSets = [];
-      this.executionSetListPage = 1;
-      this.executionSetListPageSize = DEFAULT_CASE_FORGE_PAGE_SIZE;
-      this.executionSetListTotal = 0;
-      this.activeExecutionSetId = "";
-      this.activeExecutionSet = null;
+      this.runnerCaseIds = [];
       this.runs = [];
       this.activeRun = null;
       this.selectedCaseIds = [];
@@ -716,9 +689,7 @@ export const useApiTestStore = defineStore("apiTest", {
           : getApiDocument(projectId, transactionId).catch(() => null),
         this.refreshRunnerCases(projectId, transactionId),
         listApiEnvironments(projectId),
-        this.refreshExecutionSets(projectId, transactionId, {
-          resetPage: true,
-        }),
+        this.refreshRunnerCaseIds(projectId, transactionId),
       ]);
       if (doc) {
         this.apiDoc = doc;
@@ -888,6 +859,8 @@ export const useApiTestStore = defineStore("apiTest", {
       transactionId: string,
       options?: {
         channelIds?: string[];
+        beforeSteps?: import("@case-forge/shared").ApiCaseStep[];
+        afterSteps?: import("@case-forge/shared").ApiCaseStep[];
         /** 生成成功后是否进入案例编辑，默认 true */
         navigateToCases?: boolean;
       },
@@ -1155,7 +1128,7 @@ export const useApiTestStore = defineStore("apiTest", {
       await Promise.all([
         this.refreshCases(projectId, transactionId),
         this.refreshRunnerCases(projectId, transactionId),
-        this.refreshExecutionSets(projectId, transactionId),
+        this.refreshRunnerCaseIds(projectId, transactionId),
       ]);
       await this.syncCaseListVersionFilter(projectId, transactionId);
     },
@@ -1177,7 +1150,7 @@ export const useApiTestStore = defineStore("apiTest", {
       await Promise.all([
         this.refreshCases(projectId, transactionId),
         this.refreshRunnerCases(projectId, transactionId),
-        this.refreshExecutionSets(projectId, transactionId),
+        this.refreshRunnerCaseIds(projectId, transactionId),
       ]);
       message.success(`已删除 ${caseIds.length} 条案例`);
       await this.syncCaseListVersionFilter(projectId, transactionId);
@@ -1302,148 +1275,21 @@ export const useApiTestStore = defineStore("apiTest", {
       );
       await this.refreshEnvironmentServices(projectId, environmentId);
     },
-    async refreshExecutionSets(
+    async refreshRunnerCaseIds(projectId: string, transactionId: string) {
+      this.runnerCaseIds = await listRunnerCaseIds(projectId, transactionId);
+    },
+    async replaceRunnerCases(
       projectId: string,
       transactionId: string,
-      options?: { page?: number; pageSize?: number; resetPage?: boolean },
-    ) {
-      if (options?.resetPage) {
-        this.executionSetListPage = 1;
-      }
-      const page = options?.page ?? this.executionSetListPage;
-      const pageSize = normalizeCaseForgePageSize(
-        options?.pageSize ?? this.executionSetListPageSize,
-      );
-      const result = await listApiExecutionSets(projectId, transactionId, {
-        page,
-        pageSize,
-      });
-      const maxPage = Math.max(1, Math.ceil(result.count / pageSize) || 1);
-      if (result.count > 0 && page > maxPage) {
-        await this.refreshExecutionSets(projectId, transactionId, {
-          page: maxPage,
-          pageSize,
-        });
-        return;
-      }
-      this.executionSets = result.rows;
-      this.executionSetListTotal = result.count;
-      this.executionSetListPage = result.page;
-      this.executionSetListPageSize = result.pageSize;
-
-      if (this.activeExecutionSetId) {
-        const found = result.rows.find(
-          (item) => item.id === this.activeExecutionSetId,
-        );
-        if (found) {
-          this.activeExecutionSet = found;
-        }
-      } else if (result.rows[0]) {
-        this.selectExecutionSet(result.rows[0].id);
-      } else {
-        this.activeExecutionSet = null;
-      }
-    },
-    selectExecutionSet(setId: string) {
-      this.activeExecutionSetId = setId;
-      const found =
-        this.executionSets.find((item) => item.id === setId) ??
-        (this.activeExecutionSet?.id === setId
-          ? this.activeExecutionSet
-          : null);
-      if (found) {
-        this.activeExecutionSet = found;
-      }
-    },
-    async createExecutionSet(
-      projectId: string,
-      transactionId: string,
-      payload: { name: string; description?: string },
-    ) {
-      const set = await createApiExecutionSet(
-        projectId,
-        transactionId,
-        payload,
-      );
-      await this.refreshExecutionSets(projectId, transactionId, {
-        resetPage: true,
-      });
-      this.activeExecutionSetId = set.id;
-      this.activeExecutionSet = {
-        ...set,
-        caseCount: 0,
-        caseIds: [],
-      };
-      message.success("执行集已创建");
-    },
-    async removeExecutionSet(
-      projectId: string,
-      transactionId: string,
-      setId: string,
-    ) {
-      await deleteApiExecutionSet(projectId, transactionId, setId);
-      if (this.activeExecutionSetId === setId) {
-        this.activeExecutionSetId = "";
-        this.activeExecutionSet = null;
-        this.activeRun = null;
-      }
-      await this.refreshExecutionSets(projectId, transactionId);
-      message.success("执行集已删除");
-    },
-    async removeExecutionSets(
-      projectId: string,
-      transactionId: string,
-      setIds: string[],
-    ) {
-      if (!setIds.length) return;
-      for (const setId of setIds) {
-        await deleteApiExecutionSet(projectId, transactionId, setId);
-      }
-      if (setIds.includes(this.activeExecutionSetId)) {
-        this.activeExecutionSetId = "";
-        this.activeExecutionSet = null;
-        this.activeRun = null;
-      }
-      await this.refreshExecutionSets(projectId, transactionId);
-      message.success(`已删除 ${setIds.length} 个执行集`);
-    },
-    async replaceExecutionSetCases(
-      projectId: string,
-      transactionId: string,
-      setId: string,
       caseIds: string[],
     ) {
-      const result = await replaceApiExecutionSetCases(
-        projectId,
-        transactionId,
-        setId,
-        caseIds,
-      );
-      const nextCaseIds = result.caseIds;
-      const patch = {
-        caseIds: nextCaseIds,
-        caseCount: result.caseCount,
-      };
-      if (this.activeExecutionSet?.id === setId) {
-        this.activeExecutionSet = {
-          ...this.activeExecutionSet,
-          ...patch,
-        };
-      }
-      const index = this.executionSets.findIndex((set) => set.id === setId);
-      if (index >= 0) {
-        this.executionSets[index] = {
-          ...this.executionSets[index],
-          ...patch,
-        };
-      }
-      await this.refreshExecutionSets(projectId, transactionId);
-      return nextCaseIds;
+      const result = await replaceRunnerCases(projectId, transactionId, caseIds);
+      this.runnerCaseIds = result.caseIds;
+      return result.caseIds;
     },
-    async runExecutionSet(
+    async runRunnerCases(
       projectId: string,
       transactionId: string,
-      setId: string,
       options: {
         environmentId?: string;
         environmentServiceId?: string;
@@ -1452,11 +1298,9 @@ export const useApiTestStore = defineStore("apiTest", {
       },
     ) {
       this.running = true;
-      this.markExecutionSetRunning(setId);
       try {
         await this.refreshRunnerCases(projectId, transactionId);
-        const set = this.activeExecutionSet;
-        const originalCaseIds = set?.caseIds ?? [];
+        const originalCaseIds = this.runnerCaseIds;
         const validCaseIds = originalCaseIds.filter((id) => {
           const c = this.runnerCases.find((item) => item.id === id);
           return c && c.enabled;
@@ -1469,30 +1313,17 @@ export const useApiTestStore = defineStore("apiTest", {
           message.warning("当前版本下没有可执行的案例");
           return;
         }
-
-        let run: ApiRunDetail;
-        if (validCaseIds.length === originalCaseIds.length) {
-          run = await runApiExecutionSet(projectId, transactionId, setId, {
-            environmentId: options.environmentId,
-            environmentServiceId: options.environmentServiceId,
-            encoding: options.encoding,
-            concurrency: options.concurrency ?? 5,
-          });
-        } else {
-          run = await runApiCases(projectId, transactionId, {
-            caseIds: validCaseIds,
-            environmentId: options.environmentId,
-            environmentServiceId: options.environmentServiceId,
-            concurrency: options.concurrency ?? 5,
-            encoding: options.encoding,
-            executionSetId: setId,
-          });
-        }
+        const run = await runApiCases(projectId, transactionId, {
+          caseIds: validCaseIds,
+          environmentId: options.environmentId,
+          environmentServiceId: options.environmentServiceId,
+          concurrency: options.concurrency ?? 5,
+          encoding: options.encoding,
+        });
         if (options.environmentId) this.selectedEnvironmentId = options.environmentId;
         this.selectedEnvironmentServiceId = options.environmentServiceId ?? "";
         this.activeRun = run;
         this.runs = await listApiRuns(projectId);
-        await this.refreshExecutionSets(projectId, transactionId);
         message.success(
           `执行完成：通过 ${run.passedCount} / ${run.totalCount}`,
         );
@@ -1507,7 +1338,6 @@ export const useApiTestStore = defineStore("apiTest", {
       runId: string,
       options?: {
         encoding?: string;
-        executionSetId?: string;
         caseIds?: string[];
       },
     ) {
@@ -1548,35 +1378,20 @@ export const useApiTestStore = defineStore("apiTest", {
         environmentId === detail.environmentId
           ? detail.environmentServiceId
           : this.selectedEnvironmentServiceId || undefined;
-      const executionSetId =
-        options?.executionSetId ??
-        detail.executionSetId ??
-        this.activeExecutionSetId ??
-        undefined;
       this.running = true;
-      if (executionSetId) {
-        this.markExecutionSetRunning(executionSetId);
-      }
       try {
-        const targetCases = this.runnerCases.filter((item) =>
-          validCaseIds.includes(item.id),
-        );
         const run = await runApiCases(projectId, transactionId, {
           caseIds: validCaseIds,
           environmentId,
           environmentServiceId: environmentServiceId || undefined,
           concurrency: detail.concurrency ?? 5,
           encoding: options?.encoding,
-          executionSetId,
           runId,
         });
         this.selectedEnvironmentId = environmentId;
         this.selectedEnvironmentServiceId = environmentServiceId ?? "";
         this.activeRun = run;
         this.runs = await listApiRuns(projectId);
-        if (transactionId) {
-          await this.refreshExecutionSets(projectId, transactionId);
-        }
         message.success(
           `重新执行完成：通过 ${run.passedCount} / ${run.totalCount}`,
         );
@@ -1621,18 +1436,7 @@ export const useApiTestStore = defineStore("apiTest", {
       if (this.activeRun?.id === runId) {
         this.activeRun = null;
       }
-      await this.refreshExecutionSets(projectId, transactionId);
       message.success("执行历史已删除");
-    },
-    markExecutionSetRunning(setId: string) {
-      const patch = { lastRunStatus: "running" as const };
-      if (this.activeExecutionSet?.id === setId) {
-        this.activeExecutionSet = { ...this.activeExecutionSet, ...patch };
-      }
-      const index = this.executionSets.findIndex((set) => set.id === setId);
-      if (index >= 0) {
-        this.executionSets[index] = { ...this.executionSets[index], ...patch };
-      }
     },
     /** 执行平台：加载历史列表；案例明细在用户展开时再拉取 */
     async ensureRunnerRunsLoaded(projectId: string) {

@@ -4,14 +4,13 @@
       <div>
         <h2>结果报表</h2>
         <p>通过率统计与趋势分析，支持导出 Excel / PDF / HTML</p>
-        <p v-if="reportScopeHint" class="report-scope-hint">{{ reportScopeHint }}</p>
       </div>
       <a-space wrap>
         <a-select
           v-model:value="selectedRunId"
           class="report-run-select"
           :options="runOptions"
-          placeholder="选择执行批次"
+          placeholder="选择执行版本"
         />
         <a-dropdown
           v-model:open="exportMenuOpen"
@@ -42,11 +41,15 @@
             </a-menu>
           </template>
         </a-dropdown>
+        <a-button @click="openExportHistory">
+          <HistoryOutlined />
+          导出历史
+        </a-button>
       </a-space>
     </div>
 
     <div class="report-panel-body">
-      <a-empty v-if="!selectedRunId" class="report-empty" description="请选择执行批次查看报表" />
+      <a-empty v-if="!selectedRunId" class="report-empty" description="请选择执行版本查看报表" />
 
       <div v-else-if="summaryLoading" class="report-loading">
         <a-spin tip="加载报表数据..." />
@@ -218,6 +221,33 @@
         </div>
       </template>
     </div>
+
+    <a-modal v-model:open="exportHistoryOpen" title="导出历史" :width="760" :footer="null">
+      <a-table
+        :data-source="exportHistory"
+        :loading="exportHistoryLoading"
+        row-key="id"
+        size="small"
+        :pagination="false"
+      >
+        <a-table-column title="格式" key="format" width="90">
+          <template #default="{ record }">{{ exportFormatLabel[record.format] || record.format }}</template>
+        </a-table-column>
+        <a-table-column title="文件" data-index="fileName" ellipsis />
+        <a-table-column title="导出时间" key="createdAt" width="170">
+          <template #default="{ record }">{{ formatExportTime(record.createdAt) }}</template>
+        </a-table-column>
+        <a-table-column title="操作" key="action" width="90" align="center">
+          <template #default="{ record }">
+            <a-button type="link" size="small" @click="downloadExportRecord(record)">
+              <DownloadOutlined />
+              下载
+            </a-button>
+          </template>
+        </a-table-column>
+      </a-table>
+      <a-empty v-if="!exportHistoryLoading && !exportHistory.length" description="暂无导出记录，通过「导出方式」导出后可编辑历史重新下载" />
+    </a-modal>
   </section>
 </template>
 
@@ -227,14 +257,60 @@ import { message } from 'ant-design-vue';
 import type { MenuProps } from 'ant-design-vue';
 import {
   DownOutlined,
+  DownloadOutlined,
   ExportOutlined,
   FileExcelOutlined,
   FilePdfOutlined,
   FileTextOutlined,
+  HistoryOutlined,
 } from '@ant-design/icons-vue';
 import { useApiTestStore } from '@/stores/apiTest';
+import {
+  downloadBase64Report,
+  getReportExport,
+  listReportExports,
+  type ApiReportExportRow,
+} from '@/api/apiTestClient';
 
 type ChartMode = 'bar' | 'line' | 'progress';
+
+const exportHistoryOpen = ref(false);
+const exportHistory = ref<ApiReportExportRow[]>([]);
+const exportHistoryLoading = ref(false);
+const exportFormatLabel: Record<string, string> = { xlsx: 'Excel', pdf: 'PDF', html: 'HTML' };
+function formatExportTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+async function openExportHistory() {
+  exportHistoryOpen.value = true;
+  const projectId = apiStore.activeProjectId;
+  const transactionId = apiStore.activeTransactionId;
+  if (!projectId || !transactionId) {
+    exportHistory.value = [];
+    return;
+  }
+  exportHistoryLoading.value = true;
+  try {
+    exportHistory.value = await listReportExports(projectId, transactionId);
+  } catch {
+    exportHistory.value = [];
+  } finally {
+    exportHistoryLoading.value = false;
+  }
+}
+async function downloadExportRecord(row: ApiReportExportRow) {
+  const projectId = apiStore.activeProjectId;
+  const transactionId = apiStore.activeTransactionId;
+  if (!projectId || !transactionId) return;
+  try {
+    downloadBase64Report(await getReportExport(projectId, transactionId, row.id));
+  } catch {
+    message.warning('获取导出记录失败');
+  }
+}
 
 type ReportSummary = {
   total: number;
@@ -267,18 +343,10 @@ const statusColors: Record<string, string> = {
 
 const runOptions = computed(() =>
   apiStore.reportRuns.map((r) => ({
-    label: `${new Date(r.createdAt).toLocaleString()} — ${r.passedCount}/${r.totalCount}`,
+    label: `${r.versionCode || new Date(r.createdAt).toLocaleString()} — ${r.passedCount}/${r.totalCount}`,
     value: r.id,
   })),
 );
-
-const reportScopeHint = computed(() => {
-  const setName = apiStore.activeExecutionSet?.name;
-  if (apiStore.activeExecutionSetId && setName) {
-    return `当前执行集：${setName}`;
-  }
-  return '';
-});
 
 const selectedRun = computed(() =>
   apiStore.reportRuns.find((run) => run.id === selectedRunId.value),
@@ -286,7 +354,7 @@ const selectedRun = computed(() =>
 
 const selectedRunLabel = computed(() => {
   if (!selectedRun.value) return '当前批次';
-  return new Date(selectedRun.value.createdAt).toLocaleString();
+  return selectedRun.value.versionCode || new Date(selectedRun.value.createdAt).toLocaleString();
 });
 
 const metricItems = computed(() => {
@@ -531,12 +599,6 @@ const onExportMenuClick: MenuProps['onClick'] = ({ key }) => {
 .report-panel-header {
   flex-shrink: 0;
   align-items: flex-start;
-}
-
-.report-scope-hint {
-  margin: 4px 0 0;
-  color: #667085;
-  font-size: 12px;
 }
 
 .report-panel-body {

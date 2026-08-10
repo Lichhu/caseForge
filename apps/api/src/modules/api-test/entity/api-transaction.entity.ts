@@ -93,6 +93,10 @@ export class ApiTransactionEntity {
   @Column({ type: "text", nullable: true, name: "sync_error" })
   syncError?: string;
 
+  /** 执行平台选中的案例 ID 有序列表 */
+  @Column({ type: "json", nullable: true, name: "runner_case_ids" })
+  runnerCaseIds?: string[];
+
   @Column({ nullable: true, default: "system" })
   createdBy: string;
 

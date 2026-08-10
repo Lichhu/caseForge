@@ -19,6 +19,9 @@ import { ApiTestRunItemEntity } from "./entity/api-test-run-item.entity";
 import { ApiTransactionEntity } from "./entity/api-transaction.entity";
 import { ApiDatabaseConnectionEntity } from "./entity/api-database-connection.entity";
 import { ApiDataFunctionEntity } from "./entity/api-data-function.entity";
+import { ApiStepLibraryEntity } from "./entity/api-step-library.entity";
+import { ApiStepDebugRecordEntity } from "./entity/api-step-debug-record.entity";
+import { ApiReportExportEntity } from "./entity/api-report-export.entity";
 import { ApiDocService } from "./service/api-doc.service";
 import { ApiCaseService } from "./service/api-case.service";
 import { ApiCaseGenerateQueueService } from "./service/api-case-generate-queue.service";
@@ -31,6 +34,7 @@ import { ApiReportService } from "./service/api-report.service";
 import { SmpClientService } from "./service/smp-client.service";
 import { SmpSyncService } from "./service/smp-sync.service";
 import { ApiDataFunctionService } from "./service/api-data-function.service";
+import { ApiStepLibraryService } from "./service/api-step-library.service";
 
 @Module({
   imports: [
@@ -50,6 +54,9 @@ import { ApiDataFunctionService } from "./service/api-data-function.service";
       ApiTransactionEntity,
       ApiDatabaseConnectionEntity,
       ApiDataFunctionEntity,
+      ApiStepLibraryEntity,
+      ApiStepDebugRecordEntity,
+      ApiReportExportEntity,
       CaseProjectEntity,
     ]),
     MinioStorageModule,
@@ -69,6 +76,7 @@ import { ApiDataFunctionService } from "./service/api-data-function.service";
     SmpClientService,
     SmpSyncService,
     ApiDataFunctionService,
+    ApiStepLibraryService,
   ],
   exports: [
     ApiDocService,

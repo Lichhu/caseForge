@@ -41,7 +41,7 @@ import { ApiCaseGenerateJobEntity } from "@api-test/entity/api-case-generate-job
 import { ApiCaseGenerateScenarioEntity } from "@api-test/entity/api-case-generate-scenario.entity";
 import { ApiTestRunItemEntity } from "@api-test/entity/api-test-run-item.entity";
 import { ApiTestRunEntity } from "@api-test/entity/api-test-run.entity";
-import type { ApiCaseRequest } from "@case-forge/shared";
+import type { ApiCaseRequest, ApiCaseStep } from "@case-forge/shared";
 import {
   buildScenarioPrompts,
   assertScenarioCoverage,
@@ -162,6 +162,7 @@ export class ApiCaseService {
       preconditions: payload.preconditions ?? [],
       request: payload.request,
       expected: payload.expected,
+      steps: payload.steps,
       metadata: {
         source: "manual",
         promptIds: payload.promptIds ?? [],
@@ -205,7 +206,11 @@ export class ApiCaseService {
     if (!existing) {
       throw new NotFoundException("案例不存在");
     }
-    await this.assertNoMutualCaseDependency(projectId, existing.caseNo, payload.request);
+    await this.assertNoMutualCaseDependency(
+      projectId,
+      existing.caseNo,
+      payload.request,
+    );
     if (payload.endpointId && payload.endpointId !== existing.endpointId) {
       await this.requireEndpoint(projectId, payload.endpointId, transactionId);
       existing.endpointId = payload.endpointId;
@@ -225,6 +230,7 @@ export class ApiCaseService {
     existing.preconditions = payload.preconditions ?? [];
     existing.request = payload.request;
     existing.expected = payload.expected;
+    existing.steps = payload.steps;
     existing.metadata = {
       ...existing.metadata,
       source: existing.metadata?.source === "ai" ? "ai_edited" : "manual",
@@ -272,8 +278,27 @@ export class ApiCaseService {
   }
 
   async deleteCase(projectId: string, caseId: string) {
+    const testCase = await this.caseRepo.findOne({
+      where: scopedWhere({ projectId, id: caseId }),
+      relations: ["endpoint"],
+    });
     await this.setCaseRepo.delete({ caseId });
     await this.caseRepo.delete(scopedWhere({ projectId, id: caseId }));
+    const transactionId = testCase?.endpoint?.transactionId;
+    if (transactionId) {
+      const transaction = await this.transactionRepo.findOne({
+        where: scopedWhere({ projectId, id: transactionId }),
+      });
+      if (transaction?.runnerCaseIds?.includes(caseId)) {
+        transaction.runnerCaseIds = transaction.runnerCaseIds.filter(
+          (id) => id !== caseId,
+        );
+        await this.transactionRepo.save({
+          ...transaction,
+          ...auditFieldsForUpdate(),
+        });
+      }
+    }
     return { ok: true };
   }
 
@@ -325,7 +350,7 @@ export class ApiCaseService {
   async generateCases(
     projectId: string,
     transactionId?: string,
-    options?: { channelIds?: string[] },
+    options?: { channelIds?: string[]; beforeSteps?: ApiCaseStep[]; afterSteps?: ApiCaseStep[] },
   ) {
     if (!transactionId) {
       throw new BadRequestException("请指定交易码后再生成案例");
@@ -658,12 +683,20 @@ export class ApiCaseService {
           },
           assembled.body,
         );
+        const title = `${channel ? `[${channel.name}] ` : ""}${plan.title}`;
+        const aiStep: ApiCaseStep = {
+          id: crypto.randomUUID(),
+          name: title,
+          request,
+          expected: {},
+          exports: [],
+        };
         if (task.scenarioKey === "idempotency") request.repeatCount = 2;
         entities.push(
           this.caseRepo.create({
             projectId: job.projectId,
             endpointId: endpoint.id,
-            title: `${channel ? `[${channel.name}] ` : ""}${plan.title}`,
+            title,
             caseNo: formatCaseNo(transactionCode, seq),
             description: plan.expected ?? "",
             transactionCode,
@@ -675,6 +708,11 @@ export class ApiCaseService {
             preconditions: [],
             request,
             expected: {},
+            steps: [
+              ...(job.snapshot?.beforeSteps ?? []).map(cloneStep),
+              aiStep,
+              ...(job.snapshot?.afterSteps ?? []).map(cloneStep),
+            ],
             metadata: {
               source: "ai",
               generateVersion: job.version ?? undefined,
@@ -913,6 +951,10 @@ export class ApiCaseService {
     }
     return transaction;
   }
+}
+
+function cloneStep(step: ApiCaseStep): ApiCaseStep {
+  return { ...structuredClone(step), id: crypto.randomUUID() };
 }
 
 function extractReferencedCaseNumbers(request: ApiCaseRequest) {

@@ -23,9 +23,11 @@ import type {
   ApiCaseExpected,
   ApiCaseRequest,
   ApiRunItemStatus,
+  ApiCaseStep,
 } from "@case-forge/shared";
 import { toPublicApiRun } from "@common/http/public-response.util";
 import { ApiDataFunctionService } from "./api-data-function.service";
+import type { ApiStepTarget } from "@case-forge/shared";
 
 const DEFAULT_CONCURRENCY = 5;
 const MAX_CONCURRENCY = 10;
@@ -104,11 +106,18 @@ export class ApiExecutionService {
     if (!cases.length) {
       throw new BadRequestException("未找到可执行的启用案例");
     }
-    if (input.executionSetId) {
+    const orderedFlow = Boolean(input.executionSetId || input.transactionId);
+    if (orderedFlow) {
       assertCaseDependencyOrder(cases);
     }
     const runtimeByCase = new Map<string, RuntimeEnvironment>();
     for (const testCase of cases) {
+      if (testCase.steps?.length) {
+        const missing = testCase.steps.find((step) => !step.target?.address?.trim());
+        if (missing) throw new BadRequestException(`案例「${testCase.title}」的步骤「${missing.name}」未指定环境地址`);
+        runtimeByCase.set(testCase.id, environmentFromStep(testCase.steps[0]));
+        continue;
+      }
       const environmentId =
         testCase.metadata?.debugEnvironmentId ?? input.environmentId;
       if (!environmentId)
@@ -148,6 +157,7 @@ export class ApiExecutionService {
       existing.executionSetId = input.executionSetId ?? existing.executionSetId;
       existing.transactionId = input.transactionId ?? existing.transactionId;
       existing.status = "running";
+      existing.versionCode = formatRunVersionCode(new Date());
       existing.totalCount = preservedItems.length + cases.length;
       existing.passedCount = 0;
       existing.failedCount = 0;
@@ -163,6 +173,7 @@ export class ApiExecutionService {
           environmentServiceId: input.environmentServiceId,
           executionSetId: input.executionSetId,
           transactionId: input.transactionId,
+          versionCode: formatRunVersionCode(new Date()),
           status: "running",
           totalCount: cases.length,
           concurrency,
@@ -177,7 +188,7 @@ export class ApiExecutionService {
     let error = preservedItems.filter((item) => item.status === "error").length;
 
     const sharedVars: Record<string, string> = {};
-    await this.runWithConcurrency(cases, input.executionSetId ? 1 : concurrency, async (testCase) => {
+    await this.runWithConcurrency(cases, orderedFlow ? 1 : concurrency, async (testCase) => {
       const caseEnv = runtimeByCase.get(testCase.id)!;
       const item = await this.executeSingleCase({
         runId: run.id,
@@ -323,6 +334,51 @@ export class ApiExecutionService {
   }
 
   private async executeSingleCase(input: {
+    runId: string;
+    testCase: ApiTestCaseEntity;
+    env: RuntimeEnvironment;
+    vars: Record<string, string>;
+    encoding?: string;
+  }) {
+    const steps = input.testCase.steps;
+    if (!steps?.length) return this.executeSingleStep(input);
+    const vars = { ...input.vars };
+    const stepResults: Array<Record<string, unknown>> = [];
+    let final: ApiTestRunItemEntity | undefined;
+    for (const step of steps) {
+      const stepCase = Object.assign(new ApiTestCaseEntity(), input.testCase, {
+        title: `${input.testCase.title} / ${step.name}`,
+        request: step.request,
+        expected: step.expected,
+        metadata: { ...input.testCase.metadata, exports: step.exports },
+      });
+      const result = await this.executeSingleStep({ ...input, testCase: stepCase, env: environmentFromStep(step), vars });
+      const extracted: Record<string, string> = {};
+      for (const binding of step.exports) {
+        const value = extractResponseValue(binding.source, binding.expression, {
+          body: result.responseSnapshot?.body,
+          headers: result.responseSnapshot?.headers ?? {},
+          statusCode: result.responseSnapshot?.status ?? 0,
+        });
+        if (value !== undefined && value !== null && String(value) !== "") extracted[binding.name] = vars[binding.name] = String(value);
+        else if (binding.required) {
+          result.status = "error";
+          result.responseSnapshot = { ...(result.responseSnapshot ?? { status: 0, headers: {}, body: null }), error: `响应提取失败：${binding.name}` };
+        }
+      }
+      stepResults.push({ stepId: step.id, stepName: step.name, status: result.status, durationMs: result.durationMs, request: result.requestSnapshot, response: result.responseSnapshot, assertions: result.assertions, extracted });
+      final = result;
+      if (result.status !== "passed") break;
+    }
+    if (!final) throw new BadRequestException("案例没有可执行步骤");
+    final.caseTitle = input.testCase.title;
+    final.durationMs = stepResults.reduce((sum, item) => sum + Number(item.durationMs ?? 0), 0);
+    final.requestSnapshot = { steps: stepResults };
+    final.responseSnapshot = { status: final.responseSnapshot?.status ?? 0, headers: final.responseSnapshot?.headers ?? {}, body: { steps: stepResults }, error: final.responseSnapshot?.error };
+    return final;
+  }
+
+  private async executeSingleStep(input: {
     runId: string;
     testCase: ApiTestCaseEntity;
     env: RuntimeEnvironment;
@@ -573,15 +629,14 @@ export class ApiExecutionService {
     request: ApiCaseRequest;
     expected?: ApiCaseExpected;
     polarity?: "positive" | "negative";
-    environmentId: string;
+    environmentId?: string;
+    target?: ApiStepTarget;
     environmentServiceId?: string;
     encoding?: string;
   }): Promise<DebugRunResult> {
-    const env = (await this.environmentService.getRuntimeEnvironment(
-      input.projectId,
-      input.environmentId,
-      input.environmentServiceId,
-    )) as RuntimeEnvironment;
+    const env = input.target
+      ? environmentFromStep({ id: "debug", name: "调试", target: input.target, request: input.request, expected: input.expected ?? {}, exports: [] })
+      : (await this.environmentService.getRuntimeEnvironment(input.projectId, input.environmentId!, input.environmentServiceId)) as RuntimeEnvironment;
     const vars = buildRuntimeVariables(env.variables, env.secrets);
     const substituted = substituteDeep(input.request, vars) as ApiCaseRequest;
     const request = (await this.dataFunctionService.resolveDeep(
@@ -840,6 +895,30 @@ export class ApiExecutionService {
     });
     await Promise.all(runners);
   }
+}
+
+function environmentFromStep(step: ApiCaseStep): RuntimeEnvironment {
+  const address = step.target?.address?.trim() ?? "";
+  const transport = step.request.transport ?? (step.request.framing ? "tcp" : "http");
+  if (transport === "tcp") {
+    const match = address.match(/^([^:]+):(\d+)$/);
+    if (!match) throw new BadRequestException(`步骤「${step.name}」的 TCP 地址格式应为 host:port`);
+    return { id: step.id, baseUrl: "", headers: step.target?.headers ?? {}, variables: {}, secrets: {}, services: [{ id: step.id, name: step.target?.name || step.name, transport: "tcp", host: match[1], port: Number(match[2]), headers: step.target?.headers }] };
+  }
+  if (!/^https?:\/\//i.test(address)) throw new BadRequestException(`步骤「${step.name}」的 HTTP 地址必须以 http:// 或 https:// 开头`);
+  return { id: step.id, baseUrl: address, headers: step.target?.headers ?? {}, variables: {}, secrets: {} };
+}
+
+function formatRunVersionCode(date: Date) {
+  const day = [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("");
+  const time = [date.getHours(), date.getMinutes(), date.getSeconds()]
+    .map((value) => String(value).padStart(2, "0"))
+    .join("");
+  return `${day}-${time}`;
 }
 
 function assertCaseDependencyOrder(cases: ApiTestCaseEntity[]) {
