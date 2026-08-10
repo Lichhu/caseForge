@@ -1257,6 +1257,15 @@ async function resolveStepTargetSelection(target?: { name: string; address: stri
     resolvingStepTarget.value = false;
   }
 }
+/** 打开编辑时按步骤已保存的 target 还原环境/地址下拉；步骤无 target 时清空下拉，避免把调试栏默认选择误显示为步骤配置 */
+function applyStepTargetToSelection(target?: { name: string; address: string }) {
+  if (target?.address) {
+    void resolveStepTargetSelection(target);
+  } else {
+    apiStore.selectedEnvironmentId = '';
+    debugServiceId.value = '';
+  }
+}
 const editorMainTab = ref<'basic' | 'steps'>('steps');
 const stepDetailTab = ref<'request' | 'assertion' | 'variables'>('request');
 const editorMainTabs = [
@@ -1556,11 +1565,9 @@ const CASE_CLIPBOARD_KEY = 'caseforge:api-case-clipboard';
 function cloneJson<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }
 
 function currentStepFromForm(): ApiCaseStep {
-  const environment = apiStore.environments.find((item) => item.id === apiStore.selectedEnvironmentId);
-  const service = (apiStore.environmentServices[apiStore.selectedEnvironmentId] ?? [])
-    .find((item) => item.id === debugServiceId.value);
-  const targetName = form.stepTargetName.trim() || environment?.name || '';
-  const targetAddress = form.stepTargetAddress.trim() || fullRequestAddress.value || service?.name || '';
+  /* target 只取步骤编辑器中显式选择的环境/地址，新建步骤默认为空，保存时不再回退调试栏当前选择 */
+  const targetName = form.stepTargetName.trim();
+  const targetAddress = form.stepTargetAddress.trim();
   return {
     id: form.steps[activeStepIndex.value]?.id ?? randomUuid(),
     name: form.stepName.trim() || `步骤 ${activeStepIndex.value + 1}`,
@@ -1580,7 +1587,7 @@ function loadStep(step: ApiCaseStep) {
   form.assertionRows = assertionsToRows(step.expected?.assertions);
   form.exports = step.exports.map((item) => ({ rowId: randomUuid(), name: item.name, source: item.source, expression: item.expression ?? '', required: item.required ?? false }));
 }
-function selectStep(index: number) { storeActiveStep(); activeStepIndex.value = index; loadStep(form.steps[index]); if (stepEditModalOpen.value) void resolveStepTargetSelection(form.steps[index].target); }
+function selectStep(index: number) { storeActiveStep(); activeStepIndex.value = index; loadStep(form.steps[index]); if (stepEditModalOpen.value) applyStepTargetToSelection(form.steps[index].target); }
 function toggleStep(index: number) { if (form.steps[index].id === expandedStepId.value) { storeActiveStep(); expandedStepId.value = ''; return; } selectStep(index); expandedStepId.value = form.steps[index].id; }
 function openStepEditor(index: number) {
   storeActiveStep();
@@ -1589,7 +1596,7 @@ function openStepEditor(index: number) {
   loadStep(form.steps[index]);
   expandedStepId.value = form.steps[index].id;
   stepEditModalOpen.value = true;
-  void resolveStepTargetSelection(form.steps[index].target);
+  applyStepTargetToSelection(form.steps[index].target);
 }
 function cancelStepEditor() {
   if (stepEditSnapshot.value) {
@@ -1606,11 +1613,14 @@ function confirmStepEditor() {
   stepEditModalOpen.value = false;
   expandedStepId.value = '';
 }
-function addStep() { storeActiveStep(); const step: ApiCaseStep = { id: randomUuid(), name: `步骤 ${form.steps.length + 1}`, request: { method: 'POST', path: '/' }, expected: {}, exports: [] }; form.steps.push(step); activeStepIndex.value = form.steps.length - 1; expandedStepId.value = ''; loadStep(step); }
+function createBlankStep(name: string): ApiCaseStep {
+  return { id: randomUuid(), name, request: { method: 'POST', path: '/' }, expected: {}, exports: [] };
+}
+function addStep() { storeActiveStep(); const step = createBlankStep(`步骤 ${form.steps.length + 1}`); form.steps.push(step); activeStepIndex.value = form.steps.length - 1; expandedStepId.value = ''; loadStep(step); }
 
 function addStepAfter(index: number) {
   storeActiveStep();
-  const step: ApiCaseStep = { id: randomUuid(), name: `步骤 ${form.steps.length + 1}`, request: { method: 'POST', path: '/' }, expected: {}, exports: [] };
+  const step = createBlankStep(`步骤 ${form.steps.length + 1}`);
   form.steps.splice(index + 1, 0, step);
   activeStepIndex.value = index + 1;
   expandedStepId.value = '';
@@ -1619,7 +1629,7 @@ function addStepAfter(index: number) {
 function moveStep(index: number, offset: number) { storeActiveStep(); const next = index + offset; [form.steps[index], form.steps[next]] = [form.steps[next], form.steps[index]]; activeStepIndex.value = next; }
 function removeStep(index: number) { if (form.steps.length === 1) return; const removedId = form.steps[index].id; form.steps.splice(index, 1); activeStepIndex.value = Math.min(index, form.steps.length - 1); if (expandedStepId.value === removedId) expandedStepId.value = ''; loadStep(form.steps[activeStepIndex.value]); }
 function copyActiveStep() { storeActiveStep(); copyStepToClipboard(form.steps[activeStepIndex.value]); message.success('步骤已复制'); }
-function pasteStep() { const step = readStepFromClipboard(); if (!step) return message.warning('没有可粘贴的步骤'); form.steps.push({ ...cloneJson(step), id: randomUuid() }); activeStepIndex.value = form.steps.length - 1; expandedStepId.value = ''; loadStep(form.steps[activeStepIndex.value]); message.success('步骤已粘贴'); }
+function pasteStep() { const step = readStepFromClipboard(); if (!step) return message.warning('没有可粘贴的步骤'); storeActiveStep(); form.steps.push({ ...cloneJson(step), id: randomUuid() }); activeStepIndex.value = form.steps.length - 1; expandedStepId.value = ''; loadStep(form.steps[activeStepIndex.value]); message.success('步骤已粘贴'); }
 async function openDebugHistory() { if (!projectId.value || !apiStore.activeCaseId) return; debugHistory.value = await listStepDebugRecords(projectId.value, apiStore.activeCaseId, form.steps[activeStepIndex.value].id); debugHistoryOpen.value = true; }
 async function clearDebugHistory() { if (!projectId.value || !apiStore.activeCaseId) return; await clearStepDebugRecords(projectId.value, apiStore.activeCaseId, form.steps[activeStepIndex.value].id); debugHistory.value = []; }
 
@@ -2060,15 +2070,6 @@ async function restoreCaseDebugEnvironment(row: ApiTestCaseRow) {
     debugServiceId.value = serviceId;
   } else {
     syncDebugServiceSelection();
-  }
-  const environment = apiStore.environments.find((item) => item.id === envId);
-  const service = services.find((item) => item.id === debugServiceId.value);
-  const step = form.steps[activeStepIndex.value];
-  if (step && !step.target && (environment || service)) {
-    step.target = {
-      name: environment?.name ?? '',
-      address: service?.baseUrl || service?.serverAddress || (service?.host && service.port ? `${service.host}:${service.port}` : ''),
-    };
   }
   syncingForm.value = false;
 }
