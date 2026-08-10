@@ -241,4 +241,78 @@ describe("ApiDataFunctionService", () => {
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
+
+  it("resolves case context functions from the owning case context", async () => {
+    const contextService = new ApiDataFunctionService(
+      {} as never,
+      {
+        find: jest.fn().mockResolvedValue([
+          {
+            id: "fn-case-name",
+            projectId: "p1",
+            name: "CASE_NAME",
+            params: [],
+            type: "template",
+            config: {
+              builtin: true,
+              mode: "builder",
+              parts: [{ kind: "context", value: "caseName" }],
+            },
+            description: "",
+          },
+          {
+            id: "fn-case-no",
+            projectId: "p1",
+            name: "CASE_NO",
+            params: [],
+            type: "template",
+            config: {
+              builtin: true,
+              mode: "builder",
+              parts: [{ kind: "context", value: "caseNo" }],
+            },
+            description: "",
+          },
+        ]),
+      } as never,
+    );
+
+    await expect(
+      contextService.resolveDeep(
+        "p1",
+        { title: "${CASE_NAME()}", no: "case-${CASE_NO()}" },
+        { caseName: "非必填字段为空的正向案例", caseNo: "idc_SNYF0001-016" },
+      ),
+    ).resolves.toEqual({
+      title: "非必填字段为空的正向案例",
+      no: "case-idc_SNYF0001-016",
+    });
+  });
+
+  it("resolves case context functions to empty without a case context", async () => {
+    const contextService = new ApiDataFunctionService(
+      {} as never,
+      {
+        find: jest.fn().mockResolvedValue([
+          {
+            id: "fn-case-no",
+            projectId: "p1",
+            name: "CASE_NO",
+            params: [],
+            type: "template",
+            config: {
+              builtin: true,
+              mode: "builder",
+              parts: [{ kind: "context", value: "caseNo" }],
+            },
+            description: "",
+          },
+        ]),
+      } as never,
+    );
+
+    await expect(
+      contextService.resolveDeep("p1", "${CASE_NO()}"),
+    ).resolves.toBe("");
+  });
 });

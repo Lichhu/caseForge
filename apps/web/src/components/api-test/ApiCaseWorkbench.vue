@@ -29,10 +29,6 @@
                 <ExportOutlined />
                 导出 Excel
               </a-menu-item>
-              <a-menu-item key="environment">
-                <SettingOutlined />
-                维护环境
-              </a-menu-item>
             </a-menu>
           </template>
         </a-dropdown>
@@ -875,7 +871,6 @@
       </div>
     </a-modal>
 
-    <ApiEnvironmentMaintainModal v-model:open="envModalOpen" />
     <ApiCaseExportModal
       v-model:open="exportModalOpen"
       :project-id="projectId"
@@ -884,7 +879,15 @@
   </section>
   <a-modal v-model:open="bodyFunctionInsertOpen" title="插入数据函数" :width="680" :z-index="NESTED_OVERLAY_Z_INDEX + 10" ok-text="插入" @ok="insertBodyFunction">
     <a-form layout="vertical">
-      <a-form-item label="函数" required><a-select v-model:value="bodyFunctionName" :options="bodyFunctionOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 11 }" show-search /></a-form-item>
+      <a-form-item label="函数" required>
+        <a-select v-model:value="bodyFunctionName" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 11 }" show-search :filter-option="filterBodyFunctionOption">
+          <a-select-option v-for="item in bodyFunctions" :key="item.name" :value="item.name" :label="item.name">
+            <span class="function-option-name">{{ item.name }}</span>
+            <span v-if="item.description" class="function-option-desc">{{ item.description }}</span>
+          </a-select-option>
+        </a-select>
+      </a-form-item>
+      <p v-if="selectedBodyFunction?.description" class="function-description-hint">{{ selectedBodyFunction.description }}</p>
       <div v-if="selectedBodyFunction?.params.length" class="function-argument-list">
         <label v-for="(param, index) in selectedBodyFunction.params" :key="`${param}-${index}`" class="function-argument-row">
           <span :title="param">{{ index + 1 }}. {{ param }}</span>
@@ -912,7 +915,6 @@ import {
   PlusOutlined,
   RobotOutlined,
   SaveOutlined,
-  SettingOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
@@ -929,7 +931,6 @@ import { useApiTestStore } from '@/stores/apiTest';
 import { randomUuid } from '@/utils/randomUuid';
 import KeyValueRowsEditor from '@/components/api-test/KeyValueRowsEditor.vue';
 import AssertionRowsEditor from '@/components/api-test/AssertionRowsEditor.vue';
-import ApiEnvironmentMaintainModal from '@/components/api-test/ApiEnvironmentMaintainModal.vue';
 import ApiCaseExportModal from '@/components/api-test/ApiCaseExportModal.vue';
 import { IMMERSIVE_OVERLAY_Z_INDEX, NESTED_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import {
@@ -995,8 +996,7 @@ async function openBodyFunctionInsert() {
   if (!hasBodyCursor.value) return;
   const rows = await listDataFunctions(projectId.value);
   bodyFunctions.value = rows;
-  bodyFunctionOptions.value = rows.map((item) => ({ label: item.name, value: item.name }));
-  bodyFunctionName.value ||= bodyFunctionOptions.value[0]?.value ?? '';
+  bodyFunctionName.value ||= rows[0]?.name ?? '';
   bodyFunctionInsertOpen.value = true;
 }
 
@@ -1027,14 +1027,12 @@ const batchRequest = reactive<{
 const hasBatchRequestPatch = computed(() => Boolean(
   batchRequest.protocol || batchRequest.method || batchRequest.path?.trim() || batchRequest.encoding,
 ));
-const envModalOpen = ref(false);
 const exportModalOpen = ref(false);
 const bodyExpandModalOpen = ref(false);
 const bodyFunctionInsertOpen = ref(false);
 const bodyFunctionName = ref('');
 const bodyFunctionArgs = ref<string[]>([]);
 const bodyFunctions = ref<Awaited<ReturnType<typeof listDataFunctions>>>([]);
-const bodyFunctionOptions = ref<Array<{ label: string; value: string }>>([]);
 const bodyFunctionCursor = reactive({ start: 0, end: 0 });
 const hasBodyCursor = ref(false);
 const selectedBodyFunction = computed(() => bodyFunctions.value.find((item) => item.name === bodyFunctionName.value));
@@ -1046,6 +1044,13 @@ function bodyPathOptions(index: number) {
   const keyword = (bodyFunctionArgs.value[index] ?? '').trim().toLowerCase();
   return messagePathOptions(currentBodyText()).filter((item) => !keyword || item.value.toLowerCase().includes(keyword));
 }
+function filterBodyFunctionOption(input: string, option: { value?: unknown }) {
+  const keyword = input.trim().toLowerCase();
+  if (!keyword) return true;
+  const item = bodyFunctions.value.find((row) => row.name === option.value);
+  if (!item) return false;
+  return item.name.toLowerCase().includes(keyword) || (item.description ?? '').toLowerCase().includes(keyword);
+}
 
 watch(selectedBodyFunction, (fn) => {
   bodyFunctionArgs.value = (fn?.params ?? []).map((_, index) => bodyFunctionArgs.value[index] ?? '');
@@ -1054,9 +1059,7 @@ watch(selectedBodyFunction, (fn) => {
 const moreMenuOpen = ref(false);
 
 const onCaseMoreMenuClick: MenuProps['onClick'] = ({ key }) => {
-  if (key === 'environment') {
-    envModalOpen.value = true;
-  } else if (key === 'export-excel') {
+  if (key === 'export-excel') {
     exportModalOpen.value = true;
   }
 };
@@ -2803,6 +2806,9 @@ function onBatchDelete() {
 </script>
 
 <style scoped>
+.function-option-name { font-weight: 500; }
+.function-option-desc { margin-left: 8px; overflow: hidden; color: var(--cf-text-muted, #98a2b3); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.function-description-hint { margin: -8px 0 12px; color: var(--cf-text-secondary, #667085); font-size: 12px; }
 .function-argument-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-height: 300px; margin-bottom: 16px; padding-right: 4px; overflow-y: auto; }
 .function-argument-row { display: grid; gap: 5px; min-width: 0; }
 .function-argument-row > span { overflow: hidden; color: var(--cf-text-secondary, #667085); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }

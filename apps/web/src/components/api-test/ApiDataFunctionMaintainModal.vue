@@ -8,12 +8,12 @@
     class="data-function-modal"
     :closable="true"
   >
-    <template #title>数据函数</template>
+    <template #title>函数库</template>
 
     <div class="data-function-layout">
       <aside class="data-function-sidebar">
         <div class="data-function-sidebar-head">
-          <strong>函数</strong>
+          <strong class="data-function-sidebar-label">函数 <span class="data-function-sidebar-count">{{ functions.length }}</span></strong>
           <a-button type="primary" size="small" @click="createFunction">
             <template #icon><PlusOutlined /></template>
             新建
@@ -64,6 +64,10 @@
               </a-button>
             </a-tooltip>
           </label>
+          <label class="data-function-field data-function-desc-field">
+            <span class="data-function-field-label">函数介绍</span>
+            <a-input v-model:value="form.description" placeholder="说明函数用途，插入函数时展示" :maxlength="500" allow-clear />
+          </label>
           <div class="data-function-field data-function-params-field">
             <span class="data-function-field-label">输入参数</span>
             <div class="parameter-rows">
@@ -83,8 +87,8 @@
           </div>
         </div>
 
-        <div class="data-function-body" :class="{ 'builtin-locked': isBuiltin }">
-          <a-form layout="vertical" class="data-function-form">
+        <div class="data-function-body">
+          <a-form layout="vertical" class="data-function-form" :class="{ 'builtin-locked': isBuiltin }">
             <template v-if="form.type === 'template'">
               <a-segmented v-model:value="form.templateMode" :options="templateModeOptions" block class="template-mode" />
               <section v-if="form.templateMode === 'builder'" class="formula-panel">
@@ -110,6 +114,7 @@
                     <a-input v-if="part.kind === 'text' || part.kind === 'number'" v-model:value="part.value" size="small" :placeholder="part.kind === 'number' ? '数字' : '固定文本'" />
                     <a-select v-else-if="part.kind === 'param'" v-model:value="part.value" size="small" :options="parameterOptions" placeholder="选择参数" />
                     <a-select v-else-if="part.kind === 'time'" v-model:value="part.value" size="small" :options="formulaTimeOptions" />
+                    <a-select v-else-if="part.kind === 'context'" v-model:value="part.value" size="small" :options="formulaContextOptions" />
                     <a-input-number v-else-if="part.kind === 'random'" v-model:value="part.length" size="small" :min="1" :max="32" addon-after="位" style="width: 100%" />
                     <span v-else class="formula-auto">自动生成 UUID v4</span>
                     <div class="formula-actions">
@@ -238,7 +243,7 @@ interface DataFunctionDraft {
 }
 
 type FormulaOperator = 'concat' | 'add' | 'subtract' | 'multiply' | 'divide';
-type FormulaPartKind = 'text' | 'param' | 'time' | 'random' | 'uuid' | 'number';
+type FormulaPartKind = 'text' | 'param' | 'time' | 'random' | 'uuid' | 'number' | 'context';
 
 interface FormulaPart {
   id: string;
@@ -313,6 +318,10 @@ const formulaTimeOptions = [
   { label: '毫秒时间戳', value: 'ms' },
   { label: '年月日', value: 'yyyyMMdd' },
 ];
+const formulaContextOptions = [
+  { label: '案例名称', value: 'caseName' },
+  { label: '案例编号', value: 'caseNo' },
+];
 const operatorOptions = [
   { label: '拼接', value: 'concat' },
   { label: '加', value: 'add' },
@@ -327,6 +336,7 @@ const partTypeOptions = [
   { label: '随机数', value: 'random' },
   { label: 'UUID', value: 'uuid' },
   { label: '数字', value: 'number' },
+  { label: '案例上下文', value: 'context' },
 ];
 const generatedTemplate = computed(() => {
   return form.parts.map((part, index) => `${index ? operatorSymbol(part.operator) : ''}${partExpression(part)}`).join('');
@@ -653,6 +663,7 @@ function resolvePart(part: FormulaPart, values: Map<string, string>) {
   if (part.kind === 'time') return formatPreviewTime(part.value);
   if (part.kind === 'random') return randomDigits(part.length);
   if (part.kind === 'uuid') return randomUuid();
+  if (part.kind === 'context') return part.value === 'caseNo' ? 'CASE-0001' : '示例案例名称';
   return part.value;
 }
 
@@ -661,6 +672,7 @@ function partExpression(part: FormulaPart) {
   if (part.kind === 'time') return part.value === 'ms' ? '${timestamp}' : `\${timestamp:${part.value}}`;
   if (part.kind === 'random') return `\${random:${part.length}}`;
   if (part.kind === 'uuid') return '${uuid}';
+  if (part.kind === 'context') return part.value === 'caseNo' ? '${caseNo}' : '${caseName}';
   return part.value;
 }
 
@@ -816,48 +828,13 @@ function randomDigits(length: number) {
   overflow: hidden;
 }
 
-.data-function-editor-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.data-function-editor-name {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--cf-text, #1d2939);
-}
-
-.data-function-type-tag {
-  margin: 0;
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-.data-function-type-tag.type-template {
-  background: var(--cf-brand-soft, #fff5f6);
-  color: var(--cf-brand, #b60f2d);
-}
-
-.data-function-type-tag.type-sql {
-  background: #eff6ff;
-  color: #2563eb;
-}
-
-
-.data-function-editor-desc {
-  margin: 6px 0 0;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--cf-text-secondary, #667085);
-}
-
 .data-function-meta {
   display: grid;
-  grid-template-columns: 160px minmax(280px, 1fr) minmax(240px, .9fr);
-  gap: 10px;
-  padding: 12px 14px;
+  grid-template-columns: minmax(200px, 1.1fr) 210px minmax(240px, 1fr);
+  gap: 12px;
+  padding: 14px 16px;
   border-bottom: 1px solid var(--cf-border, #e4e7ec);
+  background: var(--cf-surface-soft, #f8f9fb);
 }
 .data-function-call { display: flex; width: 100%; min-width: 0; }
 .data-function-call :deep(.ant-btn-icon) { flex-shrink: 0; }
@@ -871,15 +848,18 @@ function randomDigits(length: number) {
 
 .data-function-field-label {
   font-size: 12px;
-  font-weight: 600;
-  color: var(--cf-text-body, #344054);
+  font-weight: 500;
+  color: var(--cf-text-secondary, #667085);
 }
 .data-function-params-field { grid-column: 1 / -1; }
+.data-function-desc-field { grid-column: 1 / -1; }
 .parameter-rows { display: grid; gap: 4px; max-height: 156px; overflow-y: auto; }
 .parameter-row { display: grid; grid-template-columns: 28px minmax(180px, 1fr) 170px; gap: 8px; align-items: center; min-height: 36px; padding: 3px 6px; border: 1px solid var(--cf-border, #e4e7ec); border-radius: 6px; background: var(--cf-surface, #fff); }
 .parameter-index { color: var(--cf-text-muted, #98a2b3); text-align: center; }
 .parameter-actions { display: flex; justify-content: flex-end; }
-.parameter-actions :deep(.ant-btn) { width: 30px; padding-inline: 0; color: var(--cf-text-secondary, #667085); }
+.parameter-actions :deep(.ant-btn) { width: 30px; padding-inline: 0; color: var(--cf-text-secondary, #667085); opacity: 0; transition: opacity .15s ease; }
+.parameter-row:hover .parameter-actions :deep(.ant-btn),
+.parameter-row:focus-within .parameter-actions :deep(.ant-btn) { opacity: 1; }
 
 .data-function-name-input {
   font-weight: 600;
@@ -889,46 +869,6 @@ function randomDigits(length: number) {
   font-size: 12px;
 }
 
-
-.data-function-usage-hint {
-  font-size: 11px;
-  color: var(--cf-text-muted, #98a2b3);
-}
-
-.data-function-usage-chip {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--cf-brand-border, #e7b8c0);
-  border-radius: 8px;
-  background: var(--cf-brand-soft, #fff5f6);
-  cursor: pointer;
-  transition: background 0.15s ease, box-shadow 0.15s ease;
-}
-
-.data-function-usage-chip:hover {
-  background: #fff0f2;
-  box-shadow: var(--cf-shadow-sm, 0 1px 2px rgb(16 24 40 / 4%));
-}
-
-.data-function-usage-chip code {
-  overflow: hidden;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
-  color: var(--cf-brand, #b60f2d);
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.data-function-usage-copy {
-  flex-shrink: 0;
-  color: var(--cf-brand, #b60f2d);
-  font-size: 14px;
-}
 
 .data-function-body {
   flex: 1;
@@ -945,14 +885,6 @@ function randomDigits(length: number) {
   font-size: 12px;
   font-weight: 600;
   color: var(--cf-text-body, #344054);
-}
-
-.data-function-params-item {
-  margin-bottom: 12px;
-}
-
-.data-function-desc-item {
-  margin-bottom: 8px;
 }
 
 .data-function-basic-grid {
@@ -973,11 +905,6 @@ function randomDigits(length: number) {
 .template-mode { margin-bottom: 12px; }
 .builtin-locked { pointer-events: none; opacity: .72; }
 .builtin-locked .data-function-call { pointer-events: auto; }
-.sql-condition-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-.sql-condition-rows { display: grid; gap: 4px; }
-.sql-condition-row { display: grid; grid-template-columns: 28px minmax(120px, 1fr) 80px 150px minmax(130px, 1fr) 30px; gap: 6px; align-items: center; padding: 4px 6px; border: 1px solid var(--cf-border, #e4e7ec); border-radius: 6px; }
-.sql-condition-row > span { color: var(--cf-text-muted, #98a2b3); text-align: center; }
-.sql-generated-preview { margin: 8px 0 0; padding: 9px 10px; overflow-x: auto; border-radius: 6px; background: #101828; color: #f9fafb; font-size: 12px; white-space: pre-wrap; }
 
 /* ===== 公式构建器 ===== */
 .formula-panel,
@@ -1034,7 +961,9 @@ function randomDigits(length: number) {
 .formula-index { color: var(--cf-text-muted, #98a2b3); text-align: center; }
 .formula-result-start, .formula-auto { color: var(--cf-text-secondary, #667085); font-size: 12px; }
 .formula-actions { display: flex; justify-content: flex-end; gap: 0; }
-.formula-actions :deep(.ant-btn) { width: 30px; padding-inline: 0; color: var(--cf-text-secondary, #667085); }
+.formula-actions :deep(.ant-btn) { width: 30px; padding-inline: 0; color: var(--cf-text-secondary, #667085); opacity: 0; transition: opacity .15s ease; }
+.formula-row:hover .formula-actions :deep(.ant-btn),
+.formula-row:focus-within .formula-actions :deep(.ant-btn) { opacity: 1; }
 
 /* ===== 试运行 ===== */
 .data-function-preview-card {

@@ -831,6 +831,8 @@ export interface DebugRunResult {
   body: unknown;
   /** 实际发出的请求报文（变量替换 + 数据函数解析后） */
   requestBody?: unknown;
+  /** 变量替换 + 数据函数解析后的完整请求 */
+  request?: Record<string, unknown>;
   bodySize: number;
   durationMs: number;
   error?: string;

@@ -806,6 +806,7 @@ export class ApiTestController {
       target: body.target,
       environmentServiceId: body.environmentServiceId,
       encoding: body.encoding,
+      caseId: body.caseId,
     });
     if (body.caseId) {
       await this.apiCaseService.persistLastDebugRun(projectId, body.caseId, {
@@ -819,7 +820,8 @@ export class ApiTestController {
         executedAt: new Date().toISOString(),
       });
       if (body.stepId) {
-        const record = { id: crypto.randomUUID(), stepId: body.stepId, request: body.request, response: { statusCode: result.statusCode, headers: result.headers, body: result.body, error: result.error }, extracted: {}, target: body.target ?? null, ...result, executedAt: new Date().toISOString() };
+        const { request: resolvedRequest, ...restResult } = result;
+        const record = { id: crypto.randomUUID(), stepId: body.stepId, request: (resolvedRequest ?? body.request) as Record<string, unknown>, response: { statusCode: result.statusCode, headers: result.headers, body: result.body, error: result.error }, extracted: {}, target: body.target ?? null, ...restResult, executedAt: new Date().toISOString() };
         await this.stepDebugRepo.save(this.stepDebugRepo.create({ projectId, caseId: body.caseId, stepId: body.stepId, record, ...auditFieldsForCreate() }));
         const rows = await this.stepDebugRepo.find({ where: { caseId: body.caseId, stepId: body.stepId, createdBy: RequestContext.getUserName() }, order: { createdAt: "DESC" }, skip: 30, take: 1000 });
         if (rows.length) await this.stepDebugRepo.delete(rows.map((row) => row.id));

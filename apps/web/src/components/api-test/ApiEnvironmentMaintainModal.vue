@@ -1,7 +1,7 @@
 <template>
   <a-modal
     v-model:open="open"
-    title="环境维护"
+    title="环境库"
     width="1280px"
     :footer="null"
     :z-index="IMMERSIVE_OVERLAY_Z_INDEX"

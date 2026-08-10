@@ -28,6 +28,8 @@ import type {
 import { parseServerAddress } from "@case-forge/shared";
 import { toPublicApiRun } from "@common/http/public-response.util";
 import { ApiDataFunctionService } from "./api-data-function.service";
+import type { DataFunctionContext } from "./api-data-function.service";
+import { SAMPLE_CONTEXT } from "./api-data-function.service";
 import type { ApiStepTarget } from "@case-forge/shared";
 
 const DEFAULT_CONCURRENCY = 5;
@@ -338,7 +340,12 @@ export class ApiExecutionService {
     encoding?: string;
   }) {
     const steps = input.testCase.steps;
-    if (!steps?.length) return this.executeSingleStep(input);
+    const caseContext: DataFunctionContext = {
+      caseName: input.testCase.title,
+      caseNo: input.testCase.caseNo,
+    };
+    if (!steps?.length)
+      return this.executeSingleStep({ ...input, caseContext });
     const vars = { ...input.vars };
     const stepResults: Array<Record<string, unknown>> = [];
     let final: ApiTestRunItemEntity | undefined;
@@ -349,7 +356,7 @@ export class ApiExecutionService {
         expected: step.expected,
         metadata: { ...input.testCase.metadata, exports: step.exports },
       });
-      const result = await this.executeSingleStep({ ...input, testCase: stepCase, env: environmentFromStep(step), vars });
+      const result = await this.executeSingleStep({ ...input, testCase: stepCase, env: environmentFromStep(step), vars, caseContext });
       const extracted: Record<string, string> = {};
       for (const binding of step.exports) {
         const value = extractExportValue(binding, result.requestSnapshot, result.responseSnapshot);
@@ -377,6 +384,7 @@ export class ApiExecutionService {
     env: RuntimeEnvironment;
     vars: Record<string, string>;
     encoding?: string;
+    caseContext?: DataFunctionContext;
   }) {
     const substituted = substituteDeep(
       input.testCase.request,
@@ -385,6 +393,7 @@ export class ApiExecutionService {
     const request = (await this.dataFunctionService.resolveDeep(
       input.testCase.projectId,
       substituted,
+      input.caseContext,
     )) as ApiCaseRequest;
     const transport = request.transport ?? (request.framing ? "tcp" : "http");
     if (transport === "tcp") {
@@ -626,15 +635,29 @@ export class ApiExecutionService {
     target?: ApiStepTarget;
     environmentServiceId?: string;
     encoding?: string;
+    caseId?: string;
   }): Promise<DebugRunResult> {
     const env = input.target
       ? environmentFromStep({ id: "debug", name: "调试", target: input.target, request: input.request, expected: input.expected ?? {}, exports: [] })
       : (await this.environmentService.getRuntimeEnvironment(input.projectId, input.environmentId!, input.environmentServiceId)) as RuntimeEnvironment;
     const vars = buildRuntimeVariables(env.variables, env.secrets);
     const substituted = substituteDeep(input.request, vars) as ApiCaseRequest;
+    let caseContext: DataFunctionContext | undefined;
+    if (input.caseId) {
+      const debugCase = await this.caseRepo.findOne({
+        where: { id: input.caseId, projectId: input.projectId },
+      });
+      if (debugCase)
+        caseContext = {
+          caseName: debugCase.title,
+          caseNo: debugCase.caseNo,
+        };
+    }
+    // 步骤库调试等无案例上下文的场景回退示例值，保证 CASE_NAME/CASE_NO 可调试
     const request = (await this.dataFunctionService.resolveDeep(
       input.projectId,
       substituted,
+      caseContext ?? SAMPLE_CONTEXT,
     )) as ApiCaseRequest;
     const transport = request.transport ?? (request.framing ? "tcp" : "http");
 
@@ -730,6 +753,7 @@ export class ApiExecutionService {
         statusCode: response.status,
         headers: responseHeaders,
         body: truncateBody(body),
+        request: input.request,
         requestBody: input.request.body,
         bodySize: responseBuffer.length,
         durationMs,
@@ -741,6 +765,7 @@ export class ApiExecutionService {
         statusCode: 0,
         headers: {},
         body: null,
+        request: input.request,
         requestBody: input.request.body,
         bodySize: 0,
         durationMs,
@@ -800,6 +825,7 @@ export class ApiExecutionService {
         statusCode: -1,
         headers: {},
         body: truncateBody(responseText),
+        request: input.request,
         requestBody: input.request.body,
         bodySize: responseText.length,
         durationMs,
@@ -811,6 +837,7 @@ export class ApiExecutionService {
         statusCode: 0,
         headers: {},
         body: null,
+        request: input.request,
         requestBody: input.request.body,
         bodySize: 0,
         durationMs,
@@ -1187,6 +1214,8 @@ export interface DebugRunResult {
   body: unknown;
   /** 实际发出的请求报文（变量替换 + 数据函数解析后），供前端解析请求体字段 */
   requestBody?: unknown;
+  /** 变量替换 + 数据函数解析后的完整请求，供调试记录留存 */
+  request?: ApiCaseRequest;
   bodySize: number;
   durationMs: number;
   error?: string;

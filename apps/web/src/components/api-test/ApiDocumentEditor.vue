@@ -46,6 +46,10 @@
           <template #icon><HistoryOutlined /></template>
           生成历史
         </a-button>
+        <a-button v-if="!showSmpData" :disabled="!canSave" @click="void onSave()">
+          <template #icon><SaveOutlined /></template>
+          保存
+        </a-button>
         <a-dropdown v-model:open="moreMenuOpen" trigger="click">
           <a-button>
             更多
@@ -67,9 +71,9 @@
                 <UnorderedListOutlined />
                 步骤库
               </a-menu-item>
-              <a-menu-item v-if="!showSmpData" key="save" :disabled="!canSave">
-                <SaveOutlined />
-                保存
+              <a-menu-item key="environments">
+                <SettingOutlined />
+                环境库
               </a-menu-item>
             </a-menu>
           </template>
@@ -267,9 +271,18 @@
 
   <ApiDataFunctionMaintainModal v-model:open="dataFunctionModalOpen" :project-id="apiStore.activeProjectId" />
   <ApiDatabaseConnectionMaintainModal v-model:open="databaseConnectionModalOpen" :project-id="apiStore.activeProjectId" />
+  <ApiEnvironmentMaintainModal v-model:open="environmentModalOpen" />
   <a-modal v-model:open="functionInsertOpen" title="插入数据函数" :width="680" :z-index="NESTED_OVERLAY_Z_INDEX" ok-text="插入" @ok="insertFunctionExpression">
     <a-form layout="vertical">
-      <a-form-item label="函数" required><a-select v-model:value="insertFunctionName" :options="functionOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }" show-search /></a-form-item>
+      <a-form-item label="函数" required>
+        <a-select v-model:value="insertFunctionName" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }" show-search :filter-option="filterInsertFunctionOption">
+          <a-select-option v-for="item in insertFunctions" :key="item.name" :value="item.name" :label="item.name">
+            <span class="function-option-name">{{ item.name }}</span>
+            <span v-if="item.description" class="function-option-desc">{{ item.description }}</span>
+          </a-select-option>
+        </a-select>
+      </a-form-item>
+      <p v-if="selectedInsertFunction?.description" class="function-description-hint">{{ selectedInsertFunction.description }}</p>
       <div v-if="selectedInsertFunction?.params.length" class="function-argument-list">
         <label v-for="(param, index) in selectedInsertFunction.params" :key="`${param}-${index}`" class="function-argument-row">
           <span :title="param">{{ index + 1 }}. {{ param }}</span>
@@ -680,6 +693,7 @@ import {
   RobotOutlined,
   RightOutlined,
   SaveOutlined,
+  SettingOutlined,
   ThunderboltOutlined,
   UploadOutlined,
   UnorderedListOutlined,
@@ -690,6 +704,7 @@ import SmpDocumentViewer from '@/components/api-test/SmpDocumentViewer.vue';
 import ApiCaseGenerateHistoryDrawer from '@/components/api-test/ApiCaseGenerateHistoryDrawer.vue';
 import ApiDataFunctionMaintainModal from '@/components/api-test/ApiDataFunctionMaintainModal.vue';
 import ApiDatabaseConnectionMaintainModal from '@/components/api-test/ApiDatabaseConnectionMaintainModal.vue';
+import ApiEnvironmentMaintainModal from '@/components/api-test/ApiEnvironmentMaintainModal.vue';
 import AssertionRowsEditor from '@/components/api-test/AssertionRowsEditor.vue';
 import KeyValueRowsEditor from '@/components/api-test/KeyValueRowsEditor.vue';
 import { IMMERSIVE_OVERLAY_Z_INDEX, NESTED_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
@@ -737,13 +752,19 @@ const hasExampleCursor = ref(false);
 const insertFunctionName = ref('');
 const insertFunctionArgs = ref<string[]>([]);
 const insertFunctions = ref<Awaited<ReturnType<typeof listDataFunctions>>>([]);
-const functionOptions = ref<Array<{ label: string; value: string }>>([]);
 const selectedInsertFunction = computed(() => insertFunctions.value.find((item) => item.name === insertFunctionName.value));
 const functionInsertTarget = ref<'example' | 'stepBody'>('example');
 function functionInsertSourceText() { return functionInsertTarget.value === 'stepBody' ? stepEdit.body : exampleMessage.value; }
 function examplePathOptions(index: number) {
   const keyword = (insertFunctionArgs.value[index] ?? '').trim().toLowerCase();
   return messagePathOptions(functionInsertSourceText()).filter((item) => !keyword || item.value.toLowerCase().includes(keyword));
+}
+function filterInsertFunctionOption(input: string, option: { value?: unknown }) {
+  const keyword = input.trim().toLowerCase();
+  if (!keyword) return true;
+  const item = insertFunctions.value.find((row) => row.name === option.value);
+  if (!item) return false;
+  return item.name.toLowerCase().includes(keyword) || (item.description ?? '').toLowerCase().includes(keyword);
 }
 const functionInsertPreview = computed(() => {
   const call = `\${${insertFunctionName.value || '函数名'}(${insertFunctionArgs.value.join(', ')})`;
@@ -764,6 +785,7 @@ const historyDrawerOpen = ref(false);
 const moreMenuOpen = ref(false);
 const dataFunctionModalOpen = ref(false);
 const databaseConnectionModalOpen = ref(false);
+const environmentModalOpen = ref(false);
 const generationProfile = reactive<ApiDocGenerationProfile>({
   serviceProperty: 'query_non_accounting',
   transport: 'http',
@@ -1156,8 +1178,7 @@ function onExampleMessageBlur() {
 async function loadInsertFunctionOptions() {
   const rows = await listDataFunctions(projectId.value);
   insertFunctions.value = rows;
-  functionOptions.value = rows.map((item) => ({ label: item.name, value: item.name }));
-  insertFunctionName.value ||= functionOptions.value[0]?.value ?? '';
+  insertFunctionName.value ||= rows[0]?.name ?? '';
 }
 async function openFunctionInsert() {
   if (!hasExampleCursor.value) return;
@@ -1482,8 +1503,8 @@ const onMoreMenuClick: MenuProps['onClick'] = ({ key }) => {
     stepLibraryOpen.value = true;
     void refreshStepLibrary();
   }
-  if (key === 'save') {
-    void onSave();
+  if (key === 'environments') {
+    environmentModalOpen.value = true;
   }
 };
 
@@ -1655,6 +1676,9 @@ async function onSave() {
 </script>
 
 <style scoped>
+.function-option-name { font-weight: 500; }
+.function-option-desc { margin-left: 8px; overflow: hidden; color: var(--cf-text-muted, #98a2b3); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.function-description-hint { margin: -8px 0 12px; color: var(--cf-text-secondary, #667085); font-size: 12px; }
 .function-argument-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-height: 300px; margin-bottom: 16px; padding-right: 4px; overflow-y: auto; }
 .function-argument-row { display: grid; gap: 5px; min-width: 0; }
 .function-argument-row > span { overflow: hidden; color: var(--cf-text-secondary, #667085); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }

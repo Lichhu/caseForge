@@ -34,6 +34,15 @@ type FormulaPart = {
   value?: string;
   length?: number;
 };
+export type DataFunctionContext = {
+  caseName?: string;
+  caseNo?: string;
+};
+/** 无案例上下文时（函数试运行、步骤库调试）使用的示例值 */
+export const SAMPLE_CONTEXT: DataFunctionContext = {
+  caseName: "示例案例名称",
+  caseNo: "CASE-0001",
+};
 type DbPool = {
   query: (sql: any, params?: any[]) => Promise<any>;
   end: () => Promise<void>;
@@ -105,6 +114,32 @@ const BUILTIN_FUNCTIONS = [
       },
     ],
     description: "四位随机数字",
+  },
+  {
+    name: "CASE_NAME",
+    parts: [
+      {
+        id: "builtin-case-name",
+        operator: "concat",
+        kind: "context",
+        value: "caseName",
+        length: 4,
+      },
+    ],
+    description: "当前案例名称（步骤所属案例）",
+  },
+  {
+    name: "CASE_NO",
+    parts: [
+      {
+        id: "builtin-case-no",
+        operator: "concat",
+        kind: "context",
+        value: "caseNo",
+        length: 4,
+      },
+    ],
+    description: "当前案例编号（步骤所属案例）",
   },
 ] as const;
 
@@ -228,6 +263,19 @@ export class ApiDataFunctionService {
         ...auditFieldsForCreate(),
       }),
     );
+    // 旧内置数据无介绍时回填，保证插入弹窗能展示函数用途
+    const builtinDesc = new Map<string, string>(
+      BUILTIN_FUNCTIONS.map((item) => [item.name, item.description]),
+    );
+    const stale = publicRows.filter(
+      (row) =>
+        (row.config as { builtin?: boolean })?.builtin &&
+        !row.description &&
+        builtinDesc.has(row.name),
+    );
+    for (const row of stale)
+      row.description = builtinDesc.get(row.name) ?? "";
+    if (stale.length) await this.functionRepo.save(stale);
     return missing.length
       ? [...publicRows, ...(await this.functionRepo.save(missing))]
       : publicRows;
@@ -259,15 +307,19 @@ export class ApiDataFunctionService {
     return { ok: true };
   }
   preview(projectId: string, body: PreviewDataFunctionDto) {
-    return this.evaluate(projectId, body, body.values);
+    return this.evaluate(projectId, body, body.values, SAMPLE_CONTEXT);
   }
 
-  async resolveDeep(projectId: string, value: unknown): Promise<unknown> {
+  async resolveDeep(
+    projectId: string,
+    value: unknown,
+    context?: DataFunctionContext,
+  ): Promise<unknown> {
     const rows = await this.functionRepo.find({ order: { updatedAt: "DESC" } });
     const functions = this.uniqueByName(rows);
     const walk = async (item: unknown): Promise<unknown> => {
       if (typeof item === "string")
-        return this.resolveText(projectId, item, functions, value);
+        return this.resolveText(projectId, item, functions, value, context);
       if (Array.isArray(item)) return Promise.all(item.map(walk));
       if (item && typeof item === "object")
         return Object.fromEntries(
@@ -288,6 +340,7 @@ export class ApiDataFunctionService {
     text: string,
     functions: ApiDataFunctionEntity[],
     request: unknown,
+    context?: DataFunctionContext,
   ) {
     const pattern =
       /\$\{([A-Z][A-Z0-9_]*)\(([^{}]*)\)(?:\.([A-Za-z_][\w]*))?\}/g;
@@ -304,7 +357,7 @@ export class ApiDataFunctionService {
         const values = Object.fromEntries(
           fn.params.map((name, index) => [name, args[index] ?? ""]),
         );
-        const evaluated = await this.evaluate(projectId, fn, values);
+        const evaluated = await this.evaluate(projectId, fn, values, context);
         const resolved = match[3]
           ? (evaluated as Record<string, unknown> | null)?.[match[3]]
           : evaluated;
@@ -320,6 +373,7 @@ export class ApiDataFunctionService {
     projectId: string,
     fn: Pick<ApiDataFunctionEntity, "type" | "config" | "params">,
     values: Record<string, unknown>,
+    context?: DataFunctionContext,
   ) {
     for (const name of fn.params)
       if (values[name] === undefined)
@@ -333,9 +387,11 @@ export class ApiDataFunctionService {
         fn.params.map((name) => values[name]),
       );
     const parts = (fn.config.parts ?? []) as FormulaPart[];
-    let result: string | number = String(this.partValue(parts[0], values));
+    let result: string | number = String(
+      this.partValue(parts[0], values, context),
+    );
     for (const part of parts.slice(1)) {
-      const next = this.partValue(part, values);
+      const next = this.partValue(part, values, context);
       const op = part.operator ?? "concat";
       if (op === "concat") result = `${result}${next}`;
       else {
@@ -357,9 +413,12 @@ export class ApiDataFunctionService {
   private partValue(
     part: FormulaPart | undefined,
     values: Record<string, unknown>,
+    context?: DataFunctionContext,
   ) {
     if (!part) return "";
     if (part.kind === "param") return values[part.value ?? ""] ?? "";
+    if (part.kind === "context")
+      return context?.[part.value as keyof DataFunctionContext] ?? "";
     if (part.kind === "time") return formatDate(part.value);
     if (part.kind === "random")
       return Array.from(
