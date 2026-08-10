@@ -1,6 +1,7 @@
 import type {
   ApiAssertion,
   ApiCaseExpected,
+  ApiCaseExport,
   AssertionResult,
 } from "@case-forge/shared";
 import { JSONPath } from "jsonpath-plus";
@@ -53,6 +54,37 @@ export function extractResponseValue(
   } catch {
     return undefined;
   }
+}
+
+export interface ExecutionSnapshot {
+  body?: unknown;
+  headers?: unknown;
+  status?: unknown;
+}
+
+/**
+ * 提取步骤共享变量：source 为 request 时从本步骤实际发出的请求快照
+ * （变量替换 + 数据函数解析后）中提取，其余来源从响应快照中提取。
+ */
+export function extractExportValue(
+  binding: Pick<ApiCaseExport, "source" | "expression">,
+  requestSnapshot: Record<string, unknown> | undefined | null,
+  responseSnapshot: Record<string, unknown> | undefined | null,
+): unknown {
+  if (binding.source === "request") {
+    return extractResponseValue("body", binding.expression, {
+      body: requestSnapshot?.body,
+      headers:
+        (requestSnapshot?.headers as Record<string, string> | undefined) ?? {},
+      statusCode: 0,
+    });
+  }
+  return extractResponseValue(binding.source, binding.expression, {
+    body: responseSnapshot?.body,
+    headers:
+      (responseSnapshot?.headers as Record<string, string> | undefined) ?? {},
+    statusCode: (responseSnapshot?.status as number | undefined) ?? 0,
+  });
 }
 
 function compareValues(

@@ -177,7 +177,7 @@ export async function generateCasesWithPlan(
         "1. bodyOverrides 的 key 必须使用「请求字段目录」中的**节点路径**（如 Transaction/Body/request/bizBody/cstNo）",
         "2. 只输出需要变更的字段，其余字段保留示例报文原值",
         "3. 正向案例以示例为基准；反向案例仅变更被测字段，其余参照示例",
-        '4. 空值统一用空字符串 ""',
+        '4. 空值统一用空字符串 ""（数组内字段为空字符串时，会从所有数组元素中删除该字段，表示「缺失」）',
         "5. 禁止编造示例中不存在的字段结构",
         "```",
         exampleMessage.slice(0, EXAMPLE_MESSAGE_MAX_CHARS),

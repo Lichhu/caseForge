@@ -173,7 +173,8 @@ export interface ApiTestCasePayload {
 
 export interface ApiCaseExport {
   name: string;
-  source: "body" | "header" | "status";
+  /** 提取来源：request 表示从本步骤实际发出的请求报文（函数解析后）中提取 */
+  source: "body" | "header" | "status" | "request";
   expression?: string;
   required?: boolean;
 }

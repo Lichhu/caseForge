@@ -829,6 +829,8 @@ export interface DebugRunResult {
   statusCode: number;
   headers: Record<string, string>;
   body: unknown;
+  /** 实际发出的请求报文（变量替换 + 数据函数解析后） */
+  requestBody?: unknown;
   bodySize: number;
   durationMs: number;
   error?: string;

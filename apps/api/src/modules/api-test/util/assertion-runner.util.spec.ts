@@ -7,6 +7,7 @@ import {
 import {
   runAssertions,
   isAllPassed,
+  extractExportValue,
   type AssertionRunInput,
 } from "./assertion-runner.util";
 
@@ -629,5 +630,62 @@ describe("runAssertions – multiple assertions", () => {
     expect(results[0].passed).toBe(true);
     expect(results[1].passed).toBe(true);
     expect(results[2].passed).toBe(false);
+  });
+});
+
+describe("extractExportValue", () => {
+  const requestSnapshot = {
+    body: "<Transaction><Header><sysHeader><msgId>123456</msgId></sysHeader></Header></Transaction>",
+    headers: { "X-Req": "req-1" },
+  };
+  const responseSnapshot = {
+    status: 200,
+    headers: { "x-token": "tok-1" },
+    body: { code: "0000", data: { token: "tok-2" } },
+  };
+
+  it("source=request 从请求报文 XML 中提取字段", () => {
+    const value = extractExportValue(
+      { source: "request", expression: "/Transaction/Header/sysHeader/msgId" },
+      requestSnapshot,
+      responseSnapshot,
+    );
+    expect(value).toBe("123456");
+  });
+
+  it("source=request 支持 JSON 请求体 jsonpath", () => {
+    const value = extractExportValue(
+      { source: "request", expression: "$.msgId" },
+      { body: JSON.stringify({ msgId: "777" }) },
+      responseSnapshot,
+    );
+    expect(value).toBe("777");
+  });
+
+  it("source=body 仍从响应体提取", () => {
+    const value = extractExportValue(
+      { source: "body", expression: "data.token" },
+      requestSnapshot,
+      responseSnapshot,
+    );
+    expect(value).toBe("tok-2");
+  });
+
+  it("source=status 仍返回响应状态码", () => {
+    const value = extractExportValue(
+      { source: "status" },
+      requestSnapshot,
+      responseSnapshot,
+    );
+    expect(value).toBe(200);
+  });
+
+  it("source=request 且请求快照缺失时返回 undefined", () => {
+    const value = extractExportValue(
+      { source: "request", expression: "/Transaction/Header/sysHeader/msgId" },
+      undefined,
+      responseSnapshot,
+    );
+    expect(value).toBeUndefined();
   });
 });

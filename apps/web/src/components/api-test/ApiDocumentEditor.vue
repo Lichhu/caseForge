@@ -575,7 +575,7 @@
     <div v-show="stepEditTab === 'variables'" class="case-editor-panel case-assertion-panel">
       <div class="case-assertion-shell">
         <div class="case-assertion-toolbar">
-          <div><strong>响应提取（{{ stepEdit.exports.length }}）</strong></div>
+          <div><strong>变量提取（{{ stepEdit.exports.length }}）</strong></div>
           <div class="case-assertion-toolbar-actions">
             <a-button type="primary" size="small" :loading="libraryDebugRunning" @click="addLibraryExportFromDebug">
               <template #icon><ThunderboltOutlined /></template>
@@ -586,6 +586,7 @@
         <div class="case-step-response-list">
           <a-table :data-source="stepEdit.exports" :pagination="false" size="small" row-key="rowId">
             <a-table-column title="变量名" key="name"><template #default="{ record }"><a-input v-model:value="record.name" placeholder="accessToken" /></template></a-table-column>
+            <a-table-column title="来源" key="source" :width="110"><template #default="{ record }"><a-select v-model:value="record.source" size="small" :options="exportSourceOptions" :get-popup-container="popupContainer" :dropdown-style="nestedDropdownStyle" /></template></a-table-column>
             <a-table-column title="提取表达式" key="expression"><template #default="{ record }"><a-input v-model:value="record.expression" placeholder="json:$.Transaction... | xml:/Transaction/./." /></template></a-table-column>
             <a-table-column title="引用" key="reference" :width="160"><template #default="{ record }"><code v-if="record.name">{{ variableReference(record.name) }}</code></template></a-table-column>
             <a-table-column key="action" :width="60" align="center">
@@ -594,7 +595,7 @@
             </a-table-column>
           </a-table>
         </div>
-        <a-empty v-if="!stepEdit.exports.length" description="先调试，再从响应中添加要共享的字段" />
+        <a-empty v-if="!stepEdit.exports.length" description="从本步骤请求/响应中提取共享变量，后续步骤用 ${变量名} 引用" />
       </div>
     </div>
 
@@ -611,9 +612,10 @@
       <div class="function-expression-preview"><span>引用预览</span><code>{{ libraryVariablePreview }}</code></div>
     </a-form>
   </a-modal>
-  <a-modal v-model:open="libraryDebugExportOpen" title="从响应添加提取" :z-index="NESTED_OVERLAY_Z_INDEX + 10" ok-text="添加" @ok="confirmLibraryDebugExport">
+  <a-modal v-model:open="libraryDebugExportOpen" title="从调试添加提取" :z-index="NESTED_OVERLAY_Z_INDEX + 10" ok-text="添加" @ok="confirmLibraryDebugExport">
     <a-form layout="vertical">
-      <a-form-item label="响应字段路径"><a-select v-model:value="libraryDebugExportPath" show-search :options="libraryDebugExportPathOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 11 }" placeholder="选择字段" /></a-form-item>
+      <a-form-item label="来源"><a-select v-model:value="libraryDebugExportSource" :options="libraryDebugExportSourceOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 11 }" @change="onLibraryDebugExportSourceChange" /></a-form-item>
+      <a-form-item label="字段路径"><a-select v-model:value="libraryDebugExportPath" show-search :options="libraryDebugExportPathOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 11 }" placeholder="选择字段" /></a-form-item>
       <a-form-item label="变量名"><a-input v-model:value="libraryDebugExportName" placeholder="accessToken" /></a-form-item>
     </a-form>
   </a-modal>
@@ -786,12 +788,18 @@ const beforeStepIds = ref<string[]>([]);
 const afterStepIds = ref<string[]>([]);
 const beforeStepSearch = ref('');
 const afterStepSearch = ref('');
-type LibraryExportRow = { rowId: string; name: string; source: 'body' | 'header' | 'status'; expression: string; required: boolean };
+type LibraryExportRow = { rowId: string; name: string; source: 'body' | 'header' | 'status' | 'request'; expression: string; required: boolean };
+const exportSourceOptions = [
+  { label: '响应体', value: 'body' },
+  { label: '请求体', value: 'request' },
+  { label: '响应头', value: 'header' },
+  { label: '状态码', value: 'status' },
+];
 type LibraryBodyFormat = 'json' | 'xml' | 'text';
 const stepEditTabs = [
   { key: 'request' as const, label: '请求报文' },
   { key: 'assertion' as const, label: '断言' },
-  { key: 'variables' as const, label: '响应提取' },
+  { key: 'variables' as const, label: '变量提取' },
 ];
 const stepEditTab = ref<'request' | 'assertion' | 'variables'>('request');
 const stepRequestTab = ref<'params' | 'body' | 'headers'>('body');
@@ -992,23 +1000,37 @@ async function onLibraryGenerateAssertions() {
 const libraryDebugExportOpen = ref(false);
 const libraryDebugExportPath = ref('');
 const libraryDebugExportName = ref('');
-const libraryDebugExportPathOptions = ref<Array<{ label: string; value: string }>>([]);
+const libraryDebugExportSource = ref<'body' | 'request'>('body');
+const libraryDebugExportSourceOptions = [
+  { label: '响应体', value: 'body' },
+  { label: '请求体', value: 'request' },
+];
+const libraryDebugResponsePathOptions = ref<Array<{ label: string; value: string }>>([]);
+const libraryDebugRequestPathOptions = ref<Array<{ label: string; value: string }>>([]);
+const libraryDebugExportPathOptions = computed(() => (libraryDebugExportSource.value === 'request' ? libraryDebugRequestPathOptions.value : libraryDebugResponsePathOptions.value));
 async function addLibraryExportFromDebug() {
   const result = await runLibraryDebug();
   if (!result) return;
-  if (result.error) return message.warning(`调试请求失败：${result.error}`);
-  const paths = responsePaths(parseDebugResponseBody(result.body));
-  if (!paths.length) return message.warning('响应体中没有识别到 JSON 或 XML 字段');
-  libraryDebugExportPathOptions.value = paths.map((value) => ({ label: value, value }));
-  libraryDebugExportPath.value = paths[0];
-  const pathParts = libraryDebugExportPath.value.split(/[./\[\]]/).filter((item) => item && item !== 'text()');
-  libraryDebugExportName.value = pathParts[pathParts.length - 1] ?? '';
+  const responsePathsList = responsePaths(parseDebugResponseBody(result.body));
+  const requestPathsList = responsePaths(parseDebugResponseBody(result.requestBody));
+  if (result.error && !requestPathsList.length) return message.warning(`调试请求失败：${result.error}`);
+  if (!responsePathsList.length && !requestPathsList.length) return message.warning('请求/响应体中没有识别到 JSON 或 XML 字段');
+  libraryDebugResponsePathOptions.value = responsePathsList.map((value) => ({ label: value, value }));
+  libraryDebugRequestPathOptions.value = requestPathsList.map((value) => ({ label: value, value }));
+  libraryDebugExportSource.value = responsePathsList.length ? 'body' : 'request';
+  syncLibraryDebugExportSelection();
   libraryDebugExportOpen.value = true;
 }
+function syncLibraryDebugExportSelection() {
+  libraryDebugExportPath.value = libraryDebugExportPathOptions.value[0]?.value ?? '';
+  const pathParts = libraryDebugExportPath.value.split(/[./\[\]]/).filter((item) => item && item !== 'text()');
+  libraryDebugExportName.value = pathParts[pathParts.length - 1] ?? '';
+}
+function onLibraryDebugExportSourceChange() { syncLibraryDebugExportSelection(); }
 function confirmLibraryDebugExport() {
   if (!libraryDebugExportPath.value || !libraryDebugExportName.value.trim()) return message.warning('请选择字段并填写变量名');
   if (stepEdit.exports.some((item) => item.name.trim() === libraryDebugExportName.value.trim())) return message.warning('变量名已存在，请换一个');
-  stepEdit.exports.push({ rowId: randomUuid(), name: libraryDebugExportName.value.trim(), source: 'body', expression: libraryDebugExportPath.value, required: true });
+  stepEdit.exports.push({ rowId: randomUuid(), name: libraryDebugExportName.value.trim(), source: libraryDebugExportSource.value, expression: libraryDebugExportPath.value, required: true });
   libraryDebugExportOpen.value = false;
 }
 async function removeLibraryStep(id: string) { await deleteStepLibrary(id); await refreshStepLibrary(); }

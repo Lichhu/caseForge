@@ -17,7 +17,7 @@ import {
 import {
   isAllPassed,
   runAssertions,
-  extractResponseValue,
+  extractExportValue,
 } from "@api-test/util/assertion-runner.util";
 import type {
   ApiCaseExpected,
@@ -25,6 +25,7 @@ import type {
   ApiRunItemStatus,
   ApiCaseStep,
 } from "@case-forge/shared";
+import { parseServerAddress } from "@case-forge/shared";
 import { toPublicApiRun } from "@common/http/public-response.util";
 import { ApiDataFunctionService } from "./api-data-function.service";
 import type { ApiStepTarget } from "@case-forge/shared";
@@ -203,11 +204,7 @@ export class ApiExecutionService {
       items.push(item);
       const exports = testCase.metadata?.exports ?? [];
       for (const binding of exports) {
-        const value = extractResponseValue(binding.source, binding.expression, {
-          body: item.responseSnapshot?.body,
-          headers: item.responseSnapshot?.headers ?? {},
-          statusCode: item.responseSnapshot?.status ?? 0,
-        });
+        const value = extractExportValue(binding, item.requestSnapshot, item.responseSnapshot);
         if (value !== undefined && value !== null && String(value) !== "") {
           sharedVars[`${testCase.caseNo ?? testCase.id}.${binding.name}`] = String(value);
         } else if (binding.required) {
@@ -355,15 +352,11 @@ export class ApiExecutionService {
       const result = await this.executeSingleStep({ ...input, testCase: stepCase, env: environmentFromStep(step), vars });
       const extracted: Record<string, string> = {};
       for (const binding of step.exports) {
-        const value = extractResponseValue(binding.source, binding.expression, {
-          body: result.responseSnapshot?.body,
-          headers: result.responseSnapshot?.headers ?? {},
-          statusCode: result.responseSnapshot?.status ?? 0,
-        });
+        const value = extractExportValue(binding, result.requestSnapshot, result.responseSnapshot);
         if (value !== undefined && value !== null && String(value) !== "") extracted[binding.name] = vars[binding.name] = String(value);
         else if (binding.required) {
           result.status = "error";
-          result.responseSnapshot = { ...(result.responseSnapshot ?? { status: 0, headers: {}, body: null }), error: `响应提取失败：${binding.name}` };
+          result.responseSnapshot = { ...(result.responseSnapshot ?? { status: 0, headers: {}, body: null }), error: `${binding.source === "request" ? "请求" : "响应"}提取失败：${binding.name}` };
         }
       }
       stepResults.push({ stepId: step.id, stepName: step.name, status: result.status, durationMs: result.durationMs, request: result.requestSnapshot, response: result.responseSnapshot, assertions: result.assertions, extracted });
@@ -737,6 +730,7 @@ export class ApiExecutionService {
         statusCode: response.status,
         headers: responseHeaders,
         body: truncateBody(body),
+        requestBody: input.request.body,
         bodySize: responseBuffer.length,
         durationMs,
         assertions,
@@ -747,6 +741,7 @@ export class ApiExecutionService {
         statusCode: 0,
         headers: {},
         body: null,
+        requestBody: input.request.body,
         bodySize: 0,
         durationMs,
         error: err instanceof Error ? err.message : "请求失败",
@@ -805,6 +800,7 @@ export class ApiExecutionService {
         statusCode: -1,
         headers: {},
         body: truncateBody(responseText),
+        requestBody: input.request.body,
         bodySize: responseText.length,
         durationMs,
         assertions,
@@ -815,6 +811,7 @@ export class ApiExecutionService {
         statusCode: 0,
         headers: {},
         body: null,
+        requestBody: input.request.body,
         bodySize: 0,
         durationMs,
         error: err instanceof Error ? err.message : "TCP 请求失败",
@@ -868,10 +865,10 @@ export class ApiExecutionService {
     const host = service?.host?.trim();
     const port = service?.port;
     if (host && port) return { host, port };
-    const raw = (service?.baseUrl || env.baseUrl || "").replace(
-      /^https?:\/\//i,
-      "",
-    );
+    const raw = (service?.baseUrl || env.baseUrl || "")
+      .replace(/^(socket2?|tcp):\/\//i, "")
+      .replace(/^https?:\/\//i, "")
+      .replace(/\/.*$/, "");
     const [rawHost, rawPort] = raw.split(":");
     const parsedPort = Number(rawPort);
     if (!rawHost || !Number.isFinite(parsedPort)) {
@@ -897,13 +894,15 @@ export class ApiExecutionService {
   }
 }
 
-function environmentFromStep(step: ApiCaseStep): RuntimeEnvironment {
+export function environmentFromStep(step: ApiCaseStep): RuntimeEnvironment {
   const address = step.target?.address?.trim() ?? "";
   const transport = step.request.transport ?? (step.request.framing ? "tcp" : "http");
   if (transport === "tcp") {
-    const match = address.match(/^([^:]+):(\d+)$/);
-    if (!match) throw new BadRequestException(`步骤「${step.name}」的 TCP 地址格式应为 host:port`);
-    return { id: step.id, baseUrl: "", headers: step.target?.headers ?? {}, variables: {}, secrets: {}, services: [{ id: step.id, name: step.target?.name || step.name, transport: "tcp", host: match[1], port: Number(match[2]), headers: step.target?.headers }] };
+    const parsed = parseServerAddress(address);
+    if (!parsed.host || !parsed.port) {
+      throw new BadRequestException(`步骤「${step.name}」的 TCP 地址格式应为 host:port（如 32.114.71.6:60030，也支持 socket2://host:port）`);
+    }
+    return { id: step.id, baseUrl: "", headers: step.target?.headers ?? {}, variables: {}, secrets: {}, services: [{ id: step.id, name: step.target?.name || step.name, transport: "tcp", host: parsed.host, port: parsed.port, headers: step.target?.headers }] };
   }
   if (!/^https?:\/\//i.test(address)) throw new BadRequestException(`步骤「${step.name}」的 HTTP 地址必须以 http:// 或 https:// 开头`);
   return { id: step.id, baseUrl: address, headers: step.target?.headers ?? {}, variables: {}, secrets: {} };
@@ -1186,6 +1185,8 @@ export interface DebugRunResult {
   statusCode: number;
   headers: Record<string, string>;
   body: unknown;
+  /** 实际发出的请求报文（变量替换 + 数据函数解析后），供前端解析请求体字段 */
+  requestBody?: unknown;
   bodySize: number;
   durationMs: number;
   error?: string;

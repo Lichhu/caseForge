@@ -774,6 +774,215 @@ describe("assembleCaseRequest (JSON, with example message)", () => {
   });
 });
 
+const SAMPLE_DOC_JSON_WITH_ARRAY_EXAMPLE = [
+  "基础信息",
+  "----",
+  "原服务交易码|syncSytWorkOrder",
+  "服务URL|32.114.71.6:60030",
+  "",
+  "技术信息",
+  "----",
+  "通讯方式|HTTP",
+  "报文类型|JSON",
+  "报文编码|UTF-8",
+  "",
+  "请求报文",
+  "----",
+  "| 节点路径 | 节点代码 | 是否必填 |",
+  "| --- | --- | --- |",
+  "| Transaction/Body/request/bizBody/workOrderId | workOrderId | Y |",
+  "| Transaction/Body/request/bizBody/data/terminalList | deviceModelName | Y |",
+  "| Transaction/Body/request/bizBody/data/deviceModelName | deviceModelName | Y |",
+  "",
+  "示例报文",
+  "----",
+  JSON.stringify({
+    Transaction: {
+      Header: { sysHeader: { msgId: "OLD_MSG_ID", operation: "syncSytWorkOrder" } },
+      Body: {
+        request: {
+          bizHeader: { data: null },
+          bizBody: {
+            workOrderId: "afecaf68ffac46fd8882e80a308c6175d",
+            data: {
+              terminalList: [
+                { termId: "56000570", deviceModel: "000003", deviceModelName: "V8" },
+                { termId: "56000571", deviceModel: "000004", deviceModelName: "V9" },
+              ],
+            },
+          },
+        },
+      },
+    },
+  }),
+].join("\n");
+
+describe("assembleCaseRequest (JSON, object array fields)", () => {
+  const profile = {
+    transport: "http" as const,
+    messageFormat: "json" as const,
+    encoding: "UTF-8",
+  };
+
+  it("缺失案例：空字符串覆盖从所有数组元素中删除该字段", () => {
+    const plan: AiCasePlanItem = {
+      caseName: "缺失必填字段 deviceModelName",
+      caseDesc: "terminalList 内所有元素删除 deviceModelName",
+      caseType: "反",
+      priority: "中",
+      bodyOverrides: {
+        "Transaction/Body/request/bizBody/data/terminalList/deviceModelName": "",
+      },
+    };
+
+    const { body } = assembleCaseRequest({
+      canonicalDoc: SAMPLE_DOC_JSON_WITH_ARRAY_EXAMPLE,
+      transactionCode: "syncSytWorkOrder",
+      profile,
+      endpoint: FAKE_ENDPOINT,
+      plan,
+    });
+
+    const parsed = JSON.parse(body as string);
+    const list = parsed.Transaction.Body.request.bizBody.data.terminalList;
+    expect(list).toHaveLength(2);
+    for (const item of list) {
+      expect(item).not.toHaveProperty("deviceModelName");
+      expect(item.termId).toBeTruthy();
+      expect(item.deviceModel).toBeTruthy();
+    }
+  });
+
+  it("非空覆盖写入所有数组元素", () => {
+    const plan: AiCasePlanItem = {
+      caseName: "非法 deviceModelName",
+      caseDesc: "terminalList 内所有元素覆盖 deviceModelName",
+      caseType: "反",
+      priority: "中",
+      bodyOverrides: {
+        "Transaction/Body/request/bizBody/data/terminalList/deviceModelName": "INVALID",
+      },
+    };
+
+    const { body } = assembleCaseRequest({
+      canonicalDoc: SAMPLE_DOC_JSON_WITH_ARRAY_EXAMPLE,
+      transactionCode: "syncSytWorkOrder",
+      profile,
+      endpoint: FAKE_ENDPOINT,
+      plan,
+    });
+
+    const parsed = JSON.parse(body as string);
+    const list = parsed.Transaction.Body.request.bizBody.data.terminalList;
+    expect(list[0].deviceModelName).toBe("INVALID");
+    expect(list[1].deviceModelName).toBe("INVALID");
+  });
+
+  it("AI 只给短 key 时回退匹配也对所有数组元素删除", () => {
+    const plan: AiCasePlanItem = {
+      caseName: "缺失 deviceModelName（短key）",
+      caseDesc: "回退匹配删除数组内字段",
+      caseType: "反",
+      priority: "中",
+      bodyOverrides: {
+        deviceModelName: "",
+      },
+    };
+
+    const { body } = assembleCaseRequest({
+      canonicalDoc: SAMPLE_DOC_JSON_WITH_ARRAY_EXAMPLE,
+      transactionCode: "syncSytWorkOrder",
+      profile,
+      endpoint: FAKE_ENDPOINT,
+      plan,
+    });
+
+    const parsed = JSON.parse(body as string);
+    const list = parsed.Transaction.Body.request.bizBody.data.terminalList;
+    for (const item of list) {
+      expect(item).not.toHaveProperty("deviceModelName");
+    }
+  });
+
+  it("目录路径跳过数组节点时也能命中数组内字段（空值全元素删除）", () => {
+    const plan: AiCasePlanItem = {
+      caseName: "缺失必填字段 deviceModelName（目录路径）",
+      caseDesc: "目录路径 .../data/deviceModelName 跳过 terminalList 数组节点",
+      caseType: "反",
+      priority: "中",
+      bodyOverrides: {
+        "Transaction/Body/request/bizBody/data/deviceModelName": "",
+      },
+    };
+
+    const { body } = assembleCaseRequest({
+      canonicalDoc: SAMPLE_DOC_JSON_WITH_ARRAY_EXAMPLE,
+      transactionCode: "syncSytWorkOrder",
+      profile,
+      endpoint: FAKE_ENDPOINT,
+      plan,
+    });
+
+    const parsed = JSON.parse(body as string);
+    const bizBody = parsed.Transaction.Body.request.bizBody;
+    expect(bizBody.workOrderId).toBeTruthy();
+    const list = bizBody.data.terminalList;
+    expect(list).toHaveLength(2);
+    for (const item of list) {
+      expect(item).not.toHaveProperty("deviceModelName");
+      expect(item.termId).toBeTruthy();
+    }
+  });
+
+  it("目录路径跳过数组节点且非空值时写入所有数组元素", () => {
+    const plan: AiCasePlanItem = {
+      caseName: "非法 deviceModelName（目录路径）",
+      caseDesc: "跳过数组节点的路径覆盖所有元素",
+      caseType: "反",
+      priority: "中",
+      bodyOverrides: {
+        "Transaction/Body/request/bizBody/data/deviceModelName": "INVALID",
+      },
+    };
+
+    const { body } = assembleCaseRequest({
+      canonicalDoc: SAMPLE_DOC_JSON_WITH_ARRAY_EXAMPLE,
+      transactionCode: "syncSytWorkOrder",
+      profile,
+      endpoint: FAKE_ENDPOINT,
+      plan,
+    });
+
+    const parsed = JSON.parse(body as string);
+    const list = parsed.Transaction.Body.request.bizBody.data.terminalList;
+    expect(list[0].deviceModelName).toBe("INVALID");
+    expect(list[1].deviceModelName).toBe("INVALID");
+  });
+
+  it("非数组字段的缺失案例仍置空字符串", () => {
+    const plan: AiCasePlanItem = {
+      caseName: "缺失 workOrderId",
+      caseDesc: "标量字段置空",
+      caseType: "反",
+      priority: "中",
+      bodyOverrides: {
+        "Transaction/Body/request/bizBody/workOrderId": "",
+      },
+    };
+
+    const { body } = assembleCaseRequest({
+      canonicalDoc: SAMPLE_DOC_JSON_WITH_ARRAY_EXAMPLE,
+      transactionCode: "syncSytWorkOrder",
+      profile,
+      endpoint: FAKE_ENDPOINT,
+      plan,
+    });
+
+    const parsed = JSON.parse(body as string);
+    expect(parsed.Transaction.Body.request.bizBody.workOrderId).toBe("");
+  });
+});
+
 describe("assessDocReadiness with example message only", () => {
   it("passes when no field table but has example message", () => {
     const docWithOnlyExample = [

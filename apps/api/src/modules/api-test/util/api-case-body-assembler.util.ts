@@ -526,56 +526,137 @@ function setJsonValueByPath(
   value: string,
   createMissing = false,
 ): boolean {
-  let current: unknown = obj;
+  return applyJsonValueBySegments(obj, segments, value, createMissing, false);
+}
 
-  for (let i = 0; i < segments.length - 1; i++) {
-    if (current === null || typeof current !== "object") return false;
-    const record = current as Record<string, unknown>;
-    const requestedKey = segments[i];
-    const existingKey = Object.keys(record).find(
-      (key) => key.toLowerCase() === requestedKey.toLowerCase(),
-    );
-    const key = existingKey ?? requestedKey;
-    let next = record[key];
-    if (next === undefined && createMissing) {
-      next = {};
-      record[key] = next;
+/**
+ * 按路径段递归应用覆盖；途中遇到对象数组时对每个数组元素分别应用。
+ * 数组内字段的空字符串覆盖表示「字段缺失」：从所有数组元素中删除该字段；
+ * 非空值则写入所有数组元素。
+ */
+function applyJsonValueBySegments(
+  node: unknown,
+  segments: string[],
+  value: string,
+  createMissing: boolean,
+  insideArray: boolean,
+): boolean {
+  if (!segments.length) return false;
+  if (Array.isArray(node)) {
+    let changed = false;
+    for (const item of node) {
+      if (applyJsonValueBySegments(item, segments, value, createMissing, true)) {
+        changed = true;
+      }
     }
-    if (next === undefined) return false;
-    current = next;
+    return changed;
+  }
+  if (node === null || typeof node !== "object") return false;
+
+  const record = node as Record<string, unknown>;
+  const requestedKey = segments[0];
+  const key =
+    Object.keys(record).find(
+      (existing) => existing.toLowerCase() === requestedKey.toLowerCase(),
+    ) ?? requestedKey;
+
+  if (!(key in record)) {
+    // 字段目录路径可能跳过数组节点（目录写 .../data/deviceModelName，
+    // 示例实为 .../data/terminalList[].deviceModelName）：
+    // 此时下探到元素含该段的数组子节点，对每个数组元素应用。
+    const arrayChild = Object.values(record).find(
+      (child) =>
+        Array.isArray(child) &&
+        child.some(
+          (item) =>
+            item !== null &&
+            typeof item === "object" &&
+            !Array.isArray(item) &&
+            Object.keys(item).some(
+              (itemKey) => itemKey.toLowerCase() === requestedKey.toLowerCase(),
+            ),
+        ),
+    );
+    if (arrayChild) {
+      return applyJsonValueBySegments(
+        arrayChild,
+        segments,
+        value,
+        createMissing,
+        true,
+      );
+    }
   }
 
-  if (current === null || typeof current !== "object") return false;
-  const record = current as Record<string, unknown>;
-  const requestedLastKey = segments[segments.length - 1];
-  const lastKey =
-    Object.keys(record).find(
-      (key) => key.toLowerCase() === requestedLastKey.toLowerCase(),
-    ) ?? requestedLastKey;
-  if (record[lastKey] === undefined && !createMissing) return false;
-  if (isDataFunctionExpression(record[lastKey])) return true;
+  if (segments.length === 1) {
+    if (value === "" && insideArray) {
+      if (isDataFunctionExpression(record[key])) return true;
+      if (key in record) delete record[key];
+      return true;
+    }
+    if (record[key] === undefined && !createMissing) return false;
+    if (isDataFunctionExpression(record[key])) return true;
+    record[key] = value;
+    return true;
+  }
 
-  record[lastKey] = value;
-  return true;
+  let next = record[key];
+  if (next === undefined && createMissing) {
+    next = {};
+    record[key] = next;
+  }
+  if (next === undefined) return false;
+  return applyJsonValueBySegments(
+    next,
+    segments.slice(1),
+    value,
+    createMissing,
+    insideArray,
+  );
 }
 
 function setJsonValueByLastSegment(
   obj: unknown,
   lastSegment: string,
   value: string,
+  insideArray = false,
 ): boolean {
   if (obj === null || typeof obj !== "object") return false;
+  if (Array.isArray(obj)) {
+    let changed = false;
+    for (const item of obj) {
+      if (setJsonValueByLastSegment(item, lastSegment, value, true)) {
+        changed = true;
+      }
+    }
+    return changed;
+  }
 
   const record = obj as Record<string, unknown>;
-  if (record[lastSegment] !== undefined) {
-    if (isDataFunctionExpression(record[lastSegment])) return true;
-    record[lastSegment] = value;
+  const existingKey = Object.keys(record).find(
+    (key) => key.toLowerCase() === lastSegment.toLowerCase(),
+  );
+  if (existingKey !== undefined) {
+    if (isDataFunctionExpression(record[existingKey])) return true;
+    if (value === "" && insideArray) {
+      delete record[existingKey];
+    } else {
+      record[existingKey] = value;
+    }
     return true;
   }
 
   for (const key of Object.keys(record)) {
-    if (typeof record[key] === "object" && record[key] !== null) {
-      if (setJsonValueByLastSegment(record[key], lastSegment, value)) {
+    const child = record[key];
+    if (typeof child === "object" && child !== null) {
+      if (
+        setJsonValueByLastSegment(
+          child,
+          lastSegment,
+          value,
+          Array.isArray(child),
+        )
+      ) {
         return true;
       }
     }

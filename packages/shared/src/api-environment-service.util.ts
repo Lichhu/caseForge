@@ -6,22 +6,22 @@ export interface ParsedServerAddress {
   serverAddress: string;
 }
 
-/** 解析服务器地址：支持 http(s):// 与 socket2://host:port */
+/** 解析服务器地址：支持 http(s)://、socket://、socket2:// 与 tcp:// 的 host:port */
 export function parseServerAddress(address: string): ParsedServerAddress {
   const trimmed = address.trim();
   if (!trimmed) {
     return { transport: "http", serverAddress: "" };
   }
 
-  if (/^socket2?:\/\//i.test(trimmed)) {
-    const raw = trimmed.replace(/^socket2?:\/\//i, "");
+  if (/^(socket2?|tcp):\/\//i.test(trimmed)) {
+    const raw = trimmed.replace(/^(socket2?|tcp):\/\//i, "").replace(/\/.*$/, "");
     const [host, portStr] = raw.split(":");
     const port = Number(portStr);
     return {
       transport: "tcp",
       host: host?.trim(),
-      port: Number.isFinite(port) ? port : undefined,
-      serverAddress: trimmed,
+      port: Number.isFinite(port) && portStr ? port : undefined,
+      serverAddress: `socket2://${raw}`,
     };
   }
 

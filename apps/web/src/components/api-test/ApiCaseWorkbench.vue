@@ -652,7 +652,7 @@
               <div v-show="editorMainTab === 'steps' && stepDetailTab === 'variables'" class="case-editor-panel case-assertion-panel">
                 <div class="case-assertion-shell">
                   <div class="case-assertion-toolbar">
-                    <div><strong>响应提取（{{ form.exports.length }}）</strong></div>
+                    <div><strong>变量提取（{{ form.exports.length }}）</strong></div>
                     <div class="case-assertion-toolbar-actions">
                       <a-button type="primary" size="small" :loading="debugRunning" @click="addExportFromDebug">
                         <template #icon><ThunderboltOutlined /></template>
@@ -664,6 +664,9 @@
                   <a-table :data-source="form.exports" :pagination="false" size="small" row-key="rowId">
                     <a-table-column title="变量名" key="name">
                       <template #default="{ record }"><a-input v-model:value="record.name" placeholder="accessToken" /></template>
+                    </a-table-column>
+                    <a-table-column title="来源" key="source" :width="110">
+                      <template #default="{ record }"><a-select v-model:value="record.source" size="small" :options="exportSourceOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }" /></template>
                     </a-table-column>
                     <a-table-column title="提取表达式" key="expression">
                       <template #default="{ record }"><a-input v-model:value="record.expression" placeholder="josn:$.Transaction... | xml:/Transaction/./. " /></template>
@@ -677,7 +680,7 @@
                     </a-table-column>
                   </a-table>
                   </div>
-                  <a-empty v-if="!form.exports.length" description="先调试，再从响应中添加要共享的字段" />
+                  <a-empty v-if="!form.exports.length" description="从本步骤请求/响应中提取共享变量，后续步骤用 ${变量名} 引用" />
                 </div>
               </div>
                       <div class="case-step-modal-footer">
@@ -797,7 +800,8 @@
 
     <a-modal v-model:open="debugExportOpen" title="手动添加" :z-index="NESTED_OVERLAY_Z_INDEX + 10" ok-text="添加" @ok="confirmDebugExport">
       <a-form layout="vertical">
-        <a-form-item label="响应字段路径"><a-select v-model:value="debugExportPath" show-search :options="debugResponsePathOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 11 }" placeholder="选择字段" /></a-form-item>
+        <a-form-item label="来源"><a-select v-model:value="debugExportSource" :options="debugExportSourceOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 11 }" @change="onDebugExportSourceChange" /></a-form-item>
+        <a-form-item label="字段路径"><a-select v-model:value="debugExportPath" show-search :options="debugExportPathOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 11 }" placeholder="选择字段" /></a-form-item>
         <a-form-item label="变量名"><a-input v-model:value="debugExportName" placeholder="accessToken" /></a-form-item>
       </a-form>
     </a-modal>
@@ -1006,6 +1010,8 @@ function insertBodyFunction() {
 
 const batchMode = ref(false);
 const batchSaving = ref(false);
+/** 批量操作期间案例已在服务端更新，退出批量后需重新同步编辑表单 */
+const batchCasesStale = ref(false);
 const copying = ref(false);
 const batchAssertionRunning = ref(false);
 const batchAssertionProgress = reactive({ done: 0, total: 0, success: 0, failed: 0 });
@@ -1260,7 +1266,7 @@ const editorMainTabs = [
 const stepDetailTabs = [
   { key: 'request' as const, label: '请求报文' },
   { key: 'assertion' as const, label: '断言' },
-  { key: 'variables' as const, label: '响应提取' },
+  { key: 'variables' as const, label: '变量提取' },
 ];
 const requestTab = ref<'params' | 'body' | 'headers'>('body');
 const requestViewMode = ref<'template' | 'curl'>('template');
@@ -1527,7 +1533,7 @@ const form = reactive({
   requestTcpMeta: null as SocketRequestMeta | null,
   requestBodyXml: '',
   assertionRows: [] as AssertionRow[],
-  exports: [] as Array<{ rowId: string; name: string; source: 'body' | 'header' | 'status'; expression: string; required: boolean }>,
+  exports: [] as Array<{ rowId: string; name: string; source: 'body' | 'header' | 'status' | 'request'; expression: string; required: boolean }>,
   steps: [] as ApiCaseStep[],
   stepName: '',
   stepTargetName: '',
@@ -1619,8 +1625,21 @@ async function clearDebugHistory() { if (!projectId.value || !apiStore.activeCas
 
 const sharedVariableInsertOpen = ref(false);
 const sharedVariableName = ref('');
+const exportSourceOptions = [
+  { label: '响应体', value: 'body' },
+  { label: '请求体', value: 'request' },
+  { label: '响应头', value: 'header' },
+  { label: '状态码', value: 'status' },
+];
 const sharedVariableOptions = computed(() => {
   const variables = new Map<string, string>();
+  form.steps.slice(0, activeStepIndex.value).forEach((step, index) => {
+    for (const item of step.exports ?? []) {
+      const name = (item.name ?? '').trim();
+      if (!name || variables.has(name)) continue;
+      variables.set(name, `本案例 步骤 ${index + 1} · ${name}`);
+    }
+  });
   const currentCaseNo = form.caseNo.trim();
   for (const row of apiStore.cases) {
     if (row.id === apiStore.activeCaseId) continue;
@@ -1636,8 +1655,16 @@ const sharedVariableOptions = computed(() => {
 const debugExportOpen = ref(false);
 const debugExportPath = ref('');
 const debugExportName = ref('');
+const debugExportSource = ref<'body' | 'request'>('body');
+const debugExportSourceOptions = [
+  { label: '响应体', value: 'body' },
+  { label: '请求体', value: 'request' },
+];
 const debugResponseBody = computed(() => parseDebugResponseBody(debugResult.value?.body));
+const debugRequestBody = computed(() => parseDebugResponseBody(debugResult.value?.requestBody));
 const debugResponsePathOptions = computed(() => responsePaths(debugResponseBody.value).map((value) => ({ label: value, value })));
+const debugRequestPathOptions = computed(() => responsePaths(debugRequestBody.value).map((value) => ({ label: value, value })));
+const debugExportPathOptions = computed(() => (debugExportSource.value === 'request' ? debugRequestPathOptions.value : debugResponsePathOptions.value));
 
 function addExportRow() {
   form.exports.push({ rowId: randomUuid(), name: '', source: 'body', expression: '', required: true });
@@ -1646,18 +1673,25 @@ function addExportRow() {
 async function addExportFromDebug() {
   await onDebugRun(false);
   if (!debugResult.value) return;
-  if (debugResult.value.error) return message.warning(`调试请求失败：${debugResult.value.error}`);
-  if (!debugResponsePathOptions.value.length) return message.warning('响应体中没有识别到 JSON 或 XML 字段');
-  debugExportPath.value = debugResponsePathOptions.value[0]?.value ?? '';
-  const pathParts = debugExportPath.value.split(/[./\[\]]/).filter((item) => item && item !== 'text()');
-  debugExportName.value = pathParts[pathParts.length - 1] ?? '';
+  if (debugResult.value.error && !debugRequestPathOptions.value.length) return message.warning(`调试请求失败：${debugResult.value.error}`);
+  if (!debugResponsePathOptions.value.length && !debugRequestPathOptions.value.length) return message.warning('请求/响应体中没有识别到 JSON 或 XML 字段');
+  debugExportSource.value = debugResponsePathOptions.value.length ? 'body' : 'request';
+  syncDebugExportSelection();
   debugExportOpen.value = true;
 }
+
+function syncDebugExportSelection() {
+  debugExportPath.value = debugExportPathOptions.value[0]?.value ?? '';
+  const pathParts = debugExportPath.value.split(/[./\[\]]/).filter((item) => item && item !== 'text()');
+  debugExportName.value = pathParts[pathParts.length - 1] ?? '';
+}
+
+function onDebugExportSourceChange() { syncDebugExportSelection(); }
 
 function confirmDebugExport() {
   if (!debugExportPath.value || !debugExportName.value.trim()) return message.warning('请选择字段并填写变量名');
   if (form.exports.some((item) => item.name.trim() === debugExportName.value.trim())) return message.warning('同一案例内共享变量名不能重复');
-  form.exports.push({ rowId: randomUuid(), name: debugExportName.value.trim(), source: 'body', expression: debugExportPath.value, required: true });
+  form.exports.push({ rowId: randomUuid(), name: debugExportName.value.trim(), source: debugExportSource.value, expression: debugExportPath.value, required: true });
   debugExportOpen.value = false;
 }
 
@@ -2060,6 +2094,10 @@ function toggleBatchMode() {
     isNewCase.value = false;
     return;
   }
+  if (batchCasesStale.value) {
+    batchCasesStale.value = false;
+    syncFormFromActiveCase();
+  }
   if (apiStore.activeCaseId) {
     apiStore.selectedCaseIds = [apiStore.activeCaseId];
   }
@@ -2092,6 +2130,7 @@ async function onBatchSaveRequest() {
     }
     message.success(`已更新 ${updated} 个步骤`);
     await apiStore.refreshCases(projectId.value, transactionId.value);
+    batchCasesStale.value = true;
   } finally {
     batchSaving.value = false;
   }
@@ -2564,6 +2603,7 @@ async function onBatchGenerateAssertions() {
     }
     message.success(`批量生成完成：成功 ${batchAssertionProgress.success}，失败 ${batchAssertionProgress.failed}`);
     await apiStore.refreshCases(projectId.value, transactionId.value);
+    batchCasesStale.value = true;
   } finally {
     batchAssertionRunning.value = false;
   }
@@ -2755,6 +2795,7 @@ function onBatchDelete() {
       message.success(`已删除 ${removed} 个步骤`);
       batchSelectedSteps.clear();
       await apiStore.refreshCases(projectId.value, transactionId.value);
+      batchCasesStale.value = true;
     },
   });
 }
