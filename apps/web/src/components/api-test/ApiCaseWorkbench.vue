@@ -192,7 +192,13 @@
               </div>
             </div>
             <div class="editor-block">
-              <div class="editor-block-title">已选案例（展开勾选步骤）</div>
+              <div class="editor-block-title-row batch-case-summary-head">
+                <div class="editor-block-title">已选案例（展开勾选步骤）</div>
+                <span class="batch-case-head-actions">
+                  <a-button type="link" size="small" @click="selectAllBatchSteps">全选</a-button>
+                  <a-button type="link" size="small" @click="clearAllBatchSteps">清空</a-button>
+                </span>
+              </div>
               <ul class="batch-case-summary-list">
                 <li v-for="row in selectedRows" :key="row.id" class="batch-case-block">
                   <div
@@ -1453,6 +1459,8 @@ function toggleBatchStep(caseId: string, stepId: string, checked: boolean) { if 
 function onBatchStepChange(caseId: string, stepId: string, event: { target: { checked: boolean } }) { toggleBatchStep(caseId, stepId, event.target.checked); }
 function selectAllSteps(row: ApiTestCaseRow) { for (const step of caseStepRows(row)) batchSelectedSteps.add(batchStepKey(row.id, step.id)); }
 function clearCaseSteps(row: ApiTestCaseRow) { for (const step of caseStepRows(row)) batchSelectedSteps.delete(batchStepKey(row.id, step.id)); }
+function selectAllBatchSteps() { for (const row of selectedRows.value) selectAllSteps(row); }
+function clearAllBatchSteps() { batchSelectedSteps.clear(); }
 function selectedStepCountForCase(row: ApiTestCaseRow) { return caseStepRows(row).filter((step) => batchSelectedSteps.has(batchStepKey(row.id, step.id))).length; }
 function batchStepStatus(step: ApiCaseStep) { return step.target?.address ? { label: '配置完整', className: 'is-ready' } : { label: '缺少地址', className: 'is-failed' }; }
 const batchConfigExpanded = ref(false);
@@ -2842,6 +2850,12 @@ function onBatchDelete() {
   width: 100%;
 }
 
+/* 滚动容器内的块级内容禁止压缩，超出高度时出滚动条，避免批量面板展开内容被裁剪 */
+.api-case-panel .instruction-editor-body > .editor-block {
+  flex-shrink: 0;
+  width: 100%;
+}
+
 .case-list-toolbar {
   margin: 0 12px 4px;
 }
@@ -3035,6 +3049,8 @@ function onBatchDelete() {
   white-space: nowrap;
 }
 /* 紧凑布局覆盖 */
+.batch-case-summary-head { margin-bottom: 12px; }
+.batch-case-summary-head .editor-block-title { margin-bottom: 0; }
 .batch-case-summary-list .batch-case-block { margin-bottom: 6px; }
 .batch-case-head { padding: 6px 10px; }
 .batch-step-item { padding: 3px 6px; }
