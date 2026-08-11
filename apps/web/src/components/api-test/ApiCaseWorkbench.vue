@@ -257,7 +257,7 @@
               <template #icon><RobotOutlined /></template>
               AI 生成断言
             </a-button>
-            <a-button danger :disabled="!batchSelectedSteps.size" @click="onBatchDelete">
+            <a-button danger :disabled="!selectedIds.length" @click="onBatchDelete">
               <template #icon><DeleteOutlined /></template>
               批量删除
             </a-button>
@@ -2808,33 +2808,17 @@ function onDelete() {
 }
 
 function onBatchDelete() {
-  if (!projectId.value || !transactionId.value || !batchSelectedSteps.size) return;
-  const count = batchSelectedSteps.size;
+  if (!projectId.value || !transactionId.value || !selectedIds.value.length) return;
+  const count = selectedIds.value.length;
   Modal.confirm({
-    title: `删除选中的 ${count} 个步骤？`,
-    content: '将删除所选案例中勾选的步骤；每条案例至少保留一个步骤，步骤被选满的案例将跳过。',
+    title: `删除选中的 ${count} 条案例？`,
+    content: '删除后不可恢复，执行列表中的关联也会一并移除。',
     centered: true,
     okType: 'danger',
     okText: '删除',
+    cancelText: '取消',
     onOk: async () => {
-      const allCases = await listAllApiCases(projectId.value, transactionId.value);
-      let removed = 0;
-      let skipped = 0;
-      for (const row of allCases) {
-        const steps = caseStepRows(row);
-        const remaining = steps.filter((step) => !batchSelectedSteps.has(batchStepKey(row.id, step.id)));
-        if (remaining.length === steps.length) continue;
-        if (!remaining.length) {
-          skipped += 1;
-          continue;
-        }
-        await apiStore.saveCase(projectId.value, transactionId.value, caseSavePayload(row, remaining), row.id, { silent: true });
-        removed += steps.length - remaining.length;
-      }
-      if (skipped) message.warning(`${skipped} 条案例因步骤将被删空而跳过`);
-      message.success(`已删除 ${removed} 个步骤`);
-      batchSelectedSteps.clear();
-      await apiStore.refreshCases(projectId.value, transactionId.value);
+      await apiStore.removeCases(projectId.value!, transactionId.value!, [...selectedIds.value]);
       batchCasesStale.value = true;
     },
   });
