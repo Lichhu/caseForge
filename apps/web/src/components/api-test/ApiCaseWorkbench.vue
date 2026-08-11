@@ -360,7 +360,10 @@
 
               <div v-show="editorMainTab === 'steps'" class="case-steps-list-panel">
                 <div class="case-steps-toolbar">
-                  <strong>步骤列表（{{ form.steps.length }}）</strong>
+                  <div>
+                    <strong>步骤列表（{{ form.steps.length }}）</strong>
+                    <div class="case-steps-hint">同组步骤同时发出；组内步骤不能互相引用提取变量</div>
+                  </div>
                   <div class="action-toolbar">
                     <a-button size="small" @click="pasteStep">
                       <template #icon><CopyOutlined /></template>
@@ -374,14 +377,23 @@
                     <span>步骤名称</span>
                     <span>环境</span>
                     <span>地址</span>
+                    <span>并发</span>
                     <span>操作</span>
                   </div>
-                  <div v-for="(step, index) in form.steps" :key="step.id" class="case-step-row">
+                  <div v-for="(step, index) in form.steps" :key="step.id" :class="['case-step-row', { 'is-parallel': parallelGroupNumber(index) }]">
                     <div class="case-step-row-summary" role="button" tabindex="0" @click="openStepEditor(index)" @keydown.enter="openStepEditor(index)">
                       <span class="case-step-order">{{ index + 1 }}</span>
-                      <span class="case-step-row-name">{{ step.name || '未命名步骤' }}</span>
+                      <span class="case-step-row-name">
+                        {{ step.name || '未命名步骤' }}
+                        <a-tag v-if="parallelGroupNumber(index) && !step.parallelWithPrevious" class="case-parallel-tag">并行组 {{ parallelGroupNumber(index) }}</a-tag>
+                      </span>
                       <span>{{ step.target?.name || '未选择环境' }}</span>
                       <span class="case-step-row-address">{{ step.target?.address || '未选择地址' }}</span>
+                    </div>
+                    <div class="case-step-parallel" @click.stop>
+                      <a-tooltip v-if="index" title="与上一步并发执行">
+                        <a-switch v-model:checked="step.parallelWithPrevious" size="small" checked-children="∥" un-checked-children="∥" />
+                      </a-tooltip>
                     </div>
                     <div class="case-step-actions" @click.stop>
                       <a-button type="text" size="small" :disabled="index === 0" title="上移" @click="moveStep(index, -1)">↑</a-button>
@@ -558,7 +570,7 @@
                             </button>
                           </div>
                           <div v-if="canBeautifyBody" class="case-editor-chrome-actions">
-                            <a-button type="link" size="small" :disabled="!hasBodyCursor || !sharedVariableOptions.length" @click="openSharedVariableInsert"><LinkOutlined /> 插入变量</a-button>
+                            <a-button type="link" size="small" :disabled="!hasBodyCursor || !hasAvailableSharedVariable" @click="openSharedVariableInsert"><LinkOutlined /> 插入变量</a-button>
                             <a-button type="link" size="small" :disabled="!hasBodyCursor" @click="openBodyFunctionInsert"><CodeOutlined /> 插入函数</a-button>
                             <a-button
                               type="link"
@@ -1586,6 +1598,7 @@ function currentStepFromForm(): ApiCaseStep {
     request: buildDebugRequest(),
     expected: buildExpectedFromRows(form.assertionRows),
     exports: form.exports.filter((item) => item.name.trim()).map(({ name, source, expression, required }) => ({ name: name.trim(), source, expression: source === 'status' ? undefined : expression.trim(), required })),
+    parallelWithPrevious: activeStepIndex.value > 0 ? form.steps[activeStepIndex.value]?.parallelWithPrevious : undefined,
   };
 }
 
@@ -1637,10 +1650,10 @@ function addStepAfter(index: number) {
   expandedStepId.value = '';
   loadStep(step);
 }
-function moveStep(index: number, offset: number) { storeActiveStep(); const next = index + offset; [form.steps[index], form.steps[next]] = [form.steps[next], form.steps[index]]; activeStepIndex.value = next; }
-function removeStep(index: number) { if (form.steps.length === 1) return; const removedId = form.steps[index].id; form.steps.splice(index, 1); activeStepIndex.value = Math.min(index, form.steps.length - 1); if (expandedStepId.value === removedId) expandedStepId.value = ''; loadStep(form.steps[activeStepIndex.value]); }
+function moveStep(index: number, offset: number) { storeActiveStep(); const next = index + offset; [form.steps[index], form.steps[next]] = [form.steps[next], form.steps[index]]; form.steps[0].parallelWithPrevious = undefined; activeStepIndex.value = next; }
+function removeStep(index: number) { if (form.steps.length === 1) return; const removedId = form.steps[index].id; form.steps.splice(index, 1); form.steps[0].parallelWithPrevious = undefined; activeStepIndex.value = Math.min(index, form.steps.length - 1); if (expandedStepId.value === removedId) expandedStepId.value = ''; loadStep(form.steps[activeStepIndex.value]); }
 function copyActiveStep() { storeActiveStep(); copyStepToClipboard(form.steps[activeStepIndex.value]); message.success('步骤已复制'); }
-function pasteStep() { const step = readStepFromClipboard(); if (!step) return message.warning('没有可粘贴的步骤'); storeActiveStep(); form.steps.push({ ...cloneJson(step), id: randomUuid() }); activeStepIndex.value = form.steps.length - 1; expandedStepId.value = ''; loadStep(form.steps[activeStepIndex.value]); message.success('步骤已粘贴'); }
+function pasteStep() { const step = readStepFromClipboard(); if (!step) return message.warning('没有可粘贴的步骤'); storeActiveStep(); form.steps.push({ ...cloneJson(step), id: randomUuid(), parallelWithPrevious: undefined }); activeStepIndex.value = form.steps.length - 1; expandedStepId.value = ''; loadStep(form.steps[activeStepIndex.value]); message.success('步骤已粘贴'); }
 async function openDebugHistory() { if (!projectId.value || !apiStore.activeCaseId) return; debugHistory.value = await listStepDebugRecords(projectId.value, apiStore.activeCaseId, form.steps[activeStepIndex.value].id); debugHistoryOpen.value = true; }
 async function clearDebugHistory() { if (!projectId.value || !apiStore.activeCaseId) return; await clearStepDebugRecords(projectId.value, apiStore.activeCaseId, form.steps[activeStepIndex.value].id); debugHistory.value = []; }
 
@@ -1653,12 +1666,15 @@ const exportSourceOptions = [
   { label: '状态码', value: 'status' },
 ];
 const sharedVariableOptions = computed(() => {
-  const variables = new Map<string, string>();
+  const variables = new Map<string, { label: string; disabled?: boolean }>();
+  let groupStart = activeStepIndex.value;
+  while (groupStart > 0 && form.steps[groupStart]?.parallelWithPrevious) groupStart -= 1;
   form.steps.slice(0, activeStepIndex.value).forEach((step, index) => {
     for (const item of step.exports ?? []) {
       const name = (item.name ?? '').trim();
       if (!name || variables.has(name)) continue;
-      variables.set(name, `本案例 步骤 ${index + 1} · ${name}`);
+      const unavailable = index >= groupStart;
+      variables.set(name, { label: `本案例 步骤 ${index + 1} · ${name}${unavailable ? '（并发不可用）' : ''}`, disabled: unavailable });
     }
   });
   const currentCaseNo = form.caseNo.trim();
@@ -1668,11 +1684,23 @@ const sharedVariableOptions = computed(() => {
     for (const item of row.metadata?.exports ?? []) {
       if (!item.name.trim()) continue;
       const value = `${row.caseNo || row.id}.${item.name.trim()}`;
-      variables.set(value, `${row.caseNo || row.title} · ${item.name.trim()}`);
+      variables.set(value, { label: `${row.caseNo || row.title} · ${item.name.trim()}` });
     }
   }
-  return [...variables].map(([value, label]) => ({ label, value }));
+  return [...variables].map(([value, option]) => ({ ...option, value }));
 });
+const hasAvailableSharedVariable = computed(() => sharedVariableOptions.value.some((option) => !option.disabled));
+
+function parallelGroupNumber(index: number) {
+  let group = 0;
+  for (let start = 0; start < form.steps.length;) {
+    let end = start + 1;
+    while (end < form.steps.length && form.steps[end].parallelWithPrevious) end += 1;
+    if (end - start > 1) group += 1;
+    if (index >= start && index < end) return end - start > 1 ? group : undefined;
+    start = end;
+  }
+}
 const debugExportOpen = ref(false);
 const debugExportPath = ref('');
 const debugExportName = ref('');
@@ -1717,7 +1745,7 @@ function confirmDebugExport() {
 }
 
 function openSharedVariableInsert() {
-  sharedVariableName.value = sharedVariableOptions.value[0]?.value ?? '';
+  sharedVariableName.value = sharedVariableOptions.value.find((option) => !option.disabled)?.value ?? '';
   sharedVariableInsertOpen.value = true;
 }
 
@@ -4339,11 +4367,12 @@ function onBatchDelete() {
   margin-bottom: 10px;
   color: #344054;
 }
+.case-steps-hint { margin-top: 2px; color: #667085; font-size: 12px; font-weight: 400; }
 .case-step-rows { display: grid; }
 
 .case-step-list-head {
   display: grid;
-  grid-template-columns: 44px minmax(180px, 1.2fr) minmax(120px, 0.8fr) minmax(180px, 1fr) 216px;
+  grid-template-columns: 44px minmax(180px, 1.2fr) minmax(120px, 0.8fr) minmax(180px, 1fr) 72px 216px;
   padding: 8px 10px;
   border: 1px solid #e1e4e9;
   border-radius: 6px 6px 0 0;
@@ -4358,6 +4387,7 @@ function onBatchDelete() {
 }
 
 .case-step-row {
+  position: relative;
   min-height: 52px;
   flex-wrap: nowrap;
   border: 1px solid #e1e4e9;
@@ -4365,6 +4395,7 @@ function onBatchDelete() {
   background: #fff;
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
+.case-step-row.is-parallel::before { position: absolute; inset: 0 auto 0 0; width: 3px; background: #c8102e; content: ''; }
 
 .case-step-row-summary {
   display: grid;
@@ -4384,6 +4415,7 @@ function onBatchDelete() {
 
 .case-step-order { color: #c8102e; font-weight: 700; }
 .case-step-row-name { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.case-parallel-tag { margin-left: 8px; color: #8b000f; border-color: #efb7c1; background: #fff5f5; font-size: 11px; }
 .case-step-row-summary > span:nth-child(3) { color: #606875; }
 .case-step-row-address { flex: 1; overflow: hidden; color: #7a8290; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -4396,6 +4428,7 @@ function onBatchDelete() {
   padding-right: 6px;
   margin-left: auto;
 }
+.case-step-parallel { display: flex; width: 72px; justify-content: center; }
 
 .case-step-actions .ant-btn {
   width: 28px;

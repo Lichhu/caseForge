@@ -25,7 +25,7 @@ import type {
   ApiRunItemStatus,
   ApiCaseStep,
 } from "@case-forge/shared";
-import { parseServerAddress } from "@case-forge/shared";
+import { groupParallelSteps, parseServerAddress } from "@case-forge/shared";
 import { toPublicApiRun } from "@common/http/public-response.util";
 import { ApiDataFunctionService } from "./api-data-function.service";
 import type { DataFunctionContext } from "./api-data-function.service";
@@ -349,32 +349,90 @@ export class ApiExecutionService {
     const vars = { ...input.vars };
     const stepResults: Array<Record<string, unknown>> = [];
     let final: ApiTestRunItemEntity | undefined;
-    for (const step of steps) {
-      const stepCase = Object.assign(new ApiTestCaseEntity(), input.testCase, {
-        title: `${input.testCase.title} / ${step.name}`,
-        request: step.request,
-        expected: step.expected,
-        metadata: { ...input.testCase.metadata, exports: step.exports },
-      });
-      const result = await this.executeSingleStep({ ...input, testCase: stepCase, env: environmentFromStep(step), vars, caseContext });
-      const extracted: Record<string, string> = {};
-      for (const binding of step.exports) {
-        const value = extractExportValue(binding, result.requestSnapshot, result.responseSnapshot);
-        if (value !== undefined && value !== null && String(value) !== "") extracted[binding.name] = vars[binding.name] = String(value);
-        else if (binding.required) {
-          result.status = "error";
-          result.responseSnapshot = { ...(result.responseSnapshot ?? { status: 0, headers: {}, body: null }), error: `${binding.source === "request" ? "请求" : "响应"}提取失败：${binding.name}` };
-        }
+    const caseStarted = Date.now();
+    let parallelGroupCount = 0;
+    for (const group of groupParallelSteps(steps)) {
+      const parallelGroup = group.length > 1 ? ++parallelGroupCount : undefined;
+      // 同组步骤同时发出，共享组前变量；提取结果整组完成后才合并，组内互不可见
+      const outcomes = await Promise.all(
+        group.map(async (step) => {
+          const startedAt = new Date().toISOString();
+          const stepCase = Object.assign(
+            new ApiTestCaseEntity(),
+            input.testCase,
+            {
+              title: `${input.testCase.title} / ${step.name}`,
+              request: step.request,
+              expected: step.expected,
+              metadata: { ...input.testCase.metadata, exports: step.exports },
+            },
+          );
+          const result = await this.executeSingleStep({
+            ...input,
+            testCase: stepCase,
+            env: environmentFromStep(step),
+            vars,
+            caseContext,
+          });
+          const extracted: Record<string, string> = {};
+          for (const binding of step.exports) {
+            const value = extractExportValue(
+              binding,
+              result.requestSnapshot,
+              result.responseSnapshot,
+            );
+            if (value !== undefined && value !== null && String(value) !== "")
+              extracted[binding.name] = String(value);
+            else if (binding.required) {
+              result.status = "error";
+              result.responseSnapshot = {
+                ...(result.responseSnapshot ?? {
+                  status: 0,
+                  headers: {},
+                  body: null,
+                }),
+                error: `${binding.source === "request" ? "请求" : "响应"}提取失败：${binding.name}`,
+              };
+            }
+          }
+          return { step, result, extracted, startedAt };
+        }),
+      );
+      let groupPassed = true;
+      for (const { step, result, extracted, startedAt } of outcomes) {
+        Object.assign(vars, extracted);
+        stepResults.push({
+          stepId: step.id,
+          stepName: step.name,
+          status: result.status,
+          durationMs: result.durationMs,
+          startedAt,
+          parallelGroup,
+          request: result.requestSnapshot,
+          response: result.responseSnapshot,
+          assertions: result.assertions,
+          extracted,
+        });
+        final = result;
+        if (result.status !== "passed") groupPassed = false;
       }
-      stepResults.push({ stepId: step.id, stepName: step.name, status: result.status, durationMs: result.durationMs, request: result.requestSnapshot, response: result.responseSnapshot, assertions: result.assertions, extracted });
-      final = result;
-      if (result.status !== "passed") break;
+      if (!groupPassed) {
+        final = outcomes.find(
+          ({ result }) => result.status !== "passed",
+        )?.result;
+        break;
+      }
     }
     if (!final) throw new BadRequestException("案例没有可执行步骤");
     final.caseTitle = input.testCase.title;
-    final.durationMs = stepResults.reduce((sum, item) => sum + Number(item.durationMs ?? 0), 0);
+    final.durationMs = Date.now() - caseStarted;
     final.requestSnapshot = { steps: stepResults };
-    final.responseSnapshot = { status: final.responseSnapshot?.status ?? 0, headers: final.responseSnapshot?.headers ?? {}, body: { steps: stepResults }, error: final.responseSnapshot?.error };
+    final.responseSnapshot = {
+      status: final.responseSnapshot?.status ?? 0,
+      headers: final.responseSnapshot?.headers ?? {},
+      body: { steps: stepResults },
+      error: final.responseSnapshot?.error,
+    };
     return final;
   }
 

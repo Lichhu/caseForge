@@ -137,6 +137,19 @@ export interface ApiCaseStep {
   request: ApiCaseRequest;
   expected: ApiCaseExpected;
   exports: ApiCaseExport[];
+  /** 与上一步并发执行：相邻开启标记的步骤归入同一并行组，同时发出 */
+  parallelWithPrevious?: boolean;
+}
+
+/** 按 parallelWithPrevious 标记分组：相邻开启标记的步骤同组，未标记的步骤自成一组 */
+export function groupParallelSteps<T extends { parallelWithPrevious?: boolean }>(steps: T[]): T[][] {
+  const groups: T[][] = [];
+  for (const step of steps) {
+    const last = groups[groups.length - 1];
+    if (step.parallelWithPrevious && last?.length) last.push(step);
+    else groups.push([step]);
+  }
+  return groups;
 }
 
 export interface ApiTestCasePayload {

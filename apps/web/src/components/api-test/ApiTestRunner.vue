@@ -301,6 +301,7 @@
                                   <div class="exec-run-step-head">
                                     <span class="exec-run-step-index">步骤 {{ index + 1 }}</span>
                                     <strong class="exec-run-step-name">{{ step.stepName || '未命名步骤' }}</strong>
+                                    <span v-if="step.parallelGroup" class="exec-run-parallel-pill">∥ 并行组 {{ step.parallelGroup }}</span>
                                     <span
                                       class="exec-run-status-pill exec-run-status-pill--sm"
                                       :class="`exec-run-status-pill--${step.status}`"
@@ -308,6 +309,7 @@
                                       {{ runItemStatusLabel(step.status || '') }}
                                     </span>
                                     <span class="exec-run-duration">{{ formatDuration(step.durationMs) }}</span>
+                                    <span class="exec-run-started">开始 {{ formatStepTime(step.startedAt) }}</span>
                                   </div>
                                   <ApiRunSnapshotTabs
                                     :request-snapshot="step.request"
@@ -630,6 +632,8 @@ interface RunStepSnapshot {
   stepName?: string;
   status?: string;
   durationMs?: number;
+  startedAt?: string;
+  parallelGroup?: number;
   request?: Record<string, unknown>;
   response?: Record<string, unknown>;
   assertions?: Array<{ name: string; passed: boolean; expected?: unknown; actual?: unknown }>;
@@ -700,6 +704,11 @@ function formatDuration(ms?: number) {
   if (ms == null) return '—';
   if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
   return `${ms}ms`;
+}
+
+function formatStepTime(value?: string) {
+  if (!value) return '—';
+  return new Date(value).toLocaleTimeString('zh-CN', { hour12: false });
 }
 
 function runItemStatusLabel(status: string) {
@@ -1881,6 +1890,8 @@ function onExpand(expanded: boolean, record: { id: string }) {
   color: #1d2939;
   font-size: 13px;
 }
+.exec-run-parallel-pill { padding: 1px 7px; border: 1px solid #efb7c1; border-radius: 4px; background: #fff5f5; color: #8b000f; font-size: 11px; }
+.exec-run-started { margin-left: auto; color: #667085; font-size: 12px; }
 
 .exec-run-empty {
   flex-direction: column;
