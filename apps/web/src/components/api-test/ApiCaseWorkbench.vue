@@ -1650,7 +1650,14 @@ function addStepAfter(index: number) {
   expandedStepId.value = '';
   loadStep(step);
 }
-function moveStep(index: number, offset: number) { storeActiveStep(); const next = index + offset; [form.steps[index], form.steps[next]] = [form.steps[next], form.steps[index]]; form.steps[0].parallelWithPrevious = undefined; activeStepIndex.value = next; }
+function moveStep(index: number, offset: number) {
+  storeActiveStep();
+  const activeId = form.steps[activeStepIndex.value].id;
+  const next = index + offset;
+  [form.steps[index], form.steps[next]] = [form.steps[next], form.steps[index]];
+  form.steps[0].parallelWithPrevious = undefined;
+  activeStepIndex.value = form.steps.findIndex((step) => step.id === activeId);
+}
 function removeStep(index: number) { if (form.steps.length === 1) return; const removedId = form.steps[index].id; form.steps.splice(index, 1); form.steps[0].parallelWithPrevious = undefined; activeStepIndex.value = Math.min(index, form.steps.length - 1); if (expandedStepId.value === removedId) expandedStepId.value = ''; loadStep(form.steps[activeStepIndex.value]); }
 function copyActiveStep() { storeActiveStep(); copyStepToClipboard(form.steps[activeStepIndex.value]); message.success('步骤已复制'); }
 function pasteStep() { const step = readStepFromClipboard(); if (!step) return message.warning('没有可粘贴的步骤'); storeActiveStep(); form.steps.push({ ...cloneJson(step), id: randomUuid(), parallelWithPrevious: undefined }); activeStepIndex.value = form.steps.length - 1; expandedStepId.value = ''; loadStep(form.steps[activeStepIndex.value]); message.success('步骤已粘贴'); }
