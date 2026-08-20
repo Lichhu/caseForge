@@ -153,7 +153,8 @@
                     {{ record.serverAddress }}
                   </button>
                 </a-tooltip>
-                <span v-else class="service-cell-text service-cell-empty">—</span>
+                <a-tag v-if="record.ignoreSslVerify" class="service-ssl-tag" :bordered="false">忽略证书</a-tag>
+                <span v-if="!record.serverAddress" class="service-cell-text service-cell-empty">—</span>
               </template>
               <template v-else-if="column.key === 'remark'">
                 <a-tooltip v-if="record.remark" placement="topLeft" :mouse-enter-delay="0.3">
@@ -268,6 +269,18 @@
           placeholder="http://host:port/path 或 socket2://host:port"
         />
       </a-form-item>
+      <a-form-item label="HTTPS 证书">
+        <a-tooltip title="目标为 https 自签名/不受信任证书时开启，该服务的调试与执行将跳过 SSL 证书校验">
+          <a-switch
+            v-model:checked="serviceForm.ignoreSslVerify"
+            checked-children="忽略校验"
+            un-checked-children="正常校验"
+          />
+        </a-tooltip>
+        <span v-if="serviceForm.ignoreSslVerify" class="env-ssl-hint">
+          该服务的 https 请求将跳过证书校验，仅限测试环境使用
+        </span>
+      </a-form-item>
       <a-form-item label="备注">
         <a-textarea v-model:value="serviceForm.remark" :rows="2" />
       </a-form-item>
@@ -325,6 +338,7 @@ const serviceForm = reactive({
   name: '',
   serverAddress: '',
   remark: '',
+  ignoreSslVerify: false,
 });
 
 const scopeOptions = Object.entries(API_ENVIRONMENT_SCOPE_LABEL).map(([value, label]) => ({
@@ -481,6 +495,7 @@ function openServiceCreate() {
   serviceForm.name = '';
   serviceForm.serverAddress = '';
   serviceForm.remark = '';
+  serviceForm.ignoreSslVerify = false;
   serviceModalOpen.value = true;
 }
 
@@ -489,6 +504,7 @@ function openServiceEdit(row: ApiEnvironmentServiceRow) {
   serviceForm.name = row.name;
   serviceForm.serverAddress = row.serverAddress ?? '';
   serviceForm.remark = row.remark ?? '';
+  serviceForm.ignoreSslVerify = row.ignoreSslVerify ?? false;
   serviceModalOpen.value = true;
 }
 
@@ -500,6 +516,7 @@ async function saveService() {
     name: serviceForm.name.trim(),
     serverAddress: serviceForm.serverAddress.trim(),
     remark: serviceForm.remark.trim() || undefined,
+    ignoreSslVerify: serviceForm.ignoreSslVerify,
   };
   await apiStore.saveEnvironmentService(
     projectId,
@@ -885,5 +902,21 @@ async function moveService(serviceId: string, direction: 'up' | 'down' | 'top') 
   margin: 0;
   font-size: 14px;
   color: var(--cf-text-muted, #98a2b3);
+}
+
+/* ===== SSL 开关提示 ===== */
+.env-ssl-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #d97706;
+}
+.service-ssl-tag {
+  margin-left: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 0 6px;
+  background: #fff7ed;
+  color: #d97706;
 }
 </style>

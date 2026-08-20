@@ -150,6 +150,18 @@ export class ApiEnvironmentService {
     return rows.map((row) => toPublicApiEnvironmentService(row));
   }
 
+  /** 轻量查询服务的“忽略证书校验”开关，供按步骤地址调试的路径继承。 */
+  async getServiceIgnoreSslVerify(
+    projectId: string,
+    environmentId: string,
+    serviceId: string,
+  ): Promise<boolean> {
+    const row = await this.serviceRepo.findOne({
+      where: { environmentId, id: serviceId, enabled: true },
+    });
+    return Boolean(row?.ignoreSslVerify);
+  }
+
   async createEnvironmentService(
     projectId: string,
     environmentId: string,
@@ -173,6 +185,7 @@ export class ApiEnvironmentService {
       headers: payload.headers ?? {},
       variables: payload.variables ?? {},
       sortOrder: count,
+      ignoreSslVerify: payload.ignoreSslVerify ?? false,
       enabled: payload.enabled ?? true,
       transport: "http",
       ...auditFieldsForCreate(),
@@ -202,6 +215,9 @@ export class ApiEnvironmentService {
     existing.framing = payload.framing;
     if (payload.headers !== undefined) existing.headers = payload.headers;
     if (payload.variables !== undefined) existing.variables = payload.variables;
+    if (payload.ignoreSslVerify !== undefined) {
+      existing.ignoreSslVerify = payload.ignoreSslVerify;
+    }
     if (payload.enabled !== undefined) existing.enabled = payload.enabled;
     this.applyServiceConnectionFields(existing, payload);
     return toPublicApiEnvironmentService(

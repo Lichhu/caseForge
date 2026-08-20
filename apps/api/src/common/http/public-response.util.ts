@@ -257,6 +257,7 @@ export function toPublicApiEnvironmentService(
     headers: row.headers ?? {},
     variables: row.variables ?? {},
     sortOrder: row.sortOrder,
+    ignoreSslVerify: row.ignoreSslVerify ?? false,
     enabled: row.enabled,
   };
 }

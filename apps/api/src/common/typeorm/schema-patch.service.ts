@@ -26,6 +26,7 @@ export class SchemaPatchService implements OnModuleInit {
     await this.ensureStructRequirementJobTable();
     await this.ensureSummaryStructDocColumn();
     await this.ensureStructDocParseMetaColumns();
+    await this.ensureServiceIgnoreSslVerifyColumn();
     await migrateStructDocProjectIndex(this.dataSource);
     await ensureCaseEditorUtf8mb4TextColumns(this.dataSource, this.logger);
     await applyApiTestSchemaMigrations(this.dataSource);
@@ -287,6 +288,25 @@ export class SchemaPatchService implements OnModuleInit {
       `);
       this.logger.log(`case_struct_doc.${column.name} 列已补齐`);
     }
+  }
+
+  private async ensureServiceIgnoreSslVerifyColumn() {
+    const rows: Array<{ Field: string }> = await this.dataSource.query(
+      "SHOW COLUMNS FROM api_test_environment_service LIKE 'ignoreSslVerify'",
+    );
+    if (rows.length > 0) {
+      return;
+    }
+
+    this.logger.warn(
+      "检测到 api_test_environment_service 缺少 ignoreSslVerify 列，正在自动执行 schema 补丁…",
+    );
+    await this.dataSource.query(`
+      ALTER TABLE api_test_environment_service
+        ADD COLUMN ignoreSslVerify TINYINT NOT NULL DEFAULT 0 COMMENT '是否忽略 HTTPS 证书校验'
+        AFTER sortOrder
+    `);
+    this.logger.log("api_test_environment_service.ignoreSslVerify 列已补齐");
   }
 
   /**

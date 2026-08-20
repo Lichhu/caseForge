@@ -117,4 +117,53 @@ describe("ApiEnvironmentService 多租户隔离（回归）", () => {
     expect(result.tokenMasked).not.toContain("super-secret-token");
     expect(JSON.stringify(result)).not.toContain("super-secret-token");
   });
+
+  it("createEnvironmentService 保存 ignoreSslVerify 开关并回传", async () => {
+    const { service, envRepo, serviceRepo } = buildService();
+    envRepo.findOne.mockResolvedValue({
+      id: "env-1",
+      projectId: "project-1",
+      baseUrl: "http://x",
+      headers: {},
+      variables: {},
+      isDefault: false,
+      enabled: true,
+    });
+    serviceRepo.count.mockResolvedValue(0);
+    const result = await RequestContext.run("alice", () =>
+      service.createEnvironmentService("project-1", "env-1", {
+        name: "svc",
+        ignoreSslVerify: true,
+      } as never),
+    );
+    expect(result.ignoreSslVerify).toBe(true);
+  });
+
+  it("updateEnvironmentService 支持更新 ignoreSslVerify 开关", async () => {
+    const { service, envRepo, serviceRepo } = buildService();
+    envRepo.findOne.mockResolvedValue({
+      id: "env-1",
+      projectId: "project-1",
+      baseUrl: "http://x",
+      headers: {},
+      variables: {},
+      isDefault: false,
+      enabled: true,
+    });
+    serviceRepo.findOne.mockResolvedValue({
+      id: "svc-1",
+      environmentId: "env-1",
+      name: "svc",
+      sortOrder: 0,
+      ignoreSslVerify: false,
+      enabled: true,
+    });
+    const result = await RequestContext.run("alice", () =>
+      service.updateEnvironmentService("project-1", "env-1", "svc-1", {
+        name: "svc",
+        ignoreSslVerify: true,
+      } as never),
+    );
+    expect(result.ignoreSslVerify).toBe(true);
+  });
 });

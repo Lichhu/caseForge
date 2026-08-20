@@ -91,6 +91,11 @@ export class SaveApiEnvironmentServiceDto {
   @IsObject()
   variables?: Record<string, string>;
 
+  @ApiPropertyOptional({ description: "忽略 HTTPS 证书校验（自签名/测试环境）" })
+  @IsOptional()
+  @IsBoolean()
+  ignoreSslVerify?: boolean;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()

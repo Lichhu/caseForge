@@ -3,6 +3,8 @@ import { InjectRepository } from "@nestjs/typeorm";
 import iconv from "iconv-lite";
 import { Socket } from "node:net";
 import { In, Repository } from "typeorm";
+import { Agent } from "undici";
+import type { Dispatcher } from "undici";
 import { scopedWhere } from "@common/audit/user-scope";
 import { auditFieldsForCreate } from "@common/audit/request-context";
 import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
@@ -50,6 +52,7 @@ type RuntimeService = {
   framing?: { type: "length-prefix"; width: number; encoding?: string };
   headers?: Record<string, string>;
   variables?: Record<string, string>;
+  ignoreSslVerify?: boolean;
 };
 
 type RuntimeEnvironment = {
@@ -61,6 +64,21 @@ type RuntimeEnvironment = {
   environmentServiceId?: string;
   services?: RuntimeService[];
 };
+
+/** 开关开启时复用一个跳过证书校验的 undici Agent，避免每次请求重建连接池。 */
+let insecureDispatcher: Dispatcher | undefined;
+function fetchWithSslOption(
+  url: string,
+  init: RequestInit,
+  ignoreSslVerify?: boolean,
+): Promise<Response> {
+  if (!ignoreSslVerify) return fetch(url, init);
+  insecureDispatcher ??= new Agent({
+    connect: { rejectUnauthorized: false },
+  });
+  // Node 内置 fetch 支持 undici 的 dispatcher 选项，lib 类型未声明，此处显式断言
+  return fetch(url, { ...init, dispatcher: insecureDispatcher } as RequestInit);
+}
 
 @Injectable()
 export class ApiExecutionService {
@@ -506,15 +524,19 @@ export class ApiExecutionService {
         attempt < Math.max(1, input.request.repeatCount ?? 1);
         attempt += 1
       ) {
-        response = await fetch(url.toString(), {
-          method: input.request.method,
-          headers,
-          body: buildEncodedHttpBody(
-            input.request,
-            input.encoding ?? input.request.encoding,
-          ),
-          signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
-        });
+        response = await fetchWithSslOption(
+          url.toString(),
+          {
+            method: input.request.method,
+            headers,
+            body: buildEncodedHttpBody(
+              input.request,
+              input.encoding ?? input.request.encoding,
+            ),
+            signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+          },
+          service?.ignoreSslVerify,
+        );
       }
       if (!response) throw new Error("请求未执行");
       const durationMs = Date.now() - started;
@@ -694,6 +716,7 @@ export class ApiExecutionService {
     environmentServiceId?: string;
     encoding?: string;
     caseId?: string;
+    ignoreSslVerify?: boolean;
   }): Promise<DebugRunResult> {
     const env = input.target
       ? environmentFromStep({ id: "debug", name: "调试", target: input.target, request: input.request, expected: input.expected ?? {}, exports: [] })
@@ -717,6 +740,21 @@ export class ApiExecutionService {
       substituted,
       caseContext ?? SAMPLE_CONTEXT,
     )) as ApiCaseRequest;
+    // 按步骤地址调试时，继承所选环境服务的“忽略证书校验”开关；显式传参优先
+    let sslOverride = input.ignoreSslVerify;
+    if (
+      sslOverride === undefined &&
+      input.target &&
+      input.environmentId &&
+      input.environmentServiceId &&
+      (await this.environmentService.getServiceIgnoreSslVerify(
+        input.projectId,
+        input.environmentId,
+        input.environmentServiceId,
+      ))
+    ) {
+      sslOverride = true;
+    }
     const transport = request.transport ?? (request.framing ? "tcp" : "http");
 
     if (transport === "tcp") {
@@ -736,6 +774,7 @@ export class ApiExecutionService {
       expected: input.expected,
       polarity: input.polarity,
       encoding: input.encoding,
+      ignoreSslVerify: sslOverride,
     });
   }
 
@@ -746,6 +785,7 @@ export class ApiExecutionService {
     expected?: ApiCaseExpected;
     polarity?: "positive" | "negative";
     encoding?: string;
+    ignoreSslVerify?: boolean;
   }): Promise<DebugRunResult> {
     const service = this.resolveRuntimeService(input.env, "http");
     const baseUrl = this.resolveHttpBaseUrl(input.env, service);
@@ -773,15 +813,19 @@ export class ApiExecutionService {
         attempt < Math.max(1, input.request.repeatCount ?? 1);
         attempt += 1
       ) {
-        response = await fetch(url.toString(), {
-          method: input.request.method,
-          headers,
-          body: buildEncodedHttpBody(
-            input.request,
-            input.encoding ?? input.request.encoding,
-          ),
-          signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
-        });
+        response = await fetchWithSslOption(
+          url.toString(),
+          {
+            method: input.request.method,
+            headers,
+            body: buildEncodedHttpBody(
+              input.request,
+              input.encoding ?? input.request.encoding,
+            ),
+            signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+          },
+          input.ignoreSslVerify ?? service?.ignoreSslVerify,
+        );
       }
       if (!response) throw new Error("请求未执行");
       const durationMs = Date.now() - started;

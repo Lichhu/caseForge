@@ -71,6 +71,9 @@ export class ApiTestEnvironmentServiceEntity {
   @Column({ default: 0 })
   sortOrder: number;
 
+  @Column({ default: false })
+  ignoreSslVerify: boolean;
+
   @Column({ default: true })
   enabled: boolean;
 

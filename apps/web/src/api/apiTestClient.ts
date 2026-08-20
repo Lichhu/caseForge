@@ -193,6 +193,7 @@ export interface ApiEnvironmentServiceRow {
   headers?: Record<string, string>;
   variables?: Record<string, string>;
   sortOrder: number;
+  ignoreSslVerify?: boolean;
   enabled: boolean;
 }
 
@@ -852,6 +853,7 @@ export async function debugRunCase(
     environmentServiceId?: string;
     caseId?: string;
     encoding?: string;
+    ignoreSslVerify?: boolean;
   },
 ) {
   const { data } = await http.post<DebugRunResult>(
