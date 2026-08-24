@@ -465,6 +465,8 @@ body.cf-immersive-active .platform-topbar {
   overflow-x: hidden;
   overflow-y: auto;
   padding-right: 2px;
+  /* 临界条数下滚动条出现/消失会改变列宽，预留固定沟槽消除宽度振荡 */
+  scrollbar-gutter: stable;
 }
 
 .project-list-pagination {
@@ -576,8 +578,11 @@ body.cf-immersive-active .platform-topbar {
   width: 100%;
   min-width: 0;
   margin: 0 !important;
+  overflow: hidden;
   color: inherit !important;
   font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .project-meta {

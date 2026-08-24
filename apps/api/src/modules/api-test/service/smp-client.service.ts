@@ -193,7 +193,9 @@ export class SmpClientService {
       return {
         bizResCode: response.bizHeader.bizResCode,
         bizResText: response.bizHeader.bizResText,
-        data: response.bizBody.callServiceList,
+        data: this.sanitizeList<SmpCallServiceInfoItem>(
+          response.bizBody.callServiceList,
+        ),
       };
     }
 
@@ -213,7 +215,9 @@ export class SmpClientService {
     return {
       bizResCode: response.bizHeader.bizResCode,
       bizResText: response.bizHeader.bizResText,
-      data: response.bizBody.callServiceList,
+      data: this.sanitizeList<SmpCallServiceInfoItem>(
+        response.bizBody.callServiceList,
+      ),
     };
   }
 
@@ -243,7 +247,9 @@ export class SmpClientService {
       return {
         bizResCode: response.bizHeader.bizResCode,
         bizResText: response.bizHeader.bizResText,
-        data: response.bizBody.serviceTestList,
+        data: this.sanitizeList<SmpTestInfoItem>(
+          response.bizBody.serviceTestList,
+        ),
       };
     }
 
@@ -261,8 +267,22 @@ export class SmpClientService {
     return {
       bizResCode: response.bizHeader.bizResCode,
       bizResText: response.bizHeader.bizResText,
-      data: response.bizBody.serviceTestList,
+      data: this.sanitizeList<SmpTestInfoItem>(
+        response.bizBody.serviceTestList,
+      ),
     };
+  }
+
+  /**
+   * SMP 列表偶发混入 null / 非对象元素，在源头统一过滤，
+   * 避免下游解析、hash 与前端渲染崩溃。
+   */
+  private sanitizeList<T extends object>(list: unknown): T[] {
+    if (!Array.isArray(list)) return [];
+    return list.filter(
+      (item): item is T =>
+        item !== null && typeof item === "object" && !Array.isArray(item),
+    );
   }
 
   private buildRequestBody(bizBody: Record<string, string>): unknown {

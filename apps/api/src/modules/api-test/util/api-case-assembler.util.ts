@@ -355,6 +355,7 @@ const assemblerLogger = new Logger("ApiCaseAssembler");
 function sanitizePlanOverrides(
   plan: AiCasePlanItem,
   canonicalDoc: string,
+  profile: ApiTechnicalProfile,
 ): void {
   if (!plan.bodyOverrides) return;
 
@@ -365,7 +366,6 @@ function sanitizePlanOverrides(
   const validPaths = new Set(fields.map((f) => normalizeOverridePath(f.path)));
 
   if (exampleMessage) {
-    const profile = parseApiTechnicalProfile(canonicalDoc);
     const examplePaths = extractPathsFromExample(
       exampleMessage,
       profile.messageFormat,
@@ -406,7 +406,7 @@ export function mapCasePlanToPayload(
   const priority = normalizePriority(plan.priority);
   const status = normalizeStatus("ready");
 
-  sanitizePlanOverrides(plan, canonicalDoc);
+  sanitizePlanOverrides(plan, canonicalDoc, profile);
 
   const { request, body } = assembleCaseRequest({
     canonicalDoc,

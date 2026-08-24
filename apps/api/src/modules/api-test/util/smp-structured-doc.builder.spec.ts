@@ -2,10 +2,7 @@ import {
   buildStructuredMarkdownFromSmp,
   buildFieldTableFromJsonBody,
   buildFieldTableFromSmpNodeLists,
-  mapSocketWayLabel,
-  mapMessageTypeLabel,
 } from "./smp-structured-doc.builder";
-import { parseApiTechnicalProfile } from "./api-doc-technical-profile.util";
 import { extractApiDocSection, getApiDocFieldValue } from "./api-doc.parser";
 import { assessDocReadiness } from "./api-canonical-doc.util";
 import { parseApiDocMessageFields } from "./api-xml-request-template.util";
@@ -28,6 +25,9 @@ function makeCallItem(
     serviceCname: "测试服务",
     serviceCode: "R53000080828",
     tranCode: "PCBS03901001",
+    serviceAttribute: "查询类",
+    descript: "测试功能描述",
+    businessRule: "测试业务规则",
     ...overrides,
   };
 }
@@ -62,66 +62,20 @@ function makeTestItem(overrides?: Partial<SmpTestInfoItem>): SmpTestInfoItem {
   };
 }
 
-describe("mapSocketWayLabel", () => {
-  it("maps HTTP → HTTP", () => {
-    expect(mapSocketWayLabel("HTTP")).toBe("HTTP");
-  });
-
-  it("maps TEP → Socket", () => {
-    expect(mapSocketWayLabel("TEP")).toBe("Socket");
-  });
-
-  it("maps TCP → Socket", () => {
-    expect(mapSocketWayLabel("TCP")).toBe("Socket");
-  });
-
-  it("maps empty → HTTP (default)", () => {
-    expect(mapSocketWayLabel("")).toBe("HTTP");
-  });
-});
-
-describe("mapMessageTypeLabel", () => {
-  it("maps JSON → JSON", () => {
-    expect(mapMessageTypeLabel("JSON")).toBe("JSON");
-  });
-
-  it("maps XML → XML", () => {
-    expect(mapMessageTypeLabel("XML")).toBe("XML");
-  });
-
-  it("maps ESB标准XML → XML", () => {
-    expect(mapMessageTypeLabel("ESB标准XML")).toBe("XML");
-  });
-
-  it("maps empty → JSON (default)", () => {
-    expect(mapMessageTypeLabel("")).toBe("JSON");
-  });
-});
-
 describe("buildStructuredMarkdownFromSmp", () => {
-  it("generates 技术信息 with Socket + XML for TEP/XML SMP data", () => {
-    const md = buildStructuredMarkdownFromSmp(
-      [makeCallItem({ socketWay: "TEP", messageType: "XML" })],
-      [makeTestItem()],
-    );
+  it("no longer writes 技术信息; profile falls back to smpData", () => {
+    const callList = [makeCallItem({ socketWay: "TEP", messageType: "XML" })];
+    const testList = [makeTestItem()];
+    const md = buildStructuredMarkdownFromSmp(callList, testList);
 
-    const techSection = extractApiDocSection(md, "技术信息");
-    expect(getApiDocFieldValue(techSection, "通讯方式")).toBe("Socket");
-    expect(getApiDocFieldValue(techSection, "报文类型")).toBe("XML");
-    expect(getApiDocFieldValue(techSection, "报文编码")).toBe("UTF-8");
-    expect(getApiDocFieldValue(techSection, "最大报文大小")).toBe("10K");
-    expect(getApiDocFieldValue(techSection, "调用模式")).toBe("同步");
-  });
-
-  it("generates 技术信息 with HTTP + JSON for HTTP/JSON SMP data", () => {
-    const md = buildStructuredMarkdownFromSmp(
-      [makeCallItem({ socketWay: "HTTP", messageType: "JSON" })],
-      [makeTestItem({ requestUrl: "http://example.com/api" })],
-    );
-
-    const techSection = extractApiDocSection(md, "技术信息");
-    expect(getApiDocFieldValue(techSection, "通讯方式")).toBe("HTTP");
-    expect(getApiDocFieldValue(techSection, "报文类型")).toBe("JSON");
+    expect(extractApiDocSection(md, "技术信息")).toBe("");
+    const readiness = assessDocReadiness(md, "tcp://33.114.5.56:60000", {
+      callServiceList: callList,
+      serviceTestList: testList,
+    });
+    expect(readiness.ok).toBe(true);
+    expect(readiness.profile.transport).toBe("tcp");
+    expect(readiness.profile.messageFormat).toBe("xml");
   });
 
   it("uses SMP requestBody as 示例报文", () => {
@@ -133,37 +87,82 @@ describe("buildStructuredMarkdownFromSmp", () => {
     expect(extractApiDocSection(md, "示例报文")).toBe(NESTED_REQUEST_BODY);
   });
 
-  it("includes 基础信息 with 服务URL and 交易码", () => {
+  it("keeps 示例报文 section (empty) when requestBody missing", () => {
+    const md = buildStructuredMarkdownFromSmp([makeCallItem()], [{}]);
+    expect(md).toContain("示例报文\n----");
+    expect(extractApiDocSection(md, "示例报文")).toBe("");
+  });
+
+  it("keeps user-provided 示例报文 when SMP has no requestBody", () => {
+    const md = buildStructuredMarkdownFromSmp([makeCallItem()], [{}], {
+      existingExampleMessage: '{"user":"pasted"}',
+    });
+    expect(extractApiDocSection(md, "示例报文")).toBe('{"user":"pasted"}');
+  });
+
+  it("existing 示例报文 is not overwritten by SMP requestBody", () => {
     const md = buildStructuredMarkdownFromSmp(
       [makeCallItem()],
-      [makeTestItem({ requestUrl: "32.114.71.6:60030" })],
+      [makeTestItem()],
+      { existingExampleMessage: '{"user":"pasted"}' },
+    );
+    expect(extractApiDocSection(md, "示例报文")).toBe('{"user":"pasted"}');
+  });
+
+  it("includes 基础信息 / 服务信息 with fixed keys", () => {
+    const md = buildStructuredMarkdownFromSmp(
+      [makeCallItem()],
+      [makeTestItem()],
     );
 
     const basicSection = extractApiDocSection(md, "基础信息");
-    expect(getApiDocFieldValue(basicSection, "服务URL")).toBe(
-      "32.114.71.6:60030",
-    );
+    expect(getApiDocFieldValue(basicSection, "服务编码")).toBe("R53000080828");
     expect(getApiDocFieldValue(basicSection, "原服务交易码")).toBe(
       "PCBS03901001",
     );
+    expect(getApiDocFieldValue(basicSection, "服务名称")).toBe("测试服务");
+    expect(getApiDocFieldValue(basicSection, "服务属性")).toBe("查询类");
+
+    const serviceSection = extractApiDocSection(md, "服务信息");
+    expect(getApiDocFieldValue(serviceSection, "功能描述")).toBe(
+      "测试功能描述",
+    );
+    expect(getApiDocFieldValue(serviceSection, "业务规则")).toBe(
+      "测试业务规则",
+    );
+    expect(getApiDocFieldValue(serviceSection, "服务名称")).toBe("测试服务");
+    expect(getApiDocFieldValue(serviceSection, "服务属性")).toBe("查询类");
   });
 
-  it("includes 请求报文 as field table without 响应报文 section", () => {
+  it("keeps blank rows for missing 基础信息 / 服务信息 values", () => {
+    const md = buildStructuredMarkdownFromSmp([{}], []);
+
+    const basicSection = extractApiDocSection(md, "基础信息");
+    expect(getApiDocFieldValue(basicSection, "服务编码")).toBe("");
+    expect(getApiDocFieldValue(basicSection, "原服务交易码")).toBe("");
+    expect(getApiDocFieldValue(basicSection, "服务名称")).toBe("");
+    expect(getApiDocFieldValue(basicSection, "服务属性")).toBe("");
+
+    const serviceSection = extractApiDocSection(md, "服务信息");
+    expect(getApiDocFieldValue(serviceSection, "功能描述")).toBe("");
+    expect(getApiDocFieldValue(serviceSection, "业务规则")).toBe("");
+  });
+
+  it("includes 请求报文 as JSON fallback table without 响应报文 section", () => {
     const md = buildStructuredMarkdownFromSmp(
       [makeCallItem()],
       [makeTestItem()],
     );
 
     const requestSection = extractApiDocSection(md, "请求报文");
-    expect(requestSection).toContain("| 节点路径 | 节点代码 | 是否必填 |");
-    expect(requestSection).toContain(
-      "| Transaction/Body/request/bizBody/taskId | taskId | N |",
-    );
+    expect(requestSection).toContain("| 节点代码 | 是否必填 |");
+    expect(requestSection).not.toContain("节点路径");
+    expect(requestSection).toContain("| taskId | N |");
     expect(extractApiDocSection(md, "响应报文")).toBe("");
     expect(md).not.toContain("响应报文\n----");
   });
 
-  it("prefers callService node lists over testInfo JSON bodies", () => {
+  it("merges head + body node lists into 7-column field table without 节点路径", () => {
     const md = buildStructuredMarkdownFromSmp(
       [
         makeCallItem({
@@ -172,13 +171,21 @@ describe("buildStructuredMarkdownFromSmp", () => {
           requestHeadList: [
             {
               nodeCode: "transaction_sn",
+              nodeName: "交易流水号",
+              nodeType: "单节点",
+              dataType: "VARCHAR2",
+              dataLength: "19",
               nodeUrl: "Transaction/Body/request/bizHeader",
               isNotNull: "Y",
+              descBind: "交易序列号，可同msgId",
             },
           ],
           requestBodyList: [
             {
               nodeCode: "CUST_ID",
+              nodeName: "客户号",
+              dataType: "VARCHAR2",
+              dataLength: "30",
               nodeUrl: "Transaction/Body/request/bizBody",
               isNotNull: "Y",
             },
@@ -197,11 +204,15 @@ describe("buildStructuredMarkdownFromSmp", () => {
 
     const requestSection = extractApiDocSection(md, "请求报文");
     expect(requestSection).toContain(
-      "| Transaction/Body/request/bizHeader/transaction_sn | transaction_sn | Y |",
+      "| 节点代码 | 节点名称 | 节点类型 | 数据类型 | 长度 | 是否必填 | 描述 |",
     );
     expect(requestSection).toContain(
-      "| Transaction/Body/request/bizBody/CUST_ID | CUST_ID | Y |",
+      "| transaction_sn | 交易流水号 | 单节点 | VARCHAR2 | 19 | Y | 交易序列号，可同msgId |",
     );
+    expect(requestSection).toContain(
+      "| CUST_ID | 客户号 |  | VARCHAR2 | 30 | Y |  |",
+    );
+    expect(requestSection).not.toContain("节点路径");
     expect(requestSection).not.toContain("taskId");
     expect(extractApiDocSection(md, "响应报文")).toBe("");
   });
@@ -218,11 +229,14 @@ describe("buildStructuredMarkdownFromSmp", () => {
   });
 
   it("generated doc passes assessDocReadiness for TEP/XML SMP data", () => {
-    const md = buildStructuredMarkdownFromSmp(
-      [makeCallItem({ socketWay: "TEP", messageType: "XML" })],
-      [makeTestItem()],
+    const callList = [makeCallItem({ socketWay: "TEP", messageType: "XML" })];
+    const testList = [makeTestItem()];
+    const md = buildStructuredMarkdownFromSmp(callList, testList);
+    const readiness = assessDocReadiness(
+      md,
+      "tcp://33.114.5.56:60000",
+      { callServiceList: callList, serviceTestList: testList },
     );
-    const readiness = assessDocReadiness(md);
     expect(readiness.ok).toBe(true);
     expect(readiness.fieldCount).toBeGreaterThan(0);
     expect(readiness.profile.transport).toBe("tcp");
@@ -234,8 +248,8 @@ describe("buildStructuredMarkdownFromSmp", () => {
     const legacyDoc = [
       "请求报文",
       "----",
-      "| 节点路径 | 节点代码 | 是否必填 |",
-      "| Transaction/Body/request/bizBody/custNo | custNo | N |",
+      "| 节点代码 | 是否必填 |",
+      "| custNo | N |",
       "",
       "基础信息",
       "----",
@@ -258,46 +272,12 @@ describe("buildStructuredMarkdownFromSmp", () => {
     expect(requestSection).toContain("<Transaction>");
   });
 
-  it("parseApiTechnicalProfile reads Socket + XML from generated doc", () => {
-    const md = buildStructuredMarkdownFromSmp(
-      [makeCallItem({ socketWay: "TEP", messageType: "XML" })],
-      [makeTestItem()],
-    );
-
-    const profile = parseApiTechnicalProfile(md);
-    expect(profile.transport).toBe("tcp");
-    expect(profile.messageFormat).toBe("xml");
-    expect(profile.encoding).toBe("UTF-8");
-    expect(profile.invocationMode).toBe("同步");
-    expect(profile.maxMessageSize).toBe("10K");
-  });
-
-  it("parseApiTechnicalProfile reads HTTP + JSON from generated doc", () => {
-    const md = buildStructuredMarkdownFromSmp(
-      [makeCallItem({ socketWay: "HTTP", messageType: "JSON" })],
-      [makeTestItem()],
-    );
-
-    const profile = parseApiTechnicalProfile(md);
-    expect(profile.transport).toBe("http");
-    expect(profile.messageFormat).toBe("json");
-  });
-
-  it("falls back to testInfo.requestMessageType when callItem.messageType is empty", () => {
-    const md = buildStructuredMarkdownFromSmp(
-      [makeCallItem({ messageType: undefined })],
-      [makeTestItem({ requestMessageType: "ESB标准XML" })],
-    );
-
-    const techSection = extractApiDocSection(md, "技术信息");
-    expect(getApiDocFieldValue(techSection, "报文类型")).toBe("XML");
-  });
-
   it("handles empty SMP data gracefully", () => {
     const md = buildStructuredMarkdownFromSmp([], []);
-    const techSection = extractApiDocSection(md, "技术信息");
-    expect(getApiDocFieldValue(techSection, "通讯方式")).toBe("HTTP");
-    expect(getApiDocFieldValue(techSection, "报文类型")).toBe("JSON");
+    expect(extractApiDocSection(md, "技术信息")).toBe("");
+    expect(extractApiDocSection(md, "基础信息")).toContain("服务编码 |");
+    expect(extractApiDocSection(md, "服务信息")).toContain("功能描述 |");
+    expect(md).toContain("示例报文\n----");
   });
 });
 
@@ -319,14 +299,15 @@ describe("buildFieldTableFromSmpNodeLists", () => {
     },
   ];
 
-  it("merges head and body lists into field table", () => {
+  it("merges head and body lists into 7-column field table", () => {
     const table = buildFieldTableFromSmpNodeLists(requestHead, requestBody)!;
     expect(table).toContain(
-      "| Transaction/Body/request/bizHeader/transaction_sn | transaction_sn | Y |",
+      "| 节点代码 | 节点名称 | 节点类型 | 数据类型 | 长度 | 是否必填 | 描述 |",
     );
     expect(table).toContain(
-      "| Transaction/Body/request/bizBody/CUST_ID | CUST_ID | Y |",
+      "| transaction_sn | 交易流水号 |  |  |  | Y |  |",
     );
+    expect(table).toContain("| CUST_ID | 客户号 |  |  |  | Y |  |");
   });
 
   it("returns null when both lists are empty", () => {
@@ -377,16 +358,12 @@ describe("buildFieldTableFromSmpNodeLists", () => {
 });
 
 describe("buildFieldTableFromJsonBody", () => {
-  it("flattens nested JSON to field rows with / paths", () => {
+  it("flattens nested JSON to leaf code rows", () => {
     const table = buildFieldTableFromJsonBody(NESTED_REQUEST_BODY);
     expect(table).not.toBeNull();
-    expect(table).toContain("| 节点路径 | 节点代码 | 是否必填 |");
-    expect(table).toContain(
-      "| Transaction/Header/sysHeader/msgId | msgId | N |",
-    );
-    expect(table).toContain(
-      "| Transaction/Body/request/bizBody/serviceCode | serviceCode | N |",
-    );
+    expect(table).toContain("| 节点代码 | 是否必填 |");
+    expect(table).toContain("| msgId | N |");
+    expect(table).toContain("| serviceCode | N |");
   });
 
   it("field paths group correctly into sysHeader / bizBody", () => {
@@ -400,22 +377,22 @@ describe("buildFieldTableFromJsonBody", () => {
 
   it("accepts an already-parsed object", () => {
     const table = buildFieldTableFromJsonBody({ a: { b: "1" } });
-    expect(table).toContain("| a/b | b | N |");
+    expect(table).toContain("| b | N |");
   });
 
   it("descends into first array element as template", () => {
     const table = buildFieldTableFromJsonBody({ list: [{ id: "1" }] });
-    expect(table).toContain("| list/id | id | N |");
+    expect(table).toContain("| id | N |");
   });
 
   it("treats empty array as a leaf", () => {
     const table = buildFieldTableFromJsonBody({ items: [] });
-    expect(table).toContain("| items | items | N |");
+    expect(table).toContain("| items | N |");
   });
 
   it("skips empty objects (no leaf)", () => {
     const table = buildFieldTableFromJsonBody({ bizHeader: {}, x: "1" });
-    expect(table).toContain("| x | x | N |");
+    expect(table).toContain("| x | N |");
     expect(table).not.toContain("bizHeader");
   });
 
@@ -429,11 +406,11 @@ describe("buildFieldTableFromJsonBody", () => {
     expect(buildFieldTableFromJsonBody(undefined)).toBeNull();
   });
 
-  it("dedupes identical paths", () => {
+  it("dedupes identical leaf codes", () => {
     const table = buildFieldTableFromJsonBody({
       arr: [{ id: "1" }, { id: "2" }],
     })!;
-    const occurrences = table.split("\n").filter((l) => l.includes("arr/id"));
+    const occurrences = table.split("\n").filter((l) => l.includes("| id |"));
     expect(occurrences).toHaveLength(1);
   });
 });

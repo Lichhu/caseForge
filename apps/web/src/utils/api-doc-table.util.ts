@@ -44,11 +44,24 @@ export function parseApiDocTableText(text: string): ApiDocTableSection[] {
     }
     if (!match?.[1]?.trim()) continue;
     const sectionText = match[1].trim();
-    let rows = sectionText
-      .split("\n")
-      .map((line) => line.split("|").map((cell) => cell.trim()));
-    rows = normalizeVisibleSection(title, rows, sections);
-    sections.push({ title, rows });
+    const rows: string[][] = [];
+    for (const line of sectionText.split("\n")) {
+      const cells = line.split("|").map((cell) => cell.trim());
+      const prev = rows[rows.length - 1];
+      // 历史文档中单元格内换行会被拆成不含列分隔符的续行：拼回上一行最后一个非空单元格
+      if (prev && cells.length === 1 && cells[0]) {
+        for (let i = prev.length - 1; i >= 0; i -= 1) {
+          if (prev[i]) {
+            prev[i] += cells[0];
+            break;
+          }
+        }
+        continue;
+      }
+      rows.push(cells);
+    }
+    const normalized = normalizeVisibleSection(title, rows, sections);
+    sections.push({ title, rows: normalized });
   }
 
   if (sections.length) return sections;

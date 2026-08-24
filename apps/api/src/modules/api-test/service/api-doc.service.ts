@@ -156,13 +156,19 @@ export class ApiDocService {
     if (!markdown?.trim()) {
       throw new BadRequestException("结构化内容不能为空");
     }
-    const endpoints = payload.endpoints?.length
-      ? ensureEndpointIds(payload.endpoints)
-      : parseEndpointsFromText(markdown);
-    if (!endpoints.length) {
-      throw new BadRequestException("至少保留一个接口端点");
+    // SMP 来源的端点由服管同步/刷新维护，保存时仅提交文档文本，
+    // 避免按文本重解析覆盖真实端点（如 TCP 连接地址）
+    const isSmpManaged =
+      doc.source === "smp" && Boolean(doc.smpData?.callServiceList?.length);
+    if (!isSmpManaged) {
+      const endpoints = payload.endpoints?.length
+        ? ensureEndpointIds(payload.endpoints)
+        : parseEndpointsFromText(markdown);
+      if (!endpoints.length) {
+        throw new BadRequestException("至少保留一个接口端点");
+      }
+      await this.replaceEndpoints(projectId, transactionId, doc.id, endpoints);
     }
-    await this.replaceEndpoints(projectId, transactionId, doc.id, endpoints);
     doc.structuredMarkdown = markdown;
     doc.tempStructuredMarkdown = markdown;
     doc.structuringStatus = "completed";

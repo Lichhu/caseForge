@@ -6,11 +6,15 @@ export function parseEndpointsFromSmpData(
 ): ApiEndpointPayload[] {
   if (!serviceTestList.length) return [];
 
-  return serviceTestList.map((testItem, index) => {
-    const callItem = (callServiceList[index] ??
-      callServiceList[0] ??
-      {}) as Record<string, unknown>;
-    const test = testItem as Record<string, unknown>;
+  const endpoints: ApiEndpointPayload[] = [];
+  serviceTestList.forEach((testItem, index) => {
+    // SMP 偶发返回 null 元素：跳过但保留 index，维持与 callServiceList 的对齐
+    if (!isRecord(testItem)) return;
+    const test = testItem;
+    const alignedCall = callServiceList[index];
+    const callItem = isRecord(alignedCall)
+      ? alignedCall
+      : (callServiceList.find(isRecord) ?? {});
     const name =
       stringValue(callItem.serviceCname) ||
       stringValue(callItem.descript) ||
@@ -18,7 +22,7 @@ export function parseEndpointsFromSmpData(
       `接口 ${index + 1}`;
     const method = resolveMethod(test, callItem);
     const path = stringValue(test.requestUrl)?.trim() || "/";
-    return {
+    endpoints.push({
       name,
       method,
       path,
@@ -32,8 +36,15 @@ export function parseEndpointsFromSmpData(
             Boolean(v),
           )
         : undefined,
-    };
+    });
   });
+  return endpoints;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return (
+    value !== null && typeof value === "object" && !Array.isArray(value)
+  );
 }
 
 function resolveMethod(

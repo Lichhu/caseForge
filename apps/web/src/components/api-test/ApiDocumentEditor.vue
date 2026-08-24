@@ -22,7 +22,7 @@
       </div>
       <div class="toolbar action-toolbar document-panel-toolbar">
         <a-upload
-          v-if="!showSmpData"
+          v-if="!isSmpSource"
           :show-upload-list="false"
           :before-upload="onUpload"
           :disabled="apiStore.loading"
@@ -46,7 +46,7 @@
           <template #icon><HistoryOutlined /></template>
           生成历史
         </a-button>
-        <a-button v-if="!showSmpData" :disabled="!canSave" @click="void onSave()">
+        <a-button :disabled="!canSave" @click="void onSave()">
           <template #icon><SaveOutlined /></template>
           保存
         </a-button>
@@ -96,7 +96,7 @@
     </a-alert>
 
     <a-alert
-      v-if="!showSmpData && apiStore.apiDoc?.structuringStatus === 'failed'"
+      v-if="apiStore.apiDoc?.structuringStatus === 'failed'"
       type="error"
       show-icon
       :message="apiStore.apiDoc.structuringError"
@@ -125,33 +125,8 @@
     </a-alert>
 
     <div ref="tableScrollRef" class="document-table-scroll">
-      <template v-if="showSmpData">
-        <div class="smp-doc-source-tag">来源：服管平台</div>
-        <SmpDocumentViewer :data="apiStore.apiDoc!.smpData!">
-          <template #example-message>
-            <div class="example-message-shell">
-              <div class="example-message-actions">
-                <a-button type="link" size="small" class="example-message-action-btn" :disabled="!hasExampleCursor" @click="openFunctionInsert"><CodeOutlined /> 插入函数</a-button>
-                <a-button type="link" size="small" class="example-message-beautify-btn" :disabled="!exampleMessage.trim()" @click="beautifyExampleMessage"><template #icon><FormatPainterOutlined /></template>美化</a-button>
-                <a-button type="link" size="small" class="example-message-expand-btn" @click="exampleExpandModalOpen = true"><template #icon><ExpandOutlined /></template>编辑</a-button>
-              </div>
-              <textarea
-                v-model="exampleMessage"
-                class="example-message-input"
-                spellcheck="false"
-                @focus="rememberExampleCursor"
-                @click="rememberExampleCursor"
-                @keyup="rememberExampleCursor"
-                @input="onExampleMessageInput"
-                @blur="onExampleMessageBlur"
-                @paste="onExampleMessagePaste"
-              />
-            </div>
-          </template>
-        </SmpDocumentViewer>
-      </template>
-      <template v-else>
-        <a-empty
+      <div v-if="isSmpSource" class="smp-doc-source-tag">来源：服管平台</div>
+      <a-empty
           v-if="!sections.length"
           description="上传 Excel 后将自动结构化，可 AI 生成案例"
         />
@@ -259,7 +234,6 @@
             </div>
           </div>
         </div>
-      </template>
     </div>
   </section>
 
@@ -700,7 +674,6 @@ import {
 } from '@ant-design/icons-vue';
 import { Modal, message } from 'ant-design-vue';
 import type { MenuProps, UploadProps } from 'ant-design-vue';
-import SmpDocumentViewer from '@/components/api-test/SmpDocumentViewer.vue';
 import ApiCaseGenerateHistoryDrawer from '@/components/api-test/ApiCaseGenerateHistoryDrawer.vue';
 import ApiDataFunctionMaintainModal from '@/components/api-test/ApiDataFunctionMaintainModal.vue';
 import ApiDatabaseConnectionMaintainModal from '@/components/api-test/ApiDatabaseConnectionMaintainModal.vue';
@@ -774,6 +747,7 @@ watch(selectedInsertFunction, (fn) => {
   insertFunctionArgs.value = (fn?.params ?? []).map((_, index) => insertFunctionArgs.value[index] ?? '');
 });
 const editorText = ref('');
+const lastStoreText = ref('');
 const autoSaveTimer = ref<number | null>(null);
 const autoSaveInFlight = ref(false);
 const generationProfileSaveTimer = ref<number | null>(null);
@@ -1118,10 +1092,7 @@ const generatingCases = computed(() =>
     : false,
 );
 
-const showSmpData = computed(() =>
-  apiStore.apiDoc?.source === 'smp' &&
-  Boolean(apiStore.apiDoc?.smpData?.callServiceList?.length),
-);
+const isSmpSource = computed(() => apiStore.apiDoc?.source === 'smp');
 
 const sourceDocName = computed(() => apiStore.apiDoc?.sourceDocName ?? '');
 
@@ -1144,18 +1115,25 @@ onDeactivated(() => {
 function loadFromText(text: string) {
   syncingFromStore.value = true;
   const parsed = parseApiDocTableText(text);
-  if (!parsed.some((section) => section.title === '示例报文') && !showSmpData.value) {
+  if (!parsed.some((section) => section.title === '示例报文')) {
     parsed.push({ title: '示例报文', rows: [], freeText: '' });
   }
   const exampleSection = parsed.find((section) => section.title === '示例报文');
   const smpRequestBody = apiStore.apiDoc?.smpData?.serviceTestList?.[0] as Record<string, unknown> | undefined;
   exampleMessage.value = exampleSection?.freeText || String(smpRequestBody?.requestBody ?? '');
   hasExampleCursor.value = false;
+  const previousTitles = sections.value.map((section) => section.title).join('\u0000');
+  const nextTitles = parsed.map((section) => section.title).join('\u0000');
   sections.value = parsed;
   sectionData.value = sections.value.map((section) => sectionTableData(section));
   sectionPages.value = sections.value.map(() => 1);
   editorText.value = serializeApiDocTableText(parsed);
-  resetSectionCollapseState();
+  lastStoreText.value = text;
+  // 仅分区结构变化时重置折叠状态，避免 store 回包（自动保存/生成配置保存等）
+  // 触发重载时把用户已展开的分区收回
+  if (previousTitles !== nextTitles) {
+    resetSectionCollapseState();
+  }
   syncingFromStore.value = false;
   resizeAllDocCellInputs();
   resizeExampleMessageInput();
@@ -1356,7 +1334,14 @@ watch(
   ([value, smpRequestBody]) => {
     if (!panelActive.value || autoSaveInFlight.value) return;
     const next = value || '';
-    if (next === editorText.value && (exampleMessage.value || !smpRequestBody)) return;
+    // 后端原文与前端序列化稿是同一内容的两种形态，均视为未变化，
+    // 否则 apiDoc 对象被任意回包替换时会反复重载并重置折叠状态
+    if (next === editorText.value || next === lastStoreText.value) {
+      if (!exampleMessage.value && smpRequestBody) {
+        exampleMessage.value = String(smpRequestBody);
+      }
+      return;
+    }
     if (autoSaveTimer.value) {
       window.clearTimeout(autoSaveTimer.value);
       autoSaveTimer.value = null;

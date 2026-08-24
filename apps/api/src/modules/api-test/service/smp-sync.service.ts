@@ -21,6 +21,7 @@ import {
   type ApiTransactionSyncStatus,
 } from "@api-test/entity/api-transaction.entity";
 import { parseEndpointsFromSmpData } from "@api-test/util/smp-doc.parser";
+import { extractApiDocSection } from "@api-test/util/api-doc.parser";
 import { buildStructuredMarkdownFromSmp } from "@api-test/util/smp-structured-doc.builder";
 import {
   type SmpServiceInfoItem,
@@ -288,21 +289,8 @@ export class SmpSyncService {
       await this.transactionRepo.save(transaction);
     }
 
-    doc.source = "smp";
-    doc.smpData = {
-      callServiceList: callService.data,
-      serviceTestList: testInfo.data,
-      approvalInfoList: [],
-    };
-    doc.structuredMarkdown = buildStructuredMarkdownFromSmp(
-      callService.data,
-      testInfo.data,
-    );
-    doc.lastSmpCallServiceHash = callServiceHash;
-    doc.lastSmpTestInfoHash = testInfoHash;
-    doc.structuringStatus = "completed";
-    await this.apiDocRepo.save(doc);
-
+    // 先写 endpoint 再落盘 smpData：端点解析/写入失败时不会留下
+    // 「smpData 已更新但端点为空」的半截状态（下游会误报“没有接口端点”）
     await this.replaceSmpEndpoints(
       projectId,
       transactionId,
@@ -310,6 +298,31 @@ export class SmpSyncService {
       callService.data,
       testInfo.data,
     );
+
+    doc.source = "smp";
+    doc.smpData = {
+      callServiceList: callService.data,
+      serviceTestList: testInfo.data,
+      approvalInfoList: [],
+    };
+    // 始终覆盖：同步清空临时编辑稿，确保前端立即展示最新服管数据；
+    // 但示例报文段不覆盖：已有内容（使用人补填或此前同步的）原样保留，
+    // 仅当为空时才取服管 requestBody，避免重进交易/刷新时丢失这份唯一来源的数据
+    const previousMarkdown =
+      doc.tempStructuredMarkdown ?? doc.structuredMarkdown;
+    const existingExampleMessage = previousMarkdown
+      ? extractApiDocSection(previousMarkdown, "示例报文").trim() || undefined
+      : undefined;
+    doc.structuredMarkdown = buildStructuredMarkdownFromSmp(
+      callService.data,
+      testInfo.data,
+      { existingExampleMessage },
+    );
+    doc.tempStructuredMarkdown = doc.structuredMarkdown;
+    doc.lastSmpCallServiceHash = callServiceHash;
+    doc.lastSmpTestInfoHash = testInfoHash;
+    doc.structuringStatus = "completed";
+    await this.apiDocRepo.save(doc);
 
     return {
       changed: dataChanged,

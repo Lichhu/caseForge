@@ -80,11 +80,12 @@
               @change="toggleProjectSelection(project.id, $event)"
             />
             <div class="project-main">
-              <a-typography-text
-                class="project-title"
-                :ellipsis="{ tooltip: cleanProjectTitle(project.title) }"
-                :content="cleanProjectTitle(project.title)"
-              />
+              <!-- 标题用纯 CSS 单行省略 + 外层 Tooltip：a-typography-text 的 -->
+              <!-- :ellipsis="{ tooltip }" 会禁用 CSS 省略并走 ResizeObserver+rAF -->
+              <!-- JS 测量，临界条数下滚动条变化会引发测量-重排振荡（列表抖动） -->
+              <a-tooltip :title="cleanProjectTitle(project.title)">
+                <span class="project-title">{{ cleanProjectTitle(project.title) }}</span>
+              </a-tooltip>
               <span v-if="project.requirementNo" class="project-requirement">
                 {{ project.requirementNo }} · {{ project.caseCount }} 条案例
               </span>

@@ -43,7 +43,8 @@ export function extractTextFromExcel(buffer: Buffer) {
       .sheet_to_json<
         (string | number | boolean)[]
       >(sheet, { header: 1, defval: "" })
-      .map((row) => row.map((cell) => String(cell ?? "").trim()));
+      .map((row) => row.map((cell) => normalizeCellText(cell)));
+    fillMergedCells(rows, sheet["!merges"]);
     rawRows.set(
       name,
       rows.filter((row) => row.some(Boolean)),
@@ -86,6 +87,27 @@ export function extractTextFromExcel(buffer: Buffer) {
 
   const text = sections.join("\n").trim();
   return assertReadableText(text, "Excel 接口文档");
+}
+
+/** 单元格内换行（手动换行/合并单元格产生）会破坏「一行=一条记录」的文本约定，压成连续文本 */
+function normalizeCellText(cell: string | number | boolean) {
+  return String(cell ?? "").replace(/\s*\r?\n\s*/g, "").trim();
+}
+
+/** 合并单元格只有左上角有值：把值回填到被合并覆盖的单元格，避免下游表格出现空洞行 */
+function fillMergedCells(rows: string[][], merges: XLSX.Range[] | undefined) {
+  if (!merges?.length) return;
+  for (const range of merges) {
+    const value = rows[range.s.r]?.[range.s.c] ?? "";
+    if (!value) continue;
+    for (let r = range.s.r; r <= range.e.r; r += 1) {
+      for (let c = range.s.c; c <= range.e.c; c += 1) {
+        if (r === range.s.r && c === range.s.c) continue;
+        if (!rows[r]) rows[r] = [];
+        if (!rows[r][c]) rows[r][c] = value;
+      }
+    }
+  }
 }
 
 function filterPropertyRows(rows: string[][], allowed: string[]) {

@@ -104,7 +104,11 @@ export function parseApiDocMessageFields(
   const pathIndex = findIndex(["节点路径"]);
   const codeIndex = findIndex(["节点代码"]);
   const nameIndex = findIndex(["节点名称", "字段名称"]);
-  const dataTypeIndex = findIndex(["数据类型", "类型"]);
+  // 优先精确匹配「数据类型」，避免表头同时含「节点类型」时被「类型」关键字误命中
+  const exactDataTypeIndex = header.findIndex((cell) =>
+    cell.includes("数据类型"),
+  );
+  const dataTypeIndex = exactDataTypeIndex >= 0 ? exactDataTypeIndex : findIndex(["类型"]);
   const lengthIndex = findIndex(["长度", "maxLength"]);
   const requiredIndex = findIndex(["是否必填"]);
   const descIndex = findIndex(["描述", "说明"]);
