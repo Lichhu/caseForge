@@ -54,4 +54,14 @@ describe("parseEndpointsFromSmpData", () => {
   it("空列表返回空数组", () => {
     expect(parseEndpointsFromSmpData([], [])).toEqual([]);
   });
+
+  it("没有测试信息时仍从服务信息创建端点", () => {
+    expect(parseEndpointsFromSmpData([callItem], [])).toMatchObject([
+      { name: "测试服务", method: "POST", path: "/" },
+    ]);
+  });
+
+  it("测试信息全为无效项时回退到服务信息", () => {
+    expect(parseEndpointsFromSmpData([callItem], [null, undefined])).toHaveLength(1);
+  });
 });

@@ -204,15 +204,15 @@ describe("buildStructuredMarkdownFromSmp", () => {
 
     const requestSection = extractApiDocSection(md, "请求报文");
     expect(requestSection).toContain(
-      "| 节点代码 | 节点名称 | 节点类型 | 数据类型 | 长度 | 是否必填 | 描述 |",
+      "| 节点路径 | 节点代码 | 节点名称 | 节点类型 | 数据类型 | 长度 | 是否必填 | 描述 |",
     );
     expect(requestSection).toContain(
-      "| transaction_sn | 交易流水号 | 单节点 | VARCHAR2 | 19 | Y | 交易序列号，可同msgId |",
+      "| Transaction/Body/request/bizHeader | transaction_sn | 交易流水号 | 单节点 | VARCHAR2 | 19 | Y | 交易序列号，可同msgId |",
     );
     expect(requestSection).toContain(
-      "| CUST_ID | 客户号 |  | VARCHAR2 | 30 | Y |  |",
+      "| Transaction/Body/request/bizBody | CUST_ID | 客户号 |  | VARCHAR2 | 30 | Y |  |",
     );
-    expect(requestSection).not.toContain("节点路径");
+    expect(requestSection).toContain("节点路径");
     expect(requestSection).not.toContain("taskId");
     expect(extractApiDocSection(md, "响应报文")).toBe("");
   });
@@ -302,12 +302,12 @@ describe("buildFieldTableFromSmpNodeLists", () => {
   it("merges head and body lists into 7-column field table", () => {
     const table = buildFieldTableFromSmpNodeLists(requestHead, requestBody)!;
     expect(table).toContain(
-      "| 节点代码 | 节点名称 | 节点类型 | 数据类型 | 长度 | 是否必填 | 描述 |",
+      "| 节点路径 | 节点代码 | 节点名称 | 节点类型 | 数据类型 | 长度 | 是否必填 | 描述 |",
     );
     expect(table).toContain(
-      "| transaction_sn | 交易流水号 |  |  |  | Y |  |",
+      "| Transaction/Body/request/bizHeader | transaction_sn | 交易流水号 |  |  |  | Y |  |",
     );
-    expect(table).toContain("| CUST_ID | 客户号 |  |  |  | Y |  |");
+    expect(table).toContain("| Transaction/Body/request/bizBody | CUST_ID | 客户号 |  |  |  | Y |  |");
   });
 
   it("returns null when both lists are empty", () => {

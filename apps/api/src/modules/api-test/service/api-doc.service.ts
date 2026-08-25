@@ -28,6 +28,7 @@ import { SaveApiDocDto } from "@api-test/dto/save-api-doc.dto";
 import { SaveApiDocGenerationDto } from "@api-test/dto/save-api-doc-generation.dto";
 import { toPublicApiDoc } from "@common/http/public-response.util";
 import { RequestContext } from "@common/audit/request-context";
+import { parseEndpointsFromSmpData } from "@api-test/util/smp-doc.parser";
 
 @Injectable()
 export class ApiDocService {
@@ -159,7 +160,7 @@ export class ApiDocService {
     // SMP 来源的端点由服管同步/刷新维护，保存时仅提交文档文本，
     // 避免按文本重解析覆盖真实端点（如 TCP 连接地址）
     const isSmpManaged =
-      doc.source === "smp" && Boolean(doc.smpData?.callServiceList?.length);
+      Boolean(doc.smpData?.callServiceList?.length);
     if (!isSmpManaged) {
       const endpoints = payload.endpoints?.length
         ? ensureEndpointIds(payload.endpoints)
@@ -208,6 +209,31 @@ export class ApiDocService {
       where: { projectId, transactionId, apiDocId: doc.id },
       order: { sortOrder: "ASC", createdAt: "ASC" },
     });
+    if (!endpoints.length && doc.smpData) {
+      const payloads = parseEndpointsFromSmpData(
+        doc.smpData.callServiceList,
+        doc.smpData.serviceTestList,
+      );
+      if (payloads.length) {
+        await this.endpointRepo.save(
+          payloads.map((endpoint, sortOrder) =>
+            this.endpointRepo.create({
+              ...endpoint,
+              projectId,
+              transactionId,
+              apiDocId: doc.id,
+              sortOrder,
+            }),
+          ),
+        );
+        endpoints.push(
+          ...(await this.endpointRepo.find({
+            where: { projectId, transactionId, apiDocId: doc.id },
+            order: { sortOrder: "ASC", createdAt: "ASC" },
+          })),
+        );
+      }
+    }
     const endpointCount = endpoints.length;
     const transactionCaseCount = await this.caseRepo
       .createQueryBuilder("c")

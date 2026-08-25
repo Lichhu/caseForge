@@ -91,9 +91,7 @@ function cleanCell(value?: string): string {
 
 /**
  * 把 SMP 服务调用信息中的 head/body 字段 list 组装成文档字段表。
- * 列为：节点代码 / 节点名称 / 节点类型 / 数据类型 / 长度 / 是否必填 / 描述
- * （不输出节点路径列，页面不需要展示冗长路径）。
- * nodeUrl 为父路径，nodeCode 为叶子字段名，完整路径 `{nodeUrl}/{nodeCode}` 仅用于行去重。
+ * nodeUrl 作为父路径单独输出，nodeCode 作为叶子字段名；完整路径仅用于行去重。
  */
 export function buildFieldTableFromSmpNodeLists(
   headList?: SmpMessageFieldItem[],
@@ -104,16 +102,18 @@ export function buildFieldTableFromSmpNodeLists(
 
   const seen = new Set<string>();
   const lines = [
-    "| 节点代码 | 节点名称 | 节点类型 | 数据类型 | 长度 | 是否必填 | 描述 |",
+    "| 节点路径 | 节点代码 | 节点名称 | 节点类型 | 数据类型 | 长度 | 是否必填 | 描述 |",
   ];
   for (const item of items) {
     const code = (item.nodeCode || "").trim();
     if (!code) continue;
-    const path = buildSmpNodePath(item);
-    if (!path || seen.has(path)) continue;
-    seen.add(path);
+    const parentPath = buildSmpNodeParentPath(item);
+    const fullPath = parentPath ? `${parentPath}/${code}` : code;
+    if (seen.has(fullPath)) continue;
+    seen.add(fullPath);
     lines.push(
       `| ${[
+        parentPath,
         code,
         cleanCell(item.nodeName),
         cleanCell(item.nodeType),
@@ -128,13 +128,14 @@ export function buildFieldTableFromSmpNodeLists(
   return lines.length > 1 ? lines.join("\n") : null;
 }
 
-function buildSmpNodePath(item: SmpMessageFieldItem): string {
+function buildSmpNodeParentPath(item: SmpMessageFieldItem): string {
   const code = (item.nodeCode || "").trim();
   const nodeUrl = (item.nodeUrl || "").trim().replace(/\/+$/, "");
-  if (!code) return "";
-  if (!nodeUrl) return code;
-  if (nodeUrl === code || nodeUrl.endsWith(`/${code}`)) return nodeUrl;
-  return `${nodeUrl}/${code}`;
+  if (!nodeUrl) return "";
+  if (nodeUrl === code) return "";
+  return nodeUrl.endsWith(`/${code}`)
+    ? nodeUrl.slice(0, -(code.length + 1))
+    : nodeUrl;
 }
 
 function mapSmpIsNotNull(value?: string): "Y" | "N" {

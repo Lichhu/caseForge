@@ -51,6 +51,7 @@ import {
 } from "@api-test/util/api-case-scenarios.util";
 import { assembleBodyFromExample } from "@api-test/util/api-case-body-assembler.util";
 import { buildCaseRequestFromProfile } from "@api-test/util/api-doc-technical-profile.util";
+import { parseEndpointsFromSmpData } from "@api-test/util/smp-doc.parser";
 
 @Injectable()
 export class ApiCaseService {
@@ -811,10 +812,33 @@ export class ApiCaseService {
       doc.structuredMarkdown?.trim() ||
       doc.extractedRawText?.trim() ||
       "";
-    const endpoints = await this.endpointRepo.find({
+    let endpoints = await this.endpointRepo.find({
       where: { projectId, transactionId, apiDocId: doc.id },
       order: { sortOrder: "ASC" },
     });
+    if (!endpoints.length && doc.smpData) {
+      const payloads = parseEndpointsFromSmpData(
+        doc.smpData.callServiceList,
+        doc.smpData.serviceTestList,
+      );
+      if (payloads.length) {
+        await this.endpointRepo.save(
+          payloads.map((endpoint, sortOrder) =>
+            this.endpointRepo.create({
+              ...endpoint,
+              projectId,
+              transactionId,
+              apiDocId: doc.id,
+              sortOrder,
+            }),
+          ),
+        );
+        endpoints = await this.endpointRepo.find({
+          where: { projectId, transactionId, apiDocId: doc.id },
+          order: { sortOrder: "ASC" },
+        });
+      }
+    }
     const results = endpoints.map((ep) => {
       const canonicalDoc = resolveCanonicalDoc(structuredDoc, ep.requestNotes);
       const readiness = assessDocReadiness(canonicalDoc, ep.path, doc.smpData);

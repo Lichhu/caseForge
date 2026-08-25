@@ -47,6 +47,8 @@ export function parseApiDocTableText(text: string): ApiDocTableSection[] {
     const rows: string[][] = [];
     for (const line of sectionText.split("\n")) {
       const cells = line.split("|").map((cell) => cell.trim());
+      if (line.trim().startsWith("|") && cells[0] === "") cells.shift();
+      if (line.trim().endsWith("|") && cells[cells.length - 1] === "") cells.pop();
       const prev = rows[rows.length - 1];
       // 历史文档中单元格内换行会被拆成不含列分隔符的续行：拼回上一行最后一个非空单元格
       if (prev && cells.length === 1 && cells[0]) {

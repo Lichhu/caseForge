@@ -4,14 +4,17 @@ export function parseEndpointsFromSmpData(
   callServiceList: unknown[],
   serviceTestList: unknown[],
 ): ApiEndpointPayload[] {
-  if (!serviceTestList.length) return [];
+  const validTests = serviceTestList.filter(isRecord);
+  const validCalls = callServiceList.filter(isRecord);
+  if (!validTests.length && !validCalls.length) return [];
 
   const endpoints: ApiEndpointPayload[] = [];
-  serviceTestList.forEach((testItem, index) => {
-    // SMP 偶发返回 null 元素：跳过但保留 index，维持与 callServiceList 的对齐
-    if (!isRecord(testItem)) return;
-    const test = testItem;
-    const alignedCall = callServiceList[index];
+  const tests = validTests.length
+    ? serviceTestList.map((item, index) => ({ item, index })).filter(({ item }) => isRecord(item))
+    : validCalls.map((item, index) => ({ item: {}, index }));
+  tests.forEach(({ item: testItem, index }) => {
+    const test = testItem as Record<string, unknown>;
+    const alignedCall = validTests.length ? callServiceList[index] : validCalls[index];
     const callItem = isRecord(alignedCall)
       ? alignedCall
       : (callServiceList.find(isRecord) ?? {});
