@@ -134,6 +134,7 @@ export class ApiTransactionService {
       this.apiDocRepo.create({
         projectId,
         transactionId: transaction.id,
+        source: "upload",
         structuringStatus: "idle",
         ...auditFieldsForCreate(),
       }),

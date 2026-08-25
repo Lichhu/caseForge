@@ -613,7 +613,7 @@ export const useApiTestStore = defineStore("apiTest", {
           } catch {
             peekDoc = null;
           }
-          if (peekDoc?.source === "upload") {
+          if (peekDoc?.source !== "smp") {
             this.apiDoc = peekDoc;
             await this.refreshDocReadiness(projectId, transactionId);
           } else {
