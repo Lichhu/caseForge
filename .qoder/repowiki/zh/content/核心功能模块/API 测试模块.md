@@ -15,7 +15,10 @@
 - [apps/api/src/modules/api-test/service/api-report.service.ts](file://apps/api/src/modules/api-test/service/api-report.service.ts)
 - [apps/api/src/modules/api-test/service/api-data-function.service.ts](file://apps/api/src/modules/api-test/service/api-data-function.service.ts)
 - [apps/api/src/modules/api-test/service/api-step-library.service.ts](file://apps/api/src/modules/api-test/service/api-step-library.service.ts)
-- [apps/api/src/common/ai-workflow/service/ai-workflow.service.ts](file://apps/api/src/common/ai-workflow/service/ai-workflow.service.ts)
+- [apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts](file://apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts)
+- [apps/api/src/modules/api-test/service/api-execution.debug-prerequisite.spec.ts](file://apps/api/src/modules/api-test/service/api-execution.debug-prerequisite.spec.ts)
+- [apps/web/src/utils/debugResponse.util.ts](file://apps/web/src/utils/debugResponse.util.ts)
+- [apps/common/ai-workflow/service/ai-workflow.service.ts](file://apps/common/ai-workflow/service/ai-workflow.service.ts)
 - [apps/web/src/components/api-test/ApiCaseWorkbench.vue](file://apps/web/src/components/api-test/ApiCaseWorkbench.vue)
 - [apps/web/src/components/api-test/ApiDocumentEditor.vue](file://apps/web/src/components/api-test/ApiDocumentEditor.vue)
 - [apps/web/src/components/api-test/ApiDataFunctionMaintainModal.vue](file://apps/web/src/components/api-test/ApiDataFunctionMaintainModal.vue)
@@ -27,12 +30,10 @@
 
 ## 更新摘要
 **变更内容**
-- **增强** SMP数据处理能力：优化交易码同步流程，支持增量更新和状态跟踪
-- **标准化** 结构化文档格式：统一基础信息、服务信息、请求报文、示例报文四个分区
-- **改进** API文档服务：增强端点解析逻辑，支持多种数据源和格式转换
-- **优化** 输入清理机制：新增数据清洗和验证功能，提升数据质量
-- **增强** 端点解析优化：支持从SMP数据构建标准端点结构，提高兼容性
-- **完善** 文档格式统一化：确保不同来源的文档格式一致性，便于AI处理
+- **增强** 调试功能：新增前置步骤支持，自动从依赖步骤提取变量，提升复杂API测试用例的调试效率
+- **改进** 调试工作流：支持认证令牌和会话数据的前置步骤传递，简化多步骤测试场景
+- **优化** 变量提取机制：智能识别并提取前置步骤响应中的关键数据，减少手动配置
+- **完善** 调试记录管理：增强调试历史追踪和上下文信息保存能力
 
 ## 目录
 1. [简介](#简介)
@@ -54,6 +55,7 @@
 - **标准化** 结构化文档格式，统一基础信息、服务信息、请求报文、示例报文分区
 - **改进** API文档服务，增强端点解析和格式转换能力
 - **优化** 输入清理机制，提升数据质量和系统稳定性
+- **新增** 增强的调试功能：支持前置步骤、自动变量提取和多步骤调试工作流
 - 多步骤执行引擎与步骤库管理
 - 单步调试与历史追踪功能
 - 服务管理平台（SMP）集成与自动同步
@@ -106,12 +108,14 @@ CompWorkbench["步骤编辑器<br/>ApiCaseWorkbench.vue"]
 CompDocEditor["文档编辑器<br/>ApiDocumentEditor.vue"]
 CompSmp["SMP同步对话框<br/>ApiTransactionSmpSyncModal.vue"]
 CompDataFn["数据函数维护<br/>ApiDataFunctionMaintainModal.vue"]
+DebugUtils["调试工具<br/>debugResponse.util.ts"]
 end
 Web --> Ctl
 CompWorkbench --> SvcStepLib
 CompDocEditor --> SvcStepLib
 CompSmp --> SvcSmp
 CompDataFn --> SvcDataFn
+DebugUtils --> SvcExec
 Ctl --> SvcCase
 Ctl --> SvcEnv
 Ctl --> SvcExec
@@ -139,6 +143,7 @@ SvcSmp --> SmpParser
 SvcSmp --> SmpBuilder
 SvcSmp --> DocParser
 SvcSmp --> DocFormat
+SvcExec --> E8
 ```
 
 **图表来源**
@@ -148,6 +153,7 @@ SvcSmp --> DocFormat
 - [apps/api/src/modules/api-test/util/smp-structured-doc.builder.ts:1-238](file://apps/api/src/modules/api-test/util/smp-structured-doc.builder.ts#L1-L238)
 - [apps/api/src/modules/api-test/util/api-doc.parser.ts:1-407](file://apps/api/src/modules/api-test/util/api-doc.parser.ts#L1-L407)
 - [apps/api/src/modules/api-test/util/api-doc-format.const.ts:1-17](file://apps/api/src/modules/api-test/util/api-doc-format.const.ts#L1-L17)
+- [apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts:1-34](file://apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts#L1-L34)
 
 章节来源
 - [apps/api/src/modules/api-test/controller/api-test.controller.ts:1-1032](file://apps/api/src/modules/api-test/controller/api-test.controller.ts#L1-L1032)
@@ -158,7 +164,7 @@ SvcSmp --> DocFormat
 - 服务层：
   - 用例服务：管理接口文档、端点与测试用例的生命周期，支持 AI/模板生成用例。
   - 环境服务：管理执行环境与环境服务（多实例），支持变量与密钥合并及加解密。
-  - 执行服务：并发调度用例执行，构建请求、发送 HTTP、断言与统计，产出执行批次与明细。
+  - 执行服务：并发调度用例执行，构建请求、发送 HTTP、断言与统计，产出执行批次与明细。**增强** 支持前置步骤执行和自动变量提取。
   - 报告服务：聚合统计、过滤按交易码、导出 Excel/PDF。
   - **增强** SMP同步服务：优化数据处理流程，支持增量更新和状态跟踪，提供结构化文档构建能力。
   - **改进** API文档服务：增强端点解析逻辑，支持多种数据源和格式转换，统一文档格式。
@@ -166,14 +172,14 @@ SvcSmp --> DocFormat
   - **新增** 数据函数服务：提供动态参数生成，支持模板公式、SQL查询、JavaScript和Python脚本。
   - **增强** AI工作流服务：支持需求文档结构化、案例JSON生成与智能提示词优化。
 - 工具层：
-  - 变量替换：深度递归替换请求中的占位符。
+  - 变量替换：深度递归替换请求中的占位符。**增强** 支持从前置步骤自动提取变量。
   - 断言运行器：基于状态码、响应体、耗时等规则进行断言。
   - 密钥加解密：基于 AES-256-GCM 的对称加密封装。
   - SSL验证绕过：使用Node.js undici Agent实现自签名证书支持。
   - **增强** SMP解析器：优化端点解析逻辑，支持从SMP数据构建标准端点结构。
   - **标准化** 文档构建器：统一结构化文档格式，确保基础信息、服务信息、请求报文、示例报文分区一致性。
   - **改进** 文档解析器：增强格式识别和解析能力，支持多种文档格式。
-- 实体层：以 TypeORM 映射数据库表，建立端点、交易码、用例、执行集、执行批次、数据函数、步骤库、调试记录、环境服务等关系。
+- 实体层：以 TypeORM 映射数据库表，建立端点、交易码、用例、执行集、执行批次、数据函数、步骤库、调试记录、环境服务等关系。**新增** 调试记录实体用于存储调试历史和上下文信息。
 
 章节来源
 - [apps/api/src/modules/api-test/service/smp-sync.service.ts:1-611](file://apps/api/src/modules/api-test/service/smp-sync.service.ts#L1-L611)
@@ -181,6 +187,7 @@ SvcSmp --> DocFormat
 - [apps/api/src/modules/api-test/util/smp-structured-doc.builder.ts:1-238](file://apps/api/src/modules/api-test/util/smp-structured-doc.builder.ts#L1-L238)
 - [apps/api/src/modules/api-test/util/api-doc.parser.ts:1-407](file://apps/api/src/modules/api-test/util/api-doc.parser.ts#L1-L407)
 - [apps/api/src/modules/api-test/util/api-doc-format.const.ts:1-17](file://apps/api/src/modules/api-test/util/api-doc-format.const.ts#L1-L17)
+- [apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts:1-34](file://apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts#L1-L34)
 
 ## 架构总览
 下图展示从 Web 前端到后端控制器、服务与工具的调用链路，以及数据在实体间的流转。
@@ -222,6 +229,47 @@ CTL-->>FE : "返回刷新状态"
 - [apps/api/src/modules/api-test/util/api-doc.parser.ts:38-46](file://apps/api/src/modules/api-test/util/api-doc.parser.ts#L38-L46)
 
 ## 详细组件分析
+
+### 增强的调试功能与前置步骤支持
+- **新增** 前置步骤执行机制
+  - 支持在执行主步骤前执行前置步骤，获取认证令牌或会话数据
+  - 自动提取前置步骤响应中的关键变量，无需手动配置
+  - 支持条件执行：根据前置步骤结果决定是否继续执行后续步骤
+- **优化** 变量提取与传递
+  - 智能识别响应体中的关键字段（如token、sessionId、userId等）
+  - 支持正则表达式匹配和自定义提取规则
+  - 自动将提取的变量注入到后续步骤的请求上下文中
+- **改进** 调试工作流
+  - 支持多步骤调试：按顺序执行多个相关步骤
+  - 实时变量监控：显示每个步骤执行后的变量变化
+  - 调试历史记录：保存每次调试的完整上下文和执行结果
+- **增强** 错误处理和恢复
+  - 前置步骤失败时提供详细的错误信息和修复建议
+  - 支持跳过失败的步骤继续执行后续步骤
+  - 提供调试模式下的详细日志输出
+
+```mermaid
+flowchart TD
+Start(["开始调试"]) --> CheckPreReq{"检查前置步骤"}
+CheckPreReq --> |存在| ExecutePreReq["执行前置步骤"]
+CheckPreReq --> |不存在| ExecuteMain["执行主步骤"]
+ExecutePreReq --> ExtractVars["提取响应变量"]
+ExtractVars --> ValidateVars{"验证变量完整性"}
+ValidateVars --> |完整| InjectVars["注入变量到上下文"]
+ValidateVars --> |不完整| Error["返回错误信息"]
+InjectVars --> ExecuteMain
+ExecuteMain --> SaveRecord["保存调试记录"]
+SaveRecord --> End(["完成"])
+Error --> End
+```
+
+**图表来源**
+- [apps/api/src/modules/api-test/service/api-execution.debug-prerequisite.spec.ts:1-150](file://apps/api/src/modules/api-test/service/api-execution.debug-prerequisite.spec.ts#L1-L150)
+- [apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts:1-34](file://apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts#L1-L34)
+
+章节来源
+- [apps/api/src/modules/api-test/service/api-execution.debug-prerequisite.spec.ts:1-150](file://apps/api/src/modules/api-test/service/api-execution.debug-prerequisite.spec.ts#L1-L150)
+- [apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts:1-34](file://apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts#L1-L34)
 
 ### SMP数据处理增强
 - **增强** 交易码同步流程
@@ -322,19 +370,19 @@ participant Parser as "文档解析器"
 participant SmpParser as "SMP解析器"
 participant DocParser as "文档解析器"
 participant Builder as "文档构建器"
-Parser->>DocParser : isApiDocSectionFormat(text)
-DocParser-->>Parser : 返回格式识别结果
+Parser->>DocParser : "isApiDocSectionFormat(text)"
+DocParser-->>Parser : "返回格式识别结果"
 alt 是结构化文档
-Parser->>DocParser : parseEndpointsFromApiDocSections(text)
-DocParser-->>Parser : 返回端点列表
+Parser->>DocParser : "parseEndpointsFromApiDocSections(text)"
+DocParser-->>Parser : "返回端点列表"
 else 不是结构化文档
-Parser->>Parser : parseEndpointsFromText(text)
-Parser-->>Parser : 返回端点列表
+Parser->>Parser : "parseEndpointsFromText(text)"
+Parser-->>Parser : "返回端点列表"
 end
-Parser->>SmpParser : parseEndpointsFromSmpData(callList, testList)
-SmpParser-->>Parser : 返回标准化端点
-Parser->>Builder : buildStructuredMarkdownFromEndpoints(endpoints)
-Builder-->>Parser : 返回结构化文档
+Parser->>SmpParser : "parseEndpointsFromSmpData(callList, testList)"
+SmpParser-->>Parser : "返回标准化端点"
+Parser->>Builder : "buildStructuredMarkdownFromEndpoints(endpoints)"
+Builder-->>Parser : "返回结构化文档"
 ```
 
 **图表来源**
@@ -473,6 +521,7 @@ CTRL-->>UI : "显示刷新状态"
 - **新增** 调试记录（ApiStepDebugRecordEntity）
   - 关键字段：项目ID、用例ID、步骤ID、调试记录数据、创建时间。
   - 支持按用例和步骤查询调试历史。
+  - **增强** 支持存储前置步骤执行结果和提取的变量信息。
 - **新增** 环境服务（ApiTestEnvironmentServiceEntity）
   - 关键字段：环境ID、服务名称、传输协议、基础URL、SSL验证配置。
   - **支持** ignoreSslVerify字段：控制是否跳过HTTPS证书验证。
@@ -676,7 +725,7 @@ API_TEST_ENVIRONMENT_SERVICE ||--o{ API_TEST_RUN : "被引用"
   - 生成历史版本管理，支持回滚与对比。
 
 章节来源
-- [apps/api/src/common/ai-workflow/service/ai-workflow.service.ts:1-619](file://apps/api/src/common/ai-workflow/service/ai-workflow.service.ts#L1-L619)
+- [apps/common/ai-workflow/service/ai-workflow.service.ts:1-619](file://apps/common/ai-workflow/service/ai-workflow.service.ts#L1-L619)
 - [apps/api/src/modules/case-editor/service/case-pipeline.service.ts:49-209](file://apps/api/src/modules/case-editor/service/case-pipeline.service.ts#L49-L209)
 - [apps/web/src/views/ApiTestDashboardView.vue:28-100](file://apps/web/src/views/ApiTestDashboardView.vue#L28-L100)
 
@@ -687,6 +736,7 @@ API_TEST_ENVIRONMENT_SERVICE ||--o{ API_TEST_RUN : "被引用"
   - 使用 AES-256-GCM 对称加密，密钥派生自应用密钥或环境变量；密文以 Base64 存储。
 - 变量替换
   - 支持 {{var}} 与 {var} 两种语法，深层递归替换请求体、查询、路径与头。
+  - **增强** 支持从前置步骤自动提取的变量注入。
 - 敏感信息脱敏
   - 在请求快照中对 Authorization、Token、Secret 等头进行掩码显示。
 
@@ -720,6 +770,10 @@ API_TEST_ENVIRONMENT_SERVICE ||--o{ API_TEST_RUN : "被引用"
   - 支持服务级SSL验证绕过配置，适用于自签名证书环境。
   - 调试运行支持显式覆盖SSL验证配置。
   - 使用undici Agent实现高效的SSL验证绕过。
+- **增强** 前置步骤执行
+  - 支持在执行主步骤前执行前置步骤获取认证信息。
+  - 自动提取前置步骤响应中的关键变量。
+  - 支持条件执行和错误恢复机制。
 
 章节来源
 - [apps/api/src/modules/api-test/service/api-execution.service.ts:22-835](file://apps/api/src/modules/api-test/service/api-execution.service.ts#L22-L835)
@@ -772,6 +826,7 @@ API_TEST_ENVIRONMENT_SERVICE ||--o{ API_TEST_RUN : "被引用"
 - **新增** 数据函数服务支持多种数据库驱动和脚本语言执行。
 - **增强** AI工作流服务提供需求结构化与案例生成能力。
 - **支持** SSL验证绕过功能依赖Node.js undici Agent，提供底层网络请求控制。
+- **新增** 调试记录服务依赖调试记录实体，支持调试历史的持久化存储。
 - 实体层通过外键与索引维护一致性与查询效率。
 
 ```mermaid
@@ -802,6 +857,7 @@ SVC_STEP --> E3["步骤库实体"]
 SVC_SMP --> E4["交易码实体"]
 SVC_DATAFN --> E5["数据函数实体"]
 SVC_EXEC --> E6["环境服务实体"]
+SVC_EXEC --> E7["调试记录实体"]
 ```
 
 **图表来源**
@@ -810,6 +866,7 @@ SVC_EXEC --> E6["环境服务实体"]
 - [apps/api/src/modules/api-test/util/smp-doc.parser.ts:1-83](file://apps/api/src/modules/api-test/util/smp-doc.parser.ts#L1-L83)
 - [apps/api/src/modules/api-test/util/smp-structured-doc.builder.ts:1-238](file://apps/api/src/modules/api-test/util/smp-structured-doc.builder.ts#L1-L238)
 - [apps/api/src/modules/api-test/util/api-doc.parser.ts:1-407](file://apps/api/src/modules/api-test/util/api-doc.parser.ts#L1-L407)
+- [apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts:1-34](file://apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts#L1-L34)
 
 章节来源
 - [apps/api/src/modules/api-test/controller/api-test.controller.ts:1-1032](file://apps/api/src/modules/api-test/controller/api-test.controller.ts#L1-L1032)
@@ -830,6 +887,7 @@ SVC_EXEC --> E6["环境服务实体"]
 - **增强** AI生成性能：支持并发处理多个测试要点，提高整体生成效率。
 - **优化** 文档处理性能：结构化文档构建采用增量更新，避免全量重建。
 - **优化** 端点解析性能：支持多种数据源的快速解析和格式转换。
+- **增强** 前置步骤执行性能：支持异步执行和缓存机制，减少重复请求开销。
 - 日志与监控：建议在控制器与服务层增加关键指标埋点（吞吐、P95/P99、错误分布）。
 - 导出性能：Excel/PDF 导出为 CPU 密集型任务，建议异步化并在前端轮询结果。
 
@@ -848,6 +906,8 @@ SVC_EXEC --> E6["环境服务实体"]
   - **增强** "AI生成失败"：检查AI服务配置、网络连通与输入数据质量。
   - **增强** "文档格式错误"：检查文档分区结构是否符合标准格式要求。
   - **增强** "端点解析失败"：检查SMP数据格式和完整性。
+  - **新增** "前置步骤执行失败"：检查前置步骤配置和依赖关系，查看调试记录中的错误信息。
+  - **新增** "变量提取失败"：检查前置步骤响应格式和变量提取规则配置。
 - 排查步骤
   - 从执行批次详情入手，核对请求快照与响应快照。
   - 使用报告过滤交易码，缩小问题范围。
@@ -860,12 +920,15 @@ SVC_EXEC --> E6["环境服务实体"]
   - **增强** 查看AI生成历史记录与错误日志。
   - **增强** 检查结构化文档格式是否符合标准分区要求。
   - **增强** 验证端点解析逻辑和数据源格式。
+  - **新增** 检查前置步骤的执行结果和变量提取情况。
+  - **新增** 验证变量注入和传递机制的正确性。
 
 章节来源
 - [apps/api/src/modules/api-test/service/smp-sync.service.ts:171-186](file://apps/api/src/modules/api-test/service/smp-sync.service.ts#L171-L186)
 - [apps/api/src/modules/api-test/service/smp-sync.service.ts:237-245](file://apps/api/src/modules/api-test/service/smp-sync.service.ts#L237-L245)
 - [apps/api/src/modules/api-test/util/smp-doc.parser.ts:3-45](file://apps/api/src/modules/api-test/util/smp-doc.parser.ts#L3-L45)
 - [apps/api/src/modules/api-test/util/smp-structured-doc.builder.ts:28-86](file://apps/api/src/modules/api-test/util/smp-structured-doc.builder.ts#L28-L86)
+- [apps/api/src/modules/api-test/service/api-execution.debug-prerequisite.spec.ts:1-150](file://apps/api/src/modules/api-test/service/api-execution.debug-prerequisite.spec.ts#L1-L150)
 
 ## 结论
 该模块以清晰的分层架构实现了从接口文档到测试用例、从环境管理到执行与报告的全链路能力。通过可插拔的环境服务、强健的断言引擎与并发执行策略，满足了不同规模项目的 API 测试需求。**重大增强**包括：
@@ -876,16 +939,17 @@ SVC_EXEC --> E6["环境服务实体"]
 - **优化** 输入清理机制：新增了数据清洗和验证功能，提升了数据质量和系统稳定性。
 - **增强** 端点解析优化：支持从SMP数据构建标准端点结构，提高了解析准确性和效率。
 - **完善** 文档格式统一化：确保不同来源的文档格式一致性，便于AI处理和后续自动化流程。
+- **新增** 增强的调试功能：支持前置步骤执行、自动变量提取和多步骤调试工作流，大幅提升了复杂API测试的调试效率。
 - **支持** 多步骤执行引擎：提供了灵活的用例编排能力，支持复杂业务场景的多步骤测试。
 - **支持** 步骤库管理系统：实现了步骤模板的创建、管理和复用，提升了测试用例的开发效率。
-- **支持** 单步调试与历史追踪：提供了完善的调试功能，大幅提升了问题定位效率。
+- **增强** 单步调试与历史追踪：提供了完善的调试功能，大幅提升了问题定位效率。
 - **增强** 服务管理平台（SMP）集成：实现了与企业服务治理平台的无缝对接，支持交易码自动同步与文档实时更新。
 - **支持** 数据函数系统：提供了灵活的动态参数生成能力，支持多种数据源和执行方式。
 - **增强** AI驱动测试生成：显著提升了测试用例生成的智能化水平。
 - **支持** SSL验证绕过功能：提供了灵活的HTTPS证书验证配置，支持自签名证书环境下的测试执行。
 - **增强** 前端体验优化：提供了直观的界面操作，降低了用户使用门槛。
 
-建议后续在异步导出、指标监控与重试策略方面进一步增强，同时持续优化AI生成质量和SMP集成稳定性。在生产环境中应谨慎使用SSL验证绕过功能，确保网络安全。
+建议后续在异步导出、指标监控与重试策略方面进一步增强，同时持续优化AI生成质量和SMP集成稳定性。在生产环境中应谨慎使用SSL验证绕过功能，确保网络安全。**特别关注**前置步骤执行的性能优化和错误处理机制的进一步完善。
 
 ## 附录
 - 前端调用参考
@@ -894,11 +958,13 @@ SVC_EXEC --> E6["环境服务实体"]
   - **支持** 调试记录的API调用示例：查询和清空调试历史。
   - **增强** SMP同步和数据函数管理的API调用示例。
   - **支持** 调试运行的API调用示例：支持SSL验证绕过参数。
+  - **新增** 前置步骤调试的API调用示例：支持自动变量提取和步骤依赖配置。
 - 类型定义参考
   - 包含用例优先级、极性、状态、断言类型、请求/期望结构等，前后端一致约束。
   - **支持** 步骤相关类型定义：ApiCaseStep、ApiStepTarget、ApiCaseExport。
   - **增强** SMP相关类型定义和数据函数配置结构。
   - **支持** 环境服务SSL验证配置类型：ignoreSslVerify布尔字段。
+  - **新增** 调试记录相关类型定义：支持存储前置步骤执行结果和变量信息。
 
 章节来源
 - [apps/web/src/api/apiTestClient.ts:149-550](file://apps/web/src/api/apiTestClient.ts#L149-L550)
@@ -906,3 +972,4 @@ SVC_EXEC --> E6["环境服务实体"]
 - [apps/api/src/modules/api-test/service/smp-client.service.ts:10-94](file://apps/api/src/modules/api-test/service/smp-client.service.ts#L10-L94)
 - [apps/api/src/modules/api-test/dto/save-data-function.dto.ts:1-50](file://apps/api/src/modules/api-test/dto/save-data-function.dto.ts#L1-L50)
 - [apps/api/src/modules/api-test/dto/execution-platform.dto.ts:94-97](file://apps/api/src/modules/api-test/dto/execution-platform.dto.ts#L94-L97)
+- [apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts:1-34](file://apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts#L1-L34)

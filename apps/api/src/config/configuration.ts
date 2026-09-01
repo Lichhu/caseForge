@@ -69,4 +69,25 @@ export default (): AppConfig => ({
       "serviceManagementGovernanceController/selectTestInfoList",
     requestTimeoutMs: Number(process.env.SMP_REQUEST_TIMEOUT_MS ?? 90000),
   },
+  requirementPlatform: {
+    syncIntervalMs: Number(process.env.REQUIREMENT_SYNC_INTERVAL_MS ?? 600000),
+  },
+  ocuPush: {
+    enabled: process.env.OCU_PUSH_ENABLED === "true",
+    url:
+      process.env.OCU_PUSH_URL ??
+      "http://36.114.30.72:8888/api/v1/ocu/sendMessage",
+    ocuId: process.env.OCU_ID ?? "",
+    ocuSecret: process.env.OCU_SECRET ?? "",
+    serverURL: process.env.OCU_SERVER_URL ?? "",
+    bearerToken: process.env.OCU_BEARER_TOKEN ?? "",
+    portalBaseUrl: process.env.OCU_PORTAL_BASE_URL ?? "http://localhost:33550",
+    overdueScanIntervalMs: Number(
+      process.env.OCU_OVERDUE_SCAN_INTERVAL_MS ?? 600000,
+    ),
+    overdueThresholdMs: Number(
+      process.env.OCU_OVERDUE_THRESHOLD_MS ?? 24 * 60 * 60 * 1000,
+    ),
+    concurrency: Number(process.env.OCU_PUSH_CONCURRENCY ?? 3),
+  },
 });

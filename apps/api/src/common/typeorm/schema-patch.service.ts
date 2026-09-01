@@ -27,6 +27,7 @@ export class SchemaPatchService implements OnModuleInit {
     await this.ensureSummaryStructDocColumn();
     await this.ensureStructDocParseMetaColumns();
     await this.ensureServiceIgnoreSslVerifyColumn();
+    await this.ensureApiRequirementOverdueNotifiedColumn();
     await migrateStructDocProjectIndex(this.dataSource);
     await ensureCaseEditorUtf8mb4TextColumns(this.dataSource, this.logger);
     await applyApiTestSchemaMigrations(this.dataSource);
@@ -307,6 +308,31 @@ export class SchemaPatchService implements OnModuleInit {
         AFTER sortOrder
     `);
     this.logger.log("api_test_environment_service.ignoreSslVerify 列已补齐");
+  }
+
+  private async ensureApiRequirementOverdueNotifiedColumn() {
+    const tables: Array<Record<string, string>> = await this.dataSource.query(
+      "SHOW TABLES LIKE 'api_requirement'",
+    );
+    if (tables.length === 0) {
+      return;
+    }
+    const rows: Array<{ Field: string }> = await this.dataSource.query(
+      "SHOW COLUMNS FROM api_requirement LIKE 'overdueNotifiedAt'",
+    );
+    if (rows.length > 0) {
+      return;
+    }
+
+    this.logger.warn(
+      "检测到 api_requirement 缺少 overdueNotifiedAt 列，正在自动执行 schema 补丁…",
+    );
+    await this.dataSource.query(`
+      ALTER TABLE api_requirement
+        ADD COLUMN overdueNotifiedAt DATETIME NULL COMMENT '超期未分发提醒发送时间'
+        AFTER refuseReason
+    `);
+    this.logger.log("api_requirement.overdueNotifiedAt 列已补齐");
   }
 
   /**

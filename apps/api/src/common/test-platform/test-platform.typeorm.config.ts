@@ -7,6 +7,7 @@ import { getAppConfig } from "@config/app-config.util";
 import { TestPlatformCaseEntity } from "./entity/test-platform-case.entity";
 import { TestPlatformCaseStepEntity } from "./entity/test-platform-case-step.entity";
 import { TestPlatformProjectEntity } from "./entity/test-platform-project.entity";
+import { TestPlatformSysUserEntity } from "./entity/test-platform-sys-user.entity";
 
 export function createTestPlatformTypeOrmConfig(
   configService: ConfigService,
@@ -25,6 +26,7 @@ export function createTestPlatformTypeOrmConfig(
       TestPlatformProjectEntity,
       TestPlatformCaseEntity,
       TestPlatformCaseStepEntity,
+      TestPlatformSysUserEntity,
     ],
   };
 }

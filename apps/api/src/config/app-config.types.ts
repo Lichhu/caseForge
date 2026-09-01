@@ -55,4 +55,28 @@ export interface AppConfig {
     /** demo 模式请求超时（毫秒） */
     requestTimeoutMs: number;
   };
+  /** 需求平台集成配置 */
+  requirementPlatform: {
+    /** 定时同步间隔（毫秒），0 表示关闭定时同步 */
+    syncIntervalMs: number;
+  };
+  /** 敏行消息推送（OCU）集成配置 */
+  ocuPush: {
+    /** 是否启用推送；关闭时仅输出日志不真实发送 */
+    enabled: boolean;
+    /** 推送接口地址 */
+    url: string;
+    ocuId: string;
+    ocuSecret: string;
+    serverURL: string;
+    bearerToken: string;
+    /** 需求平台前端访问前缀，用于拼装消息链接（如 http://localhost:33550） */
+    portalBaseUrl: string;
+    /** 超期未分发扫描间隔（毫秒），0 表示关闭定时扫描 */
+    overdueScanIntervalMs: number;
+    /** 超期阈值（毫秒），默认 24 小时 */
+    overdueThresholdMs: number;
+    /** 逐人推送并发数，默认 3 */
+    concurrency: number;
+  };
 }

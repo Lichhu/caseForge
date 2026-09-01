@@ -9,6 +9,7 @@ import { TEST_PLATFORM_CONNECTION } from "./test-platform.constants";
 import { TestPlatformCaseEntity } from "./entity/test-platform-case.entity";
 import { TestPlatformCaseStepEntity } from "./entity/test-platform-case-step.entity";
 import { TestPlatformProjectEntity } from "./entity/test-platform-project.entity";
+import { TestPlatformSysUserEntity } from "./entity/test-platform-sys-user.entity";
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { TestPlatformProjectEntity } from "./entity/test-platform-project.entity
         TestPlatformProjectEntity,
         TestPlatformCaseEntity,
         TestPlatformCaseStepEntity,
+        TestPlatformSysUserEntity,
       ],
       TEST_PLATFORM_CONNECTION,
     ),

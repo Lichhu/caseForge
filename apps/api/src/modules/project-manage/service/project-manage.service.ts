@@ -144,8 +144,13 @@ export class ProjectManageService {
 
     const keyword = input.trim();
     if (keyword) {
+      // api-test 平台额外支持按交易码 / 接口名称匹配（子查询 api_transaction）
+      const transactionMatch =
+        platform === "api-test"
+          ? " OR EXISTS (SELECT 1 FROM api_transaction txn WHERE txn.projectId = project.id AND (txn.code LIKE :keyword OR txn.name LIKE :keyword))"
+          : "";
       query.andWhere(
-        "(project.title LIKE :keyword OR project.requirementNo LIKE :keyword)",
+        `(project.title LIKE :keyword OR project.requirementNo LIKE :keyword${transactionMatch})`,
         { keyword: `%${keyword}%` },
       );
     }

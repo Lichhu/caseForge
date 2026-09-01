@@ -667,7 +667,7 @@ function setJsonValueByLastSegment(
 function isDataFunctionExpression(value: unknown): boolean {
   return (
     typeof value === "string" &&
-    /\$\{[A-Z][A-Z0-9_]*\([^{}]*\)(?:\.[A-Za-z_][\w]*)?\}/.test(value)
+    /\$\{[A-Z][A-Z0-9_-]*\([^{}]*\)(?:\.[A-Za-z_][\w]*)?\}/.test(value)
   );
 }
 

@@ -33,6 +33,34 @@ describe("ApiDataFunctionService", () => {
     ).resolves.toEqual({ body: { id: "0023" } });
   });
 
+  it("resolves function names containing hyphens", async () => {
+    const hyphenService = new ApiDataFunctionService(
+      {} as never,
+      {
+        find: jest.fn().mockResolvedValue([
+          {
+            id: "fn-date-hyphen",
+            projectId: "p1",
+            name: "DATE_YYYY-MM-DD",
+            params: [],
+            type: "template",
+            config: {
+              mode: "builder",
+              parts: [{ kind: "time", value: "yyyy-MM-dd" }],
+            },
+            description: "",
+          },
+        ]),
+      } as never,
+    );
+
+    await expect(
+      hyphenService.resolveDeep("p1", { msgTime: "${DATE_YYYY-MM-DD()}" }),
+    ).resolves.toEqual({
+      msgTime: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+    });
+  });
+
   it("loads shared functions without project filtering", async () => {
     await service.resolveDeep("another-project", "${MSG_ID('00', '3')}");
 

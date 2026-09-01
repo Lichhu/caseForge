@@ -1,7 +1,14 @@
 <template>
   <aside class="project-sidebar">
     <div class="project-section-title">
-      <strong>项目管理</strong>
+      <a-select
+        class="module-select"
+        value="project"
+        :bordered="false"
+        :options="moduleOptions"
+        aria-label="管理模块"
+        @change="handleModuleChange"
+      />
       <span>以需求为维度，手动新建项目</span>
     </div>
 
@@ -15,26 +22,43 @@
       </a-button>
     </div>
 
-    <a-input
-      v-model:value="keyword"
-      class="project-search"
-      allow-clear
-      placeholder="输入需求编号或需求名称"
-    >
-      <template #prefix><SearchOutlined /></template>
-    </a-input>
-
-    <div class="project-month-row">
-      <a-date-picker
-        v-model:value="selectedMonth"
-        picker="month"
-        value-format="YYYY-MM"
-        popup-class-name="project-month-popup"
+    <div class="project-filter-row">
+      <a-input
+        v-model:value="keyword"
+        class="project-search"
         allow-clear
-        placeholder="筛选年月"
-        @change="handleMonthChange"
-      />
-      <span v-if="selectedMonth" class="project-month-total">{{ monthCaseCount }} 条案例</span>
+        :placeholder="isApiPlatform ? '搜索需求编号 / 需求名 / 交易码' : '搜索需求编号或需求名称'"
+      >
+        <template #prefix><SearchOutlined /></template>
+      </a-input>
+      <div class="filter-icon-wrap">
+        <button
+          type="button"
+          class="filter-icon-btn"
+          :class="{ active: Boolean(selectedMonth) }"
+          aria-label="筛选年月"
+        >
+          <CalendarOutlined />
+        </button>
+        <!-- 透明日期选择器覆盖图标按钮：点击直接弹年月面板 -->
+        <a-date-picker
+          v-model:value="selectedMonth"
+          class="filter-picker-overlay"
+          picker="month"
+          value-format="YYYY-MM"
+          popup-class-name="project-month-popup"
+          input-read-only
+          placeholder="筛选年月"
+          @change="handleMonthChange"
+        />
+      </div>
+    </div>
+
+    <div v-if="selectedMonth" class="project-month-chip">
+      <span>{{ selectedMonth }} · {{ monthCaseCount }} 条案例</span>
+      <button type="button" aria-label="清除年月筛选" @click="clearMonthFilter">
+        <CloseOutlined />
+      </button>
     </div>
 
     <div v-if="deleteMode" class="project-batch-bar action-toolbar action-toolbar--compact">
@@ -212,7 +236,15 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons-vue';
+import { useRouter } from 'vue-router';
+import {
+  CalendarOutlined,
+  CloseOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  PlusOutlined,
+  SearchOutlined,
+} from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
 import { PROJECT_PAGE_SIZE_OPTIONS } from '@case-forge/shared';
 import { useCaseForgeStore } from '@/stores/caseForge';
@@ -228,7 +260,22 @@ const props = withDefaults(
 
 const caseStore = useCaseForgeStore();
 const apiStore = useApiTestStore();
+const router = useRouter();
 const isApiPlatform = computed(() => props.platform === 'api-test');
+
+/** 管理模块下拉：案例管理待后续开发 */
+const moduleOptions = [
+  { value: 'requirement', label: '需求管理' },
+  { value: 'project', label: '项目管理' },
+  { value: 'case', label: '案例管理（待开发）', disabled: true },
+];
+
+function handleModuleChange(value: string) {
+  if (value === 'requirement') {
+    router.push({ path: '/api-test/requirement' });
+  }
+  // 项目管理即当前侧栏列表，无需跳转
+}
 const projectList = computed(() =>
   isApiPlatform.value ? apiStore.projects : caseStore.projects,
 );
@@ -318,6 +365,11 @@ async function reloadProjects(options?: {
 
 function handleMonthChange(value: string | null) {
   void reloadProjects({ page: 1, month: value || '' });
+}
+
+function clearMonthFilter() {
+  selectedMonth.value = '';
+  void reloadProjects({ page: 1, month: '' });
 }
 
 function goPrevPage() {
@@ -578,6 +630,116 @@ function projectMeta(project: { runCount: number; requirementNo?: string | null 
 </script>
 
 <style scoped>
+/* 搜索行：输入框占满 + 年月筛选收进图标按钮，避免并排双框 */
+.project-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-filter-row .project-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.filter-icon-wrap {
+  position: relative;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+}
+
+.filter-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border: 1px solid #d0d5dd;
+  border-radius: 4px;
+  background: #fff;
+  color: #667085;
+  font-size: 15px;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease,
+    background-color 0.12s ease;
+}
+
+.filter-icon-wrap:hover .filter-icon-btn {
+  border-color: var(--cf-brand);
+  color: var(--cf-brand);
+}
+
+.filter-icon-btn.active {
+  border-color: var(--cf-brand);
+  background: #fff5f6;
+  color: var(--cf-brand);
+}
+
+/* 透明日期选择器覆盖图标按钮，点击直接弹出年月面板 */
+.filter-picker-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* 已选年月的轻量提示条，可一键清除 */
+.project-month-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: -6px;
+  padding: 3px 8px;
+  border: 1px dashed #e4e7ec;
+  border-radius: 4px;
+  background: #f9fafb;
+  color: #667085;
+  font-size: 11px;
+}
+
+.project-month-chip button {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: #98a2b3;
+  font-size: 10px;
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.project-month-chip button:hover {
+  color: var(--cf-brand);
+}
+
+/* 管理模块下拉：替代原标题文本，保持标题字号与字重 */
+.module-select {
+  width: 100%;
+  margin-left: -8px;
+}
+
+.module-select :deep(.ant-select-selector) {
+  padding-inline: 8px !important;
+  border-radius: 6px;
+  transition: background-color 0.12s ease;
+}
+
+.module-select :deep(.ant-select-selector:hover) {
+  background: #f5f6f8;
+}
+
+.module-select :deep(.ant-select-selection-item) {
+  color: #1d2939;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
 .project-list :deep(.ant-spin-nested-loading),
 .project-list :deep(.ant-spin-container) {
   display: flex;

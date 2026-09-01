@@ -156,5 +156,6 @@ export * from './api-test';
 export * from './api-execution-profile.util';
 export * from './xml-format.util';
 export * from './platform';
+export * from './requirement-platform';
 export * from './scenario-scope';
 export * from './struct-doc';

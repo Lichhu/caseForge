@@ -17,5 +17,9 @@ export function getAppConfig(configService: ConfigService): AppConfig {
     minio: configService.get<AppConfig["minio"]>("minio")!,
     aiWorkflow: configService.get<AppConfig["aiWorkflow"]>("aiWorkflow")!,
     smp: configService.get<AppConfig["smp"]>("smp")!,
+    requirementPlatform: configService.get<AppConfig["requirementPlatform"]>(
+      "requirementPlatform",
+    )!,
+    ocuPush: configService.get<AppConfig["ocuPush"]>("ocuPush")!,
   };
 }

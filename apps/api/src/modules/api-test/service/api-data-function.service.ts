@@ -343,7 +343,7 @@ export class ApiDataFunctionService {
     context?: DataFunctionContext,
   ) {
     const pattern =
-      /\$\{([A-Z][A-Z0-9_]*)\(([^{}]*)\)(?:\.([A-Za-z_][\w]*))?\}/g;
+      /\$\{([A-Z][A-Z0-9_-]*)\(([^{}]*)\)(?:\.([A-Za-z_][\w]*))?\}/g;
     let result = text;
     for (let depth = 0; depth < 5 && pattern.test(result); depth += 1) {
       pattern.lastIndex = 0;

@@ -26,6 +26,31 @@ describe("assembleBodyFromExample missing paths", () => {
       "${MSG($.Transaction.Header.sysHeader.clientCd)}",
     );
   });
+  it("preserves hyphenated function names in msgTime against dynamic header refresh (JSON)", () => {
+    const result = assembleBodyFromExample({
+      exampleMessage:
+        '{"Transaction":{"Header":{"sysHeader":{"msgTime":"${DATE_YYYY-MM-DD()}","msgDate":"20260522"}}}}',
+      overrides: {},
+      messageFormat: "json",
+      refreshDynamicHeaders: true,
+    });
+    const parsed = JSON.parse(result.body);
+    expect(parsed.Transaction.Header.sysHeader.msgTime).toBe(
+      "${DATE_YYYY-MM-DD()}",
+    );
+  });
+
+  it("preserves hyphenated function names in msgTime against dynamic header refresh (XML)", () => {
+    const result = assembleBodyFromExample({
+      exampleMessage:
+        "<Transaction><Header><sysHeader><msgTime>${DATE_YYYY-MM-DD()}</msgTime></sysHeader></Header></Transaction>",
+      overrides: {},
+      messageFormat: "xml",
+      refreshDynamicHeaders: true,
+    });
+    expect(result.body).toContain("<msgTime>${DATE_YYYY-MM-DD()}</msgTime>");
+  });
+
   it("creates missing JSON channel path", () => {
     const result = assembleBodyFromExample({
       exampleMessage: '{"Transaction":{}}',

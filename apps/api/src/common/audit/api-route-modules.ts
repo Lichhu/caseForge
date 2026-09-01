@@ -6,4 +6,5 @@ export const API_ROUTE_MODULES = new Set([
   "dynamic-instruct",
   "scenario",
   "api-test",
+  "requirement-platform",
 ]);

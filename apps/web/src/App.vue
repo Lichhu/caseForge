@@ -24,7 +24,10 @@ import { configureAppMessage, dismissAppMessages } from '@/utils/globalFeedback'
 
 const route = useRoute();
 const isPlatformRoute = computed(
-  () => route.name === 'case-forge' || route.name === 'api-test',
+  () =>
+    route.name === 'case-forge' ||
+    route.name === 'api-test' ||
+    route.name === 'requirement-platform',
 );
 const current = computed(() => getPlatformByRoute(route));
 
