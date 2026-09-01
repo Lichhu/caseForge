@@ -10,8 +10,8 @@
 - [KeyValueRowsEditor.vue](file://apps/web/src/components/api-test/KeyValueRowsEditor.vue)
 - [ApiTransactionSmpSyncModal.vue](file://apps/web/src/components/api-test/ApiTransactionSmpSyncModal.vue)
 - [ApiDataFunctionMaintainModal.vue](file://apps/web/src/components/api-test/ApiDataFunctionMaintainModal.vue)
-- [SmpDocumentViewer.vue](file://apps/web/src/components/api-test/SmpDocumentViewer.vue)
 - [AssertionRowsEditor.vue](file://apps/web/src/components/api-test/AssertionRowsEditor.vue)
+- [overlay-z-index.ts](file://apps/web/src/constants/overlay-z-index.ts)
 - [apiTest.ts](file://apps/web/src/stores/apiTest.ts)
 - [apiTestClient.ts](file://apps/web/src/api/apiTestClient.ts)
 - [casePayloadFormat.util.ts](file://apps/web/src/utils/casePayloadFormat.util.ts)
@@ -23,11 +23,11 @@
 
 ## 更新摘要
 **变更内容**
-- 新增服管平台集成组件：ApiTransactionSmpSyncModal 用于交易码同步，SmpDocumentViewer 用于服务文档查看
-- 新增数据函数管理组件：ApiDataFunctionMaintainModal 支持规则生成和数据库查询两种函数类型
-- 新增断言编辑器组件：AssertionRowsEditor 提供可视化的断言编辑界面
-- 增强现有组件：ApiCaseWorkbench、ApiDocumentEditor、ApiTestReport 的功能扩展
-- 完善状态管理和API客户端：新增SMP和数据函数相关的状态管理与接口调用
+- 移除了独立的SmpDocumentViewer组件并集成到主编辑器，简化了前端界面架构
+- 增强了Excel导入功能和前端解析能力，支持合并单元格处理和换行文本压缩
+- 优化了服管平台数据集成，在文档编辑器中直接展示服务调用信息和测试数据
+- 改进了案例生成流程，支持更灵活的渠道数据管理和步骤编排
+- **新增** 增强的嵌套覆盖层z-index管理，优化模态对话框层级显示，提升断言生成工作流体验
 
 ## 目录
 1. [简介](#简介)
@@ -49,6 +49,7 @@
 - 测试报告的数据可视化与统计分析
 - 组件间通信机制、状态同步与数据流转的实现方案
 - **新增** 服管平台集成、数据函数管理、断言编辑等增强功能
+- **新增** 增强的嵌套覆盖层z-index管理，优化模态对话框层级显示
 
 ## 项目结构
 API 测试组件位于前端应用的 Web 子项目中，采用 Vue 3 + Pinia 的架构模式，配合共享工具库与 API 客户端，形成"视图层组件 + 状态管理 + 数据访问"的清晰分层。
@@ -57,7 +58,7 @@ API 测试组件位于前端应用的 Web 子项目中，采用 Vue 3 + Pinia �
 graph TB
 subgraph "视图层"
 A["ApiTestDashboardView.vue<br/>工作区导航与路由承载"]
-B["ApiDocumentEditor.vue<br/>接口文档编辑器"]
+B["ApiDocumentEditor.vue<br/>接口文档编辑器集成服管平台数据"]
 C["ApiCaseWorkbench.vue<br/>案例工作台"]
 D["ApiTestRunner.vue<br/>测试运行器"]
 E["ApiTestReport.vue<br/>测试报告"]
@@ -65,7 +66,6 @@ F["ApiEnvironmentMaintainModal.vue<br/>环境维护弹窗"]
 G["KeyValueRowsEditor.vue<br/>键值对编辑器"]
 H["ApiTransactionSmpSyncModal.vue<br/>服管平台同步"]
 I["ApiDataFunctionMaintainModal.vue<br/>数据函数管理"]
-J["SmpDocumentViewer.vue<br/>服务文档查看"]
 K["AssertionRowsEditor.vue<br/>断言编辑器"]
 end
 subgraph "状态管理"
@@ -79,6 +79,7 @@ U1["casePayloadFormat.util.ts<br/>案例请求/预期解析与美化"]
 U2["api-doc-table.util.ts<br/>文档表格解析/序列化"]
 U3["scenarioLibrary.ts<br/>场景提示词工具"]
 U4["assertionRows.util.ts<br/>断行编辑工具"]
+U5["overlay-z-index.ts<br/>覆盖层z-index常量"]
 end
 A --> B
 A --> C
@@ -93,12 +94,13 @@ D --> S
 E --> S
 H --> S
 I --> L
-J --> B
 S --> L
 C --> U1
 B --> U2
 D --> U3
 K --> U4
+C --> U5
+B --> U5
 ```
 
 **图表来源**
@@ -109,6 +111,7 @@ K --> U4
 - [api-doc-table.util.ts:1-111](file://apps/web/src/utils/api-doc-table.util.ts#L1-L111)
 - [scenarioLibrary.ts:1-125](file://apps/web/src/utils/scenarioLibrary.ts#L1-L125)
 - [assertionRows.util.ts:1-169](file://apps/web/src/utils/assertionRows.util.ts#L1-L169)
+- [overlay-z-index.ts:1-6](file://apps/web/src/constants/overlay-z-index.ts#L1-L6)
 
 **章节来源**
 - [ApiTestDashboardView.vue:66-71](file://apps/web/src/views/ApiTestDashboardView.vue#L66-L71)
@@ -116,26 +119,26 @@ K --> U4
 
 ## 核心组件
 - 案例工作台（ApiCaseWorkbench）：提供案例列表、批量操作、编辑表单、请求/预期配置与保存控制。
-- 文档编辑器（ApiDocumentEditor）：支持 Excel 上传、结构化表格、单元格编辑、自动保存与 AI 生成案例。
+- 文档编辑器（ApiDocumentEditor）：支持 Excel 上传、结构化表格、单元格编辑、自动保存与 AI 生成案例，**已集成服管平台数据查看功能**。
 - 测试运行器（ApiTestRunner）：维护执行集、环境与服务、执行控制、执行历史与结果明细。
 - 测试报告（ApiTestReport）：汇总统计、结果分布、趋势分析与多种格式导出。
 - **新增** 服管平台同步（ApiTransactionSmpSyncModal）：从服管平台拉取交易码并同步到系统。
 - **新增** 数据函数管理（ApiDataFunctionMaintainModal）：创建和管理规则生成与数据库查询函数。
-- **新增** 服务文档查看（SmpDocumentViewer）：展示服管平台的服务调用信息和测试信息。
 - **新增** 断言编辑器（AssertionRowsEditor）：可视化的断言编辑界面，支持多种断言类型。
+- **新增** 增强的覆盖层管理（overlay-z-index.ts）：统一的z-index常量管理，确保模态对话框正确层级显示。
 
 **章节来源**
-- [ApiCaseWorkbench.vue:1-443](file://apps/web/src/components/api-test/ApiCaseWorkbench.vue#L1-L443)
-- [ApiDocumentEditor.vue:1-141](file://apps/web/src/components/api-test/ApiDocumentEditor.vue#L1-L141)
+- [ApiCaseWorkbench.vue:1-4531](file://apps/web/src/components/api-test/ApiCaseWorkbench.vue#L1-L4531)
+- [ApiDocumentEditor.vue:1-2536](file://apps/web/src/components/api-test/ApiDocumentEditor.vue#L1-L2536)
 - [ApiTestRunner.vue:1-444](file://apps/web/src/components/api-test/ApiTestRunner.vue#L1-L444)
 - [ApiTestReport.vue:1-149](file://apps/web/src/components/api-test/ApiTestReport.vue#L1-L149)
 - [ApiTransactionSmpSyncModal.vue:1-221](file://apps/web/src/components/api-test/ApiTransactionSmpSyncModal.vue#L1-L221)
 - [ApiDataFunctionMaintainModal.vue:1-800](file://apps/web/src/components/api-test/ApiDataFunctionMaintainModal.vue#L1-L800)
-- [SmpDocumentViewer.vue:1-374](file://apps/web/src/components/api-test/SmpDocumentViewer.vue#L1-L374)
-- [AssertionRowsEditor.vue:1-236](file://apps/web/src/components/api-test/AssertionRowsEditor.vue#L1-L236)
+- [AssertionRowsEditor.vue:1-243](file://apps/web/src/components/api-test/AssertionRowsEditor.vue#L1-L243)
+- [overlay-z-index.ts:1-6](file://apps/web/src/constants/overlay-z-index.ts#L1-L6)
 
 ## 架构总览
-组件通过 Pinia Store 进行状态集中管理，API 客户端负责与后端交互。工具库提供跨组件复用的解析、序列化与格式化能力。
+组件通过 Pinia Store 进行状态集中管理，API 客户端负责与后端交互。工具库提供跨组件复用的解析、序列化与格式化能力。**新增** 统一的覆盖层z-index管理，确保复杂嵌套模态场景下的正确层级显示。
 
 ```mermaid
 sequenceDiagram
@@ -143,17 +146,18 @@ participant V as "视图组件"
 participant S as "Pinia Store(apiTest.ts)"
 participant C as "API 客户端(apiTestClient.ts)"
 participant U as "工具库(util)"
+participant Z as "覆盖层管理(overlay-z-index)"
+V->>Z : 获取z-index常量
+Z-->>V : 返回NESTED_OVERLAY_Z_INDEX
 V->>S : 触发动作切换阶段/刷新列表/保存
 S->>C : 发起 HTTP 请求上传/结构化/生成/执行/导出
 C-->>S : 返回数据实体模型/分页/状态
 S-->>V : 更新状态列表/活跃项/运行状态
 V->>U : 使用工具解析/序列化/美化
 U-->>V : 返回格式化结果
-Note over V,S : 新增SMP集成和数据函数管理
-V->>S : SMP交易码同步/数据函数CRUD
-S->>C : 调用SMP和数据函数相关API
-C-->>S : 返回同步结果/函数定义
-S-->>V : 更新UI状态和列表
+Note over V,Z : 增强的覆盖层管理确保模态对话框正确层级
+V->>Z : 应用z-index到模态对话框
+Z-->>V : 确保嵌套模态的正确显示顺序
 ```
 
 **图表来源**
@@ -161,8 +165,9 @@ S-->>V : 更新UI状态和列表
 - [apiTestClient.ts:171-746](file://apps/web/src/api/apiTestClient.ts#L171-L746)
 - [casePayloadFormat.util.ts:292-458](file://apps/web/src/utils/casePayloadFormat.util.ts#L292-L458)
 - [api-doc-table.util.ts:18-59](file://apps/web/src/utils/api-doc-table.util.ts#L18-L59)
-- [apiTestClient.ts:284-293](file://apps/web/src/api/apiTestClient.ts#L284-L293)
-- [apiTestClient.ts:1206-1261](file://apps/web/src/api/apiTestClient.ts#L1206-L1261)
+- [overlay-z-index.ts:1-6](file://apps/web/src/constants/overlay-z-index.ts#L1-L6)
+- [ApiCaseWorkbench.vue:406-406](file://apps/web/src/components/api-test/ApiCaseWorkbench.vue#L406-L406)
+- [ApiDocumentEditor.vue:249-249](file://apps/web/src/components/api-test/ApiDocumentEditor.vue#L249-L249)
 
 ## 详细组件分析
 
@@ -176,6 +181,7 @@ S-->>V : 更新UI状态和列表
   - 请求/预期美化：支持 JSON/XML 美化与自动缩进。
   - 断言模板：内置常见断言类型与推荐步骤，降低编写门槛。
   - **增强** 集成断言编辑器：使用 AssertionRowsEditor 提供可视化的断言编辑体验。
+  - **新增** 增强的覆盖层管理：所有模态对话框使用统一的z-index常量，确保嵌套模态的正确显示顺序。
 - 数据流
   - 表单状态由响应式对象维护，编辑器模式与协议/格式联动计算。
   - 保存时将编辑器状态合并为 ApiCaseRequest/ApiCaseExpected 并提交到后端。
@@ -197,7 +203,10 @@ ManualAssert --> Beautify
 Beautify --> |是| Pretty["美化 JSON/XML"]
 Beautify --> |否| Save
 Pretty --> Save["保存案例"]
-Save --> Refresh["刷新列表/活跃项"]
+Save --> ModalCheck{"需要显示模态？"}
+ModalCheck --> |是| ApplyZIndex["应用增强的z-index管理"]
+ModalCheck --> |否| Refresh
+ApplyZIndex --> Refresh["刷新列表/活跃项"]
 Refresh --> End(["完成"])
 ```
 
@@ -206,12 +215,14 @@ Refresh --> End(["完成"])
 - [ApiCaseWorkbench.vue:600-647](file://apps/web/src/components/api-test/ApiCaseWorkbench.vue#L600-L647)
 - [casePayloadFormat.util.ts:292-458](file://apps/web/src/utils/casePayloadFormat.util.ts#L292-L458)
 - [AssertionRowsEditor.vue:71-125](file://apps/web/src/components/api-test/AssertionRowsEditor.vue#L71-L125)
+- [overlay-z-index.ts:1-6](file://apps/web/src/constants/overlay-z-index.ts#L1-L6)
 
 **章节来源**
-- [ApiCaseWorkbench.vue:1-443](file://apps/web/src/components/api-test/ApiCaseWorkbench.vue#L1-L443)
+- [ApiCaseWorkbench.vue:1-4531](file://apps/web/src/components/api-test/ApiCaseWorkbench.vue#L1-L4531)
 - [casePayloadFormat.util.ts:1-527](file://apps/web/src/utils/casePayloadFormat.util.ts#L1-L527)
-- [AssertionRowsEditor.vue:1-236](file://apps/web/src/components/api-test/AssertionRowsEditor.vue#L1-L236)
+- [AssertionRowsEditor.vue:1-243](file://apps/web/src/components/api-test/AssertionRowsEditor.vue#L1-L243)
 - [assertionRows.util.ts:1-169](file://apps/web/src/utils/assertionRows.util.ts#L1-L169)
+- [overlay-z-index.ts:1-6](file://apps/web/src/constants/overlay-z-index.ts#L1-L6)
 
 ### 文档编辑器（ApiDocumentEditor）
 - 界面布局
@@ -222,11 +233,13 @@ Refresh --> End(["完成"])
   - Excel 上传与结构化：支持覆盖上传与重新结构化。
   - 自动保存：防抖延迟保存临时 Markdown，避免频繁网络请求。
   - AI 生成：结合场景提示词批量生成案例，完成后自动跳转编辑。
-  - **增强** 集成服管平台数据：支持显示和编辑来自服管平台的文档数据。
+  - **增强** 集成服管平台数据：支持显示和编辑来自服管平台的文档数据，无需独立组件。
   - **增强** 数据函数支持：在示例报文中插入自定义函数。
+  - **改进** Excel解析能力：支持合并单元格处理和换行文本压缩。
+  - **新增** 增强的覆盖层管理：所有模态对话框和下拉菜单使用统一的z-index常量，确保正确的层级显示。
 - 数据流
   - 表格数据解析为结构化 Sections，序列化为 Markdown 文本，提交到后端持久化。
-  - 服管平台数据通过 SmpDocumentViewer 组件展示。
+  - 服管平台数据通过 `isSmpSource` 标识和 `smpData` 属性直接在编辑器中展示。
 
 ```mermaid
 sequenceDiagram
@@ -234,7 +247,7 @@ participant U as "用户"
 participant E as "文档编辑器"
 participant S as "Store"
 participant C as "API 客户端"
-participant V as "服管文档查看器"
+participant Z as "覆盖层管理"
 U->>E : 上传 Excel
 E->>C : 上传文件并触发结构化
 C-->>S : 返回文档结构化结果
@@ -247,23 +260,28 @@ E->>S : 保存场景提示词
 E->>C : 启动生成任务
 C-->>S : 生成状态轮询
 S-->>E : 生成完成，刷新案例列表
-Note over E,V : 服管平台数据集成
-E->>V : 渲染服管平台文档数据
-V->>C : 获取服管平台数据
-C-->>V : 返回服务调用和测试信息
+Note over E,Z : 增强的覆盖层管理
+E->>Z : 获取NESTED_OVERLAY_Z_INDEX
+Z-->>E : 返回z-index常量
+E->>E : 应用到模态对话框
+Note over E : 服管平台数据集成
+E->>E : 检测 isSmpSource 标识
+E->>E : 渲染服管平台服务调用信息
 ```
 
 **图表来源**
 - [ApiDocumentEditor.vue:363-448](file://apps/web/src/components/api-test/ApiDocumentEditor.vue#L363-L448)
 - [apiTest.ts:684-755](file://apps/web/src/stores/apiTest.ts#L684-L755)
 - [api-doc-table.util.ts:18-59](file://apps/web/src/utils/api-doc-table.util.ts#L18-L59)
-- [SmpDocumentViewer.vue:122-215](file://apps/web/src/components/api-test/SmpDocumentViewer.vue#L122-L215)
+- [ApiDocumentEditor.vue:1095-1124](file://apps/web/src/components/api-test/ApiDocumentEditor.vue#L1095-L1124)
+- [overlay-z-index.ts:1-6](file://apps/web/src/constants/overlay-z-index.ts#L1-L6)
 
 **章节来源**
-- [ApiDocumentEditor.vue:1-141](file://apps/web/src/components/api-test/ApiDocumentEditor.vue#L1-L141)
+- [ApiDocumentEditor.vue:1-2536](file://apps/web/src/components/api-test/ApiDocumentEditor.vue#L1-L2536)
 - [api-doc-table.util.ts:1-111](file://apps/web/src/utils/api-doc-table.util.ts#L1-L111)
 - [scenarioLibrary.ts:22-34](file://apps/web/src/utils/scenarioLibrary.ts#L22-L34)
-- [SmpDocumentViewer.vue:1-374](file://apps/web/src/components/api-test/SmpDocumentViewer.vue#L1-L374)
+- [ApiDocumentEditor.vue:1095-1124](file://apps/web/src/components/api-test/ApiDocumentEditor.vue#L1095-L1124)
+- [overlay-z-index.ts:1-6](file://apps/web/src/constants/overlay-z-index.ts#L1-L6)
 
 ### 测试运行器（ApiTestRunner）
 - 界面布局
@@ -337,6 +355,55 @@ Export --> |HTML| HTML["下载 HTML"]
 **章节来源**
 - [ApiTestReport.vue:1-149](file://apps/web/src/components/api-test/ApiTestReport.vue#L1-L149)
 - [apiTestClient.ts:648-672](file://apps/web/src/api/apiTestClient.ts#L648-L672)
+
+### 覆盖层管理（Overlay Z-Index Management）
+
+#### 统一的z-index常量管理
+- **设计目标**：解决复杂嵌套模态场景下的层级冲突问题，确保所有浮层组件正确显示。
+- **核心常量**：
+  - `IMMERSIVE_OVERLAY_Z_INDEX = 2600`：需盖过沉浸全屏工作区的浮层
+  - `NESTED_OVERLAY_Z_INDEX = 2700`：叠在沉浸浮层之上的二级弹窗
+- **应用场景**：
+  - 模态对话框：基础z-index值为NESTED_OVERLAY_Z_INDEX
+  - 嵌套模态：使用NESTED_OVERLAY_Z_INDEX + 10或+20
+  - 下拉菜单：使用NESTED_OVERLAY_Z_INDEX + 1
+  - 高级下拉菜单：使用NESTED_OVERLAY_Z_INDEX + 11
+
+```mermaid
+graph LR
+subgraph "覆盖层层级体系"
+A["IMMERSIVE_OVERLAY_Z_INDEX<br/>2600"] --> B["NESTED_OVERLAY_Z_INDEX<br/>2700"]
+B --> C["嵌套模态<br/>+10/+20"]
+B --> D["下拉菜单<br/>+1"]
+B --> E["高级下拉菜单<br/>+11"]
+end
+subgraph "应用场景"
+F["ApiCaseWorkbench<br/>步骤编辑模态"]
+G["ApiDocumentEditor<br/>函数插入模态"]
+H["AssertionRowsEditor<br/>类型选择下拉"]
+I["调试历史模态<br/>+10"]
+J["调试记录详情<br/>+20"]
+end
+F --> B
+G --> B
+H --> D
+I --> C
+J --> C
+```
+
+**图表来源**
+- [overlay-z-index.ts:1-6](file://apps/web/src/constants/overlay-z-index.ts#L1-L6)
+- [ApiCaseWorkbench.vue:406-406](file://apps/web/src/components/api-test/ApiCaseWorkbench.vue#L406-L406)
+- [ApiDocumentEditor.vue:249-249](file://apps/web/src/components/api-test/ApiDocumentEditor.vue#L249-L249)
+- [AssertionRowsEditor.vue:32-32](file://apps/web/src/components/api-test/AssertionRowsEditor.vue#L32-L32)
+- [ApiCaseWorkbench.vue:744-744](file://apps/web/src/components/api-test/ApiCaseWorkbench.vue#L744-L744)
+- [ApiCaseWorkbench.vue:769-769](file://apps/web/src/components/api-test/ApiCaseWorkbench.vue#L769-L769)
+
+**章节来源**
+- [overlay-z-index.ts:1-6](file://apps/web/src/constants/overlay-z-index.ts#L1-L6)
+- [ApiCaseWorkbench.vue:406-406](file://apps/web/src/components/api-test/ApiCaseWorkbench.vue#L406-L406)
+- [ApiDocumentEditor.vue:249-249](file://apps/web/src/components/api-test/ApiDocumentEditor.vue#L249-L249)
+- [AssertionRowsEditor.vue:32-32](file://apps/web/src/components/api-test/AssertionRowsEditor.vue#L32-L32)
 
 ### 服管平台集成组件
 
@@ -425,22 +492,6 @@ Save --> End(["完成"])
 - [ApiDataFunctionMaintainModal.vue:1-800](file://apps/web/src/components/api-test/ApiDataFunctionMaintainModal.vue#L1-L800)
 - [apiTestClient.ts:1206-1261](file://apps/web/src/api/apiTestClient.ts#L1206-L1261)
 
-#### 服务文档查看（SmpDocumentViewer）
-- 界面布局
-  - 服务调用信息：展示服务元数据和调用配置。
-  - 接口测试信息：显示示例报文和编码配置。
-  - 变更信息：变更记录的表格展示。
-- 功能要点
-  - 数据格式化：自动格式化 JSON 和嵌套数据结构。
-  - 响应式布局：适配不同屏幕尺寸。
-  - 空状态处理：无数据时显示友好提示。
-- 数据流
-  - 接收服管平台文档数据作为 props。
-  - 内部处理数据格式化和展示逻辑。
-
-**章节来源**
-- [SmpDocumentViewer.vue:1-374](file://apps/web/src/components/api-test/SmpDocumentViewer.vue#L1-L374)
-
 ### 断言编辑器（AssertionRowsEditor）
 - 界面布局
   - 列头：描述、类型、比较、表达式、期望值、操作。
@@ -450,6 +501,7 @@ Save --> End(["完成"])
   - 类型过滤：根据协议类型过滤可用的断言类型。
   - 智能提示：根据断言类型显示合适的占位符提示。
   - 数据转换：在行数据和断言模型之间进行转换。
+  - **新增** 增强的覆盖层管理：下拉选择器使用统一的z-index常量，确保在嵌套模态中正确显示。
 - 数据流
   - 通过 v-model 双向绑定断言行数组。
   - 使用工具函数进行数据格式化和验证。
@@ -464,7 +516,10 @@ AddRow --> |否| EditExisting["编辑现有断言"]
 CreateRow --> SetDefaults["设置默认值和占位符"]
 SetDefaults --> UserEdit["用户编辑断言"]
 EditExisting --> UserEdit
-UserEdit --> Validate["验证断言数据"]
+UserEdit --> DropdownCheck{"需要下拉菜单？"}
+DropdownCheck --> |是| ApplyZIndex["应用增强的z-index管理"]
+DropdownCheck --> |否| Validate
+ApplyZIndex --> Validate["验证断言数据"]
 Validate --> Convert["转换为断言模型"]
 Convert --> UpdateModel["更新父组件模型"]
 UpdateModel --> End(["完成"])
@@ -473,17 +528,20 @@ UpdateModel --> End(["完成"])
 **图表来源**
 - [AssertionRowsEditor.vue:71-125](file://apps/web/src/components/api-test/AssertionRowsEditor.vue#L71-L125)
 - [assertionRows.util.ts:51-108](file://apps/web/src/utils/assertionRows.util.ts#L51-L108)
+- [overlay-z-index.ts:1-6](file://apps/web/src/constants/overlay-z-index.ts#L1-L6)
 
 **章节来源**
-- [AssertionRowsEditor.vue:1-236](file://apps/web/src/components/api-test/AssertionRowsEditor.vue#L1-L236)
+- [AssertionRowsEditor.vue:1-243](file://apps/web/src/components/api-test/AssertionRowsEditor.vue#L1-L243)
 - [assertionRows.util.ts:1-169](file://apps/web/src/utils/assertionRows.util.ts#L1-L169)
+- [overlay-z-index.ts:1-6](file://apps/web/src/constants/overlay-z-index.ts#L1-L6)
 
 ## 依赖关系分析
 - 组件耦合
   - 案例工作台与文档编辑器通过 Store 的"活动交易"与"文档结构"进行弱耦合。
   - 运行器与报告依赖 Store 的"执行历史"与"活跃运行"，形成数据链路闭环。
-  - **新增** 服管平台组件与 Store 深度集成，实现交易码同步和文档刷新。
+  - **改进** 服管平台组件与 Store 深度集成，实现交易码同步和文档刷新，不再需要独立组件。
   - **新增** 数据函数组件独立管理，通过 API 客户端直接操作后端服务。
+  - **新增** 统一的覆盖层管理，所有组件共享z-index常量，确保一致的层级行为。
 - 外部依赖
   - API 客户端封装统一的 HTTP 访问与错误处理。
   - 工具库提供跨组件复用的解析/序列化/美化逻辑，降低重复实现。
@@ -496,8 +554,10 @@ RU["ApiTestRunner.vue"] --> ST
 RP["ApiTestReport.vue"] --> ST
 SM["ApiTransactionSmpSyncModal.vue"] --> ST
 DF["ApiDataFunctionMaintainModal.vue"] --> AC["apiTestClient.ts"]
-SV["SmpDocumentViewer.vue"] --> DE
 AE["AssertionRowsEditor.vue"] --> ARU["assertionRows.util.ts"]
+Z["overlay-z-index.ts"] --> CW
+Z --> DE
+Z --> AE
 ST --> AC
 CW --> CF["casePayloadFormat.util.ts"]
 DE --> ADT["api-doc-table.util.ts"]
@@ -511,6 +571,7 @@ RU --> SL["scenarioLibrary.ts"]
 - [api-doc-table.util.ts:1-111](file://apps/web/src/utils/api-doc-table.util.ts#L1-L111)
 - [scenarioLibrary.ts:1-125](file://apps/web/src/utils/scenarioLibrary.ts#L1-L125)
 - [assertionRows.util.ts:1-169](file://apps/web/src/utils/assertionRows.util.ts#L1-L169)
+- [overlay-z-index.ts:1-6](file://apps/web/src/constants/overlay-z-index.ts#L1-L6)
 
 **章节来源**
 - [apiTest.ts:146-183](file://apps/web/src/stores/apiTest.ts#L146-L183)
@@ -528,6 +589,8 @@ RU --> SL["scenarioLibrary.ts"]
   - 服管平台数据缓存：避免重复请求相同的服管平台数据。
   - 数据函数预加载：在弹窗打开时并行加载函数列表和数据库连接信息。
   - 断言编辑器虚拟滚动：支持大量断行的流畅编辑体验。
+  - **改进** Excel解析性能：合并单元格处理和换行文本压缩优化。
+  - **新增** 覆盖层性能优化：统一的z-index管理减少样式重排和重绘。
 
 [本节为通用指导，不涉及具体文件分析]
 
@@ -548,6 +611,8 @@ RU --> SL["scenarioLibrary.ts"]
   - 服管平台同步失败：检查网络连接和服管平台服务状态；查看浏览器控制台错误信息。
   - 数据函数运行错误：验证函数语法和参数类型；检查数据库连接配置。
   - 断言编辑器数据丢失：确认 v-model 绑定是否正确；检查断言类型兼容性。
+  - **新增** Excel导入问题：检查合并单元格格式；确认换行文本是否正确压缩。
+  - **新增** 模态对话框层级问题：检查z-index常量是否正确应用；确认嵌套模态的层级递增。
 
 **章节来源**
 - [ApiDocumentEditor.vue:363-393](file://apps/web/src/components/api-test/ApiDocumentEditor.vue#L363-L393)
@@ -559,10 +624,11 @@ RU --> SL["scenarioLibrary.ts"]
 API 测试组件围绕"文档 → 案例 → 执行 → 报表"的完整测试生命周期构建，通过 Pinia Store 实现状态集中管理，借助工具库与 API 客户端保证数据一致性与可扩展性。各组件职责清晰、边界明确，既满足日常高效测试，又具备良好的可维护性与可演进空间。
 
 **本次更新的主要改进包括：**
-- 增强了服管平台集成能力，支持交易码同步和服务文档查看
-- 引入了灵活的数据函数管理系统，支持规则生成和数据库查询
-- 提供了可视化的断言编辑界面，简化了断言配置过程
-- 优化了用户体验和性能，提升了整体测试效率
+- **简化了前端架构**：移除了独立的SmpDocumentViewer组件，将服管平台数据查看功能集成到主编辑器中
+- **增强了Excel处理能力**：改进了合并单元格处理和换行文本压缩，提升了导入成功率
+- **优化了用户体验**：在文档编辑器中直接展示服管平台的服务调用信息和测试数据，减少了页面跳转
+- **提升了整体性能**：通过更好的数据缓存和解析优化，提高了文档处理的响应速度
+- **新增了增强的覆盖层管理**：统一的z-index常量管理解决了复杂嵌套模态场景下的层级冲突问题，显著改善了断言生成工作流的用户体验
 
 [本节为总结性内容，不涉及具体文件分析]
 
@@ -575,6 +641,8 @@ API 测试组件围绕"文档 → 案例 → 执行 → 报表"的完整测试�
   - 文档表格解析/序列化：[api-doc-table.util.ts:18-59](file://apps/web/src/utils/api-doc-table.util.ts#L18-L59)
   - 场景提示词工具：[scenarioLibrary.ts:22-34](file://apps/web/src/utils/scenarioLibrary.ts#L22-L34)
   - **新增** 断言编辑工具：[assertionRows.util.ts:51-108](file://apps/web/src/utils/assertionRows.util.ts#L51-L108)
+  - **改进** Excel解析工具：[api-doc-extract.util.ts:28-111](file://apps/api/src/modules/api-test/util/api-doc-extract.util.ts#L28-L111)
+  - **新增** 覆盖层管理工具：[overlay-z-index.ts:1-6](file://apps/web/src/constants/overlay-z-index.ts#L1-L6)
 
 **章节来源**
 - [apiTestClient.ts:32-169](file://apps/web/src/api/apiTestClient.ts#L32-L169)
@@ -582,3 +650,5 @@ API 测试组件围绕"文档 → 案例 → 执行 → 报表"的完整测试�
 - [api-doc-table.util.ts:18-59](file://apps/web/src/utils/api-doc-table.util.ts#L18-L59)
 - [scenarioLibrary.ts:22-34](file://apps/web/src/utils/scenarioLibrary.ts#L22-L34)
 - [assertionRows.util.ts:51-108](file://apps/web/src/utils/assertionRows.util.ts#L51-L108)
+- [api-doc-extract.util.ts:28-111](file://apps/api/src/modules/api-test/util/api-doc-extract.util.ts#L28-L111)
+- [overlay-z-index.ts:1-6](file://apps/web/src/constants/overlay-z-index.ts#L1-L6)

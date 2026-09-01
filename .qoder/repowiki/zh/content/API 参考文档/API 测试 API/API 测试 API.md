@@ -13,15 +13,19 @@
 - [apps/api/src/modules/api-test/service/api-environment.service.ts](file://apps/api/src/modules/api-test/service/api-environment.service.ts)
 - [apps/api/src/modules/api-test/service/api-execution-set.service.ts](file://apps/api/src/modules/api-test/service/api-execution-set.service.ts)
 - [apps/api/src/modules/api-test/service/api-execution.service.ts](file://apps/api/src/modules/api-test/service/api-execution.service.ts)
+- [apps/api/src/modules/api-test/entity/api-step-library.entity.ts](file://apps/api/src/modules/api-test/entity/api-step-library.entity.ts)
+- [apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts](file://apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts)
+- [apps/api/src/modules/api-test/service/api-step-library.service.ts](file://apps/api/src/modules/api-test/service/api-step-library.service.ts)
+- [packages/shared/src/api-test.ts](file://packages/shared/src/api-test.ts)
 </cite>
 
 ## 更新摘要
 **变更内容**
-- 新增服务管理平台（SMP）同步功能：交易码候选列表获取、批量同步、详情刷新与变更检测
-- 新增数据函数管理：数据库连接管理、SQL/脚本函数执行、内置函数模板、AI 生成脚本
-- 新增断言生成队列：基于 AI 的响应体断言自动生成、任务状态查询与结果获取
-- 增强测试执行能力：调试运行、步骤调试记录、批量请求配置修改
-- 新增步骤库管理：API 用例步骤的增删改查
+- 新增多步骤测试用例执行系统：支持并行执行、步骤分组、变量共享和结果提取
+- 新增步骤库管理：API 用例步骤的增删改查，支持步骤复用和版本管理
+- 增强调试能力：步骤级调试记录持久化、调试历史查询、调试数据清理
+- 改进前端界面：步骤式测试工作流、并行执行可视化、调试结果展示
+- 优化执行引擎：基于 parallelWithPrevious 标记的自动并行分组、组内并发执行
 
 ## 目录
 1. [简介](#简介)
@@ -43,17 +47,19 @@
 - 执行集管理：执行集 CRUD、替换用例、按执行集运行
 - 报告导出：支持 xlsx/pdf 导出
 - 断言与变量：请求变量替换、断言执行、运行结果统计
+- **新增**：多步骤测试用例执行系统：并行执行、步骤分组、变量共享
+- **新增**：步骤库管理：步骤复用、版本管理、用户隔离
+- **新增**：增强调试能力：步骤级调试记录、调试历史、调试数据管理
 - **新增**：服务管理平台（SMP）集成：交易码同步、详情刷新、变更检测
 - **新增**：数据函数管理：数据库连接、SQL/脚本函数、内置函数模板、AI 脚本生成
 - **新增**：断言生成队列：AI 驱动的响应体断言自动生成与管理
-- **新增**：调试执行：单案例调试、步骤调试记录、批量请求配置修改
 
 所有接口均基于 NestJS 控制器暴露，并通过 Swagger 注解标注。
 
 ## 项目结构
 API 测试模块采用分层设计：
 - 控制器层：统一暴露 RESTful 端点
-- 服务层：封装业务逻辑（文档、用例、环境、执行集、执行、报告、SMP 同步、数据函数、断言队列）
+- 服务层：封装业务逻辑（文档、用例、环境、执行集、执行、报告、SMP 同步、数据函数、断言队列、步骤库）
 - DTO 层：输入输出参数校验与文档注解
 - 实体层：TypeORM 映射数据库表结构
 
@@ -68,6 +74,7 @@ C --> R["ApiReportService<br/>报告服务"]
 C --> SMP["SmpSyncService<br/>SMP 同步服务"]
 C --> DF["ApiDataFunctionService<br/>数据函数服务"]
 C --> AQ["ApiAssertionGenerateQueueService<br/>断言生成队列"]
+C --> SL["ApiStepLibraryService<br/>步骤库服务"]
 D --> ED["ApiDocEntity"]
 D --> EP["ApiEndpointEntity"]
 K --> EC["ApiTestCaseEntity"]
@@ -81,6 +88,8 @@ SMP --> STX["ApiTransactionEntity"]
 DF --> DBCONN["ApiDatabaseConnectionEntity"]
 DF --> DFUNC["ApiDataFunctionEntity"]
 AQ --> AJOB["ApiAssertionGenerateJobEntity"]
+SL --> STEP["ApiStepLibraryEntity"]
+X --> DEBUG["ApiStepDebugRecordEntity"]
 ```
 
 图表来源
@@ -88,6 +97,7 @@ AQ --> AJOB["ApiAssertionGenerateJobEntity"]
 - [apps/api/src/modules/api-test/service/smp-sync.service.ts:47-60](file://apps/api/src/modules/api-test/service/smp-sync.service.ts#L47-L60)
 - [apps/api/src/modules/api-test/service/api-data-function.service.ts:115-120](file://apps/api/src/modules/api-test/service/api-data-function.service.ts#L115-L120)
 - [apps/api/src/modules/api-test/service/api-assertion-generate-queue.service.ts:49-53](file://apps/api/src/modules/api-test/service/api-assertion-generate-queue.service.ts#L49-L53)
+- [apps/api/src/modules/api-test/service/api-step-library.service.ts:17-21](file://apps/api/src/modules/api-test/service/api-step-library.service.ts#L17-L21)
 
 章节来源
 - [apps/api/src/modules/api-test/controller/api-test.controller.ts:77-95](file://apps/api/src/modules/api-test/controller/api-test.controller.ts#L77-L95)
@@ -98,7 +108,8 @@ AQ --> AJOB["ApiAssertionGenerateJobEntity"]
 - ApiCaseService：用例 CRUD、AI/模板生成、批量删除
 - ApiEnvironmentService：执行环境 CRUD、环境服务 CRUD、运行时合并
 - ApiExecutionSetService：执行集 CRUD、用例替换、最后运行状态更新
-- ApiExecutionService：并发执行用例/执行集、断言、运行记录与明细
+- ApiExecutionService：并发执行用例/执行集、断言、运行记录与明细、**多步骤并行执行**
+- **新增** ApiStepLibraryService：步骤库 CRUD、用户隔离、步骤复用
 - **新增** SmpSyncService：服务管理平台数据同步、交易码候选列表获取、详情刷新与变更检测
 - **新增** ApiDataFunctionService：数据库连接管理、SQL/脚本函数执行、内置函数模板、AI 脚本生成
 - **新增** ApiAssertionGenerateQueueService：AI 断言生成队列管理、任务调度、状态查询
@@ -106,46 +117,110 @@ AQ --> AJOB["ApiAssertionGenerateJobEntity"]
 - 实体：数据库持久化模型
 
 章节来源
+- [apps/api/src/modules/api-test/service/api-step-library.service.ts:17-21](file://apps/api/src/modules/api-test/service/api-step-library.service.ts#L17-L21)
 - [apps/api/src/modules/api-test/service/smp-sync.service.ts:47-60](file://apps/api/src/modules/api-test/service/smp-sync.service.ts#L47-L60)
 - [apps/api/src/modules/api-test/service/api-data-function.service.ts:115-120](file://apps/api/src/modules/api-test/service/api-data-function.service.ts#L115-L120)
 - [apps/api/src/modules/api-test/service/api-assertion-generate-queue.service.ts:49-53](file://apps/api/src/modules/api-test/service/api-assertion-generate-queue.service.ts#L49-L53)
 
 ## 架构总览
-下图展示控制器到服务层的调用关系及关键数据流：
+下图展示控制器到服务层的调用关系及关键数据流，包括新增的多步骤执行流程：
 
 ```mermaid
 sequenceDiagram
 participant Client as "客户端"
 participant Ctrl as "ApiTestController"
-participant SMP as "SmpSyncService"
-participant DF as "ApiDataFunctionService"
-participant AQ as "ApiAssertionGenerateQueueService"
 participant Exec as "ApiExecutionService"
-Client->>Ctrl : POST "/transactions/smp-list"
-Ctrl->>SMP : fetchServiceInfoList(projectId)
-SMP-->>Ctrl : 交易码候选列表
-Client->>Ctrl : POST "/transactions/smp-sync"
-Ctrl->>SMP : syncTransactions(projectId, items)
-SMP-->>Ctrl : {created, updated}
-Client->>Ctrl : POST "/data-functions/generate-script"
-Ctrl->>DF : generateDataFunctionScript()
-DF-->>Ctrl : {script}
-Client->>Ctrl : POST "/cases/generate-assertions"
-Ctrl->>AQ : enqueue(assertion job)
-AQ-->>Ctrl : {jobId, phase}
-Client->>Ctrl : POST "/transactions/runs"
-Ctrl->>Exec : runCases({caseIds, environmentId, ...})
-Exec-->>Ctrl : 运行详情
+participant StepLib as "ApiStepLibraryService"
+participant Debug as "调试记录"
+Client->>Ctrl : POST "/step-library"
+Ctrl->>StepLib : save({name, step})
+StepLib-->>Ctrl : 步骤库条目
+Client->>Ctrl : POST "/transactions/ : id/cases/debug-run"
+Ctrl->>Exec : debugRun({request, stepId, ...})
+Exec->>Exec : groupParallelSteps(steps)
+Exec->>Exec : Promise.all(并行组)
+Exec->>Debug : 保存步骤调试记录
+Debug-->>Ctrl : 调试记录ID
 Ctrl-->>Client : 执行结果
 ```
 
 图表来源
-- [apps/api/src/modules/api-test/controller/api-test.controller.ts:277-290](file://apps/api/src/modules/api-test/controller/api-test.controller.ts#L277-L290)
-- [apps/api/src/modules/api-test/controller/api-test.controller.ts:194-214](file://apps/api/src/modules/api-test/controller/api-test.controller.ts#L194-L214)
-- [apps/api/src/modules/api-test/controller/api-test.controller.ts:816-847](file://apps/api/src/modules/api-test/controller/api-test.controller.ts#L816-L847)
-- [apps/api/src/modules/api-test/controller/api-test.controller.ts:906-923](file://apps/api/src/modules/api-test/controller/api-test.controller.ts#L906-L923)
+- [apps/api/src/modules/api-test/controller/api-test.controller.ts:98-119](file://apps/api/src/modules/api-test/controller/api-test.controller.ts#L98-L119)
+- [apps/api/src/modules/api-test/controller/api-test.controller.ts:782-831](file://apps/api/src/modules/api-test/controller/api-test.controller.ts#L782-L831)
+- [apps/api/src/modules/api-test/service/api-step-library.service.ts:30-49](file://apps/api/src/modules/api-test/service/api-step-library.service.ts#L30-L49)
+- [packages/shared/src/api-test.ts:144-153](file://packages/shared/src/api-test.ts#L144-L153)
 
 ## 详细组件分析
+
+### 多步骤测试用例执行系统
+**新增功能**：支持多步骤测试用例的并行执行，通过 `parallelWithPrevious` 标记实现智能分组
+
+- 并行步骤分组算法
+  - 基于 `parallelWithPrevious` 标记将相邻步骤分组
+  - 同组步骤同时发出，共享组前变量；提取结果整组完成后才合并
+  - 组内步骤互不可见，确保数据隔离
+
+- 执行流程
+  - 单案例执行时检查 steps 数组
+  - 使用 `groupParallelSteps()` 进行智能分组
+  - 对每个并行组使用 `Promise.all()` 并发执行
+  - 组间顺序执行，组内并行执行
+
+- 变量共享机制
+  - 每组开始前继承上一组的最终变量状态
+  - 组内步骤可访问组前变量，但修改不立即生效
+  - 组完成后统一合并变量变更
+
+章节来源
+- [packages/shared/src/api-test.ts:133-153](file://packages/shared/src/api-test.ts#L133-L153)
+- [apps/api/src/modules/api-test/service/api-execution.service.ts:335-369](file://apps/api/src/modules/api-test/service/api-execution.service.ts#L335-L369)
+- [apps/api/src/modules/api-test/util/parallel-steps.util.spec.ts:1-21](file://apps/api/src/modules/api-test/util/parallel-steps.util.spec.ts#L1-L21)
+
+### 步骤库管理
+**新增功能**：提供步骤级别的复用和管理能力
+
+- 步骤库 CRUD 操作
+  - 列出步骤库：GET /api-test/step-library
+  - 创建步骤库：POST /api-test/step-library
+  - 更新步骤库：PATCH /api-test/step-library/:id
+  - 删除步骤库：DELETE /api-test/step-library/:id
+
+- 步骤数据结构
+  - name：步骤名称（必填）
+  - step：完整的 ApiCaseStep 对象
+  - createdBy：创建者（用户隔离）
+  - createdAt/updatedAt：时间戳
+
+- 用户隔离机制
+  - 所有操作基于当前登录用户
+  - 不同用户的步骤库完全独立
+  - 防止跨用户的数据污染
+
+章节来源
+- [apps/api/src/modules/api-test/controller/api-test.controller.ts:98-119](file://apps/api/src/modules/api-test/controller/api-test.controller.ts#L98-L119)
+- [apps/api/src/modules/api-test/service/api-step-library.service.ts:23-58](file://apps/api/src/modules/api-test/service/api-step-library.service.ts#L23-L58)
+- [apps/api/src/modules/api-test/entity/api-step-library.entity.ts:11-34](file://apps/api/src/modules/api-test/entity/api-step-library.entity.ts#L11-L34)
+
+### 增强调试能力
+**新增功能**：提供步骤级的调试记录和生命周期管理
+
+- 调试执行增强
+  - 支持指定 stepId 进行单步骤调试
+  - 自动保存调试记录到数据库
+  - 限制调试记录数量（最多保留最近 30 条）
+
+- 调试记录管理
+  - 列出调试记录：GET /:projectId/cases/:caseId/steps/:stepId/debug-records
+  - 清理调试记录：DELETE /:projectId/cases/:caseId/steps/:stepId/debug-records
+
+- 调试记录结构
+  - 包含请求、响应、提取变量、目标信息等
+  - 支持按 caseId 和 stepId 精确查询
+  - 自动清理过期记录，保持数据库整洁
+
+章节来源
+- [apps/api/src/modules/api-test/controller/api-test.controller.ts:782-841](file://apps/api/src/modules/api-test/controller/api-test.controller.ts#L782-L841)
+- [apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts:10-34](file://apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts#L10-L34)
 
 ### 服务管理平台（SMP）同步
 - 拉取交易码候选列表
@@ -229,7 +304,7 @@ Ctrl-->>Client : 执行结果
   - 响应：{ ok: true }
 
 章节来源
-- [apps/api/src/modules/api-test/controller/api-test.controller.ts:816-904](file://apps/api/src/modules/api-test/controller/api-test.controller.ts#L816-L904)
+- [apps/api/src/modules/api-test/controller/api-test.controller.ts:843-931](file://apps/api/src/modules/api-test/controller/api-test.controller.ts#L843-L931)
 - [apps/api/src/modules/api-test/service/api-assertion-generate-queue.service.ts:83-146](file://apps/api/src/modules/api-test/service/api-assertion-generate-queue.service.ts#L83-L146)
 - [apps/api/src/modules/api-test/service/api-assertion-generate-queue.service.ts:148-266](file://apps/api/src/modules/api-test/service/api-assertion-generate-queue.service.ts#L148-L266)
 
@@ -255,7 +330,7 @@ Ctrl-->>Client : 执行结果
 
 章节来源
 - [apps/api/src/modules/api-test/controller/api-test.controller.ts:97-118](file://apps/api/src/modules/api-test/controller/api-test.controller.ts#L97-L118)
-- [apps/api/src/modules/api-test/controller/api-test.controller.ts:433-448](file://apps/api/src/modules/api-test/controller/api-test.controller.ts#L433-L448)
+- [apps/api/src/modules/api-test/controller/api-test.controller.ts:782-841](file://apps/api/src/modules/api-test/controller/api-test.controller.ts#L782-L841)
 - [apps/api/src/modules/api-test/controller/api-test.controller.ts:757-814](file://apps/api/src/modules/api-test/controller/api-test.controller.ts#L757-L814)
 
 ### 接口文档管理
@@ -439,6 +514,13 @@ Ctrl-->>Client : 执行结果
   - 环境默认唯一性由服务层保证；服务可叠加 baseUrl/pathPrefix/headers/variables
 - 执行集
   - 链接表维护用例顺序；最后运行统计字段便于快速概览
+- **新增** 步骤库
+  - 用户隔离：基于 createdBy 字段实现
+  - 步骤复用：支持在多个用例中引用相同步骤
+  - 版本管理：通过 updatedAt 跟踪变更
+- **新增** 调试记录
+  - 生命周期管理：自动清理超过 30 条的记录
+  - 索引优化：按 caseId、stepId、createdAt 建立复合索引
 - **新增** SMP 交易码
   - 同步状态：pending/success/changed/failed/cancelled
   - 变更检测：通过 hash 对比服务调用信息和测试信息
@@ -451,15 +533,19 @@ Ctrl-->>Client : 执行结果
 
 章节来源
 - [apps/api/src/modules/api-test/entity/api-doc.entity.ts:15-80](file://apps/api/src/modules/api-test/entity/api-doc.entity.ts#L15-L80)
-- [apps/api/src/modules/api-test/entity/api-test-case.entity.ts:21-94](file://apps/api/src/modules/api-test/entity/api-test-case.entity.ts#L21-L94)
+- [apps/api/src/modules/api-test/entity/api-test-case.entity.ts:21-94](file://apps/api/src/modules/api-test/entity/api-test-case.entity.ts#L21-94)
 - [apps/api/src/modules/api-test/entity/api-test-environment.entity.ts:10-51](file://apps/api/src/modules/api-test/entity/api-test-environment.entity.ts#L10-L51)
 - [apps/api/src/modules/api-test/entity/api-test-execution-set.entity.ts:10-61](file://apps/api/src/modules/api-test/entity/api-test-execution-set.entity.ts#L10-L61)
+- [apps/api/src/modules/api-test/entity/api-step-library.entity.ts:11-34](file://apps/api/src/modules/api-test/entity/api-step-library.entity.ts#L11-L34)
+- [apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts:10-34](file://apps/api/src/modules/api-test/entity/api-step-debug-record.entity.ts#L10-L34)
 
 ## 依赖关系分析
 - 控制器依赖各服务进行业务处理
 - 服务层依赖 TypeORM Repository 进行数据持久化
 - 执行服务依赖环境服务构建运行时变量与请求快照
 - 执行集服务与执行服务协作完成批量运行与统计回写
+- **新增** 步骤库服务提供步骤复用和用户隔离
+- **新增** 调试记录服务支持步骤级调试和历史追踪
 - **新增** SMP 同步服务依赖服务管理平台客户端进行数据拉取
 - **新增** 数据函数服务支持多种数据库驱动和脚本执行引擎
 - **新增** 断言生成队列服务集成 AI 工作流进行智能断言生成
@@ -472,6 +558,7 @@ class ApiCaseService
 class ApiEnvironmentService
 class ApiExecutionSetService
 class ApiExecutionService
+class ApiStepLibraryService
 class SmpSyncService
 class ApiDataFunctionService
 class ApiAssertionGenerateQueueService
@@ -480,6 +567,7 @@ ApiTestController --> ApiCaseService : "用例管理"
 ApiTestController --> ApiEnvironmentService : "环境管理"
 ApiTestController --> ApiExecutionSetService : "执行集管理"
 ApiTestController --> ApiExecutionService : "执行与报告"
+ApiTestController --> ApiStepLibraryService : "步骤库管理"
 ApiTestController --> SmpSyncService : "SMP 同步"
 ApiTestController --> ApiDataFunctionService : "数据函数"
 ApiTestController --> ApiAssertionGenerateQueueService : "断言生成"
@@ -497,12 +585,15 @@ ApiTestController --> ApiAssertionGenerateQueueService : "断言生成"
 - 变量替换：深度替换与路径变量替换，避免重复计算
 - 响应截断：对大响应体进行截断，防止内存膨胀
 - 统计聚合：执行集运行完成后回写最后统计，减少查询成本
+- **新增** 并行步骤执行：基于 Promise.all 的组内并发，提升执行效率
 - **新增** 队列管理：断言生成任务使用数据库队列，支持并发控制和恢复
 - **新增** 脚本执行：JavaScript/Python 脚本执行限制 2 秒超时，防止长时间运行
 - **新增** 数据库连接：连接池大小限制为 1，防止资源耗尽
+- **新增** 调试记录：自动清理超过 30 条的历史记录，保持数据库性能
 
 章节来源
 - [apps/api/src/modules/api-test/service/api-execution.service.ts:22-23](file://apps/api/src/modules/api-test/service/api-execution.service.ts#L22-L23)
+- [apps/api/src/modules/api-test/service/api-execution.service.ts:354-369](file://apps/api/src/modules/api-test/service/api-execution.service.ts#L354-L369)
 - [apps/api/src/modules/api-test/service/api-assertion-generate-queue.service.ts:268-281](file://apps/api/src/modules/api-test/service/api-assertion-generate-queue.service.ts#L268-L281)
 - [apps/api/src/modules/api-test/service/api-data-function.service.ts:372-440](file://apps/api/src/modules/api-test/service/api-data-function.service.ts#L372-L440)
 
@@ -524,6 +615,16 @@ ApiTestController --> ApiAssertionGenerateQueueService : "断言生成"
   - 请求异常：记录 error 状态与错误消息
 - 报告导出
   - 确保 runId 对应的运行记录存在且已完成
+- **新增** 步骤库
+  - 错误：步骤名称为空 → 400
+  - 错误：步骤内容不完整 → 400
+  - 错误：步骤不存在 → 404
+- **新增** 调试记录
+  - 错误：调试记录过多 → 自动清理超过 30 条的记录
+  - 错误：权限不足 → 只能查看自己创建的调试记录
+- **新增** 并行执行
+  - 错误：步骤分组异常 → 检查 parallelWithPrevious 标记是否正确
+  - 错误：变量冲突 → 确认组内步骤不会相互依赖
 - **新增** SMP 同步
   - 错误：项目未配置需求编号 → 400
   - 错误：SMP API 调用失败 → 检查网络连接和认证配置
@@ -541,6 +642,8 @@ ApiTestController --> ApiAssertionGenerateQueueService : "断言生成"
 - [apps/api/src/modules/api-test/service/api-case.service.ts:162-230](file://apps/api/src/modules/api-test/service/api-case.service.ts#L162-L230)
 - [apps/api/src/modules/api-test/service/api-environment.service.ts:87-135](file://apps/api/src/modules/api-test/service/api-environment.service.ts#L87-L135)
 - [apps/api/src/modules/api-test/service/api-execution.service.ts:38-114](file://apps/api/src/modules/api-test/service/api-execution.service.ts#L38-L114)
+- [apps/api/src/modules/api-test/service/api-step-library.service.ts:30-58](file://apps/api/src/modules/api-test/service/api-step-library.service.ts#L30-L58)
+- [apps/api/src/modules/api-test/controller/api-test.controller.ts:822-828](file://apps/api/src/modules/api-test/controller/api-test.controller.ts#L822-L828)
 - [apps/api/src/modules/api-test/service/smp-sync.service.ts:65-166](file://apps/api/src/modules/api-test/service/smp-sync.service.ts#L65-L166)
 - [apps/api/src/modules/api-test/service/api-data-function.service.ts:165-210](file://apps/api/src/modules/api-test/service/api-data-function.service.ts#L165-L210)
 - [apps/api/src/modules/api-test/service/api-assertion-generate-queue.service.ts:299-348](file://apps/api/src/modules/api-test/service/api-assertion-generate-queue.service.ts#L299-L348)
@@ -548,11 +651,13 @@ ApiTestController --> ApiAssertionGenerateQueueService : "断言生成"
 ## 结论
 本模块提供了完整的 API 测试生命周期管理：从接口文档导入与结构化，到用例生成与执行，再到执行集编排与报告导出。通过环境与环境服务的灵活叠加，满足多场景、多服务的测试需求；通过并发执行与断言机制，保障测试效率与质量。
 
-**新增功能**进一步增强了系统的企业级集成能力：
+**新增功能**进一步增强了系统的企业级集成能力和用户体验：
+- 多步骤测试用例执行系统实现了复杂的业务流程测试，支持并行执行和变量共享
+- 步骤库管理提供了强大的步骤复用能力，提升测试用例的可维护性
+- 增强的调试能力为开发和测试人员提供了便捷的调试工具
 - 服务管理平台（SMP）集成实现了与企业服务治理平台的无缝对接
 - 数据函数管理提供了强大的数据处理和转换能力
 - 断言生成队列利用 AI 技术提升了测试用例的智能化水平
-- 调试执行功能为开发和测试人员提供了便捷的调试工具
 
 这些新功能共同构成了一个更加完善、智能、高效的 API 测试解决方案。
 
@@ -588,6 +693,21 @@ ApiTestController --> ApiAssertionGenerateQueueService : "断言生成"
   - 断言：基于 expected 配置与实际响应比对
   - 请求快照：脱敏头（Authorization/Token/Secret 等）
 
+- **新增** 多步骤执行
+  - 支持 parallelWithPrevious 标记实现并行执行
+  - 组内并发，组间顺序执行
+  - 变量共享和隔离机制
+
+- **新增** 步骤库
+  - 用户隔离：基于当前登录用户
+  - 步骤复用：支持在多个用例中引用
+  - 版本管理：通过时间戳跟踪变更
+
+- **新增** 调试记录
+  - 自动清理：超过 30 条的记录会被清理
+  - 索引优化：按 caseId、stepId、createdAt 建立复合索引
+  - 权限控制：只能查看自己的调试记录
+
 - **新增** SMP 同步
   - 需要项目配置需求编号才能同步
   - 支持增量同步和变更检测
@@ -606,3 +726,4 @@ ApiTestController --> ApiAssertionGenerateQueueService : "断言生成"
 章节来源
 - [apps/api/src/modules/api-test/controller/api-test.controller.ts:52-971](file://apps/api/src/modules/api-test/controller/api-test.controller.ts#L52-L971)
 - [apps/api/src/modules/api-test/service/api-execution.service.ts:22-23](file://apps/api/src/modules/api-test/service/api-execution.service.ts#L22-L23)
+- [packages/shared/src/api-test.ts:133-153](file://packages/shared/src/api-test.ts#L133-L153)
