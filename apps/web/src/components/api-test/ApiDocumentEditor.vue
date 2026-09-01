@@ -967,6 +967,7 @@ async function onLibraryGenerateAssertions() {
           centered: true,
           closable: true,
           maskClosable: true,
+          zIndex: NESTED_OVERLAY_Z_INDEX + 10,
           onOk: () => resolve(true),
           onCancel: () => resolve(false),
         });
