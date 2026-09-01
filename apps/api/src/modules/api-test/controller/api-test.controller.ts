@@ -795,6 +795,7 @@ export class ApiTestController {
       caseId?: string;
       encoding?: string;
       ignoreSslVerify?: boolean;
+      prerequisiteSteps?: Array<Record<string, unknown>>;
     },
   ) {
     if (!body.target?.address && !body.environmentId) throw new BadRequestException("请指定环境地址");
@@ -809,6 +810,7 @@ export class ApiTestController {
       encoding: body.encoding,
       caseId: body.caseId,
       ignoreSslVerify: body.ignoreSslVerify,
+      prerequisiteSteps: body.prerequisiteSteps as any,
     });
     if (body.caseId) {
       await this.apiCaseService.persistLastDebugRun(projectId, body.caseId, {

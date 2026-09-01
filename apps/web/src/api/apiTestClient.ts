@@ -854,6 +854,8 @@ export async function debugRunCase(
     caseId?: string;
     encoding?: string;
     ignoreSslVerify?: boolean;
+    /** 调试前先执行的前置步骤（按序），提取其共享变量后再替换当前调试报文 */
+    prerequisiteSteps?: ApiCaseStep[];
   },
 ) {
   const { data } = await http.post<DebugRunResult>(

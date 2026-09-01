@@ -2451,6 +2451,39 @@ function buildDebugRequest(): ApiCaseRequest {
   });
 }
 
+const VARIABLE_REFERENCE_PATTERN = /\$\{\s*([a-zA-Z_][\w.-]*)\s*\}|\{\{?\s*([a-zA-Z_][\w.-]*)\s*\}?\}/g;
+function referencedVariableKeys(value: unknown): Set<string> {
+  const keys = new Set<string>();
+  const text = typeof value === 'string' ? value : JSON.stringify(value ?? '');
+  for (const match of text.matchAll(VARIABLE_REFERENCE_PATTERN)) keys.add(match[1] ?? match[2]);
+  return keys;
+}
+
+/**
+ * 收集调试前需要先执行的前置步骤：当前报文引用的共享变量由哪些前置步骤产出（含传递依赖）。
+ * 与共享变量插入选项一致：同并发组内的步骤互相不可见变量，不纳入前置。
+ */
+function collectDebugPrerequisiteSteps(steps: ApiCaseStep[], targetIndex: number, targetRequest: ApiCaseRequest): ApiCaseStep[] {
+  let boundary = targetIndex;
+  while (boundary > 0 && steps[boundary]?.parallelWithPrevious) boundary -= 1;
+  const candidates = steps.slice(0, boundary);
+  if (!candidates.length) return [];
+  const needed = referencedVariableKeys(targetRequest);
+  const included = new Set<string>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const step of candidates) {
+      if (included.has(step.id)) continue;
+      if (!(step.exports ?? []).some((item) => needed.has((item.name ?? '').trim()))) continue;
+      included.add(step.id);
+      for (const key of referencedVariableKeys(step.request)) needed.add(key);
+      changed = true;
+    }
+  }
+  return candidates.filter((step) => included.has(step.id));
+}
+
 async function onDebugRun(showResult = true) {
   if (!projectId.value || !transactionId.value) return;
   if (!form.stepTargetAddress.trim()) {
@@ -2462,12 +2495,13 @@ async function onDebugRun(showResult = true) {
   debugRunningCaseKey.value = caseKey;
   debugResult.value = null;
   debugResponseTab.value = 'expected';
+  const request = buildDebugRequest();
   try {
     const result = await debugRunCase(
       projectId.value,
       transactionId.value,
       {
-        request: buildDebugRequest(),
+        request,
         expected: buildExpectedFromRows(form.assertionRows),
         polarity: form.polarity,
         environmentId: apiStore.selectedEnvironmentId || undefined,
@@ -2476,6 +2510,7 @@ async function onDebugRun(showResult = true) {
         environmentServiceId: debugServiceId.value || apiStore.selectedEnvironmentServiceId || undefined,
         encoding: debugEncoding.value,
         caseId: caseIdAtStart,
+        prerequisiteSteps: collectDebugPrerequisiteSteps(form.steps, activeStepIndex.value, request),
       },
     );
     if (!isStillOnCase(caseKey)) return;
@@ -2510,9 +2545,10 @@ async function onGenerateAssertions() {
 
   assertionGenerateError.value = '';
   debugRunningCaseKey.value = caseKey;
+  const request = buildDebugRequest();
   try {
     const result = await debugRunCase(projectId.value, transactionId.value, {
-      request: buildDebugRequest(),
+      request,
       expected: buildExpectedFromRows(form.assertionRows),
       polarity: form.polarity,
       environmentId: apiStore.selectedEnvironmentId || undefined,
@@ -2521,6 +2557,7 @@ async function onGenerateAssertions() {
       environmentServiceId: debugServiceId.value || undefined,
       encoding: debugEncoding.value,
       caseId: caseIdAtStart,
+      prerequisiteSteps: collectDebugPrerequisiteSteps(form.steps, activeStepIndex.value, request),
     });
     const responseIssue = getDebugResponseIssue(result);
     if (responseIssue) throw new Error(result.error || responseIssue);
@@ -2608,7 +2645,8 @@ async function onBatchGenerateAssertions() {
       if (!steps.some((step) => batchSelectedSteps.has(batchStepKey(row.id, step.id)))) continue;
       const nextSteps = cloneJson(steps);
       let changed = false;
-      for (const step of nextSteps) {
+      for (let stepIndex = 0; stepIndex < nextSteps.length; stepIndex += 1) {
+        const step = nextSteps[stepIndex];
         const stepKey = batchStepKey(row.id, step.id);
         if (!batchSelectedSteps.has(stepKey)) continue;
         batchAssertionStatuses[stepKey] = 'running';
@@ -2621,6 +2659,7 @@ async function onBatchGenerateAssertions() {
             polarity: row.polarity,
             target,
             encoding: row.metadata?.debugEncoding || 'UTF-8',
+            prerequisiteSteps: collectDebugPrerequisiteSteps(nextSteps, stepIndex, step.request),
           });
           const responseIssue = getDebugResponseIssue(result);
           if (responseIssue) throw new Error(result.error || responseIssue);

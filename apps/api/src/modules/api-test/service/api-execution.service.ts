@@ -717,12 +717,13 @@ export class ApiExecutionService {
     encoding?: string;
     caseId?: string;
     ignoreSslVerify?: boolean;
+    /** 调试前需先执行的前置步骤（按序），提取其共享变量后再替换当前调试报文 */
+    prerequisiteSteps?: ApiCaseStep[];
   }): Promise<DebugRunResult> {
     const env = input.target
       ? environmentFromStep({ id: "debug", name: "调试", target: input.target, request: input.request, expected: input.expected ?? {}, exports: [] })
       : (await this.environmentService.getRuntimeEnvironment(input.projectId, input.environmentId!, input.environmentServiceId)) as RuntimeEnvironment;
     const vars = buildRuntimeVariables(env.variables, env.secrets);
-    const substituted = substituteDeep(input.request, vars) as ApiCaseRequest;
     let caseContext: DataFunctionContext | undefined;
     if (input.caseId) {
       const debugCase = await this.caseRepo.findOne({
@@ -734,6 +735,17 @@ export class ApiExecutionService {
           caseNo: debugCase.caseNo,
         };
     }
+    // 先执行前置步骤提取共享变量，保证当前步骤报文中的 ${变量} 能被替换为真实值
+    if (input.prerequisiteSteps?.length) {
+      await this.runDebugPrerequisiteSteps({
+        projectId: input.projectId,
+        steps: input.prerequisiteSteps,
+        vars,
+        encoding: input.encoding,
+        caseContext,
+      });
+    }
+    const substituted = substituteDeep(input.request, vars) as ApiCaseRequest;
     // 步骤库调试等无案例上下文的场景回退示例值，保证 CASE_NAME/CASE_NO 可调试
     const request = (await this.dataFunctionService.resolveDeep(
       input.projectId,
@@ -776,6 +788,64 @@ export class ApiExecutionService {
       encoding: input.encoding,
       ignoreSslVerify: sslOverride,
     });
+  }
+
+  /**
+   * 调试前置步骤：按序执行产出变量的历史步骤，把提取出的共享变量合并进 vars。
+   * 与案例正式执行保持一致：步骤提取值覆盖同名环境变量；请求失败或必填变量提取失败时中断调试。
+   */
+  private async runDebugPrerequisiteSteps(input: {
+    projectId: string;
+    steps: ApiCaseStep[];
+    vars: Record<string, string>;
+    encoding?: string;
+    caseContext?: DataFunctionContext;
+  }) {
+    for (const step of input.steps) {
+      if (!step.target?.address?.trim()) {
+        throw new BadRequestException(
+          `前置步骤「${step.name}」未配置环境地址，无法提取其共享变量`,
+        );
+      }
+      const stepCase = Object.assign(new ApiTestCaseEntity(), {
+        id: step.id,
+        projectId: input.projectId,
+        title: step.name,
+        request: step.request,
+        expected: step.expected ?? {},
+        metadata: { exports: step.exports ?? [] },
+      });
+      const result = await this.executeSingleStep({
+        runId: "debug",
+        testCase: stepCase,
+        env: environmentFromStep(step),
+        vars: input.vars,
+        encoding: input.encoding,
+        caseContext: input.caseContext,
+      });
+      if (result.status === "error") {
+        const reason =
+          (result.responseSnapshot as { error?: string } | undefined)?.error ??
+          "请求执行失败";
+        throw new BadRequestException(
+          `前置步骤「${step.name}」执行失败：${reason}`,
+        );
+      }
+      for (const binding of step.exports ?? []) {
+        const value = extractExportValue(
+          binding,
+          result.requestSnapshot,
+          result.responseSnapshot,
+        );
+        if (value !== undefined && value !== null && String(value) !== "") {
+          input.vars[binding.name] = String(value);
+        } else if (binding.required) {
+          throw new BadRequestException(
+            `前置步骤「${step.name}」的共享变量「${binding.name}」提取失败`,
+          );
+        }
+      }
+    }
   }
 
   private async debugRunHttp(input: {
