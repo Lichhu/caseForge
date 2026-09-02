@@ -1,7 +1,7 @@
 import type { ApiServiceProperty } from "@case-forge/shared";
 import { extractApiDocSection, getApiDocFieldValue } from "./api-doc.parser";
 
-export const API_CASE_RULE_VERSION = "api-case-rules-v3";
+export const API_CASE_RULE_VERSION = "api-case-rules-v4";
 
 export const API_CASE_SCENARIOS = {
   positive_flow: "正向流程",
@@ -187,6 +187,11 @@ export function assertScenarioCoverage(
   if (scenarioKey === "idempotency" && result.cases.length !== 1) {
     throw new Error("幂等性场景必须生成 1 条案例");
   }
+  if (scenarioKey === "pagination" && positive < 2) {
+    throw new Error(
+      "分页场景必须至少生成 2 条覆盖分页实效的正向案例（如首页查询、翻页生效）",
+    );
+  }
   if (structuredMarkdown && scenarioKey === "precision") {
     assertEachFieldHasPolarities(
       result,
@@ -251,7 +256,12 @@ function scenarioRule(key: ApiCaseScenarioKey) {
     case "positive_flow":
       return "生成1条成功正向案例。";
     case "pagination":
-      return "按字段代码、中文名称和描述的语义识别分页，不限固定命名：page/pageNo/pageNum、size/pageSize/limit/rowCount/perPage 及名称含“页码/页数/每页/查询条数”的字段；start/startSize/startIndex/beginRow/offset 及名称含“开始条数/起始条数/起始位置/偏移量”的字段。存在页大小加起始位置（如 size+start、size+startSize）也适用；字段语义有歧义时以中文名称和描述为准。起始值必须遵循文档或示例报文：示例 start=1 时正向首条使用 1，不得按习惯改成 0；只有文档明确为零基偏移量时才使用 0。不适用时说明具体原因。生成单页/多页、单条/多条组合案例。";
+      return [
+        "按字段代码、中文名称和描述的语义识别分页，不限固定命名：page/pageNo/pageNum、size/pageSize/limit/rowCount/perPage 及名称含“页码/页数/每页/查询条数”的字段；start/startSize/startIndex/beginRow/offset 及名称含“开始条数/起始条数/起始位置/偏移量”的字段。存在页大小加起始位置（如 size+start、size+startSize）也适用；字段语义有歧义时以中文名称和描述为准。",
+        "起始值必须遵循文档或示例报文：示例 start=1 时正向首条使用 1，不得按习惯改成 0；只有文档明确为零基偏移量时才使用 0。不适用时说明具体原因。",
+        "适用时生成以下「分页实效」案例：① 首页查询：页码取起始值、页大小取文档默认值或示例值，预期成功且返回条数不超过页大小；② 翻页生效：页码加 1（起始位置模式则起始位置加页大小），页大小不变，预期成功且返回数据与上一页不重复；③ 最小页大小：页大小=1，预期成功且仅返回 1 条；④ 页码超末页：页码取远超最大页数的值，预期成功且列表为空（文档规定报错时按文档）。",
+        "反向 1~2 条：页码为负数或非数字、页大小为 0/负数；文档规定页大小上限时须覆盖超上限。每条案例的预期结果须写明分页实效验证点。",
+      ].join(" ");
     case "required_fields":
       return "覆盖必填字段缺失异常，并生成全部非必填字段为空的正向案例；忽略参数名称错误。";
     case "related_fields":

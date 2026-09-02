@@ -83,13 +83,33 @@ describe("assertScenarioCoverage", () => {
     changes: [{ path: "Transaction/Body/request/bizBody/value", value: "1" }],
   });
 
-  it("does not restrict pagination case count", () => {
+  it("requires at least two positive pagination effectiveness cases", () => {
     expect(() =>
-      assertScenarioCoverage("pagination", {
-        applicable: true,
-        reason: "分页字段存在",
-        cases: [testCase("positive")],
-      }),
+      assertScenarioCoverage(
+        "pagination",
+        {
+          applicable: true,
+          reason: "分页字段存在",
+          cases: [testCase("positive")],
+        },
+      ),
+    ).toThrow("分页实效");
+  });
+
+  it("accepts pagination results with two positive cases", () => {
+    expect(() =>
+      assertScenarioCoverage(
+        "pagination",
+        {
+          applicable: true,
+          reason: "分页字段存在",
+          cases: [
+            { title: "首页查询", polarity: "positive", changes: [] },
+            { title: "翻页生效", polarity: "positive", changes: [] },
+            testCase("negative"),
+          ],
+        },
+      ),
     ).not.toThrow();
   });
 
@@ -153,5 +173,8 @@ describe("buildScenarioPrompts", () => {
     expect(prompt).toContain("start/startSize/startIndex/beginRow/offset");
     expect(prompt).toContain("size+start、size+startSize");
     expect(prompt).toContain("示例 start=1 时正向首条使用 1");
+    expect(prompt).toContain("分页实效");
+    expect(prompt).toContain("翻页生效");
+    expect(prompt).toContain("页码超末页");
   });
 });
