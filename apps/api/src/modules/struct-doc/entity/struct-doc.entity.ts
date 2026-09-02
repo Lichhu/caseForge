@@ -4,6 +4,7 @@
  */
 import { TestPointEntity } from "@struct-doc/entity/test-point.entity";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -31,7 +32,7 @@ export type StructuringStatus = (typeof STRUCTURING_STATUS)[number];
 @Entity("case_struct_doc")
 @Index("idx_case_struct_doc_project", ["projectId"])
 @Index("idx_case_struct_doc_structuring_status", ["structuringStatus"])
-export class StructDocEntity {
+export class StructDocEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

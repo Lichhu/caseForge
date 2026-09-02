@@ -491,6 +491,7 @@ export class ApiTestController {
       channelIds: body.channelIds,
       beforeSteps: body.beforeSteps,
       afterSteps: body.afterSteps,
+      largePayloadFieldPath: body.largePayloadFieldPath,
     });
   }
 
@@ -828,7 +829,7 @@ export class ApiTestController {
         const record = { id: crypto.randomUUID(), stepId: body.stepId, request: (resolvedRequest ?? body.request) as Record<string, unknown>, response: { statusCode: result.statusCode, headers: result.headers, body: result.body, error: result.error }, extracted: {}, target: body.target ?? null, ...restResult, executedAt: new Date().toISOString() };
         await this.stepDebugRepo.save(this.stepDebugRepo.create({ projectId, caseId: body.caseId, stepId: body.stepId, record, ...auditFieldsForCreate() }));
         const rows = await this.stepDebugRepo.find({ where: { caseId: body.caseId, stepId: body.stepId, createdBy: RequestContext.getUserName() }, order: { createdAt: "DESC" }, skip: 30, take: 1000 });
-        if (rows.length) await this.stepDebugRepo.delete(rows.map((row) => row.id));
+        if (rows.length) await this.stepDebugRepo.softDelete(rows.map((row) => row.id));
       }
     }
     return result;
@@ -841,7 +842,7 @@ export class ApiTestController {
 
   @Delete(":projectId/cases/:caseId/steps/:stepId/debug-records")
   clearStepDebugRecords(@Param("projectId") projectId: string, @Param("caseId") caseId: string, @Param("stepId") stepId: string) {
-    return this.stepDebugRepo.delete({ projectId, caseId, stepId, createdBy: RequestContext.getUserName() });
+    return this.stepDebugRepo.softDelete({ projectId, caseId, stepId, createdBy: RequestContext.getUserName() });
   }
 
   @Post(":projectId/transactions/:transactionId/cases/generate-assertions")

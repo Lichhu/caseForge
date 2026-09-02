@@ -176,8 +176,8 @@ export class ApiTransactionService {
   async deleteTransaction(projectId: string, transactionId: string) {
     await this.requireTransaction(projectId, transactionId);
     await this.generateQueueService.cancel(projectId, transactionId);
-    await this.apiDocRepo.delete({ projectId, transactionId });
-    await this.transactionRepo.delete(
+    await this.apiDocRepo.softDelete({ projectId, transactionId });
+    await this.transactionRepo.softDelete(
       scopedWhere({ projectId, id: transactionId }),
     );
     await touchProjectUpdatedAt(this.projectRepo, projectId);
@@ -195,8 +195,8 @@ export class ApiTransactionService {
     for (const transactionId of ids) {
       await this.requireTransaction(projectId, transactionId);
       await this.generateQueueService.cancel(projectId, transactionId);
-      await this.apiDocRepo.delete({ projectId, transactionId });
-      await this.transactionRepo.delete(
+      await this.apiDocRepo.softDelete({ projectId, transactionId });
+      await this.transactionRepo.softDelete(
         scopedWhere({ projectId, id: transactionId }),
       );
     }

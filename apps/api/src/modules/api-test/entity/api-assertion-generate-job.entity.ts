@@ -1,6 +1,7 @@
 /**
  * @file AI 断言生成任务队列（持久化，支持重启恢复）
  */
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -28,7 +29,7 @@ export type ApiAssertionGenerateJobStatus =
   "transactionId",
   "caseId",
 ])
-export class ApiAssertionGenerateJobEntity {
+export class ApiAssertionGenerateJobEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

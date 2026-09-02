@@ -1,4 +1,5 @@
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -24,10 +25,10 @@ export type ApiTransactionSyncStatus =
   ["projectId", "reqCode", "taskId", "serviceCode", "reqSystemId", "code"],
   {
     unique: true,
-    where: "req_code IS NOT NULL",
+    where: "req_code IS NOT NULL AND deleted_at IS NULL",
   },
 )
-export class ApiTransactionEntity {
+export class ApiTransactionEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

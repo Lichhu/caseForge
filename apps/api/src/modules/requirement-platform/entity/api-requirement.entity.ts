@@ -2,6 +2,7 @@
  * @file 需求平台需求实体（api_requirement 表）
  * 数据源自测管平台库 b_project（SIT 测试中的需求），经服管 serviceList 校验后入库
  */
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -21,9 +22,9 @@ export const API_REQUIREMENT_STATUSES = [
 export type ApiRequirementStatus = (typeof API_REQUIREMENT_STATUSES)[number];
 
 @Entity("api_requirement")
-@Index("uk_api_requirement_project_code", ["projectCode"], { unique: true })
+@Index("uk_api_requirement_project_code", ["projectCode"], { unique: true, where: "deleted_at IS NULL" })
 @Index("idx_api_requirement_status", ["status"])
-export class ApiRequirementEntity {
+export class ApiRequirementEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

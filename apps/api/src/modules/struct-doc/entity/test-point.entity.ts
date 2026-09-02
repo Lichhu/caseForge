@@ -6,6 +6,7 @@ import type { DynamicInstructEntity } from "@dynamic-instruct/entity/dynamic-ins
 import type { TestPointInstructEntity } from "@dynamic-instruct/entity/test-point-instruct.entity";
 import type { TestPointPromptEntity } from "@dynamic-instruct/entity/test-point-prompt.entity";
 import { StructDocEntity } from "@struct-doc/entity/struct-doc.entity";
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -32,7 +33,7 @@ import {
   "featureModule",
 ])
 @Index(["structDocId", "testPoint"])
-export class TestPointEntity {
+export class TestPointEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

@@ -84,7 +84,7 @@ export class ApiExecutionSetService {
       caseIdsMap.set(link.executionSetId, ids);
     }
     if (orphanLinkIds.length) {
-      await this.setCaseRepo.delete(orphanLinkIds);
+      await this.setCaseRepo.softDelete(orphanLinkIds);
     }
 
     return {
@@ -133,8 +133,8 @@ export class ApiExecutionSetService {
 
   async deleteSet(projectId: string, transactionId: string, setId: string) {
     await this.requireSet(projectId, transactionId, setId);
-    await this.setCaseRepo.delete({ executionSetId: setId });
-    await this.setRepo.delete({ id: setId });
+    await this.setCaseRepo.softDelete({ executionSetId: setId });
+    await this.setRepo.softDelete({ id: setId });
     return { ok: true };
   }
 
@@ -152,7 +152,7 @@ export class ApiExecutionSetService {
       uniqueCaseIds,
     );
     const sortedCaseIds = await this.sortByDependencies(projectId, uniqueCaseIds);
-    await this.setCaseRepo.delete({ executionSetId: setId });
+    await this.setCaseRepo.softDelete({ executionSetId: setId });
     if (!sortedCaseIds.length) {
       return { caseIds: [] as string[], caseCount: 0 };
     }

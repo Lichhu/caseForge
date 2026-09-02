@@ -322,7 +322,7 @@ export class DynamicInstructService {
       throw new NotFoundException("测试要点不存在");
     }
     const ownedIds = rows.map((item) => item.id);
-    await this.testPointRepo.delete({ id: In(ownedIds) });
+    await this.testPointRepo.softDelete({ id: In(ownedIds) });
     await touchProjectUpdatedAt(this.projectRepo, rows[0].projectId);
     return { deleted: ownedIds.length, testPointIds: ownedIds };
   }
@@ -375,7 +375,7 @@ export class DynamicInstructService {
       }),
     );
 
-    await this.promptSelectionRepo.delete({ testPointId });
+    await this.promptSelectionRepo.softDelete({ testPointId });
     if (promptIds.length) {
       await this.promptSelectionRepo.save(
         promptIds.map((promptId) =>

@@ -1,6 +1,7 @@
 /**
  * @file 需求结构化任务队列（持久化，支持重启恢复）
  */
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -28,7 +29,7 @@ export type StructRequirementJobStatus =
   "status",
   "queuedAt",
 ])
-export class StructRequirementJobEntity {
+export class StructRequirementJobEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

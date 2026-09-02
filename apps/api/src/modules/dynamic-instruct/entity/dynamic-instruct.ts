@@ -1,6 +1,7 @@
 /**
  * @file 动态指令实体（历史表 case_dynamic_instruct，测试要点与提示词关联）
  */
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -18,7 +19,7 @@ import type { TestPointEntity } from "@struct-doc/entity/test-point.entity";
  * 动态指令实体：记录测试要点上的编辑状态、自然语言约束及关联提示词
  */
 @Entity("case_dynamic_instruct")
-export class DynamicInstructEntity {
+export class DynamicInstructEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn({ name: "id" })
   id: string;
 

@@ -5,6 +5,7 @@
 import { CaseNodeKind } from "@case-forge/shared";
 import { CaseEditorEntity } from "@case-editor/entity/case-editor.entity";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -33,7 +34,7 @@ import { CaseNodeMetadataEntity } from "./case-node-metadata.entity";
   "sortOrder",
 ])
 @Index("idx_case_tree_parent_sort", ["parentId", "sortOrder"])
-export class CaseTreeEntity {
+export class CaseTreeEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

@@ -50,6 +50,15 @@ import {
   type ApiCaseScenarioKey,
 } from "@api-test/util/api-case-scenarios.util";
 import { assembleBodyFromExample } from "@api-test/util/api-case-body-assembler.util";
+import { extractRequestFieldPaths } from "@api-test/util/api-case-scenarios.util";
+import {
+  EMPTY_FIELD_SCENARIO_KEY,
+  EMPTY_FIELD_SCENARIO_NAME,
+  LARGE_PAYLOAD_SCENARIO_KEY,
+  LARGE_PAYLOAD_SCENARIO_NAME,
+  extractLongRequestFieldPaths,
+  loadLargePayloadBase64,
+} from "@api-test/util/api-case-large-payload.util";
 import { buildCaseRequestFromProfile } from "@api-test/util/api-doc-technical-profile.util";
 import { parseEndpointsFromSmpData } from "@api-test/util/smp-doc.parser";
 
@@ -283,8 +292,8 @@ export class ApiCaseService {
       where: scopedWhere({ projectId, id: caseId }),
       relations: ["endpoint"],
     });
-    await this.setCaseRepo.delete({ caseId });
-    await this.caseRepo.delete(scopedWhere({ projectId, id: caseId }));
+    await this.setCaseRepo.softDelete({ caseId });
+    await this.caseRepo.softDelete(scopedWhere({ projectId, id: caseId }));
     const transactionId = testCase?.endpoint?.transactionId;
     if (transactionId) {
       const transaction = await this.transactionRepo.findOne({
@@ -351,7 +360,12 @@ export class ApiCaseService {
   async generateCases(
     projectId: string,
     transactionId?: string,
-    options?: { channelIds?: string[]; beforeSteps?: ApiCaseStep[]; afterSteps?: ApiCaseStep[] },
+    options?: {
+      channelIds?: string[];
+      beforeSteps?: ApiCaseStep[];
+      afterSteps?: ApiCaseStep[];
+      largePayloadFieldPath?: string;
+    },
   ) {
     if (!transactionId) {
       throw new BadRequestException("请指定交易码后再生成案例");
@@ -481,10 +495,10 @@ export class ApiCaseService {
       });
       if (executed > 0)
         throw new BadRequestException("版本案例已有执行记录，不能删除");
-      await this.caseRepo.delete({ id: In(caseIds), projectId });
+      await this.caseRepo.softDelete({ id: In(caseIds), projectId });
     }
-    await this.scenarioRepo.delete({ jobId });
-    await this.generateJobRepo.delete({ id: jobId, projectId, transactionId });
+    await this.scenarioRepo.softDelete({ jobId });
+    await this.generateJobRepo.softDelete({ id: jobId, projectId, transactionId });
     return { ok: true };
   }
 
@@ -539,6 +553,54 @@ export class ApiCaseService {
                 title: "正向流程",
                 polarity: "positive" as const,
                 changes: [],
+              },
+            ],
+          };
+          task.result = result;
+          task.applicableReason = result.reason;
+          task.status = "completed";
+          task.resultCount = await this.persistScenarioCases(
+            job,
+            endpoint,
+            transaction.code,
+            task,
+            result.cases,
+          );
+          createdCount += task.resultCount;
+          task.durationMs = Date.now() - started;
+          task.finishedAt = new Date();
+          await this.scenarioRepo.save(task);
+          continue;
+        }
+        if (task.scenarioKey === "all_fields_empty") {
+          const fieldPaths = extractRequestFieldPaths(
+            job.snapshot.structuredMarkdown,
+          );
+          if (!fieldPaths.length) {
+            const reason = "请求报文无可解析字段，跳过全字段空值场景";
+            task.result = {
+              applicable: false,
+              reason,
+              cases: [],
+            };
+            task.applicableReason = reason;
+            task.status = "not_applicable";
+            task.resultCount = 0;
+            task.durationMs = Date.now() - started;
+            task.finishedAt = new Date();
+            await this.scenarioRepo.save(task);
+            continue;
+          }
+          const result = {
+            applicable: true,
+            reason: "请求报文每个字段均置为空值，验证接口校验能力",
+            cases: [
+              {
+                title: "全字段空值",
+                polarity: "negative" as const,
+                changes: fieldPaths.map((path) => ({ path, value: "" })),
+                expected:
+                  "请求报文全部字段为空值时接口应校验失败或返回明确错误提示，不得处理成功",
               },
             ],
           };
@@ -630,6 +692,23 @@ export class ApiCaseService {
       task.durationMs = Date.now() - started;
       task.finishedAt = new Date();
       await this.scenarioRepo.save(task);
+    }
+    const latestAfterScenarios = await this.generateJobRepo.findOne({
+      where: { id: job.id },
+    });
+    if (latestAfterScenarios?.status !== "cancelled") {
+      try {
+        createdCount += await this.persistLargePayloadCases(
+          job,
+          endpoint,
+          transaction.code,
+        );
+      } catch (error) {
+        // 大报文/空字段案例失败不影响常规场景案例
+        this.logger.warn(
+          `大报文/空字段测试案例生成失败：${(error as Error).message}`,
+        );
+      }
     }
     await this.refreshScenarioSummary(job.id);
     return { count: createdCount, cases: [] };
@@ -741,10 +820,156 @@ export class ApiCaseService {
         .filter((item) => item.metadata?.scenarioTaskId === task.id)
         .map((item) => item.id);
       if (staleIds.length) {
-        await manager.delete(ApiTestExecutionSetCaseEntity, {
+        await manager.softDelete(ApiTestExecutionSetCaseEntity, {
           caseId: In(staleIds),
         });
-        await manager.delete(ApiTestCaseEntity, {
+        await manager.softDelete(ApiTestCaseEntity, {
+          id: In(staleIds),
+          projectId: job.projectId,
+        });
+      }
+      await manager.save(ApiTestCaseEntity, entities);
+    });
+    return entities.length;
+  }
+
+  /**
+   * 大报文/空字段测试：在常规场景案例之外，对每个目标字段
+   * （手动选择的大报文字段 + 请求报文中声明长度 > 100000 的字段）
+   * 各附加「传 1MB 大报文」与「传空值」两条案例。
+   * 重试同一任务时先清理本任务该类旧案例，保证幂等。
+   */
+  private async persistLargePayloadCases(
+    job: ApiCaseGenerateJobEntity,
+    endpoint: ApiEndpointEntity,
+    transactionCode: string,
+  ): Promise<number> {
+    if (!job.snapshot) return 0;
+    const fieldPaths: string[] = [];
+    const seen = new Set<string>();
+    const addField = (path?: string) => {
+      const trimmed = path?.trim();
+      if (!trimmed) return;
+      const key = trimmed.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      fieldPaths.push(trimmed);
+    };
+    addField(job.snapshot.largePayloadFieldPath);
+    for (const path of extractLongRequestFieldPaths(
+      job.snapshot.structuredMarkdown,
+    )) {
+      addField(path);
+    }
+    if (!fieldPaths.length) return 0;
+    const profile = job.snapshot.profile;
+    const largePayload = loadLargePayloadBase64();
+    let seq = await maxCaseNoSuffix(
+      this.caseRepo,
+      job.projectId,
+      endpoint.id,
+      transactionCode,
+    );
+    const transport = profile.transport === "socket" ? "tcp" : "http";
+    const entities: ApiTestCaseEntity[] = [];
+    for (const fieldPath of fieldPaths) {
+      const fieldCode = fieldPath.split("/").filter(Boolean).pop() || fieldPath;
+      const variants = [
+        {
+          scenarioKey: LARGE_PAYLOAD_SCENARIO_KEY,
+          scenarioName: LARGE_PAYLOAD_SCENARIO_NAME,
+          value: largePayload,
+          polarity: "positive" as const,
+          description: `验证请求字段 ${fieldPath} 传入约 1MB base64 大报文时接口的传输与处理能力`,
+        },
+        {
+          scenarioKey: EMPTY_FIELD_SCENARIO_KEY,
+          scenarioName: EMPTY_FIELD_SCENARIO_NAME,
+          value: "",
+          polarity: "negative" as const,
+          description: `验证请求字段 ${fieldPath} 传空值时接口的校验与处理能力`,
+        },
+      ];
+      for (const variant of variants) {
+        const assembled = assembleBodyFromExample({
+          exampleMessage: profile.exampleMessage,
+          overrides: { [fieldPath]: variant.value },
+          messageFormat: profile.messageFormat,
+          createMissingPaths: true,
+          refreshDynamicHeaders: true,
+        });
+        const request = buildCaseRequestFromProfile(
+          endpoint,
+          {
+            transport,
+            messageFormat: profile.messageFormat,
+          },
+          assembled.body,
+        );
+        const title = `${variant.scenarioName}-${fieldCode}`;
+        const aiStep: ApiCaseStep = {
+          id: crypto.randomUUID(),
+          name: title,
+          request,
+          expected: {},
+          exports: [],
+        };
+        seq += 1;
+        entities.push(
+          this.caseRepo.create({
+            projectId: job.projectId,
+            endpointId: endpoint.id,
+            title,
+            caseNo: formatCaseNo(transactionCode, seq),
+            description: variant.description,
+            transactionCode,
+            owner: RequestContext.getUserName(),
+            priority: "P1",
+            polarity: variant.polarity,
+            status: "ready",
+            enabled: true,
+            preconditions: [],
+            request,
+            expected: {},
+            steps: [
+              ...(job.snapshot?.beforeSteps ?? []).map(cloneStep),
+              aiStep,
+              ...(job.snapshot?.afterSteps ?? []).map(cloneStep),
+            ],
+            metadata: {
+              source: "ai",
+              generateVersion: job.version ?? undefined,
+              scenarioName: variant.scenarioName,
+              generateJobId: job.id,
+              versionCode: job.versionCode ?? undefined,
+              scenarioKey: variant.scenarioKey,
+            },
+            ...auditFieldsForCreate(),
+          }),
+        );
+      }
+    }
+    await this.dataSource.transaction(async (manager) => {
+      const existing = await manager.find(ApiTestCaseEntity, {
+        where: { projectId: job.projectId },
+      });
+      const staleKeys = new Set([
+        LARGE_PAYLOAD_SCENARIO_KEY,
+        EMPTY_FIELD_SCENARIO_KEY,
+      ]);
+      const staleIds = existing
+        .filter(
+          (item) =>
+            item.metadata?.generateJobId === job.id &&
+            typeof item.metadata?.scenarioKey === "string" &&
+            staleKeys.has(item.metadata.scenarioKey),
+        )
+        .map((item) => item.id);
+      if (staleIds.length) {
+        await manager.softDelete(ApiTestExecutionSetCaseEntity, {
+          caseId: In(staleIds),
+        });
+        await manager.softDelete(ApiTestCaseEntity, {
           id: In(staleIds),
           projectId: job.projectId,
         });
@@ -789,8 +1014,8 @@ export class ApiCaseService {
     );
     if (!toDelete.length) return 0;
     const caseIds = toDelete.map((c) => c.id);
-    await this.setCaseRepo.delete({ caseId: In(caseIds) });
-    await this.caseRepo.delete({ id: In(caseIds), projectId });
+    await this.setCaseRepo.softDelete({ caseId: In(caseIds) });
+    await this.caseRepo.softDelete({ id: In(caseIds), projectId });
     return toDelete.length;
   }
 

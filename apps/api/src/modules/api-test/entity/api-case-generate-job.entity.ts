@@ -1,6 +1,7 @@
 /**
  * @file 接口案例生成任务队列（持久化，支持重启恢复与排队 ETA）
  */
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -39,7 +40,7 @@ export type ApiCaseGenerateJobStatus =
   "status",
 ])
 @Index("idx_api_case_generate_job_status_finished", ["status", "finishedAt"])
-export class ApiCaseGenerateJobEntity {
+export class ApiCaseGenerateJobEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 
@@ -80,6 +81,8 @@ export class ApiCaseGenerateJobEntity {
     structuredMarkdown: string;
     beforeSteps?: ApiCaseStep[];
     afterSteps?: ApiCaseStep[];
+    /** 大报文测试字段路径；存在时生成完成后附加 1 条大报文案例 */
+    largePayloadFieldPath?: string;
   } | null;
 
   @Column({ type: "int", default: 0 })

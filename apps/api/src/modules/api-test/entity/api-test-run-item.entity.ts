@@ -1,5 +1,6 @@
 import type { AssertionResult, ApiRunItemStatus } from "@case-forge/shared";
 import { ApiTestRunEntity } from "./api-test-run.entity";
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -13,7 +14,7 @@ import {
 @Entity("api_test_run_item")
 @Index("idx_api_test_run_item_run", ["runId"])
 @Index("idx_api_test_run_item_run_created", ["runId", "createdAt"])
-export class ApiTestRunItemEntity {
+export class ApiTestRunItemEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

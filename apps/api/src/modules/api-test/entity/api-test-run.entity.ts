@@ -1,4 +1,5 @@
 import { ApiTestRunItemEntity } from "./api-test-run-item.entity";
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -10,7 +11,7 @@ import {
 
 @Entity("api_test_run")
 @Index("idx_api_test_run_project_created", ["projectId", "createdAt"])
-export class ApiTestRunEntity {
+export class ApiTestRunEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

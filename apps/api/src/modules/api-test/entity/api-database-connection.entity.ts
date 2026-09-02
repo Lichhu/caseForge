@@ -1,3 +1,4 @@
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -10,8 +11,9 @@ import {
 @Entity("api_database_connection")
 @Index("uk_api_database_connection_project_name", ["projectId", "name"], {
   unique: true,
+  where: "deleted_at IS NULL",
 })
-export class ApiDatabaseConnectionEntity {
+export class ApiDatabaseConnectionEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid") id: string;
   @Column() projectId: string;
   @Column() name: string;

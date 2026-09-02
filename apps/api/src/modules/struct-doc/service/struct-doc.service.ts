@@ -108,7 +108,7 @@ export class StructDocService {
       }
     }
 
-    await this.structDocRepo.delete({ id: structDocId });
+    await this.structDocRepo.softDelete({ id: structDocId });
     return { id: structDocId, deleted: true };
   }
 
@@ -799,7 +799,7 @@ export class StructDocService {
       .filter((id) => !idsToKeep.includes(id));
 
     if (toDelete.length) {
-      await this.testPointRepo.delete({ id: In(toDelete) });
+      await this.testPointRepo.softDelete({ id: In(toDelete) });
     }
 
     const entities = items.map((item) =>

@@ -102,7 +102,7 @@ export class ApiReportService {
       skip: 20,
       take: 100,
     });
-    if (old.length) await this.exportRepo.delete(old.map((row) => row.id));
+    if (old.length) await this.exportRepo.softDelete(old.map((row) => row.id));
   }
 
   async listReportExports(projectId: string, transactionId: string) {

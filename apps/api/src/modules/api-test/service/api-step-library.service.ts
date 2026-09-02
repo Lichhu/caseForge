@@ -49,7 +49,7 @@ export class ApiStepLibraryService {
   }
 
   async remove(id: string) {
-    const result = await this.repo.delete({
+    const result = await this.repo.softDelete({
       id,
       createdBy: RequestContext.getUserName(),
     });

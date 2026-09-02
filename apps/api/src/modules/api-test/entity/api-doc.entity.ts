@@ -1,6 +1,7 @@
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { ApiEndpointEntity } from "./api-endpoint.entity";
 import type { ApiDocGenerationProfile } from "@case-forge/shared";
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -33,9 +34,9 @@ export interface SmpDocumentData {
 }
 
 @Entity("api_doc")
-@Index("uk_api_doc_transaction", ["transactionId"], { unique: true })
+@Index("uk_api_doc_transaction", ["transactionId"], { unique: true, where: "deleted_at IS NULL" })
 @Index("idx_api_doc_project", ["projectId"])
-export class ApiDocEntity {
+export class ApiDocEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

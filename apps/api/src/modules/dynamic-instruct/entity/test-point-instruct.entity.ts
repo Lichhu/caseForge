@@ -2,6 +2,7 @@
  * @file 测试要点动态指令主表实体（状态、自然语言、全量/追加标志）
  */
 import type { TestPointEntity } from "@struct-doc/entity/test-point.entity";
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -33,9 +34,10 @@ export type TestPointInstructStatus =
 @Entity("case_test_point_instruct")
 @Index("uk_case_test_point_instruct_test_point", ["testPointId"], {
   unique: true,
+  where: "deleted_at IS NULL",
 })
 @Index("idx_case_test_point_instruct_status", ["status"])
-export class TestPointInstructEntity {
+export class TestPointInstructEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

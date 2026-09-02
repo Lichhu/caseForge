@@ -107,6 +107,6 @@ async function upsertScenario(
     .filter((prompt) => prompt.isSystem && !keepIds.has(prompt.id))
     .map((prompt) => prompt.id);
   if (staleIds.length) {
-    await promptRepo.delete(staleIds);
+    await promptRepo.softDelete(staleIds);
   }
 }

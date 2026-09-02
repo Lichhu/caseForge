@@ -1,6 +1,7 @@
 /**
  * @file 场景提示词库实体（prompt_library 表）
  */
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -20,10 +21,10 @@ import { DynamicInstructEntity } from "@dynamic-instruct/entity/dynamic-instruct
  * 提示词实体：归属某场景，含名称、内容、标签、排序及启用状态
  */
 @Entity("prompt_library")
-@Index("idx_scenario_name", ["scenarioId", "name"], { unique: true })
+@Index("idx_scenario_name", ["scenarioId", "name"], { unique: true, where: "deleted_at IS NULL" })
 @Index("idx_scenario_sort", ["scenarioId", "sortOrder"])
 @Index("idx_scenario_id", ["scenarioId"])
-export class PromptEntity {
+export class PromptEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

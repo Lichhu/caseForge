@@ -2,6 +2,7 @@
  * 案例生成约束快照实体：持久化约束输入 JSON。
  * markdown 列保留兼容旧数据，新记录不再写入内容。
  */
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -15,7 +16,7 @@ import {
 @Entity("case_constraint")
 @Index("idx_case_constraint_project", ["projectId", "createdAt"])
 @Index("idx_case_constraint_struct_doc", ["structDocId"])
-export class CaseConstraintEntity {
+export class CaseConstraintEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

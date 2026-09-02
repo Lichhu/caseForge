@@ -580,7 +580,7 @@ export class CaseWorkspaceService {
       select: ["id"],
     });
     if (existing.length) {
-      await this.testPointRepo.delete({
+      await this.testPointRepo.softDelete({
         id: In(existing.map((item) => item.id)),
       });
     }

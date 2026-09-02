@@ -300,7 +300,7 @@ export class ProjectManageService {
         throw new NotFoundException(`Project ${projectId} not found`);
       }
       await this.deleteProjectRelations(manager, projectId);
-      await manager.delete(CaseProjectEntity, projectId);
+      await manager.softDelete(CaseProjectEntity, projectId);
     });
 
     return { id: projectId, deleted: true };
@@ -327,7 +327,7 @@ export class ProjectManageService {
           continue;
         }
         await this.deleteProjectRelations(manager, projectId);
-        await manager.delete(CaseProjectEntity, projectId);
+        await manager.softDelete(CaseProjectEntity, projectId);
       }
     });
 
@@ -404,7 +404,7 @@ export class ProjectManageService {
     manager: EntityManager,
     projectId: string,
   ): Promise<void> {
-    await manager.delete(CaseEditorEntity, { projectId });
-    await manager.delete(StructDocEntity, { projectId });
+    await manager.softDelete(CaseEditorEntity, { projectId });
+    await manager.softDelete(StructDocEntity, { projectId });
   }
 }

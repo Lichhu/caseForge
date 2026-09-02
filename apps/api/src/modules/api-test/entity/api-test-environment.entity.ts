@@ -1,3 +1,4 @@
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -9,7 +10,7 @@ import {
 
 @Entity("api_test_environment")
 @Index("idx_api_test_env_project_default", ["projectId", "isDefault"])
-export class ApiTestEnvironmentEntity {
+export class ApiTestEnvironmentEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

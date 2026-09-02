@@ -133,7 +133,7 @@ export class ScenarioService {
    */
   async deleteScenario(id: string) {
     const scenario = await this.getOwnedScenario(id);
-    await this.scenarioRepo.remove(scenario);
+    await this.scenarioRepo.softRemove(scenario);
     return { id, deleted: true };
   }
 
@@ -150,7 +150,7 @@ export class ScenarioService {
       .map((item) => item.id)
       .filter((id) => !keepIds.includes(id));
     if (deleteIds.length) {
-      await this.promptRepo.delete({ id: In(deleteIds) });
+      await this.promptRepo.softDelete({ id: In(deleteIds) });
     }
     await this.savePrompts(scenarioId, prompts);
   }

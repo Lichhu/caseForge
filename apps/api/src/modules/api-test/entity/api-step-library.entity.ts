@@ -1,4 +1,5 @@
 import type { ApiCaseStep } from "@case-forge/shared";
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -10,7 +11,7 @@ import {
 
 @Entity("api_step_library")
 @Index("idx_api_step_library_user", ["createdBy", "updatedAt"])
-export class ApiStepLibraryEntity {
+export class ApiStepLibraryEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

@@ -1,6 +1,7 @@
 /**
  * @file 案例生成任务队列（持久化，支持重启恢复与排队 ETA）
  */
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -30,7 +31,7 @@ export type CaseGenerateJobStatus = (typeof CASE_GENERATE_JOB_STATUS)[number];
 ])
 @Index("idx_case_generate_job_test_point_status", ["testPointId", "status"])
 @Index("idx_case_generate_job_status_finished", ["status", "finishedAt"])
-export class CaseGenerateJobEntity {
+export class CaseGenerateJobEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

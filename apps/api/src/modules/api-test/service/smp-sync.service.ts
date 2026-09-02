@@ -350,7 +350,7 @@ export class SmpSyncService {
       order: { sortOrder: "ASC" },
     });
     if (!endpoints.length) {
-      await this.endpointRepo.delete({ projectId, transactionId, apiDocId });
+      await this.endpointRepo.softDelete({ projectId, transactionId, apiDocId });
       return;
     }
 
@@ -397,7 +397,7 @@ export class SmpSyncService {
 
     const removed = existing.filter((item) => !updatedIds.has(item.id));
     if (removed.length) {
-      await this.endpointRepo.delete({
+      await this.endpointRepo.softDelete({
         id: In(removed.map((item) => item.id)),
       });
     }

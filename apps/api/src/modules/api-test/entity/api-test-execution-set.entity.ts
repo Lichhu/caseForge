@@ -1,3 +1,4 @@
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -13,7 +14,7 @@ import {
   "transactionId",
   "updatedAt",
 ])
-export class ApiTestExecutionSetEntity {
+export class ApiTestExecutionSetEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

@@ -194,7 +194,7 @@ export class ApiDataFunctionService {
   }
   async deleteConnection(projectId: string, id: string) {
     await this.requireConnection(id);
-    await this.connectionRepo.delete({ id });
+    await this.connectionRepo.softDelete({ id });
     return { ok: true };
   }
   async testConnection(projectId: string, id: string) {
@@ -303,23 +303,30 @@ export class ApiDataFunctionService {
   async deleteFunction(projectId: string, id: string) {
     const row = await this.requireFunction(id);
     if (row.config.builtin) throw new BadRequestException("内置函数不可删除");
-    await this.functionRepo.delete({ id });
+    await this.functionRepo.softDelete({ id });
     return { ok: true };
   }
   preview(projectId: string, body: PreviewDataFunctionDto) {
     return this.evaluate(projectId, body, body.values, SAMPLE_CONTEXT);
   }
 
+  /**
+   * 递归解析 value 中的数据函数调用。
+   * requestRoot 作为函数参数中 `$.` 路径的取值根：解析断言期望值等非请求结构时
+   * 传入同一步骤的请求报文，保证参数语义与请求报文中的函数调用一致。
+   */
   async resolveDeep(
     projectId: string,
     value: unknown,
     context?: DataFunctionContext,
+    requestRoot?: unknown,
   ): Promise<unknown> {
     const rows = await this.functionRepo.find({ order: { updatedAt: "DESC" } });
     const functions = this.uniqueByName(rows);
+    const root = requestRoot ?? value;
     const walk = async (item: unknown): Promise<unknown> => {
       if (typeof item === "string")
-        return this.resolveText(projectId, item, functions, value, context);
+        return this.resolveText(projectId, item, functions, root, context);
       if (Array.isArray(item)) return Promise.all(item.map(walk));
       if (item && typeof item === "object")
         return Object.fromEntries(

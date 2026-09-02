@@ -3,6 +3,7 @@
  */
 import { PromptEntity } from "@scenario/entity/prompt.entity";
 import type { TestPointEntity } from "@struct-doc/entity/test-point.entity";
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -20,9 +21,10 @@ import {
 @Entity("case_test_point_prompt")
 @Index("uk_case_test_point_prompt", ["testPointId", "promptId"], {
   unique: true,
+  where: "deleted_at IS NULL",
 })
 @Index("idx_test_point_prompt_prompt", ["promptId"])
-export class TestPointPromptEntity {
+export class TestPointPromptEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

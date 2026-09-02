@@ -1,4 +1,5 @@
 import { ApiDocEntity } from "./api-doc.entity";
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -14,7 +15,7 @@ import {
 @Index("idx_api_endpoint_doc", ["apiDocId"])
 @Index("idx_api_endpoint_transaction", ["transactionId"])
 @Index("idx_api_endpoint_project_transaction", ["projectId", "transactionId"])
-export class ApiEndpointEntity {
+export class ApiEndpointEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

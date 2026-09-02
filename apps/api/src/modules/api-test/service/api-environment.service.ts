@@ -91,7 +91,7 @@ export class ApiEnvironmentService {
   }
 
   async deleteEnvironment(projectId: string, environmentId: string) {
-    await this.envRepo.delete({ id: environmentId });
+    await this.envRepo.softDelete({ id: environmentId });
     return { ok: true };
   }
 
@@ -263,7 +263,7 @@ export class ApiEnvironmentService {
     serviceId: string,
   ) {
     await this.requireService(projectId, environmentId, serviceId);
-    await this.serviceRepo.delete({ id: serviceId });
+    await this.serviceRepo.softDelete({ id: serviceId });
     return { ok: true };
   }
 

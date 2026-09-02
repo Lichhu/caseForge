@@ -169,7 +169,7 @@ export class ApiExecutionService {
       const existingItems = await this.runItemRepo.find({ where: { runId: existing.id } });
       const rerunCaseIds = new Set(cases.map((testCase) => testCase.id));
       preservedItems = existingItems.filter((item) => !rerunCaseIds.has(item.caseId));
-      await this.runItemRepo.delete({
+      await this.runItemRepo.softDelete({
         runId: existing.id,
         caseId: In([...rerunCaseIds]),
       });
@@ -333,8 +333,8 @@ export class ApiExecutionService {
       throw new BadRequestException("执行记录不存在");
     }
     const executionSetId = run.executionSetId;
-    await this.runItemRepo.delete({ runId: run.id });
-    await this.runRepo.delete(run.id);
+    await this.runItemRepo.softDelete({ runId: run.id });
+    await this.runRepo.softDelete(run.id);
     if (executionSetId) {
       const [nextRun] = await this.runRepo.find({
         where: scopedWhere({ projectId, executionSetId }),
@@ -471,11 +471,43 @@ export class ApiExecutionService {
       substituted,
       input.caseContext,
     )) as ApiCaseRequest;
+    const expected = await this.resolveExpected({
+      projectId: input.testCase.projectId,
+      expected: input.testCase.expected,
+      vars: input.vars,
+      caseContext: input.caseContext,
+      request,
+    });
+    const testCase = Object.assign(new ApiTestCaseEntity(), input.testCase, {
+      expected,
+    });
     const transport = request.transport ?? (request.framing ? "tcp" : "http");
     if (transport === "tcp") {
-      return this.executeTcpCase({ ...input, request });
+      return this.executeTcpCase({ ...input, testCase, request });
     }
-    return this.executeHttpCase({ ...input, request });
+    return this.executeHttpCase({ ...input, testCase, request });
+  }
+
+  /**
+   * 断言期望值支持 ${共享变量} 与数据函数调用（如取数据库值作比较基准）。
+   * 函数参数中的 $. 路径相对本步骤实际发出的请求报文解析，与请求报文中的函数参数语义一致。
+   */
+  private async resolveExpected(input: {
+    projectId: string;
+    expected: ApiCaseExpected | undefined;
+    vars: Record<string, string>;
+    caseContext?: DataFunctionContext;
+    request: unknown;
+  }): Promise<ApiCaseExpected> {
+    const expected = input.expected ?? {};
+    if (!JSON.stringify(expected).includes("${")) return expected;
+    const substituted = substituteDeep(expected, input.vars) as ApiCaseExpected;
+    return (await this.dataFunctionService.resolveDeep(
+      input.projectId,
+      substituted,
+      input.caseContext,
+      input.request,
+    )) as ApiCaseExpected;
   }
 
   private async executeHttpCase(input: {
@@ -752,6 +784,13 @@ export class ApiExecutionService {
       substituted,
       caseContext ?? SAMPLE_CONTEXT,
     )) as ApiCaseRequest;
+    const expected = await this.resolveExpected({
+      projectId: input.projectId,
+      expected: input.expected,
+      vars,
+      caseContext: caseContext ?? SAMPLE_CONTEXT,
+      request,
+    });
     // 按步骤地址调试时，继承所选环境服务的“忽略证书校验”开关；显式传参优先
     let sslOverride = input.ignoreSslVerify;
     if (
@@ -774,7 +813,7 @@ export class ApiExecutionService {
         request,
         env,
         vars,
-        expected: input.expected,
+        expected,
         polarity: input.polarity,
         encoding: input.encoding,
       });
@@ -783,7 +822,7 @@ export class ApiExecutionService {
       request,
       env,
       vars,
-      expected: input.expected,
+      expected,
       polarity: input.polarity,
       encoding: input.encoding,
       ignoreSslVerify: sslOverride,

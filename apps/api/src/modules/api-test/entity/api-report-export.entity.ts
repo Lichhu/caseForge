@@ -1,3 +1,4 @@
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -8,7 +9,7 @@ import {
 
 @Entity("api_report_export")
 @Index("idx_report_export_tx", ["projectId", "transactionId", "createdAt"])
-export class ApiReportExportEntity {
+export class ApiReportExportEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

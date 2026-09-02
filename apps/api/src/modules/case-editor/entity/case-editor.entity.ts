@@ -6,6 +6,7 @@ import { CaseTreeEntity } from "@case-editor/entity/case-tree.entity";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { StructDocEntity } from "@struct-doc/entity/struct-doc.entity";
 import type { MindMapExtras } from "@case-forge/shared";
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -32,7 +33,7 @@ export type CaseEditorStatus = (typeof CASE_EDITOR_STATUS)[number];
 @Entity("case_editor")
 @Index("idx_case_editor_project", ["projectId", "createdAt"])
 @Index("idx_case_editor_project_run", ["projectId", "id"])
-export class CaseEditorEntity {
+export class CaseEditorEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

@@ -9,6 +9,7 @@ import type {
   ApiCaseStep,
 } from "@case-forge/shared";
 import { ApiEndpointEntity } from "./api-endpoint.entity";
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -23,7 +24,7 @@ import {
 @Entity("api_test_case")
 @Index("idx_api_test_case_project", ["projectId"])
 @Index("idx_api_test_case_project_endpoint", ["projectId", "endpointId"])
-export class ApiTestCaseEntity {
+export class ApiTestCaseEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

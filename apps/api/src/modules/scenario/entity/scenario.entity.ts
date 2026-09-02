@@ -1,6 +1,7 @@
 /**
  * @file 测试场景库实体（scenario_library 表）
  */
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -20,7 +21,7 @@ import { PromptEntity } from "./prompt.entity";
 @Index("idx_scenario_library_active_updated", ["isActive", "updatedAt"])
 @Index("idx_scenario_library_name", ["name"])
 @Index("idx_scenario_library_user_updated", ["createdBy", "updatedAt"])
-export class ScenarioEntity {
+export class ScenarioEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

@@ -2,6 +2,7 @@
  * @file 案例生成项目实体（case_project 表）
  */
 import type { ProjectPlatform } from "@case-forge/shared";
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -24,7 +25,7 @@ export const PROJECT_PLATFORMS = ["case-forge", "api-test"] as const;
   "updatedAt",
 ])
 @Index("idx_case_project_platform_requirement", ["platform", "requirementNo"])
-export class CaseProjectEntity {
+export class CaseProjectEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

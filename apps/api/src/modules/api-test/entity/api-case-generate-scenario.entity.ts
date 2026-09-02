@@ -1,3 +1,4 @@
+import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
   Column,
   CreateDateColumn,
@@ -20,9 +21,10 @@ export type ApiCaseScenarioStatus = (typeof API_CASE_SCENARIO_STATUS)[number];
 @Entity("api_case_generate_scenario")
 @Index("uk_api_case_generate_scenario_job_key", ["jobId", "scenarioKey"], {
   unique: true,
+  where: "deleted_at IS NULL",
 })
 @Index("idx_api_case_generate_scenario_job_status", ["jobId", "status"])
-export class ApiCaseGenerateScenarioEntity {
+export class ApiCaseGenerateScenarioEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 

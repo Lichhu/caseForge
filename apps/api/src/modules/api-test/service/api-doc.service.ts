@@ -302,7 +302,7 @@ export class ApiDocService {
 
     const toDelete = existing.filter((e) => !incomingIds.has(e.id));
     if (toDelete.length) {
-      await this.endpointRepo.delete({
+      await this.endpointRepo.softDelete({
         id: In(toDelete.map((e) => e.id)),
       });
     }
