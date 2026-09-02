@@ -263,6 +263,15 @@
           <a-auto-complete v-model:value="insertFunctionArgs[index]" :options="examplePathOptions(index)" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }" filter-option placeholder="选择或输入参数来源" />
         </label>
       </div>
+      <a-form-item v-if="selectedInsertFunction?.type === 'sql'" label="结果字段" required>
+        <a-auto-complete
+          v-model:value="insertFunctionField"
+          :options="insertFieldOptions"
+          :get-popup-container="popupContainer"
+          :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }"
+          placeholder="选择或输入查询结果字段"
+        />
+      </a-form-item>
       <div class="function-expression-preview"><span>调用预览</span><code>{{ functionInsertPreview }}</code></div>
     </a-form>
   </a-modal>
@@ -292,6 +301,26 @@
             <a-select v-model:value="generationProfile.messageFormat" :options="messageFormatOptions" />
           </a-form-item>
         </div>
+        <section class="step-orchestration large-payload-panel">
+          <div class="step-orchestration-head">
+            <div><strong>大报文测试</strong><span>请求报文长度 &gt; 100000 的字段会自动附加大报文与空字段案例；开启后为所选字段额外附加这两类案例</span></div>
+            <a-switch v-model:checked="largePayloadEnabled" />
+          </div>
+          <div class="large-payload-body">
+            <a-select
+              v-if="largePayloadEnabled"
+              v-model:value="largePayloadFieldPath"
+              :options="largePayloadFieldOptions"
+              show-search
+              allow-clear
+              option-filter-prop="label"
+              placeholder="选择请求报文中传大报文的字段"
+              :get-popup-container="popupContainer"
+              :dropdown-style="nestedDropdownStyle"
+            />
+            <div v-else class="step-lane-empty">未开启：请求报文中长度 &gt; 100000 的字段仍会自动附加大报文与空字段案例</div>
+          </div>
+        </section>
         <section class="step-orchestration">
           <div class="step-orchestration-head">
             <div><strong>步骤编排</strong><span>按从上到下的顺序执行</span></div>
@@ -555,7 +584,7 @@
           </div>
         </div>
         <div v-if="libraryAssertionError" class="case-assertion-error">{{ libraryAssertionError }}</div>
-        <AssertionRowsEditor v-model:rows="stepEdit.assertionRows" :protocol="stepEdit.protocol" class="case-debug-assertion-editor" />
+        <AssertionRowsEditor v-model:rows="stepEdit.assertionRows" :protocol="stepEdit.protocol" :project-id="projectId" class="case-debug-assertion-editor" />
       </div>
     </div>
 
@@ -708,6 +737,7 @@ import { createEmptyKeyValueRow, type KeyValueRow } from '@/utils/casePayloadFor
 import { copyText } from '@/utils/copyText';
 import { getDebugResponseIssue, parseDebugResponseBody, responsePaths } from '@/utils/debugResponse.util';
 import { copyStepToClipboard } from '@/utils/stepClipboard.util';
+import { parseSqlSelectColumns } from '@/utils/sqlSelectColumns.util';
 
 const tableScrollRef = ref<HTMLElement | null>(null);
 const EXAMPLE_MESSAGE_MIN_HEIGHT_PX = 160;
@@ -724,6 +754,7 @@ const functionInsertRange = reactive({ start: 0, end: 0 });
 const hasExampleCursor = ref(false);
 const insertFunctionName = ref('');
 const insertFunctionArgs = ref<string[]>([]);
+const insertFunctionField = ref('');
 const insertFunctions = ref<Awaited<ReturnType<typeof listDataFunctions>>>([]);
 const selectedInsertFunction = computed(() => insertFunctions.value.find((item) => item.name === insertFunctionName.value));
 const functionInsertTarget = ref<'example' | 'stepBody'>('example');
@@ -739,12 +770,18 @@ function filterInsertFunctionOption(input: string, option: { value?: unknown }) 
   if (!item) return false;
   return item.name.toLowerCase().includes(keyword) || (item.description ?? '').toLowerCase().includes(keyword);
 }
+const insertFieldOptions = computed(() =>
+  parseSqlSelectColumns(String(selectedInsertFunction.value?.config?.sql ?? '')).map((value) => ({ value })),
+);
 const functionInsertPreview = computed(() => {
   const call = `\${${insertFunctionName.value || '函数名'}(${insertFunctionArgs.value.join(', ')})`;
-  return selectedInsertFunction.value?.type === 'sql' ? `${call}.字段}` : `${call}}`;
+  if (selectedInsertFunction.value?.type !== 'sql') return `${call}}`;
+  const field = insertFunctionField.value.trim();
+  return `${call}.${field || '字段'}}`;
 });
 watch(selectedInsertFunction, (fn) => {
   insertFunctionArgs.value = (fn?.params ?? []).map((_, index) => insertFunctionArgs.value[index] ?? '');
+  insertFunctionField.value = '';
 });
 const editorText = ref('');
 const lastStoreText = ref('');
@@ -768,6 +805,29 @@ const generationProfile = reactive<ApiDocGenerationProfile>({
   channels: [],
 });
 const selectedChannelIds = ref<string[]>([]);
+const largePayloadEnabled = ref(false);
+const largePayloadFieldPath = ref<string | undefined>(undefined);
+const largePayloadFieldOptions = computed(() => {
+  const section = sections.value.find((item) => item.title === '请求报文');
+  if (!section || section.rows.length < 2) return [];
+  const header = section.rows[0] ?? [];
+  const pathIndex = Math.max(0, header.findIndex((cell) => cell.includes('节点路径')));
+  const codeIndex = Math.max(1, header.findIndex((cell) => cell.includes('节点代码')));
+  const nameIndex = header.findIndex((cell) => cell.includes('节点名称'));
+  const seen = new Set<string>();
+  const options: { label: string; value: string }[] = [];
+  for (const row of section.rows.slice(1)) {
+    const path = (row[pathIndex] ?? '').trim().replace(/\/$/, '');
+    const code = (row[codeIndex] ?? '').trim();
+    if (!path || !code) continue;
+    const value = `${path}/${code}`;
+    if (seen.has(value)) continue;
+    seen.add(value);
+    const name = nameIndex >= 0 ? (row[nameIndex] ?? '').trim() : '';
+    options.push({ label: name ? `${value}（${name}）` : value, value });
+  }
+  return options;
+});
 const stepLibrary = ref<ApiStepLibraryRow[]>([]);
 const stepLibraryPage = ref(1);
 const stepLibraryPageSize = 10;
@@ -1181,6 +1241,8 @@ function rememberExampleCursor(event: Event) {
 
 function insertFunctionExpression() {
   if (!insertFunctionName.value) return message.warning('请选择函数');
+  if (selectedInsertFunction.value?.type === 'sql' && !insertFunctionField.value.trim())
+    return message.warning('请选择结果字段');
   const expression = functionInsertPreview.value;
   if (functionInsertTarget.value === 'stepBody') {
     stepEdit.body = `${stepEdit.body.slice(0, stepBodyCursor.start)}${expression}${stepEdit.body.slice(stepBodyCursor.end)}`;
@@ -1626,6 +1688,10 @@ function onConfirmGenerate() {
     message.warning('请完整填写渠道名称、clientCd 和 serviceCd');
     return;
   }
+  if (largePayloadEnabled.value && !largePayloadFieldPath.value) {
+    message.warning('请选择大报文测试字段');
+    return;
+  }
   apiStore.markCaseGenerateStarted(tid);
   generateModalOpen.value = false;
 
@@ -1648,6 +1714,7 @@ function runGenerate(pid: string, tid: string) {
     channelIds: [...selectedChannelIds.value],
     beforeSteps: beforeStepIds.value.map((id) => cloneJson(stepLibrary.value.find((row) => row.id === id)!.step)),
     afterSteps: afterStepIds.value.map((id) => cloneJson(stepLibrary.value.find((row) => row.id === id)!.step)),
+    largePayloadFieldPath: largePayloadEnabled.value ? largePayloadFieldPath.value : undefined,
     navigateToCases: true,
   });
 }
@@ -1757,6 +1824,10 @@ async function onSave() {
   margin-bottom: 16px;
   border: 1px solid #d9dde5;
   background: #fafbfc;
+}
+
+.large-payload-body {
+  padding: 10px 12px;
 }
 
 .step-library-toolbar {

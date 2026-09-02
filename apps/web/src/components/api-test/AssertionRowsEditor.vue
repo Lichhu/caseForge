@@ -49,14 +49,29 @@
           :placeholder="expressionPlaceholder(row.type)"
           @update:value="(v: string) => updateRow(index, 'expression', v)"
         />
-        <a-input
-          :value="row.expected"
-          size="small"
-          class="assertion-col assertion-col--expected"
-          :placeholder="expectedPlaceholder(row.type)"
-          :disabled="!showsExpectedField(row.type)"
-          @update:value="(v: string) => updateRow(index, 'expected', v)"
-        />
+        <div class="assertion-col assertion-col--expected assertion-expected-cell">
+          <a-input
+            :value="row.expected"
+            size="small"
+            class="assertion-expected-input"
+            :placeholder="expectedPlaceholder(row.type)"
+            :disabled="!showsExpectedField(row.type)"
+            @update:value="(v: string) => updateRow(index, 'expected', v)"
+            @focus="rememberExpectedCursor(index, $event)"
+            @click="rememberExpectedCursor(index, $event)"
+            @keyup="rememberExpectedCursor(index, $event)"
+          />
+          <a-button
+            v-if="showsExpectedField(row.type) && projectId"
+            type="text"
+            size="small"
+            class="assertion-expected-fn-btn"
+            title="插入数据函数（如取数据库值作比较基准）"
+            @click="openFunctionInsert(index)"
+          >
+            <CodeOutlined />
+          </a-button>
+        </div>
         <a-button
           type="text"
           size="small"
@@ -70,12 +85,58 @@
       </div>
     </div>
   </div>
+  <a-modal
+    v-model:open="functionInsertOpen"
+    title="插入数据函数"
+    :width="680"
+    :z-index="NESTED_OVERLAY_Z_INDEX + 10"
+    ok-text="插入"
+    @ok="insertFunctionExpression"
+  >
+    <a-form layout="vertical">
+      <a-form-item label="函数" required>
+        <a-select
+          v-model:value="insertFunctionName"
+          :get-popup-container="popupContainer"
+          :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 11 }"
+          show-search
+          :filter-option="filterInsertFunctionOption"
+        >
+          <a-select-option v-for="item in insertFunctions" :key="item.name" :value="item.name" :label="item.name">
+            <span class="function-option-name">{{ item.name }}</span>
+            <span v-if="item.description" class="function-option-desc">{{ item.description }}</span>
+          </a-select-option>
+        </a-select>
+      </a-form-item>
+      <p v-if="selectedInsertFunction?.description" class="function-description-hint">{{ selectedInsertFunction.description }}</p>
+      <div v-if="selectedInsertFunction?.params.length" class="function-argument-list">
+        <label v-for="(param, index) in selectedInsertFunction.params" :key="`${param}-${index}`" class="function-argument-row">
+          <span :title="param">{{ index + 1 }}. {{ param }}</span>
+          <a-input v-model:value="insertFunctionArgs[index]" placeholder="常量加引号如 '00'；$. 开头引用请求报文字段" />
+        </label>
+      </div>
+      <a-form-item v-if="selectedInsertFunction?.type === 'sql'" label="结果字段" required>
+        <a-auto-complete
+          v-model:value="insertFunctionField"
+          :options="insertFieldOptions"
+          :get-popup-container="popupContainer"
+          :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 11 }"
+          placeholder="选择或输入查询结果字段"
+        />
+      </a-form-item>
+      <div class="function-expression-preview"><span>调用预览</span><code>{{ functionInsertPreview }}</code></div>
+      <p class="function-usage-hint">执行与调试时先解析函数调用（如 SQL 函数取数据库值），再与响应实际值比较。</p>
+    </a-form>
+  </a-modal>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
-import { MinusOutlined, PlusOutlined } from '@ant-design/icons-vue';
+import { computed, reactive, ref, watch } from 'vue';
+import { CodeOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons-vue';
+import { message } from 'ant-design-vue';
 import { NESTED_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
+import { listDataFunctions, type ApiDataFunctionRow } from '@/api/apiTestClient';
+import { parseSqlSelectColumns } from '@/utils/sqlSelectColumns.util';
 import type { AssertionOperator, AssertionType } from '@case-forge/shared';
 import type { CaseProtocol } from '@/utils/casePayloadFormat.util';
 import {
@@ -93,6 +154,8 @@ const popupContainer = () => document.body;
 const props = defineProps<{
   protocol: CaseProtocol;
   hint?: string;
+  /** 提供后期望值列显示「插入数据函数」入口 */
+  projectId?: string;
 }>();
 
 const rows = defineModel<AssertionRow[]>('rows', { required: true });
@@ -128,6 +191,86 @@ function addRow() {
 
 function removeRow(index: number) {
   rows.value = rows.value.filter((_, i) => i !== index);
+}
+
+const functionInsertOpen = ref(false);
+const insertFunctions = ref<ApiDataFunctionRow[]>([]);
+const insertFunctionName = ref('');
+const insertFunctionArgs = ref<string[]>([]);
+const insertRowIndex = ref(-1);
+const insertFunctionField = ref('');
+const expectedCursor = reactive({ index: -1, start: 0, end: 0 });
+const selectedInsertFunction = computed(() =>
+  insertFunctions.value.find((item) => item.name === insertFunctionName.value),
+);
+const insertFieldOptions = computed(() =>
+  parseSqlSelectColumns(
+    String(selectedInsertFunction.value?.config?.sql ?? ''),
+  ).map((value) => ({ value })),
+);
+const functionInsertPreview = computed(() => {
+  const call = `\${${insertFunctionName.value || '函数名'}(${insertFunctionArgs.value.join(', ')})`;
+  if (selectedInsertFunction.value?.type !== 'sql') return `${call}}`;
+  const field = insertFunctionField.value.trim();
+  return `${call}.${field || '字段'}}`;
+});
+watch(selectedInsertFunction, (fn) => {
+  insertFunctionArgs.value = (fn?.params ?? []).map(
+    (_, index) => insertFunctionArgs.value[index] ?? '',
+  );
+  insertFunctionField.value = '';
+});
+
+function rememberExpectedCursor(index: number, event: Event) {
+  const input = event.target as HTMLInputElement;
+  expectedCursor.index = index;
+  expectedCursor.start = input.selectionStart ?? 0;
+  expectedCursor.end = input.selectionEnd ?? 0;
+}
+
+async function openFunctionInsert(index: number) {
+  insertRowIndex.value = index;
+  if (props.projectId) {
+    insertFunctions.value = await listDataFunctions(props.projectId);
+    insertFunctionName.value ||= insertFunctions.value[0]?.name ?? '';
+  }
+  functionInsertOpen.value = true;
+}
+
+function filterInsertFunctionOption(input: string, option: { value?: unknown }) {
+  const keyword = input.trim().toLowerCase();
+  if (!keyword) return true;
+  const item = insertFunctions.value.find((row) => row.name === option.value);
+  if (!item) return false;
+  return (
+    item.name.toLowerCase().includes(keyword) ||
+    (item.description ?? '').toLowerCase().includes(keyword)
+  );
+}
+
+function insertFunctionExpression() {
+  if (!insertFunctionName.value) return message.warning('请选择函数');
+  if (
+    selectedInsertFunction.value?.type === 'sql' &&
+    !insertFunctionField.value.trim()
+  )
+    return message.warning('请选择结果字段');
+  const index = insertRowIndex.value;
+  const row = rows.value[index];
+  if (!row) return;
+  const expression = functionInsertPreview.value;
+  const current = row.expected ?? '';
+  const at =
+    expectedCursor.index === index
+      ? { start: expectedCursor.start, end: expectedCursor.end }
+      : { start: current.length, end: current.length };
+  updateRow(
+    index,
+    'expected',
+    `${current.slice(0, at.start)}${expression}${current.slice(at.end)}`,
+  );
+  expectedCursor.index = -1;
+  functionInsertOpen.value = false;
 }
 </script>
 
@@ -239,4 +382,41 @@ function removeRow(index: number) {
   color: #98a2b3;
   text-align: center;
 }
+
+.assertion-expected-cell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding-right: 4px;
+}
+
+.assertion-expected-cell .assertion-expected-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.assertion-expected-fn-btn {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: #667085;
+}
+
+.assertion-expected-fn-btn:hover {
+  color: #7f1d1d;
+  background: #fef2f2;
+}
+
+.function-option-name { font-weight: 500; }
+.function-option-desc { margin-left: 8px; overflow: hidden; color: #98a2b3; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.function-description-hint { margin: -8px 0 12px; color: #667085; font-size: 12px; }
+.function-argument-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-height: 300px; margin-bottom: 16px; padding-right: 4px; overflow-y: auto; }
+.function-argument-row { display: grid; gap: 5px; min-width: 0; }
+.function-argument-row > span { overflow: hidden; color: #667085; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.function-expression-preview { display: grid; gap: 5px; padding: 10px 12px; border-radius: 6px; background: #f8f9fb; }
+.function-expression-preview > span { color: #98a2b3; font-size: 11px; }
+.function-expression-preview code { overflow-wrap: anywhere; }
+.function-usage-hint { margin: 12px 0 0; color: #98a2b3; font-size: 12px; }
+@media (max-width: 640px) { .function-argument-list { grid-template-columns: 1fr; } }
 </style>

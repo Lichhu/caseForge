@@ -153,6 +153,14 @@ export class GenerateApiCasesDto {
   @IsOptional()
   @IsArray()
   afterSteps?: ApiCaseStep[];
+
+  @ApiPropertyOptional({
+    description:
+      "大报文测试字段路径（如 Transaction/Body/request/bizBody/CUST_ID）；传入则额外生成 1 条该字段传 1MB 大报文的案例",
+  })
+  @IsOptional()
+  @IsString()
+  largePayloadFieldPath?: string;
 }
 
 export class BatchPatchApiCaseRequestDto {

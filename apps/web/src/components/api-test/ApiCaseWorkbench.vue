@@ -658,6 +658,7 @@
                     :key="`${payloadEditorKey}-expected`"
                     v-model:rows="form.assertionRows"
                     :protocol="form.protocol"
+                    :project-id="projectId"
                     class="case-debug-assertion-editor"
                   />
                 </div>

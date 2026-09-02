@@ -119,7 +119,12 @@ export class ApiCaseGenerateQueueService
   async enqueue(
     projectId: string,
     transactionId: string,
-    options?: { channelIds?: string[]; beforeSteps?: ApiCaseStep[]; afterSteps?: ApiCaseStep[] },
+    options?: {
+      channelIds?: string[];
+      beforeSteps?: ApiCaseStep[];
+      afterSteps?: ApiCaseStep[];
+      largePayloadFieldPath?: string;
+    },
   ): Promise<ApiCaseGenerateJobEntity> {
     const existing = await this.jobRepo.findOne({
       where: {
@@ -165,6 +170,9 @@ export class ApiCaseGenerateQueueService
             "",
           beforeSteps: structuredClone(options?.beforeSteps ?? []),
           afterSteps: structuredClone(options?.afterSteps ?? []),
+          largePayloadFieldPath: options?.largePayloadFieldPath?.trim()
+            ? options.largePayloadFieldPath.trim()
+            : undefined,
         },
         scenarioCount: scenarios.length,
         queuedAt: new Date(),

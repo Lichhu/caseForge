@@ -69,6 +69,10 @@ export interface ApiTechnicalProfile {
  * | response_size  | 响应体字节数      | 留空                | 字节数              | eq/nq/gt/lt/gte/lte  |
  * | default        | 业务码默认检查    | 留空                | 不需要              | eq（正向检查成功码，反向恒过）|
  * | rsp_download   | 下载响应检查      | 文件名模式（可省）  | 不需要              | eq=是下载 / nq=非下载|
+ *
+ * expected 另支持 ${共享变量} 与数据函数调用（如 ${DB_BALANCE('003').amt}
+ * 取数据库值作比较基准）：执行时先替换变量再解析函数，最后与响应实际值比较；
+ * 函数参数中的 $. 路径相对本步骤实际发出的请求报文解析。
  */
 export type AssertionType =
   | "status_code"
@@ -96,7 +100,7 @@ export type AssertionOperator = "eq" | "nq" | "gt" | "lt" | "gte" | "lte";
  * @param type - 断言类型，决定取值来源
  * @param operator - 比较运算符
  * @param expression - 断言表达式（路径/正则/要匹配的字符串/header名等，含义随 type 变化）
- * @param expected - 预期值（部分类型可省略，如 string/re/default）
+ * @param expected - 预期值（部分类型可省略，如 string/re/default；支持 ${变量} 与数据函数调用）
  * @param description - 人类可读的断言描述
  */
 export interface ApiAssertion {

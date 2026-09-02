@@ -861,6 +861,8 @@ export const useApiTestStore = defineStore("apiTest", {
         channelIds?: string[];
         beforeSteps?: import("@case-forge/shared").ApiCaseStep[];
         afterSteps?: import("@case-forge/shared").ApiCaseStep[];
+        /** 大报文测试字段路径；传入则额外生成 1 条大报文案例 */
+        largePayloadFieldPath?: string;
         /** 生成成功后是否进入案例编辑，默认 true */
         navigateToCases?: boolean;
       },

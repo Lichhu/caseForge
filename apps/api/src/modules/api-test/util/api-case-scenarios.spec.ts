@@ -1,9 +1,12 @@
 import {
   assertScenarioCoverage,
   buildScenarioPrompts,
+  extractRequestFieldPaths,
   parseScenarioAiResult,
+  scenariosForProperty,
   validateScenarioAiResult,
 } from "./api-case-scenarios.util";
+import type { ApiServiceProperty } from "@case-forge/shared";
 
 describe("parseScenarioAiResult", () => {
   it("coerces numeric change values to strings", () => {
@@ -176,5 +179,51 @@ describe("buildScenarioPrompts", () => {
     expect(prompt).toContain("分页实效");
     expect(prompt).toContain("翻页生效");
     expect(prompt).toContain("页码超末页");
+  });
+});
+
+describe("all_fields_empty scenario", () => {
+  const properties: ApiServiceProperty[] = [
+    "query_non_accounting",
+    "query_accounting",
+    "management_non_accounting",
+    "management_accounting",
+    "accounting",
+    "reversal",
+    "file",
+    "push",
+  ];
+
+  it("is registered for every service property", () => {
+    for (const property of properties) {
+      expect(scenariosForProperty(property).map((item) => item.key)).toContain(
+        "all_fields_empty",
+      );
+    }
+  });
+
+  it("extracts every request field path for the empty-value case", () => {
+    const markdown = [
+      "请求报文",
+      "----",
+      "节点路径 | 节点代码 | 节点名称 | 节点类型 | 数据类型 | 长度 | 是否必填 | 描述",
+      "Transaction/Body/request/bizHeader | transaction_sn | 交易流水号 | 单节点 | VARCHAR2 | 19 | Y |",
+      "Transaction/Body/request/bizBody | CUST_ID | 客户号 | 单节点 | VARCHAR2 | 30 | Y |",
+    ].join("\n");
+
+    expect(extractRequestFieldPaths(markdown)).toEqual([
+      "Transaction/Body/request/bizHeader/transaction_sn",
+      "Transaction/Body/request/bizBody/CUST_ID",
+    ]);
+  });
+
+  it("requires exactly one case when applicable", () => {
+    expect(() =>
+      assertScenarioCoverage("all_fields_empty", {
+        applicable: true,
+        reason: "ok",
+        cases: [],
+      }),
+    ).toThrow();
   });
 });

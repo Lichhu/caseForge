@@ -504,7 +504,13 @@ export async function batchPatchApiCaseRequest(
 export async function generateApiCases(
   projectId: string,
   transactionId: string,
-  options?: { channelIds?: string[]; beforeSteps?: ApiCaseStep[]; afterSteps?: ApiCaseStep[] },
+  options?: {
+    channelIds?: string[];
+    beforeSteps?: ApiCaseStep[];
+    afterSteps?: ApiCaseStep[];
+    /** 大报文测试字段路径；传入则额外生成 1 条大报文案例 */
+    largePayloadFieldPath?: string;
+  },
 ) {
   const { data } = await http.post<{
     jobId: string;

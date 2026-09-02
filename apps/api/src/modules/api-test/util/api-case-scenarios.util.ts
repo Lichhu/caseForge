@@ -1,7 +1,7 @@
 import type { ApiServiceProperty } from "@case-forge/shared";
 import { extractApiDocSection, getApiDocFieldValue } from "./api-doc.parser";
 
-export const API_CASE_RULE_VERSION = "api-case-rules-v4";
+export const API_CASE_RULE_VERSION = "api-case-rules-v5";
 
 export const API_CASE_SCENARIOS = {
   positive_flow: "正向流程",
@@ -12,18 +12,25 @@ export const API_CASE_SCENARIOS = {
   precision: "精度校验",
   idempotency: "幂等性校验",
   accounting_business: "业务场景",
+  all_fields_empty: "全字段空值校验",
 } as const;
 export type ApiCaseScenarioKey = keyof typeof API_CASE_SCENARIOS;
 
 const SERVICE_SCENARIOS: Record<ApiServiceProperty, ApiCaseScenarioKey[]> = {
-  query_non_accounting: ["positive_flow", "pagination"],
-  query_accounting: ["positive_flow", "pagination", "precision"],
+  query_non_accounting: ["positive_flow", "pagination", "all_fields_empty"],
+  query_accounting: [
+    "positive_flow",
+    "pagination",
+    "precision",
+    "all_fields_empty",
+  ],
   management_non_accounting: [
     "positive_flow",
     "required_fields",
     "related_fields",
     "enum",
     "idempotency",
+    "all_fields_empty",
   ],
   management_accounting: [
     "positive_flow",
@@ -32,6 +39,7 @@ const SERVICE_SCENARIOS: Record<ApiServiceProperty, ApiCaseScenarioKey[]> = {
     "enum",
     "precision",
     "idempotency",
+    "all_fields_empty",
   ],
   accounting: [
     "positive_flow",
@@ -41,6 +49,7 @@ const SERVICE_SCENARIOS: Record<ApiServiceProperty, ApiCaseScenarioKey[]> = {
     "accounting_business",
     "related_fields",
     "idempotency",
+    "all_fields_empty",
   ],
   reversal: [
     "positive_flow",
@@ -50,9 +59,10 @@ const SERVICE_SCENARIOS: Record<ApiServiceProperty, ApiCaseScenarioKey[]> = {
     "accounting_business",
     "related_fields",
     "idempotency",
+    "all_fields_empty",
   ],
-  file: ["positive_flow", "idempotency"],
-  push: ["positive_flow", "idempotency"],
+  file: ["positive_flow", "idempotency", "all_fields_empty"],
+  push: ["positive_flow", "idempotency", "all_fields_empty"],
 };
 
 export function scenariosForProperty(property: ApiServiceProperty) {
@@ -80,6 +90,24 @@ function requestFieldLines(structuredMarkdown: string) {
     .split("\n")
     .filter(Boolean)
     .slice(0, 120);
+}
+
+/** 请求报文全部字段路径（节点路径/节点代码，与 overrides 路径格式一致），按文档顺序去重 */
+export function extractRequestFieldPaths(structuredMarkdown: string): string[] {
+  const seen = new Set<string>();
+  const paths: string[] = [];
+  for (const line of requestFieldLines(structuredMarkdown).slice(1)) {
+    const cells = line.split("|").map((cell) => cell.trim());
+    const path = (cells[0] ?? "").replace(/\/$/, "");
+    const code = cells[1] ?? "";
+    if (!path || !code) continue;
+    const value = `${path}/${code}`;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    paths.push(value);
+  }
+  return paths;
 }
 
 export function buildScenarioPrompts(input: {
@@ -192,6 +220,9 @@ export function assertScenarioCoverage(
       "分页场景必须至少生成 2 条覆盖分页实效的正向案例（如首页查询、翻页生效）",
     );
   }
+  if (scenarioKey === "all_fields_empty" && result.cases.length !== 1) {
+    throw new Error("全字段空值场景必须生成 1 条案例");
+  }
   if (structuredMarkdown && scenarioKey === "precision") {
     assertEachFieldHasPolarities(
       result,
@@ -274,6 +305,8 @@ function scenarioRule(key: ApiCaseScenarioKey) {
       return "仅当存在幂等业务含义时适用，生成1条相同幂等键连续请求的案例。";
     case "accounting_business":
       return "生成利率超界、余额不足、非本人扣款账户、未传密码、金额或利率超范围等适用的涉账异常案例。";
+    case "all_fields_empty":
+      return "生成 1 条请求报文每个字段均置为空值的反向案例，验证接口校验能力。";
   }
 }
 

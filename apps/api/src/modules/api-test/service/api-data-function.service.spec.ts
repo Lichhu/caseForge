@@ -169,6 +169,19 @@ describe("ApiDataFunctionService", () => {
     });
   });
 
+  it("resolves $. arguments against an explicit request root", async () => {
+    await expect(
+      service.resolveDeep(
+        "p1",
+        { expected: "${MSG_ID($.Transaction.Header.clientCd, '9')}" },
+        undefined,
+        {
+          body: "<Transaction><Header><clientCd>003</clientCd></Header></Transaction>",
+        },
+      ),
+    ).resolves.toEqual({ expected: "00329" });
+  });
+
   it("supports numeric operations", async () => {
     await expect(
       service.preview("p1", {
