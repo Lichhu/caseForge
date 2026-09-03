@@ -49,6 +49,7 @@ function buildService() {
   projectRepo.findOne.mockResolvedValue({
     id: "p1",
     platform: "api-test",
+    requirementNo: "REQ001",
     createdBy: "test-user",
   });
   const smpClient = {
@@ -154,6 +155,57 @@ function makeDoc(overrides?: {
   };
 }
 
+describe("SmpSyncService.fetchServiceInfoList", () => {
+  it("filters out candidates with empty or '-' reqSystemId", async () => {
+    const { service, smpClient } = buildService();
+    smpClient.selectServiceInfoList.mockResolvedValue({
+      bizResCode: "000000",
+      bizResText: "ok",
+      data: [
+        {
+          tranCode: "TX001",
+          serviceCname: "有效交易",
+          reqCode: "REQ001",
+          taskId: "TASK001",
+          serviceCode: "SVC001",
+          reqSystemId: "SYS001",
+        },
+        {
+          tranCode: "TX002",
+          serviceCname: "空系统",
+          reqCode: "REQ001",
+          taskId: "TASK001",
+          serviceCode: "SVC002",
+          reqSystemId: "",
+        },
+        {
+          tranCode: "TX003",
+          serviceCname: "横线系统",
+          reqCode: "REQ001",
+          taskId: "TASK001",
+          serviceCode: "SVC003",
+          reqSystemId: "-",
+        },
+        {
+          tranCode: "TX004",
+          serviceCname: "空白系统",
+          reqCode: "REQ001",
+          taskId: "TASK001",
+          serviceCode: "SVC004",
+          reqSystemId: "   ",
+        },
+      ],
+    });
+
+    const result = await RequestContext.run("test-user", () =>
+      service.fetchServiceInfoList("p1"),
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].code).toBe("TX001");
+  });
+});
+
 describe("SmpSyncService.syncTransactions", () => {
   it("throws 400 when candidates is empty", async () => {
     const { service } = buildService();
@@ -162,30 +214,19 @@ describe("SmpSyncService.syncTransactions", () => {
     );
   });
 
-  it("throws 400 on batch-internal duplicate code", async () => {
-    const { service } = buildService();
+  it("does not reject batch-internal duplicate SMP key (DB unique constraint enforces)", async () => {
+    const { service, txRepo } = buildService();
     const c1 = makeCandidate();
     const c2 = makeCandidate({ name: "另一个名字" });
-    await expect(
-      RequestContext.run("test-user", () =>
-        service.syncTransactions("p1", [c1, c2]),
-      ),
-    ).rejects.toThrow("批量中存在重复服管记录");
+    const result = await RequestContext.run("test-user", () =>
+      service.syncTransactions("p1", [c1, c2]),
+    );
+    expect(result).toEqual({ created: 2, updated: 0 });
+    expect(txRepo.save).toHaveBeenCalledTimes(2);
   });
 
-  it("throws 400 on batch-internal same code different SMP tuple", async () => {
-    const { service } = buildService();
-    const c1 = makeCandidate({ taskId: "TASK001" });
-    const c2 = makeCandidate({ taskId: "TASK002" });
-    await expect(
-      RequestContext.run("test-user", () =>
-        service.syncTransactions("p1", [c1, c2]),
-      ),
-    ).rejects.toThrow("批量中存在相同交易码");
-  });
-
-  it("throws 400 when code exists locally but not same SMP record", async () => {
-    const { service, transactionRepo } = buildService();
+  it("does not reject same code as existing local row with different SMP record (DB unique constraint enforces)", async () => {
+    const { service, transactionRepo, txRepo } = buildService();
     transactionRepo.find.mockResolvedValue([
       {
         id: "tx-1",
@@ -198,11 +239,11 @@ describe("SmpSyncService.syncTransactions", () => {
       },
     ]);
     const candidate = makeCandidate();
-    await expect(
-      RequestContext.run("test-user", () =>
-        service.syncTransactions("p1", [candidate]),
-      ),
-    ).rejects.toThrow("已在项目中存在，且非同一服管记录");
+    const result = await RequestContext.run("test-user", () =>
+      service.syncTransactions("p1", [candidate]),
+    );
+    expect(result).toEqual({ created: 1, updated: 0 });
+    expect(txRepo.save).toHaveBeenCalledTimes(1);
   });
 
   it("creates 2 new transactions + docs in a single transaction", async () => {

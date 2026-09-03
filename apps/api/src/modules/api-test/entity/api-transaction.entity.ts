@@ -22,7 +22,15 @@ export type ApiTransactionSyncStatus =
 @Entity("api_transaction")
 @Index(
   "uk_api_transaction_smp",
-  ["projectId", "reqCode", "taskId", "serviceCode", "reqSystemId", "code"],
+  [
+    "projectId",
+    "reqCode",
+    "taskId",
+    "serviceCode",
+    "reqSystemId",
+    "code",
+    "deletedAt",
+  ],
   {
     unique: true,
     where: "req_code IS NOT NULL AND deleted_at IS NULL",

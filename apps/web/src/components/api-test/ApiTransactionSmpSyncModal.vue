@@ -55,9 +55,9 @@
       </a-table>
 
       <div class="smp-sync-hint">
-        <span v-if="!items.length && !loading">点击「重新获取」从服管平台拉取交易码列表</span>
+        <span v-if="!validItems.length && !loading">点击「重新获取」从服管平台拉取交易码列表</span>
         <span v-else-if="!filteredItems.length">暂无匹配数据</span>
-        <span v-else>共 {{ items.length }} 条，已勾选 {{ selectedRowKeys.length }} 条</span>
+        <span v-else>共 {{ validItems.length }} 条，已勾选 {{ selectedRowKeys.length }} 条</span>
       </div>
     </div>
   </a-modal>
@@ -92,10 +92,19 @@ const columns = [
   { title: '属性', dataIndex: 'serviceAttribute', key: 'serviceAttribute', width: 100 },
 ];
 
+function isValidReqSystemId(reqSystemId?: string | null): boolean {
+  const value = reqSystemId?.trim();
+  return Boolean(value) && value !== '-';
+}
+
+const validItems = computed(() =>
+  items.value.filter((item) => isValidReqSystemId(item.reqSystemId)),
+);
+
 const filteredItems = computed(() => {
   const value = keyword.value.trim().toLowerCase();
-  if (!value) return items.value;
-  return items.value.filter((item) => {
+  if (!value) return validItems.value;
+  return validItems.value.filter((item) => {
     const haystack = [
       item.code,
       item.name,
@@ -136,7 +145,7 @@ async function loadItems() {
       ...item,
       rowKey: `${item.reqCode}|${item.taskId}|${item.serviceCode}|${item.reqSystemId}|${item.code}`,
     }));
-    selectedRowKeys.value = items.value.filter((i) => i.selected).map((i) => i.rowKey);
+    selectedRowKeys.value = validItems.value.filter((i) => i.selected).map((i) => i.rowKey);
   } catch (error) {
     message.error(error instanceof Error ? error.message : '获取服管数据失败');
   } finally {
@@ -149,7 +158,7 @@ function onReload() {
 }
 
 async function onSync() {
-  const selected = items.value.filter((item) => selectedRowKeys.value.includes(item.rowKey));
+  const selected = validItems.value.filter((item) => selectedRowKeys.value.includes(item.rowKey));
   if (!selected.length) {
     message.warning('请选择要同步的交易码');
     return Promise.reject();

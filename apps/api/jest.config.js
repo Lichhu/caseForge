@@ -27,6 +27,7 @@ module.exports = {
     "^@struct-doc/(.*)$": "<rootDir>/src/modules/struct-doc/$1",
     "^@scenario/(.*)$": "<rootDir>/src/modules/scenario/$1",
     "^@api-test/(.*)$": "<rootDir>/src/modules/api-test/$1",
+    "^@requirement-platform/(.*)$": "<rootDir>/src/modules/requirement-platform/$1",
   },
   collectCoverageFrom: ["src/**/*.{ts}", "!src/**/*.entity.ts", "!src/**/*.dto.ts"],
   coverageDirectory: "coverage",

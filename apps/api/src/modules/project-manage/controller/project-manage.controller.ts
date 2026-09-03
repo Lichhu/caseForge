@@ -74,6 +74,8 @@ export class ProjectManageController {
         createdAt: row.createdAt.toISOString(),
         updatedAt: row.updatedAt.toISOString(),
         runCount: row.generationCount,
+        caseCount: row.caseCount,
+        isClaimedFromPlatform: row.isClaimedFromPlatform,
       })),
     };
   }

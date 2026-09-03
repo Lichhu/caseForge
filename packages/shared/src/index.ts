@@ -146,6 +146,8 @@ export interface CaseForgeProject {
   updatedAt: string;
   /** 案例生成次数，侧边栏展示用 */
   runCount?: number;
+  /** 是否来源于需求管理平台认领，认领项目禁止删除 */
+  isClaimedFromPlatform?: boolean;
 }
 
 export * from './case-tree';

@@ -100,6 +100,7 @@
               v-if="deleteMode"
               class="project-check"
               :checked="selectedProjectIdSet.has(project.id)"
+              :disabled="project.isClaimedFromPlatform"
               @click.stop
               @change="toggleProjectSelection(project.id, $event)"
             />
@@ -124,15 +125,19 @@
             >
               <EditOutlined />
             </button>
-            <button
+            <a-tooltip
               v-if="deleteMode"
-              class="project-delete"
-              :disabled="deleting"
-              aria-label="删除项目"
-              @click.stop="deleteSingleProject(project.id)"
+              :title="project.isClaimedFromPlatform ? '该项目由需求管理平台认领创建，无法删除' : ''"
             >
-              <DeleteOutlined />
-            </button>
+              <button
+                class="project-delete"
+                :disabled="deleting || project.isClaimedFromPlatform"
+                aria-label="删除项目"
+                @click.stop="!project.isClaimedFromPlatform && deleteSingleProject(project.id)"
+              >
+                <DeleteOutlined />
+              </button>
+            </a-tooltip>
           </div>
           <a-empty v-if="!projectList.length && !listLoading" class="project-empty" description="暂无匹配项目" />
         </a-spin>
@@ -484,6 +489,8 @@ function toggleDeleteMode() {
 
 function handleProjectClick(projectId: string) {
   if (deleteMode.value) {
+    const project = projectList.value.find((item) => item.id === projectId);
+    if (project?.isClaimedFromPlatform) return;
     setProjectSelected(projectId, !selectedProjectIds.value.includes(projectId));
     return;
   }
@@ -500,7 +507,10 @@ function toggleProjectSelection(projectId: string, event: { target: { checked: b
 
 function toggleSelectAll(event: { target: { checked: boolean } }) {
   if (event.target.checked) {
-    selectedProjectIds.value = [...new Set([...selectedProjectIds.value, ...currentPageProjectIds.value])];
+    const selectableIds = currentPageProjectIds.value.filter(
+      (projectId) => !projectList.value.find((p) => p.id === projectId)?.isClaimedFromPlatform,
+    );
+    selectedProjectIds.value = [...new Set([...selectedProjectIds.value, ...selectableIds])];
     return;
   }
   const pageIds = new Set(currentPageProjectIds.value);
@@ -520,6 +530,7 @@ function setProjectSelected(projectId: string, selected: boolean) {
 async function deleteSingleProject(projectId: string) {
   if (deleting.value) return;
   const project = projectList.value.find((item) => item.id === projectId);
+  if (project?.isClaimedFromPlatform) return;
   const projectName = project ? cleanProjectTitle(project.title) : '该项目';
   confirmDeleteProject(`确定删除「${projectName}」？删除后不可恢复。`, async () => {
     deleting.value = true;
@@ -530,6 +541,8 @@ async function deleteSingleProject(projectId: string) {
         await caseStore.removeProject(projectId);
       }
       setProjectSelected(projectId, false);
+    } catch (error) {
+      message.error((error as Error)?.message || '删除失败');
     } finally {
       deleting.value = false;
     }
@@ -551,6 +564,8 @@ async function deleteSelectedProjects(projectIds: string[]) {
       if (!projectList.value.length && listTotal.value === 0) {
         deleteMode.value = false;
       }
+    } catch (error) {
+      message.error((error as Error)?.message || '删除失败');
     } finally {
       deleting.value = false;
     }

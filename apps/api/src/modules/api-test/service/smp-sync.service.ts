@@ -80,7 +80,9 @@ export class SmpSyncService {
     }
 
     const existing = await this.findExistingSmpKeys(projectId);
-    return response.data.map((item) => this.toCandidate(item, existing));
+    return response.data
+      .filter((item) => this.isValidReqSystemId(item.reqSystemId))
+      .map((item) => this.toCandidate(item, existing));
   }
 
   /**
@@ -109,7 +111,7 @@ export class SmpSyncService {
       ],
     });
 
-    this.validateSyncBatch(candidates, existingRows);
+    this.validateSyncBatch(candidates);
 
     const existingBySmpKey = new Map<string, ApiTransactionEntity>();
     for (const row of existingRows) {
@@ -420,6 +422,14 @@ export class SmpSyncService {
     return assertApiTestProject(this.projectRepo, projectId);
   }
 
+  /**
+   * 校验 reqSystemId 是否有效：为空或为 "-" 时表示无响应系统，应剔除
+   */
+  private isValidReqSystemId(reqSystemId: string): boolean {
+    const value = reqSystemId?.trim();
+    return Boolean(value) && value !== "-";
+  }
+
   private async findExistingSmpKeys(projectId: string): Promise<Set<string>> {
     const rows = await this.transactionRepo.find({
       where: scopedWhere({ projectId }),
@@ -477,62 +487,9 @@ export class SmpSyncService {
     return `${reqCode}|${taskId}|${serviceCode}|${reqSystemId}|${code}`;
   }
 
-  private validateSyncBatch(
-    candidates: SmpTransactionCandidate[],
-    existingRows: Pick<
-      ApiTransactionEntity,
-      "id" | "code" | "reqCode" | "taskId" | "serviceCode" | "reqSystemId"
-    >[],
-  ): void {
-    const seenSmpKeys = new Set<string>();
-    const seenCodes = new Set<string>();
-    const existingBySmpKey = new Map<string, (typeof existingRows)[number]>();
-    const existingByCode = new Map<string, (typeof existingRows)[number]>();
-
-    for (const row of existingRows) {
-      if (row.reqCode) {
-        const key = this.smpKey(
-          row.reqCode,
-          row.taskId!,
-          row.serviceCode!,
-          row.reqSystemId!,
-          row.code,
-        );
-        existingBySmpKey.set(key, row);
-      }
-      existingByCode.set(row.code, row);
-    }
-
+  private validateSyncBatch(candidates: SmpTransactionCandidate[]): void {
     for (const candidate of candidates) {
       this.validateCandidate(candidate);
-
-      const key = this.smpKey(
-        candidate.reqCode,
-        candidate.taskId,
-        candidate.serviceCode,
-        candidate.reqSystemId,
-        candidate.code,
-      );
-
-      if (seenSmpKeys.has(key)) {
-        throw new BadRequestException(
-          `批量中存在重复服管记录：交易码 ${candidate.code}`,
-        );
-      }
-      seenSmpKeys.add(key);
-
-      if (seenCodes.has(candidate.code)) {
-        throw new BadRequestException(
-          `批量中存在相同交易码 ${candidate.code}，无法同时同步`,
-        );
-      }
-      seenCodes.add(candidate.code);
-
-      if (!existingBySmpKey.has(key) && existingByCode.has(candidate.code)) {
-        throw new BadRequestException(
-          `交易码 ${candidate.code} 已在项目中存在，且非同一服管记录`,
-        );
-      }
     }
   }
 

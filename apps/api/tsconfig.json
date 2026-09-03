@@ -27,7 +27,8 @@
       "@project-manage/*": ["src/modules/project-manage/*"],
       "@struct-doc/*": ["src/modules/struct-doc/*"],
       "@scenario/*": ["src/modules/scenario/*"],
-      "@api-test/*": ["src/modules/api-test/*"]
+      "@api-test/*": ["src/modules/api-test/*"],
+      "@requirement-platform/*": ["src/modules/requirement-platform/*"]
     }
   },
   "include": ["src/**/*.ts"],

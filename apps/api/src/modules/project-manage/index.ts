@@ -9,6 +9,7 @@ import { CaseTreeEntity } from "@case-editor/entity/case-tree.entity";
 import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
 import { StructDocEntity } from "@struct-doc/entity/struct-doc.entity";
 import { TestPointEntity } from "@struct-doc/entity/test-point.entity";
+import { ApiRequirementEntity } from "@requirement-platform/entity/api-requirement.entity";
 import { ProjectManageController } from "./controller/project-manage.controller";
 import { ProjectManageService } from "./service/project-manage.service";
 import { CaseProjectEntity } from "./entity/project.entity";
@@ -23,6 +24,7 @@ import { CaseProjectEntity } from "./entity/project.entity";
       CaseTreeEntity,
       ApiTestCaseEntity,
       CaseNodeMetadataEntity,
+      ApiRequirementEntity,
     ]),
   ],
   controllers: [ProjectManageController],

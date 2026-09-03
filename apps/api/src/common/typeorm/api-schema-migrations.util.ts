@@ -247,7 +247,8 @@ async function ensureApiTransactionTable(runner: Queryable) {
         modifiedBy VARCHAR(255) NULL DEFAULT 'system',
         createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
         updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-        UNIQUE KEY uk_api_transaction_project_code (projectId, code)
+        deleted_at DATETIME(6) NULL,
+        UNIQUE KEY uk_api_transaction_project_code (projectId, code, deleted_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
     return;
@@ -271,12 +272,38 @@ async function ensureApiTransactionTable(runner: Queryable) {
     { name: "reqSystemId", def: "VARCHAR(32) NULL" },
     { name: "syncStatus", def: "VARCHAR(16) NULL DEFAULT 'pending'" },
     { name: "syncError", def: "TEXT NULL" },
+    { name: "deleted_at", def: "DATETIME(6) NULL" },
   ]) {
     if (!(await columnExists(runner, "api_transaction", name))) {
       await runner.query(`
         ALTER TABLE api_transaction ADD COLUMN ${name} ${def}
       `);
     }
+  }
+
+  await ensureApiTransactionProjectCodeUnique(runner);
+}
+
+async function ensureApiTransactionProjectCodeUnique(runner: Queryable) {
+  const indexName = "uk_api_transaction_project_code";
+  const indexColumns = await queryRows<{ Column_name: string }>(
+    runner,
+    `SHOW INDEX FROM api_transaction WHERE Key_name = ?`,
+    [indexName],
+  );
+  const hasDeletedAt = indexColumns.some(
+    (row) => row.Column_name === "deleted_at",
+  );
+  if (indexColumns.length && !hasDeletedAt) {
+    await runner.query(`
+      ALTER TABLE api_transaction DROP INDEX ${indexName}
+    `);
+  }
+  if (!hasDeletedAt) {
+    await runner.query(`
+      ALTER TABLE api_transaction
+        ADD UNIQUE KEY ${indexName} (projectId, code, deleted_at)
+    `);
   }
 }
 

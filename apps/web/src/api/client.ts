@@ -77,6 +77,7 @@ function mapProjectListRow(raw: {
   updatedAt: string | Date;
   generationCount?: number;
   caseCount?: number;
+  isClaimedFromPlatform?: boolean;
 }): ProjectListItem {
   return {
     id: raw.id,
@@ -93,6 +94,7 @@ function mapProjectListRow(raw: {
         : raw.updatedAt.toISOString(),
     runCount: raw.generationCount ?? 0,
     caseCount: raw.caseCount ?? 0,
+    isClaimedFromPlatform: raw.isClaimedFromPlatform ?? false,
   };
 }
 
@@ -104,6 +106,7 @@ function mapProjectDetail(raw: {
   createdAt: string | Date;
   updatedAt: string | Date;
   generationCount?: number;
+  isClaimedFromPlatform?: boolean;
 }): CaseForgeProject {
   return {
     id: raw.id,
@@ -119,6 +122,7 @@ function mapProjectDetail(raw: {
         ? raw.updatedAt
         : raw.updatedAt.toISOString(),
     runCount: raw.generationCount,
+    isClaimedFromPlatform: raw.isClaimedFromPlatform ?? false,
   };
 }
 
@@ -265,6 +269,7 @@ export async function listProjects(
       updatedAt: string | Date;
       generationCount?: number;
       caseCount?: number;
+      isClaimedFromPlatform?: boolean;
     }>;
     count: number;
     caseCount: number;

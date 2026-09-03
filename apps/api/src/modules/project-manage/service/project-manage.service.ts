@@ -15,6 +15,7 @@ import { CaseEditorEntity } from "@case-editor/entity/case-editor.entity";
 import { CaseTreeEntity } from "@case-editor/entity/case-tree.entity";
 import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
 import { StructDocEntity } from "@struct-doc/entity/struct-doc.entity";
+import { ApiRequirementEntity } from "@requirement-platform/entity/api-requirement.entity";
 import { DataSource, EntityManager, In, Repository } from "typeorm";
 import {
   extractProjectCodeFromText,
@@ -39,10 +40,11 @@ function normalizeRequirementNo(raw: string): string {
   return code.toUpperCase();
 }
 
-/** 项目列表项：对外字段 + 案例生成次数 */
+/** 项目列表项：对外字段 + 案例生成次数 + 是否来源于需求平台认领 */
 export type ProjectListItem = ReturnType<typeof toPublicProject> & {
   generationCount: number;
   caseCount: number;
+  isClaimedFromPlatform: boolean;
 };
 
 /**
@@ -59,6 +61,8 @@ export class ProjectManageService {
     private readonly caseTreeRepo: Repository<CaseTreeEntity>,
     @InjectRepository(ApiTestCaseEntity)
     private readonly apiTestCaseRepo: Repository<ApiTestCaseEntity>,
+    @InjectRepository(ApiRequirementEntity)
+    private readonly apiRequirementRepo: Repository<ApiRequirementEntity>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
   ) {}
@@ -183,12 +187,14 @@ export class ProjectManageService {
     const projectIds = rows.map((row) => String(row.id));
     const generationCountMap = await this.getGenerationCountMap(projectIds);
     const caseCountMap = await this.getCaseCountMap(projectIds, platform);
+    const claimedProjectIdSet = await this.getClaimedProjectIdSet(projectIds);
 
     return {
       rows: rows.map((row) => ({
         ...toPublicProject(row),
         generationCount: generationCountMap.get(String(row.id)) ?? 0,
         caseCount: caseCountMap.get(String(row.id)) ?? 0,
+        isClaimedFromPlatform: claimedProjectIdSet.has(String(row.id)),
       })),
       count,
       caseCount: [
@@ -207,6 +213,9 @@ export class ProjectManageService {
     const generationCountMap = await this.getGenerationCountMap([
       String(project.id),
     ]);
+    const claimedProjectIdSet = await this.getClaimedProjectIdSet([
+      String(project.id),
+    ]);
     return {
       ...toPublicProject(project),
       generationCount: generationCountMap.get(String(project.id)) ?? 0,
@@ -214,6 +223,7 @@ export class ProjectManageService {
         (
           await this.getCaseCountMap([String(project.id)], project.platform)
         ).get(String(project.id)) ?? 0,
+      isClaimedFromPlatform: claimedProjectIdSet.has(String(project.id)),
     };
   }
 
@@ -287,11 +297,13 @@ export class ProjectManageService {
 
   /**
    * 删除项目及其关联的结构化文档、案例编辑器等数据
+   * 来源于需求平台认领的项目禁止删除
    * @param projectId - 项目 ID
    */
   async deleteProject(
     projectId: string,
   ): Promise<{ id: string; deleted: boolean }> {
+    await this.assertProjectNotClaimed([projectId]);
     await this.dataSource.transaction(async (manager) => {
       const project = await manager.findOne(CaseProjectEntity, {
         where: scopedWhere({ id: projectId }),
@@ -308,6 +320,7 @@ export class ProjectManageService {
 
   /**
    * 批量删除项目（忽略不存在的 ID）
+   * 来源于需求平台认领的项目禁止删除，整批拒绝
    * @param ids - 项目 ID 列表
    */
   async batchDeleteProjects(
@@ -317,6 +330,8 @@ export class ProjectManageService {
     if (!uniqueIds.length) {
       return { ids: [], deleted: true };
     }
+
+    await this.assertProjectNotClaimed(uniqueIds);
 
     await this.dataSource.transaction(async (manager) => {
       for (const projectId of uniqueIds) {
@@ -332,6 +347,23 @@ export class ProjectManageService {
     });
 
     return { ids: uniqueIds, deleted: true };
+  }
+
+  /**
+   * 校验项目列表中是否存在需求平台认领的项目；若存在则抛出异常拒绝删除
+   */
+  private async assertProjectNotClaimed(projectIds: string[]): Promise<void> {
+    const claimedRows = await this.apiRequirementRepo
+      .createQueryBuilder("req")
+      .select("req.claimedProjectId", "projectId")
+      .where("req.claimedProjectId IN (:...projectIds)", { projectIds })
+      .andWhere("req.deletedAt IS NULL")
+      .getRawMany<{ projectId: string }>();
+    if (claimedRows.length) {
+      throw new BadRequestException(
+        "该项目由需求管理平台认领创建，无法删除；请前往需求管理平台处理",
+      );
+    }
   }
 
   private async getGenerationCountMap(
@@ -406,5 +438,21 @@ export class ProjectManageService {
   ): Promise<void> {
     await manager.softDelete(CaseEditorEntity, { projectId });
     await manager.softDelete(StructDocEntity, { projectId });
+  }
+
+  /**
+   * 批量查询哪些项目 ID 是由需求平台认领创建的
+   */
+  private async getClaimedProjectIdSet(
+    projectIds: string[],
+  ): Promise<Set<string>> {
+    if (!projectIds.length) return new Set();
+    const rows = await this.apiRequirementRepo
+      .createQueryBuilder("req")
+      .select("req.claimedProjectId", "projectId")
+      .where("req.claimedProjectId IN (:...projectIds)", { projectIds })
+      .andWhere("req.deletedAt IS NULL")
+      .getRawMany<{ projectId: string }>();
+    return new Set(rows.map((row) => row.projectId));
   }
 }

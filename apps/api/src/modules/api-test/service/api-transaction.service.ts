@@ -111,12 +111,6 @@ export class ApiTransactionService {
     if (!code) {
       throw new BadRequestException("请输入交易码");
     }
-    const duplicate = await this.transactionRepo.findOne({
-      where: scopedWhere({ projectId, code }),
-    });
-    if (duplicate) {
-      throw new BadRequestException(`交易码「${code}」已存在`);
-    }
     const count = await this.transactionRepo.count({
       where: scopedWhere({ projectId }),
     });
@@ -153,14 +147,6 @@ export class ApiTransactionService {
     const name = payload.name?.trim() || code;
     if (!code) {
       throw new BadRequestException("请输入交易码");
-    }
-    if (code !== transaction.code) {
-      const duplicate = await this.transactionRepo.findOne({
-        where: scopedWhere({ projectId, code }),
-      });
-      if (duplicate && duplicate.id !== transactionId) {
-        throw new BadRequestException(`交易码「${code}」已存在`);
-      }
     }
     transaction.code = code;
     transaction.name = name;
