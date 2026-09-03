@@ -21,5 +21,6 @@ export function getAppConfig(configService: ConfigService): AppConfig {
       "requirementPlatform",
     )!,
     ocuPush: configService.get<AppConfig["ocuPush"]>("ocuPush")!,
+    notify: configService.get<AppConfig["notify"]>("notify")!,
   };
 }

@@ -1,9 +1,9 @@
 /**
- * @file 需求平台消息通知服务：通过行内 OCU 推送接口发送敏行消息
- * 1. 超期提醒：定时扫描创建超阈值（默认 24 小时）仍待分发的需求，
- *    给每个分发人各推一条（userIds 只放一个工号，并发默认 3），消息带该收件人专属访问链接；
- * 2. 事件通知：分发/改派后通知被分发人；认领/拒绝后通知分发人或改派人。
- * 推送关闭（OCU_PUSH_ENABLED=false）时仅输出日志，不真实发送。
+ * @file 需求平台消息通知服务：组装需求事件消息并写入 notify_message（默认未发送）
+ * 1. 事件通知：分发/改派后通知被分发人；认领/拒绝后通知分发人或改派人；
+ * 2. 超期提醒：定时扫描创建超阈值（默认 24 小时）仍待分发的需求，给每个分发人各写一条汇总提醒，
+ *    消息带该收件人专属访问链接，写入后记录 overdueNotifiedAt 实现「只提醒一次」。
+ * 实际推送由 NotifyMessageService 轮询未发送消息完成（通道为行内 OCU 敏行消息）。
  */
 import {
   Injectable,
@@ -15,11 +15,20 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { ConfigService } from "@nestjs/config";
 import type { AppConfig } from "@config/app-config.types";
 import { In, IsNull, LessThan, Repository } from "typeorm";
+import { NotifyMessageService } from "@common/notify/service/notify-message.service";
 import { ApiRequirementEntity } from "../entity/api-requirement.entity";
 import { ApiRequirementDispatcherEntity } from "../entity/api-requirement-dispatcher.entity";
 
-/** 单次推送请求超时（毫秒） */
-const PUSH_REQUEST_TIMEOUT_MS = 10000;
+/** 需求消息的业务对象类型 */
+const REQUIREMENT_BIZ_TYPE = "api_requirement";
+
+/** 需求消息场景标识 */
+const REQUIREMENT_SCENES = {
+  dispatched: "requirement.dispatched",
+  claimed: "requirement.claimed",
+  refused: "requirement.refused",
+  overdue: "requirement.overdue",
+} as const;
 
 @Injectable()
 export class RequirementNotifyService implements OnModuleInit, OnModuleDestroy {
@@ -32,6 +41,7 @@ export class RequirementNotifyService implements OnModuleInit, OnModuleDestroy {
     private readonly requirementRepo: Repository<ApiRequirementEntity>,
     @InjectRepository(ApiRequirementDispatcherEntity)
     private readonly dispatcherRepo: Repository<ApiRequirementDispatcherEntity>,
+    private readonly messageService: NotifyMessageService,
     private readonly config: ConfigService<AppConfig>,
   ) {}
 
@@ -62,7 +72,7 @@ export class RequirementNotifyService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     const message = `【需求分发通知】需求 ${requirement.projectCode}「${requirement.projectName}」已分发给你，请及时登录平台认领：${this.portalLink(target)}`;
-    this.enqueueSend(target, message);
+    this.enqueue(REQUIREMENT_SCENES.dispatched, requirement, target, message);
   }
 
   /** 认领后：通知分发人/改派人 */
@@ -73,7 +83,7 @@ export class RequirementNotifyService implements OnModuleInit, OnModuleDestroy {
     }
     const claimer = requirement.claimedByName ?? requirement.claimedBy ?? "";
     const message = `【需求认领通知】需求 ${requirement.projectCode}「${requirement.projectName}」已由 ${claimer} 认领，可登录平台查看进展：${this.portalLink(target)}`;
-    this.enqueueSend(target, message);
+    this.enqueue(REQUIREMENT_SCENES.claimed, requirement, target, message);
   }
 
   /**
@@ -92,12 +102,12 @@ export class RequirementNotifyService implements OnModuleInit, OnModuleDestroy {
     }
     const reasonText = reason?.trim() ? `原因：${reason.trim()}。` : "";
     const message = `【需求拒绝通知】需求 ${requirement.projectCode}「${requirement.projectName}」被 ${refuserName} 拒绝。${reasonText}请及时登录平台重新分发：${this.portalLink(dispatcher)}`;
-    this.enqueueSend(dispatcher, message);
+    this.enqueue(REQUIREMENT_SCENES.refused, requirement, dispatcher, message);
   }
 
   /**
-   * 超期扫描：创建超阈值仍待分发且未提醒过的需求，逐人推送提醒（并发受限），
-   * 推送后记录 overdueNotifiedAt 实现「只发一次」（分发/拒绝时重置标记）
+   * 超期扫描：创建超阈值仍待分发且未提醒过的需求，给每个分发人各写一条汇总提醒，
+   * 写入后记录 overdueNotifiedAt 实现「只提醒一次」（分发/拒绝时重置标记）
    */
   async scanOverdue(): Promise<void> {
     if (this.scanning) {
@@ -127,13 +137,17 @@ export class RequirementNotifyService implements OnModuleInit, OnModuleDestroy {
       }
 
       const hours = Math.round(push.overdueThresholdMs / 3600000);
-      await this.runConcurrent(
-        dispatchers.map((row) => row.userName),
-        push.concurrency,
-        async (userName) => {
+      await Promise.all(
+        dispatchers.map((row) => {
+          const userName = row.userName;
           const message = `【需求分发提醒】当前有 ${overdueRows.length} 条接口测试需求超 ${hours} 小时未分发，请及时登录平台处理：${this.portalLink(userName)}`;
-          await this.sendToUser(userName, message);
-        },
+          return this.enqueueMessage(
+            REQUIREMENT_SCENES.overdue,
+            null,
+            userName,
+            message,
+          );
+        }),
       );
 
       await this.requirementRepo.update(
@@ -141,60 +155,42 @@ export class RequirementNotifyService implements OnModuleInit, OnModuleDestroy {
         { overdueNotifiedAt: new Date() },
       );
       this.logger.log(
-        `超期扫描推送完成：${overdueRows.length} 条需求 × ${dispatchers.length} 个分发人`,
+        `超期扫描消息已入队：${overdueRows.length} 条需求 × ${dispatchers.length} 个分发人`,
       );
     } finally {
       this.scanning = false;
     }
   }
 
-  /** process.nextTick 延迟发送：脱离请求主流程，不阻塞接口响应 */
-  private enqueueSend(userName: string, message: string): void {
-    process.nextTick(() => {
-      this.sendToUser(userName, message).catch((error) => {
-        this.logger.warn(
-          `OCU 推送任务异常 to=${userName}: ${this.errorMessage(error)}`,
-        );
-      });
-    });
+  /** 写入需求相关消息（不阻塞业务流程，失败仅记日志） */
+  private enqueue(
+    scene: string,
+    requirement: ApiRequirementEntity,
+    receiver: string,
+    content: string,
+  ): void {
+    void this.enqueueMessage(scene, requirement.id, receiver, content);
   }
 
-  /** 给单个用户发送敏行消息；推送关闭时仅输出日志 */
-  private async sendToUser(
-    userName: string,
-    message: string,
-  ): Promise<boolean> {
-    const push = this.pushConfig();
-    if (!push.enabled) {
-      this.logger.log(`[OCU 推送关闭] to=${userName} message=${message}`);
-      return true;
-    }
+  /** 写入消息表：默认未发送，由 NotifyMessageService 轮询推送并负责失败重试 */
+  private async enqueueMessage(
+    scene: string,
+    bizId: string | null,
+    receiver: string,
+    content: string,
+  ): Promise<void> {
     try {
-      const response = await fetch(push.url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ocuId: push.ocuId,
-          ocuSecret: push.ocuSecret,
-          serverURL: push.serverURL,
-          bearerToken: push.bearerToken,
-          userIds: [userName],
-          message,
-        }),
-        signal: AbortSignal.timeout(PUSH_REQUEST_TIMEOUT_MS),
+      await this.messageService.enqueue({
+        scene,
+        bizType: REQUIREMENT_BIZ_TYPE,
+        bizId,
+        receiver,
+        content,
       });
-      if (!response.ok) {
-        this.logger.warn(
-          `OCU 推送失败 to=${userName} status=${response.status}`,
-        );
-        return false;
-      }
-      return true;
     } catch (error) {
       this.logger.warn(
-        `OCU 推送异常 to=${userName}: ${this.errorMessage(error)}`,
+        `消息入队失败 scene=${scene} to=${receiver}: ${this.errorMessage(error)}`,
       );
-      return false;
     }
   }
 
@@ -202,26 +198,6 @@ export class RequirementNotifyService implements OnModuleInit, OnModuleDestroy {
   private portalLink(userName: string): string {
     const base = this.pushConfig().portalBaseUrl.replace(/\/+$/, "");
     return `${base}/api-test/requirement?userName=${encodeURIComponent(userName)}`;
-  }
-
-  /** 简单并发池：控制逐人推送的并发数 */
-  private async runConcurrent(
-    userNames: string[],
-    concurrency: number,
-    fn: (userName: string) => Promise<void>,
-  ): Promise<void> {
-    let cursor = 0;
-    const workers = Array.from(
-      { length: Math.max(1, Math.min(concurrency, userNames.length)) },
-      async () => {
-        while (cursor < userNames.length) {
-          const current = userNames[cursor];
-          cursor += 1;
-          await fn(current);
-        }
-      },
-    );
-    await Promise.all(workers);
   }
 
   private pushConfig(): AppConfig["ocuPush"] {

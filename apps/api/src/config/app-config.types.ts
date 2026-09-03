@@ -79,4 +79,13 @@ export interface AppConfig {
     /** 逐人推送并发数，默认 3 */
     concurrency: number;
   };
+  /** 消息发送（先落库 notify_message，再由轮询任务推送）配置 */
+  notify: {
+    /** 未发送消息轮询间隔（毫秒），0 表示关闭定时轮询（仅入队时触发发送） */
+    scanIntervalMs: number;
+    /** 单轮最多拉取的消息条数 */
+    batchSize: number;
+    /** 发送失败最大重试次数，超过后标记 failed 不再发送 */
+    maxRetry: number;
+  };
 }

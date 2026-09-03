@@ -5,6 +5,7 @@ import { Module } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { TestPlatformModule } from "@common/test-platform";
+import { NotifyModule } from "@common/notify";
 import { ApiTestModule } from "@api-test/index";
 import { RequirementPlatformController } from "./controller/requirement-platform.controller";
 import { ApiRequirementEntity } from "./entity/api-requirement.entity";
@@ -22,6 +23,7 @@ import { RequirementNotifyService } from "./service/requirement-notify.service";
     ]),
     TestPlatformModule,
     ApiTestModule,
+    NotifyModule,
   ],
   controllers: [RequirementPlatformController],
   providers: [

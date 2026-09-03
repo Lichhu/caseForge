@@ -90,4 +90,9 @@ export default (): AppConfig => ({
     ),
     concurrency: Number(process.env.OCU_PUSH_CONCURRENCY ?? 3),
   },
+  notify: {
+    scanIntervalMs: Number(process.env.NOTIFY_SCAN_INTERVAL_MS ?? 30000),
+    batchSize: Number(process.env.NOTIFY_BATCH_SIZE ?? 50),
+    maxRetry: Number(process.env.NOTIFY_MAX_RETRY ?? 3),
+  },
 });

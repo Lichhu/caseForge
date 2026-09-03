@@ -236,6 +236,16 @@ const INDEX_SPECS: Array<{ table: string; name: string; columns: string }> = [
     columns: "executionSetId, sortOrder",
   },
   {
+    table: "notify_message",
+    name: "idx_notify_message_status_retry",
+    columns: "status, nextRetryAt",
+  },
+  {
+    table: "notify_message",
+    name: "idx_notify_message_biz",
+    columns: "bizType, bizId",
+  },
+  {
     table: "scenario_library",
     name: "idx_scenario_library_user_updated",
     columns: "createdBy, updatedAt",

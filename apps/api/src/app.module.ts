@@ -16,6 +16,7 @@ import { ScenarioModule } from "@scenario/index";
 import { ApiTestModule } from "./modules/api-test";
 import { RequirementPlatformModule } from "./modules/requirement-platform";
 import { AiWorkflowModule } from "./common/ai-workflow";
+import { NotifyModule } from "./common/notify";
 import { TypeormModule } from "./common/typeorm";
 import { TestPlatformModule } from "./common/test-platform";
 
@@ -30,6 +31,7 @@ import { TestPlatformModule } from "./common/test-platform";
     TestPlatformModule,
     MinioStorageModule,
     AiWorkflowModule,
+    NotifyModule,
     CaseEditorModule,
     DynamicInstructModule,
     ProjectManageModule,

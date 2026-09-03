@@ -28,6 +28,7 @@ export class SchemaPatchService implements OnModuleInit {
     await this.ensureStructDocParseMetaColumns();
     await this.ensureServiceIgnoreSslVerifyColumn();
     await this.ensureApiRequirementOverdueNotifiedColumn();
+    await this.ensureNotifyMessageTable();
     await migrateStructDocProjectIndex(this.dataSource);
     await ensureCaseEditorUtf8mb4TextColumns(this.dataSource, this.logger);
     await applyApiTestSchemaMigrations(this.dataSource);
@@ -333,6 +334,40 @@ export class SchemaPatchService implements OnModuleInit {
         AFTER refuseReason
     `);
     this.logger.log("api_requirement.overdueNotifiedAt 列已补齐");
+  }
+
+  private async ensureNotifyMessageTable() {
+    const rows: Array<{ Tables_in_db?: string }> = await this.dataSource.query(
+      "SHOW TABLES LIKE 'notify_message'",
+    );
+    if (rows.length > 0) {
+      return;
+    }
+
+    this.logger.warn("检测到缺少 notify_message 表，正在自动执行 schema 补丁…");
+    await this.dataSource.query(`
+      CREATE TABLE notify_message (
+        id CHAR(36) NOT NULL PRIMARY KEY,
+        scene VARCHAR(50) NOT NULL COMMENT '业务场景标识',
+        bizType VARCHAR(50) NULL COMMENT '业务对象类型',
+        bizId VARCHAR(64) NULL COMMENT '业务对象 id',
+        receiver VARCHAR(64) NOT NULL COMMENT '收件人账号',
+        content TEXT NOT NULL COMMENT '消息正文',
+        status ENUM('pending','sending','sent','failed') NOT NULL DEFAULT 'pending',
+        retryCount INT NOT NULL DEFAULT 0,
+        maxRetry INT NOT NULL DEFAULT 3,
+        nextRetryAt DATETIME(3) NULL,
+        lastError VARCHAR(1000) NULL,
+        sentAt DATETIME(3) NULL,
+        createdBy VARCHAR(255) NULL DEFAULT 'system',
+        createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+        updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+        deleted_at DATETIME(6) NULL,
+        INDEX idx_notify_message_status_retry (status, nextRetryAt),
+        INDEX idx_notify_message_biz (bizType, bizId)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    this.logger.log("notify_message 表已创建");
   }
 
   /**
