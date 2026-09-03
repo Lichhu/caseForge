@@ -136,7 +136,7 @@ import { CodeOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons-vue
 import { message } from 'ant-design-vue';
 import { NESTED_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import { listDataFunctions, type ApiDataFunctionRow } from '@/api/apiTestClient';
-import { parseSqlSelectColumns } from '@/utils/sqlSelectColumns.util';
+import { dataFunctionFieldOptions } from '@/utils/sqlSelectColumns.util';
 import type { AssertionOperator, AssertionType } from '@case-forge/shared';
 import type { CaseProtocol } from '@/utils/casePayloadFormat.util';
 import {
@@ -204,9 +204,9 @@ const selectedInsertFunction = computed(() =>
   insertFunctions.value.find((item) => item.name === insertFunctionName.value),
 );
 const insertFieldOptions = computed(() =>
-  parseSqlSelectColumns(
-    String(selectedInsertFunction.value?.config?.sql ?? ''),
-  ).map((value) => ({ value })),
+  dataFunctionFieldOptions(selectedInsertFunction.value?.config).map(
+    (value) => ({ value }),
+  ),
 );
 const functionInsertPreview = computed(() => {
   const call = `\${${insertFunctionName.value || '函数名'}(${insertFunctionArgs.value.join(', ')})`;

@@ -350,7 +350,7 @@ export class ApiDataFunctionService {
     context?: DataFunctionContext,
   ) {
     const pattern =
-      /\$\{([A-Z][A-Z0-9_-]*)\(([^{}]*)\)(?:\.([A-Za-z_][\w]*))?\}/g;
+      /\$\{([A-Z][A-Z0-9_-]*)\(([^{}]*)\)(?:\.([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*))?\}/g;
     let result = text;
     for (let depth = 0; depth < 5 && pattern.test(result); depth += 1) {
       pattern.lastIndex = 0;
@@ -366,7 +366,13 @@ export class ApiDataFunctionService {
         );
         const evaluated = await this.evaluate(projectId, fn, values, context);
         const resolved = match[3]
-          ? (evaluated as Record<string, unknown> | null)?.[match[3]]
+          ? match[3].split(".").reduce<unknown>(
+              (current, key) =>
+                current && typeof current === "object"
+                  ? (current as Record<string, unknown>)[key]
+                  : undefined,
+              evaluated,
+            )
           : evaluated;
         result = result.replace(match[0], String(resolved ?? ""));
       }
@@ -514,7 +520,7 @@ export class ApiDataFunctionService {
     );
     let sql = String(config.sql ?? "").trim();
     if (
-      !/^select\s/i.test(sql) ||
+      !/^(?:select|with)\b/i.test(sql) ||
       /;\s*\S/.test(sql) ||
       /\b(insert|update|delete|drop|alter|create|truncate|grant|call)\b/i.test(
         sql,
@@ -536,6 +542,7 @@ export class ApiDataFunctionService {
       /\s+(?:limit\s+\d+(?:\s*,\s*\d+)?|fetch\s+first\s+\d+\s+rows?\s+only)\s*;?\s*$/i,
       "",
     );
+    sql = sql.replace(/;\s*$/, "");
     sql += ["Oracle", "OceanBase-Oracle", "DM8"].includes(connection.type)
       ? " FETCH FIRST 1 ROWS ONLY"
       : " LIMIT 1";

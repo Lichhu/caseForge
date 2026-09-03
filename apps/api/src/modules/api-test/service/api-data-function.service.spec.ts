@@ -224,6 +224,34 @@ describe("ApiDataFunctionService", () => {
     );
   });
 
+  it("supports a CTE query", async () => {
+    const query = jest.fn().mockResolvedValue([[{ flag: "true" }]]);
+    const pool = { query, end: jest.fn() };
+    const sqlService = new ApiDataFunctionService(
+      { findOne: jest.fn().mockResolvedValue({ id: "db" }) } as never,
+      {} as never,
+    );
+    jest.spyOn(sqlService as any, "pool").mockResolvedValue(pool);
+
+    await expect(
+      sqlService.preview("p1", {
+        name: "CTE",
+        params: ["asset_bal"],
+        type: "sql",
+        config: {
+          connectionId: "db",
+          sql: "WITH row_count AS (SELECT COUNT(*) AS cnt FROM assets WHERE asset_bal > :asset_bal) SELECT CASE WHEN cnt > 0 THEN 'true' ELSE 'false' END AS flag FROM row_count;",
+        },
+        values: { asset_bal: 6000000 },
+      }),
+    ).resolves.toEqual({ flag: "true" });
+
+    expect(query).toHaveBeenCalledWith(
+      expect.objectContaining({ sql: expect.stringContaining("FROM row_count LIMIT 1") }),
+      [6000000],
+    );
+  });
+
   it("supports reading a field from a function result", async () => {
     const objectService = new ApiDataFunctionService(
       {} as never,

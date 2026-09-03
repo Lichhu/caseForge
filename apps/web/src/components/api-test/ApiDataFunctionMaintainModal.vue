@@ -639,7 +639,7 @@ async function runPreview() {
 }
 
 function apiPayload() {
-  return { name: form.name, params: parameterNames.value, type: form.type, description: form.description, config: form.type === 'template' ? { mode: form.templateMode, parts: form.parts, template: generatedTemplate.value, script: activeScript.value, javascriptScript: form.javascriptScript, pythonScript: form.pythonScript } : { connectionId: form.connection, sql: form.sql } };
+  return { name: form.name, params: parameterNames.value, type: form.type, description: form.description, config: form.type === 'template' ? { mode: form.templateMode, parts: form.parts, template: generatedTemplate.value, script: activeScript.value, javascriptScript: form.javascriptScript, pythonScript: form.pythonScript } : { connectionId: form.connection, sql: form.sql, returnFields: sqlReturnFields.value } };
 }
 
 function buildGeneratedValue(inputs: string[]) {

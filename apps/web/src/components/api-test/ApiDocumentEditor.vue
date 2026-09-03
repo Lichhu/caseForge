@@ -737,7 +737,7 @@ import { createEmptyKeyValueRow, type KeyValueRow } from '@/utils/casePayloadFor
 import { copyText } from '@/utils/copyText';
 import { getDebugResponseIssue, parseDebugResponseBody, responsePaths } from '@/utils/debugResponse.util';
 import { copyStepToClipboard } from '@/utils/stepClipboard.util';
-import { parseSqlSelectColumns } from '@/utils/sqlSelectColumns.util';
+import { dataFunctionFieldOptions } from '@/utils/sqlSelectColumns.util';
 
 const tableScrollRef = ref<HTMLElement | null>(null);
 const EXAMPLE_MESSAGE_MIN_HEIGHT_PX = 160;
@@ -771,7 +771,7 @@ function filterInsertFunctionOption(input: string, option: { value?: unknown }) 
   return item.name.toLowerCase().includes(keyword) || (item.description ?? '').toLowerCase().includes(keyword);
 }
 const insertFieldOptions = computed(() =>
-  parseSqlSelectColumns(String(selectedInsertFunction.value?.config?.sql ?? '')).map((value) => ({ value })),
+  dataFunctionFieldOptions(selectedInsertFunction.value?.config).map((value) => ({ value })),
 );
 const functionInsertPreview = computed(() => {
   const call = `\${${insertFunctionName.value || '函数名'}(${insertFunctionArgs.value.join(', ')})`;

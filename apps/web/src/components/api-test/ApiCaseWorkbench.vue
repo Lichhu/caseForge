@@ -913,6 +913,9 @@
           <a-auto-complete v-model:value="bodyFunctionArgs[index]" :options="bodyPathOptions(index)" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 11 }" filter-option placeholder="选择或输入参数来源" />
         </label>
       </div>
+      <a-form-item v-if="selectedBodyFunction?.type === 'sql'" label="结果字段" required>
+        <a-auto-complete v-model:value="bodyFunctionField" :options="bodyFunctionFieldOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 11 }" placeholder="选择或输入查询结果字段" />
+      </a-form-item>
       <div class="function-expression-preview"><span>调用预览</span><code>{{ bodyFunctionPreview }}</code></div>
     </a-form>
   </a-modal>
@@ -977,6 +980,7 @@ import {
   type SocketRequestMeta,
 } from '@/utils/casePayloadFormat.util';
 import { messagePathOptions } from '@/utils/messagePathOptions';
+import { dataFunctionFieldOptions } from '@/utils/sqlSelectColumns.util';
 import { getDebugResponseIssue, parseDebugResponseBody, responsePaths } from '@/utils/debugResponse.util';
 import { copyStepToClipboard, readStepFromClipboard } from '@/utils/stepClipboard.util';
 
@@ -1021,6 +1025,7 @@ async function openBodyFunctionInsert() {
 
 function insertBodyFunction() {
   if (!bodyFunctionName.value) return message.warning('请选择函数');
+  if (selectedBodyFunction.value?.type === 'sql' && !bodyFunctionField.value.trim()) return message.warning('请选择结果字段');
   const expression = bodyFunctionPreview.value;
   const body = currentBodyText();
   setCurrentBodyText(`${body.slice(0, bodyFunctionCursor.start)}${expression}${body.slice(bodyFunctionCursor.end)}`);
@@ -1051,14 +1056,18 @@ const bodyExpandModalOpen = ref(false);
 const bodyFunctionInsertOpen = ref(false);
 const bodyFunctionName = ref('');
 const bodyFunctionArgs = ref<string[]>([]);
+const bodyFunctionField = ref('');
 const bodyFunctions = ref<Awaited<ReturnType<typeof listDataFunctions>>>([]);
 const bodyFunctionCursor = reactive({ start: 0, end: 0 });
 const hasBodyCursor = ref(false);
 const selectedBodyFunction = computed(() => bodyFunctions.value.find((item) => item.name === bodyFunctionName.value));
 const bodyFunctionPreview = computed(() => {
   const call = `\${${bodyFunctionName.value || '函数名'}(${bodyFunctionArgs.value.join(', ')})`;
-  return selectedBodyFunction.value?.type === 'sql' ? `${call}.字段}` : `${call}}`;
+  return selectedBodyFunction.value?.type === 'sql' ? `${call}.${bodyFunctionField.value || '字段'}}` : `${call}}`;
 });
+const bodyFunctionFieldOptions = computed(() =>
+  dataFunctionFieldOptions(selectedBodyFunction.value?.config).map((value) => ({ value })),
+);
 function bodyPathOptions(index: number) {
   const keyword = (bodyFunctionArgs.value[index] ?? '').trim().toLowerCase();
   return messagePathOptions(currentBodyText()).filter((item) => !keyword || item.value.toLowerCase().includes(keyword));
@@ -1073,6 +1082,8 @@ function filterBodyFunctionOption(input: string, option: { value?: unknown }) {
 
 watch(selectedBodyFunction, (fn) => {
   bodyFunctionArgs.value = (fn?.params ?? []).map((_, index) => bodyFunctionArgs.value[index] ?? '');
+  const config = fn?.config ?? {};
+  bodyFunctionField.value = config.returnField ?? config.returnFields?.[0] ?? config.sqlReturnFields?.[0] ?? '';
 });
 
 const moreMenuOpen = ref(false);
