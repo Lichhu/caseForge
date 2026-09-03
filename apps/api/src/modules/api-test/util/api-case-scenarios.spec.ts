@@ -1,6 +1,7 @@
 import {
   assertScenarioCoverage,
   buildScenarioPrompts,
+  extractFieldsByRequirement,
   extractRequestFieldPaths,
   parseScenarioAiResult,
   scenariosForProperty,
@@ -225,5 +226,191 @@ describe("all_fields_empty scenario", () => {
         cases: [],
       }),
     ).toThrow();
+  });
+});
+
+describe("required_fields scenario", () => {
+  const doc = [
+    "请求报文",
+    "----",
+    "节点路径 | 节点代码 | 节点名称 | 节点类型 | 数据类型 | 长度 | 是否必填 | 描述",
+    "Transaction/Body/request/bizHeader | transaction_sn | 交易流水号 | 单节点 | VARCHAR2 | 19 | Y |",
+    "Transaction/Body/request/bizBody | CUST_ID | 客户号 | 单节点 | VARCHAR2 | 30 | Y |",
+    "Transaction/Body/request/bizBody | MOBILE_NO | 手机号 | 单节点 | VARCHAR2 | 20 | N |",
+    "Transaction/Body/request/bizBody | REMARK | 备注 | 单节点 | VARCHAR2 | 200 | 条件必填 |",
+  ].join("\n");
+
+  it("is registered for both query service properties", () => {
+    for (const property of [
+      "query_non_accounting",
+      "query_accounting",
+    ] as ApiServiceProperty[]) {
+      expect(scenariosForProperty(property)).toContainEqual({
+        key: "required_fields",
+        name: "必填参数检验",
+      });
+    }
+  });
+
+  it("splits request fields by the required flag column", () => {
+    expect(extractFieldsByRequirement(doc)).toEqual({
+      required: [
+        "Transaction/Body/request/bizHeader/transaction_sn",
+        "Transaction/Body/request/bizBody/CUST_ID",
+      ],
+      optional: ["Transaction/Body/request/bizBody/MOBILE_NO"],
+    });
+  });
+
+  it("asks for both required-missing and optional-empty cases", () => {
+    const prompt = buildScenarioPrompts({
+      scenarioKey: "required_fields",
+      scenarioName: "必填参数检验",
+      structuredMarkdown: doc,
+      transactionCode: "0101",
+      serviceProperty: "query_accounting",
+    })[0].prompt;
+
+    expect(prompt).toContain("必填字段：逐个生成反向案例");
+    expect(prompt).toContain("全部非必填字段置为空值");
+    expect(prompt).toContain("至少传其一");
+  });
+
+  it("requires a negative case for every required field", () => {
+    expect(() =>
+      assertScenarioCoverage(
+        "required_fields",
+        {
+          applicable: true,
+          reason: "存在必填字段",
+          cases: [
+            {
+              title: "客户号为空",
+              polarity: "negative",
+              changes: [
+                {
+                  path: "Transaction/Body/request/bizBody/CUST_ID",
+                  value: "",
+                },
+              ],
+            },
+            { title: "非必填为空", polarity: "positive", changes: [] },
+          ],
+        },
+        doc,
+      ),
+    ).toThrow("必填字段 Transaction/Body/request/bizHeader/transaction_sn");
+  });
+
+  it("requires an optional-empty positive case when optional fields exist", () => {
+    expect(() =>
+      assertScenarioCoverage(
+        "required_fields",
+        {
+          applicable: true,
+          reason: "存在必填字段",
+          cases: [
+            {
+              title: "交易流水号为空",
+              polarity: "negative",
+              changes: [
+                {
+                  path: "Transaction/Body/request/bizHeader/transaction_sn",
+                  value: "",
+                },
+              ],
+            },
+            {
+              title: "客户号为空",
+              polarity: "negative",
+              changes: [
+                {
+                  path: "Transaction/Body/request/bizBody/CUST_ID",
+                  value: "",
+                },
+              ],
+            },
+          ],
+        },
+        doc,
+      ),
+    ).toThrow("非必填字段为空");
+  });
+
+  it("accepts full required and optional coverage", () => {
+    expect(() =>
+      assertScenarioCoverage(
+        "required_fields",
+        {
+          applicable: true,
+          reason: "覆盖必填与非必填",
+          cases: [
+            {
+              title: "交易流水号为空",
+              polarity: "negative",
+              changes: [
+                {
+                  path: "Transaction/Body/request/bizHeader/transaction_sn",
+                  value: "",
+                },
+              ],
+            },
+            {
+              title: "客户号为空",
+              polarity: "negative",
+              changes: [
+                {
+                  path: "Transaction/Body/request/bizBody/CUST_ID",
+                  value: "",
+                },
+              ],
+            },
+            {
+              title: "非必填字段全为空",
+              polarity: "positive",
+              changes: [
+                {
+                  path: "Transaction/Body/request/bizBody/MOBILE_NO",
+                  value: "",
+                },
+              ],
+            },
+          ],
+        },
+        doc,
+      ),
+    ).not.toThrow();
+  });
+
+  it("skips the optional-empty assertion when no optional field exists", () => {
+    const requiredOnlyDoc = [
+      "请求报文",
+      "----",
+      "节点路径 | 节点代码 | 节点名称 | 节点类型 | 数据类型 | 长度 | 是否必填 | 描述",
+      "Transaction/Body/request/bizBody | CUST_ID | 客户号 | 单节点 | VARCHAR2 | 30 | Y |",
+    ].join("\n");
+
+    expect(() =>
+      assertScenarioCoverage(
+        "required_fields",
+        {
+          applicable: true,
+          reason: "全部字段必填",
+          cases: [
+            {
+              title: "客户号为空",
+              polarity: "negative",
+              changes: [
+                {
+                  path: "Transaction/Body/request/bizBody/CUST_ID",
+                  value: "",
+                },
+              ],
+            },
+          ],
+        },
+        requiredOnlyDoc,
+      ),
+    ).not.toThrow();
   });
 });

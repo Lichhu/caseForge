@@ -1,7 +1,7 @@
 import type { ApiServiceProperty } from "@case-forge/shared";
 import { extractApiDocSection, getApiDocFieldValue } from "./api-doc.parser";
 
-export const API_CASE_RULE_VERSION = "api-case-rules-v5";
+export const API_CASE_RULE_VERSION = "api-case-rules-v6";
 
 export const API_CASE_SCENARIOS = {
   positive_flow: "正向流程",
@@ -17,10 +17,16 @@ export const API_CASE_SCENARIOS = {
 export type ApiCaseScenarioKey = keyof typeof API_CASE_SCENARIOS;
 
 const SERVICE_SCENARIOS: Record<ApiServiceProperty, ApiCaseScenarioKey[]> = {
-  query_non_accounting: ["positive_flow", "pagination", "all_fields_empty"],
+  query_non_accounting: [
+    "positive_flow",
+    "pagination",
+    "required_fields",
+    "all_fields_empty",
+  ],
   query_accounting: [
     "positive_flow",
     "pagination",
+    "required_fields",
     "precision",
     "all_fields_empty",
   ],
@@ -108,6 +114,44 @@ export function extractRequestFieldPaths(structuredMarkdown: string): string[] {
     paths.push(value);
   }
   return paths;
+}
+
+const REQUIRED_FLAG_PATTERN = /^(y|yes|m|mandatory|required|true|1|是|必填)$/i;
+const OPTIONAL_FLAG_PATTERN = /^(n|no|o|optional|false|0|否|非必填|可选)$/i;
+
+/** 「是否必填」列下标：优先按表头定位，缺省回退到第 7 列 */
+function requiredFlagIndex(structuredMarkdown: string) {
+  const header = requestFieldLines(structuredMarkdown)[0] ?? "";
+  const cells = header.split("|").map((cell) => cell.trim());
+  const index = cells.findIndex((cell) => /必填|必需|required/i.test(cell));
+  return index >= 0 ? index : 6;
+}
+
+/**
+ * 按「是否必填」列拆分请求字段路径；条件必填等无法判定的字段不计入任何一侧
+ */
+export function extractFieldsByRequirement(structuredMarkdown: string): {
+  required: string[];
+  optional: string[];
+} {
+  const flagIndex = requiredFlagIndex(structuredMarkdown);
+  const seen = new Set<string>();
+  const required: string[] = [];
+  const optional: string[] = [];
+  for (const line of requestFieldLines(structuredMarkdown).slice(1)) {
+    const cells = line.split("|").map((cell) => cell.trim());
+    const path = (cells[0] ?? "").replace(/\/$/, "");
+    const code = cells[1] ?? "";
+    if (!path || !code) continue;
+    const field = `${path}/${code}`;
+    const key = field.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const flag = (cells[flagIndex] ?? "").replace(/[\s*]/g, "");
+    if (OPTIONAL_FLAG_PATTERN.test(flag)) optional.push(field);
+    else if (REQUIRED_FLAG_PATTERN.test(flag)) required.push(field);
+  }
+  return { required, optional };
 }
 
 export function buildScenarioPrompts(input: {
@@ -223,6 +267,26 @@ export function assertScenarioCoverage(
   if (scenarioKey === "all_fields_empty" && result.cases.length !== 1) {
     throw new Error("全字段空值场景必须生成 1 条案例");
   }
+  if (structuredMarkdown && scenarioKey === "required_fields") {
+    const { required, optional } =
+      extractFieldsByRequirement(structuredMarkdown);
+    for (const path of required) {
+      if (
+        !result.cases.some(
+          (item) =>
+            item.polarity === "negative" &&
+            item.changes.some((change) => change.path === path),
+        )
+      ) {
+        throw new Error(`必填字段 ${path} 缺少缺失或为空的反向案例`);
+      }
+    }
+    if (optional.length && !positive) {
+      throw new Error(
+        "存在非必填字段时必须生成 1 条全部非必填字段为空的正向案例",
+      );
+    }
+  }
   if (structuredMarkdown && scenarioKey === "precision") {
     assertEachFieldHasPolarities(
       result,
@@ -294,7 +358,13 @@ function scenarioRule(key: ApiCaseScenarioKey) {
         "反向 1~2 条：页码为负数或非数字、页大小为 0/负数；文档规定页大小上限时须覆盖超上限。每条案例的预期结果须写明分页实效验证点。",
       ].join(" ");
     case "required_fields":
-      return "覆盖必填字段缺失异常，并生成全部非必填字段为空的正向案例；忽略参数名称错误。";
+      return [
+        "按「是否必填」列判定必填与非必填字段；标注为条件必填或留空等无法判定的字段直接忽略，不得臆测。",
+        "必填字段：逐个生成反向案例，仅将该字段置为空值、其余字段保留示例报文原值，预期接口返回参数校验失败并指明缺失字段。",
+        "非必填字段：生成 1 条正向案例，将全部非必填字段置为空值、必填字段取合法值，预期接口正常处理，验证非必填字段可缺省。",
+        "业务规则要求多个非必填查询条件至少传其一时，补充 1 条全部条件均为空的反向案例和 1 条仅传单个条件的正向案例。",
+        "每条案例的预期结果须写明校验维度（必填缺失报错 / 非必填可空成功）；忽略参数名称错误等非必填性维度的校验。",
+      ].join(" ");
     case "related_fields":
       return "识别业务规则中的关联字段，为每组关系生成合法正向和冲突反向案例。";
     case "enum":
