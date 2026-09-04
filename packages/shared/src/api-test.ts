@@ -118,6 +118,8 @@ export interface ApiCaseRequest {
   headers?: Record<string, string>;
   query?: Record<string, string | number | boolean>;
   body?: unknown;
+  /** JSON body source text kept for editor round-tripping; execution uses body. */
+  bodyText?: string;
   contentType?: string;
   encoding?: string;
   framing?: ApiMessageFraming;

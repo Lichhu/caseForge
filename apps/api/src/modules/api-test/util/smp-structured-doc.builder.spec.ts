@@ -162,7 +162,7 @@ describe("buildStructuredMarkdownFromSmp", () => {
     expect(md).not.toContain("响应报文\n----");
   });
 
-  it("merges head + body node lists into 7-column field table without 节点路径", () => {
+  it("uses only body node list for 7-column field table", () => {
     const md = buildStructuredMarkdownFromSmp(
       [
         makeCallItem({
@@ -206,9 +206,7 @@ describe("buildStructuredMarkdownFromSmp", () => {
     expect(requestSection).toContain(
       "| 节点路径 | 节点代码 | 节点名称 | 节点类型 | 数据类型 | 长度 | 是否必填 | 描述 |",
     );
-    expect(requestSection).toContain(
-      "| Transaction/Body/request/bizHeader | transaction_sn | 交易流水号 | 单节点 | VARCHAR2 | 19 | Y | 交易序列号，可同msgId |",
-    );
+    expect(requestSection).not.toContain("transaction_sn");
     expect(requestSection).toContain(
       "| Transaction/Body/request/bizBody | CUST_ID | 客户号 |  | VARCHAR2 | 30 | Y |  |",
     );

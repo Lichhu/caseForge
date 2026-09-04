@@ -262,7 +262,9 @@ export function splitRequestForEditor(request: ApiCaseRequest) {
       requestBodyText:
         bodyFormat === "text" ? formatBodyForEditor(body, "text") : "",
       requestBodyJson:
-        bodyFormat === "json" ? formatBodyForEditor(body, "json") : "{}",
+        bodyFormat === "json"
+          ? request.bodyText ?? formatBodyForEditor(body, "json")
+          : "{}",
       requestJson: "",
       requestMetaJson: "",
       requestTcpMeta: null,
@@ -285,7 +287,7 @@ export function splitRequestForEditor(request: ApiCaseRequest) {
         bodyFormat === "text" ? formatBodyForEditor(request.body, "text") : "",
       requestBodyJson:
         bodyFormat === "json"
-          ? formatBodyForEditor(request.body, "json")
+          ? request.bodyText ?? formatBodyForEditor(request.body, "json")
           : "{}",
       requestJson: "",
       requestMetaJson: "",
@@ -362,6 +364,8 @@ export function mergeRequestFromEditor(input: {
   const hasBody =
     input.protocol !== "http" || httpMethodHasBody(input.httpMethod);
   const body = hasBody ? parseBodyFromEditor(input.mode, input) : undefined;
+  const bodyText =
+    input.bodyFormat === "json" && hasBody ? input.requestBodyJson : undefined;
 
   if (input.protocol === "http") {
     if (!headers["Content-Type"] && !headers["content-type"]) {
@@ -377,6 +381,7 @@ export function mergeRequestFromEditor(input: {
       contentType,
       encoding: "UTF-8",
       body,
+      bodyText,
     };
   }
 
@@ -395,6 +400,7 @@ export function mergeRequestFromEditor(input: {
       contentType,
       framing,
       body,
+      bodyText,
     };
   }
 
@@ -406,6 +412,7 @@ export function mergeRequestFromEditor(input: {
     contentType,
     encoding: "UTF-8",
     body,
+    bodyText,
   };
 }
 

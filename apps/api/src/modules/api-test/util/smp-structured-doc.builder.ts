@@ -19,7 +19,7 @@ import { API_DOC_SECTION_SEPARATOR } from "./api-doc-format.const";
  * 输出格式与 Excel 结构化文档一致：
  *   基础信息\n----\n服务编码|R53000080828\n...
  *   服务信息\n----\n功能描述|...\n...
- *   请求报文\n----\n（requestHeadList + requestBodyList 字段表）
+ *   请求报文\n----\n（requestBodyList 字段表）
  *   示例报文\n----\n（serviceTestList 的 requestBody）
  *
  * 基础信息 / 服务信息的四个键值行即使值为空也始终保留，
@@ -59,10 +59,7 @@ export function buildStructuredMarkdownFromSmp(
 
   /* ── 请求报文 ── */
   const requestSection =
-    buildFieldTableFromSmpNodeLists(
-      callItem.requestHeadList,
-      callItem.requestBodyList,
-    ) ??
+    buildFieldTableFromSmpNodeLists(callItem.requestBodyList) ??
     buildFieldTableFromJsonBody(testItem.requestBody) ??
     formatSmpBody(testItem.requestBody);
   if (requestSection) {
