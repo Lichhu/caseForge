@@ -112,6 +112,20 @@ describe("assembleBodyFromExample missing paths", () => {
     expect(result.body.match(/<bizbody>/gi)).toHaveLength(1);
   });
 
+  it("applies pagination page size overrides in XML examples", () => {
+    const result = assembleBodyFromExample({
+      exampleMessage:
+        "<Transaction><Body><request><bizBody><pagesize>10</pagesize></bizBody></request></Body></Transaction>",
+      overrides: {
+        "Transaction/Body/request/bizBody/pageSize": "1",
+      },
+      messageFormat: "xml",
+    });
+
+    expect(result.body).toContain("<pagesize>1</pagesize>");
+    expect(result.body).not.toContain("<pagesize>10</pagesize>");
+  });
+
   it("appends missing TEXT key-value fields", () => {
     const result = assembleBodyFromExample({
       exampleMessage: "amount=1",

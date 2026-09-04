@@ -1507,7 +1507,27 @@ const batchConfigSummary = computed(() => {
   if (batchRequest.path?.trim()) parts.push(batchRequest.path.trim());
   return parts.length ? parts.join(' · ') : '未填写，默认不修改步骤配置';
 });
+function mainCaseStepIndex(
+  row: Pick<ApiTestCaseRow, 'request' | 'title'>,
+  steps: ApiCaseStep[],
+) {
+  const markedIndex = steps.findIndex((step) => step.isMainRequest);
+  if (markedIndex >= 0) return markedIndex;
+  const namedIndex = steps.findIndex((step) => step.name?.trim() === row.title?.trim());
+  if (namedIndex >= 0) return namedIndex;
+  const request = JSON.stringify(row.request);
+  const index = steps.findIndex((step) => JSON.stringify(step.request) === request);
+  return index >= 0 ? index : 0;
+}
+function markMainCaseStep(steps: ApiCaseStep[], index: number) {
+  return steps.map((step, stepIndex) => {
+    const clone = { ...step };
+    delete clone.isMainRequest;
+    return stepIndex === index ? { ...clone, isMainRequest: true } : clone;
+  });
+}
 function caseSavePayload(row: ApiTestCaseRow, steps: ApiCaseStep[]) {
+  const mainStep = steps[mainCaseStepIndex(row, steps)] ?? steps[0];
   return {
     endpointId: row.endpointId,
     title: row.title,
@@ -1519,9 +1539,9 @@ function caseSavePayload(row: ApiTestCaseRow, steps: ApiCaseStep[]) {
     polarity: row.polarity,
     status: row.status,
     enabled: row.enabled,
-    request: steps[0].request,
-    expected: steps[0].expected,
-    exports: steps[0].exports,
+    request: mainStep.request,
+    expected: mainStep.expected,
+    exports: mainStep.exports,
     steps,
     debugEnvironmentId: row.metadata?.debugEnvironmentId,
     debugEnvironmentServiceId: row.metadata?.debugEnvironmentServiceId,
@@ -1606,6 +1626,9 @@ function currentStepFromForm(): ApiCaseStep {
   return {
     id: form.steps[activeStepIndex.value]?.id ?? randomUuid(),
     name: form.stepName.trim() || `步骤 ${activeStepIndex.value + 1}`,
+    ...(form.steps[activeStepIndex.value]?.isMainRequest
+      ? { isMainRequest: true }
+      : {}),
     target: targetAddress ? { name: targetName, address: targetAddress } : undefined,
     request: buildDebugRequest(),
     expected: buildExpectedFromRows(form.assertionRows),
@@ -2092,13 +2115,15 @@ function loadForm(row: ApiTestCaseRow) {
   form.polarity = row.polarity;
   form.status = row.status;
   form.enabled = row.enabled;
-  form.steps = cloneJson(row.steps?.length ? row.steps : [{ id: row.id, name: row.title, request: row.request, expected: row.expected, exports: row.metadata?.exports ?? [] }]);
-  if (!form.steps.length) form.steps = [{ id: row.id, name: row.title, request: row.request, expected: row.expected, exports: row.metadata?.exports ?? [] }];
-  activeStepIndex.value = 0;
+  const loadedSteps = cloneJson(row.steps?.length ? row.steps : [{ id: row.id, name: row.title, request: row.request, expected: row.expected, exports: row.metadata?.exports ?? [] }]);
+  if (!loadedSteps.length) loadedSteps.push({ id: row.id, name: row.title, request: row.request, expected: row.expected, exports: row.metadata?.exports ?? [] });
+  const mainIndex = mainCaseStepIndex(row, loadedSteps);
+  form.steps = markMainCaseStep(loadedSteps, mainIndex);
+  activeStepIndex.value = mainIndex;
   expandedStepId.value = '';
-  loadStep(form.steps[0]);
+  loadStep(form.steps[activeStepIndex.value]);
   /* legacy fields remain populated by loadStep for existing editor controls */
-  form.exports = (form.steps[0].exports ?? []).map((item) => ({
+  form.exports = (form.steps[activeStepIndex.value].exports ?? []).map((item) => ({
     rowId: randomUuid(),
     name: item.name,
     source: item.source,
@@ -2331,7 +2356,25 @@ function buildSavePayload(): Record<string, unknown> | null {
     return null;
   }
   storeActiveStep();
-  const expected = form.steps[0]?.expected ?? buildExpectedFromRows(form.assertionRows);
+  const fallbackRequest = form.steps[0]?.request ?? mergeRequestFromEditor({
+    mode: requestEditorMode.value,
+    protocol: form.protocol,
+    bodyFormat: form.bodyFormat,
+    httpMethod: form.httpMethod,
+    httpPath: form.httpPath,
+    headerRows: form.headerRows,
+    queryRows: form.queryRows,
+    socketEncoding: form.socketEncoding,
+    requestBodyText: form.requestBodyText,
+    requestBodyJson: form.requestBodyJson,
+    requestJson: form.requestJson,
+    requestMetaJson: form.requestMetaJson,
+    requestTcpMeta: form.requestTcpMeta,
+    requestBodyXml: form.requestBodyXml,
+  });
+  const mainStep = form.steps.find((step) => step.isMainRequest) ?? form.steps[0];
+  const request = mainStep?.request ?? fallbackRequest;
+  const expected = mainStep?.expected ?? buildExpectedFromRows(form.assertionRows);
   const payload: Record<string, unknown> = {
     endpointId: form.endpointId,
     title: form.title.trim(),
@@ -2344,29 +2387,9 @@ function buildSavePayload(): Record<string, unknown> | null {
     status: form.status,
     enabled: form.status !== 'disabled',
     steps: cloneJson(form.steps),
-    request: form.steps[0]?.request ?? mergeRequestFromEditor({
-      mode: requestEditorMode.value,
-      protocol: form.protocol,
-      bodyFormat: form.bodyFormat,
-      httpMethod: form.httpMethod,
-      httpPath: form.httpPath,
-      headerRows: form.headerRows,
-      queryRows: form.queryRows,
-      socketEncoding: form.socketEncoding,
-      requestBodyText: form.requestBodyText,
-      requestBodyJson: form.requestBodyJson,
-      requestJson: form.requestJson,
-      requestMetaJson: form.requestMetaJson,
-      requestTcpMeta: form.requestTcpMeta,
-      requestBodyXml: form.requestBodyXml,
-    }),
+    request,
     expected,
-    exports: form.exports.filter((item) => item.name.trim()).map(({ name, source, expression, required }) => ({
-      name: name.trim(),
-      source,
-      expression: source === 'status' ? undefined : expression.trim(),
-      required,
-    })),
+    exports: mainStep?.exports ?? [],
       debugEnvironmentId: apiStore.selectedEnvironmentId || undefined,
       debugEnvironmentServiceId: debugServiceId.value || undefined,
       debugEncoding: debugEncoding.value || undefined,
@@ -2429,15 +2452,22 @@ async function pasteCase() {
     const copied = JSON.parse(localStorage.getItem(CASE_CLIPBOARD_KEY) || '') as Record<string, unknown>;
     const endpoint = apiStore.apiDoc?.endpoints?.[0];
     if (!endpoint) return message.warning('当前交易没有可承载案例的接口端点');
-    const steps = (copied.steps as ApiCaseStep[]).map((step) => ({ ...cloneJson(step), id: randomUuid() }));
+    const copiedSteps = copied.steps as ApiCaseStep[];
+    const stepsWithIds = copiedSteps.map((step) => ({ ...cloneJson(step), id: randomUuid() }));
+    const mainIndex = mainCaseStepIndex(
+      { title: String(copied.title || ''), request: stepsWithIds[0].request },
+      stepsWithIds,
+    );
+    const steps = markMainCaseStep(stepsWithIds, mainIndex);
+    const mainStep = steps[mainIndex];
     await apiStore.saveCase(projectId.value, transactionId.value, {
       ...copied,
       endpointId: endpoint.id,
       title: `${String(copied.title || '未命名案例')} 副本`,
       transactionCode: apiStore.activeTransaction?.code,
-      request: steps[0].request,
-      expected: steps[0].expected,
-      exports: steps[0].exports,
+      request: mainStep.request,
+      expected: mainStep.expected,
+      exports: mainStep.exports,
       steps,
     });
     message.success('案例已粘贴');

@@ -264,6 +264,23 @@ export function assertScenarioCoverage(
       "分页场景必须至少生成 2 条覆盖分页实效的正向案例（如首页查询、翻页生效）",
     );
   }
+  if (structuredMarkdown && scenarioKey === "pagination") {
+    const pageSizePaths = scenarioFieldPaths(structuredMarkdown, "pageSize");
+    const minimumCase = result.cases.find((item) =>
+      /最小页|页大小\s*[=:：]?\s*1|仅返回\s*1\s*条/.test(
+        `${item.title} ${item.expected ?? ""}`,
+      ),
+    );
+    if (
+      pageSizePaths.length &&
+      (!minimumCase ||
+        !minimumCase.changes.some(
+          (change) => pageSizePaths.includes(change.path) && change.value === "1",
+        ))
+    ) {
+      throw new Error("最小页大小案例必须将页大小字段实际设置为 1");
+    }
+  }
   if (scenarioKey === "all_fields_empty" && result.cases.length !== 1) {
     throw new Error("全字段空值场景必须生成 1 条案例");
   }
@@ -311,7 +328,7 @@ export function assertScenarioCoverage(
 
 function scenarioFieldPaths(
   structuredMarkdown: string,
-  kind: "precision" | "enum",
+  kind: "precision" | "enum" | "pageSize",
 ) {
   return requestFieldLines(structuredMarkdown)
     .slice(1)
@@ -320,6 +337,11 @@ function scenarioFieldPaths(
       const text = cells.join(" ").toLowerCase();
       if (kind === "precision") {
         return /(金额|利率|比例|比率|频率|汇率|小数|精度|decimal|numeric|number)/i.test(
+          text,
+        );
+      }
+      if (kind === "pageSize") {
+        return /(pagesize|page_size|每页|页大小|查询条数|rowcount|perpage|limit)/i.test(
           text,
         );
       }

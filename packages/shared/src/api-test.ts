@@ -139,6 +139,8 @@ export interface ApiStepTarget {
 export interface ApiCaseStep {
   id: string;
   name: string;
+  /** AI 生成案例中的主请求步骤；前置/后置步骤不设置 */
+  isMainRequest?: boolean;
   target?: ApiStepTarget;
   request: ApiCaseRequest;
   expected: ApiCaseExpected;

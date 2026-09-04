@@ -767,6 +767,7 @@ export class ApiCaseService {
         const aiStep: ApiCaseStep = {
           id: crypto.randomUUID(),
           name: title,
+          isMainRequest: true,
           request,
           expected: {},
           exports: [],
@@ -910,6 +911,7 @@ export class ApiCaseService {
         const aiStep: ApiCaseStep = {
           id: crypto.randomUUID(),
           name: title,
+          isMainRequest: true,
           request,
           expected: {},
           exports: [],
@@ -1203,7 +1205,9 @@ export class ApiCaseService {
 }
 
 function cloneStep(step: ApiCaseStep): ApiCaseStep {
-  return { ...structuredClone(step), id: crypto.randomUUID() };
+  const clone = structuredClone(step);
+  delete clone.isMainRequest;
+  return { ...clone, id: crypto.randomUUID() };
 }
 
 function extractReferencedCaseNumbers(request: ApiCaseRequest) {
