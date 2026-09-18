@@ -156,6 +156,38 @@ describe("validateScenarioAiResult", () => {
       "Transaction/Body/request/bizBody/pagesize",
     );
   });
+
+  it("builds the allowed map from a Markdown table with leading and trailing pipes", () => {
+    const result = validateScenarioAiResult(
+      {
+        applicable: true,
+        reason: "适用",
+        cases: [
+          {
+            title: "pagesize 为空",
+            polarity: "negative",
+            changes: [
+              {
+                path: "transaction/body/request/bizbody/pagesize",
+                value: "",
+              },
+            ],
+          },
+        ],
+      },
+      [
+        "请求报文",
+        "----",
+        "| 节点路径 | 节点代码 | 节点名称 |",
+        "| Transaction/Body/request/bizBody | pagesize | 每页条数 |",
+      ].join("\n"),
+    );
+
+    expect(result.cases).toHaveLength(1);
+    expect(result.cases[0].changes[0].path).toBe(
+      "Transaction/Body/request/bizBody/pagesize",
+    );
+  });
 });
 
 describe("assertScenarioCoverage", () => {
@@ -344,6 +376,21 @@ describe("required_fields scenario", () => {
     ].join("\n");
 
     expect(extractFieldsByRequirement(fullPathDoc)).toEqual({
+      required: ["Transaction/Body/request/bizBody/pagesize"],
+      optional: ["Transaction/Body/request/bizBody/actorno"],
+    });
+  });
+
+  it("extracts required fields from a Markdown table with outer pipes", () => {
+    const markdownTable = [
+      "请求报文",
+      "----",
+      "| 节点路径 | 节点代码 | 节点名称 | 节点类型 | 数据类型 | 长度 | 是否必填 | 描述 |",
+      "| Transaction/Body/request/bizBody | pagesize | 每页条数 | 01 | 01 | 100 | Y | |",
+      "| Transaction/Body/request/bizBody | actorno | 登录用户 | 01 | 01 | 100 | N | |",
+    ].join("\n");
+
+    expect(extractFieldsByRequirement(markdownTable)).toEqual({
       required: ["Transaction/Body/request/bizBody/pagesize"],
       optional: ["Transaction/Body/request/bizBody/actorno"],
     });

@@ -98,6 +98,13 @@ function requestFieldLines(structuredMarkdown: string) {
     .slice(0, 120);
 }
 
+function parseTableCells(line: string): string[] {
+  const cells = line.split("|").map((cell) => cell.trim());
+  if (!cells[0]) cells.shift();
+  if (!cells[cells.length - 1]) cells.pop();
+  return cells;
+}
+
 function completeFieldPath(path: string, code: string): string {
   const normalizedPath = path.replace(/\/$/, "");
   const lastSegment = normalizedPath.split("/").filter(Boolean).pop();
@@ -111,7 +118,7 @@ export function extractRequestFieldPaths(structuredMarkdown: string): string[] {
   const seen = new Set<string>();
   const paths: string[] = [];
   for (const line of requestFieldLines(structuredMarkdown).slice(1)) {
-    const cells = line.split("|").map((cell) => cell.trim());
+    const cells = parseTableCells(line);
     const path = (cells[0] ?? "").replace(/\/$/, "");
     const code = cells[1] ?? "";
     if (!path || !code) continue;
@@ -130,7 +137,7 @@ const OPTIONAL_FLAG_PATTERN = /^(n|no|o|optional|false|0|否|非必填|可选)$/
 /** 「是否必填」列下标：优先按表头定位，缺省回退到第 7 列 */
 function requiredFlagIndex(structuredMarkdown: string) {
   const header = requestFieldLines(structuredMarkdown)[0] ?? "";
-  const cells = header.split("|").map((cell) => cell.trim());
+  const cells = parseTableCells(header);
   const index = cells.findIndex((cell) => /必填|必需|required/i.test(cell));
   return index >= 0 ? index : 6;
 }
@@ -147,7 +154,7 @@ export function extractFieldsByRequirement(structuredMarkdown: string): {
   const required: string[] = [];
   const optional: string[] = [];
   for (const line of requestFieldLines(structuredMarkdown).slice(1)) {
-    const cells = line.split("|").map((cell) => cell.trim());
+    const cells = parseTableCells(line);
     const path = (cells[0] ?? "").replace(/\/$/, "");
     const code = cells[1] ?? "";
     if (!path || !code) continue;
@@ -223,7 +230,7 @@ export function validateScenarioAiResult(
   const allowed = new Map(
     requestFieldLines(structuredMarkdown)
       .slice(1)
-      .map((line) => line.split("|").map((cell) => cell.trim()))
+      .map(parseTableCells)
       .filter((cells) => cells[0] && cells[1])
       .map((cells) => completeFieldPath(cells[0], cells[1]))
       .map((path) => [path.toLowerCase(), path]),
@@ -323,7 +330,7 @@ function scenarioFieldPaths(
 ) {
   return requestFieldLines(structuredMarkdown)
     .slice(1)
-    .map((line) => line.split("|").map((cell) => cell.trim()))
+    .map(parseTableCells)
     .filter((cells) => {
       const text = cells.join(" ").toLowerCase();
       if (kind === "precision") {
