@@ -38,9 +38,11 @@ export class StructRequirementQueueService implements OnModuleInit {
     setStructuringSlotReleaseHook(() => {
       this.background(this.pump());
     });
-    this.background(this.recoverInterruptedJobs()
-      .then(() => this.reconcileProcessingStructDocs())
-      .then(() => this.pump()));
+    this.background(
+      this.recoverInterruptedJobs()
+        .then(() => this.reconcileProcessingStructDocs())
+        .then(() => this.pump()),
+    );
   }
 
   async findActiveJob(projectId: string, structDocId?: string) {

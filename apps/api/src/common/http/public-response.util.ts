@@ -200,13 +200,15 @@ export function toPublicApiDoc(
 export function toPublicApiCase(testCase: ApiTestCaseEntity) {
   const steps = testCase.steps?.length
     ? testCase.steps
-    : [{
-        id: testCase.id,
-        name: testCase.title,
-        request: testCase.request,
-        expected: testCase.expected,
-        exports: testCase.metadata?.exports ?? [],
-      }];
+    : [
+        {
+          id: testCase.id,
+          name: testCase.title,
+          request: testCase.request,
+          expected: testCase.expected,
+          exports: testCase.metadata?.exports ?? [],
+        },
+      ];
   return {
     id: testCase.id,
     projectId: testCase.projectId,

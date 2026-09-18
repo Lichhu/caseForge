@@ -34,7 +34,10 @@ export interface SmpDocumentData {
 }
 
 @Entity("api_doc")
-@Index("uk_api_doc_transaction", ["transactionId"], { unique: true, where: "deleted_at IS NULL" })
+@Index("uk_api_doc_transaction", ["transactionId"], {
+  unique: true,
+  where: "deleted_at IS NULL",
+})
 @Index("idx_api_doc_project", ["projectId"])
 export class ApiDocEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")

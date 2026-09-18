@@ -323,7 +323,9 @@ export class CaseEditorService {
     ) {
       const chunk = caseTreeIds.slice(index, index + TREE_BATCH_CHUNK_SIZE);
       if (!chunk.length) continue;
-      await manager.softDelete(CaseNodeMetadataEntity, { caseTreeId: In(chunk) });
+      await manager.softDelete(CaseNodeMetadataEntity, {
+        caseTreeId: In(chunk),
+      });
     }
   }
 

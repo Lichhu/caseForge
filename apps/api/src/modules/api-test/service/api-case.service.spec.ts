@@ -1,4 +1,46 @@
-import { ApiCaseService } from "./api-case.service";
+import { ApiCaseService, normalizeCasePayload } from "./api-case.service";
+
+describe("normalizeCasePayload", () => {
+  it("keeps the AI-generated XML request when an after-step still has the example page", () => {
+    const generatedRequest = {
+      method: "POST",
+      path: "/",
+      body: "<Transaction><Body><request><bizBody><page>2</page></bizBody></request></Body></Transaction>",
+    };
+    const exampleRequest = {
+      method: "POST",
+      path: "/",
+      body: "<Transaction><Body><request><bizBody><page>1</page></bizBody></request></Body></Transaction>",
+    };
+
+    const result = normalizeCasePayload({
+      title: "翻页生效",
+      request: exampleRequest,
+      expected: {},
+      steps: [
+        {
+          id: "main",
+          name: "翻页生效",
+          isMainRequest: true,
+          request: generatedRequest,
+          expected: {},
+          exports: [],
+        },
+        {
+          id: "after",
+          name: "后置清理",
+          request: exampleRequest,
+          expected: {},
+          exports: [],
+        },
+      ],
+    });
+
+    expect(result.request.body).toContain("<page>2</page>");
+    expect(result.steps?.[0].isMainRequest).toBe(true);
+    expect(result.steps?.[1].isMainRequest).toBeUndefined();
+  });
+});
 
 describe("ApiCaseService positive flow generation", () => {
   it("uses the example message without calling aiChat", async () => {
@@ -175,7 +217,10 @@ describe("ApiCaseService large payload case generation", () => {
   });
 
   it("skips extra cases when job is cancelled", async () => {
-    const job = { ...buildJob("Transaction/Body/request/bizBody/CUST_ID"), status: "cancelled" };
+    const job = {
+      ...buildJob("Transaction/Body/request/bizBody/CUST_ID"),
+      status: "cancelled",
+    };
     const { service, largePayloadSpy } = buildService(job);
 
     await service.runQueuedGenerateJob({

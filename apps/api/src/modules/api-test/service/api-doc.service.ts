@@ -159,8 +159,7 @@ export class ApiDocService {
     }
     // SMP 来源的端点由服管同步/刷新维护，保存时仅提交文档文本，
     // 避免按文本重解析覆盖真实端点（如 TCP 连接地址）
-    const isSmpManaged =
-      Boolean(doc.smpData?.callServiceList?.length);
+    const isSmpManaged = Boolean(doc.smpData?.callServiceList?.length);
     if (!isSmpManaged) {
       const endpoints = payload.endpoints?.length
         ? ensureEndpointIds(payload.endpoints)

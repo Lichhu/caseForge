@@ -91,9 +91,11 @@ export class CaseGenerateQueueService implements OnModuleInit, OnModuleDestroy {
     this.unregisterSlotHook = registerCaseGenerateSlotReleaseHook(() => {
       this.background(this.pump());
     });
-    this.background(this.recoverInterruptedJobs()
-      .then(() => this.reconcileGeneratingInstructs())
-      .then(() => this.pump()));
+    this.background(
+      this.recoverInterruptedJobs()
+        .then(() => this.reconcileGeneratingInstructs())
+        .then(() => this.pump()),
+    );
   }
 
   onModuleDestroy() {

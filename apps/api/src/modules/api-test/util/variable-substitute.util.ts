@@ -1,14 +1,18 @@
-const VAR_PATTERN = /\$\{\s*([a-zA-Z_][\w.-]*)\s*\}|\{\{?\s*([a-zA-Z_][\w.-]*)\s*\}?\}/g;
+const VAR_PATTERN =
+  /\$\{\s*([a-zA-Z_][\w.-]*)\s*\}|\{\{?\s*([a-zA-Z_][\w.-]*)\s*\}?\}/g;
 
 export function substituteVariables(
   input: string,
   vars: Record<string, string>,
 ) {
-  return input.replace(VAR_PATTERN, (_, dollarKey: string, braceKey: string) => {
-    const key = dollarKey ?? braceKey;
-    if (vars[key] !== undefined) return vars[key];
-    return dollarKey ? `\${${key}}` : `{{${key}}}`;
-  });
+  return input.replace(
+    VAR_PATTERN,
+    (_, dollarKey: string, braceKey: string) => {
+      const key = dollarKey ?? braceKey;
+      if (vars[key] !== undefined) return vars[key];
+      return dollarKey ? `\${${key}}` : `{{${key}}}`;
+    },
+  );
 }
 
 export function substituteDeep<T>(value: T, vars: Record<string, string>): T {

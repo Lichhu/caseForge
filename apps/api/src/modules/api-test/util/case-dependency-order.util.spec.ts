@@ -28,7 +28,10 @@ describe("执行集案例依赖排序", () => {
 
   it("无依赖案例保持用户原顺序", () => {
     const cases = [testCase("08", "CASE-008"), testCase("07", "CASE-007")];
-    expect(sortCaseIdsByDependencies(["08", "07"], cases)).toEqual(["08", "07"]);
+    expect(sortCaseIdsByDependencies(["08", "07"], cases)).toEqual([
+      "08",
+      "07",
+    ]);
   });
 
   it("引用案例未加入执行集时报错", () => {

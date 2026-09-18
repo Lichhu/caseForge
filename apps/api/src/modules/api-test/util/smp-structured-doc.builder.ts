@@ -63,9 +63,7 @@ export function buildStructuredMarkdownFromSmp(
     buildFieldTableFromJsonBody(testItem.requestBody) ??
     formatSmpBody(testItem.requestBody);
   if (requestSection) {
-    sections.push(
-      `请求报文\n${API_DOC_SECTION_SEPARATOR}\n${requestSection}`,
-    );
+    sections.push(`请求报文\n${API_DOC_SECTION_SEPARATOR}\n${requestSection}`);
   }
 
   /* ── 示例报文（始终输出该段，且不覆盖）──
@@ -75,9 +73,7 @@ export function buildStructuredMarkdownFromSmp(
   const exampleBody =
     (options?.existingExampleMessage ?? "").trim() ||
     (testItem.requestBody ?? "").trim();
-  sections.push(
-    `示例报文\n${API_DOC_SECTION_SEPARATOR}\n${exampleBody}`,
-  );
+  sections.push(`示例报文\n${API_DOC_SECTION_SEPARATOR}\n${exampleBody}`);
 
   return sections.join("\n\n");
 }

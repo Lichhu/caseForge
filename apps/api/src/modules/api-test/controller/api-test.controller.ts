@@ -62,7 +62,10 @@ import { ApiDataFunctionService } from "@api-test/service/api-data-function.serv
 import { ApiStepLibraryService } from "@api-test/service/api-step-library.service";
 import type { ApiCaseStep } from "@case-forge/shared";
 import { ApiStepDebugRecordEntity } from "@api-test/entity/api-step-debug-record.entity";
-import { RequestContext, auditFieldsForCreate } from "@common/audit/request-context";
+import {
+  RequestContext,
+  auditFieldsForCreate,
+} from "@common/audit/request-context";
 import {
   GenerateDataFunctionScriptDto,
   PreviewDataFunctionDto,
@@ -790,7 +793,11 @@ export class ApiTestController {
       expected?: Record<string, unknown>;
       polarity?: "positive" | "negative";
       environmentId?: string;
-      target?: { name: string; address: string; headers?: Record<string, string> };
+      target?: {
+        name: string;
+        address: string;
+        headers?: Record<string, string>;
+      };
       stepId?: string;
       environmentServiceId?: string;
       caseId?: string;
@@ -799,7 +806,8 @@ export class ApiTestController {
       prerequisiteSteps?: Array<Record<string, unknown>>;
     },
   ) {
-    if (!body.target?.address && !body.environmentId) throw new BadRequestException("请指定环境地址");
+    if (!body.target?.address && !body.environmentId)
+      throw new BadRequestException("请指定环境地址");
     const result = await this.apiExecutionService.debugRun({
       projectId,
       request: body.request as any,
@@ -826,23 +834,77 @@ export class ApiTestController {
       });
       if (body.stepId) {
         const { request: resolvedRequest, ...restResult } = result;
-        const record = { id: crypto.randomUUID(), stepId: body.stepId, request: (resolvedRequest ?? body.request) as Record<string, unknown>, response: { statusCode: result.statusCode, headers: result.headers, body: result.body, error: result.error }, extracted: {}, target: body.target ?? null, ...restResult, executedAt: new Date().toISOString() };
-        await this.stepDebugRepo.save(this.stepDebugRepo.create({ projectId, caseId: body.caseId, stepId: body.stepId, record, ...auditFieldsForCreate() }));
-        const rows = await this.stepDebugRepo.find({ where: { caseId: body.caseId, stepId: body.stepId, createdBy: RequestContext.getUserName() }, order: { createdAt: "DESC" }, skip: 30, take: 1000 });
-        if (rows.length) await this.stepDebugRepo.softDelete(rows.map((row) => row.id));
+        const record = {
+          id: crypto.randomUUID(),
+          stepId: body.stepId,
+          request: (resolvedRequest ?? body.request) as Record<string, unknown>,
+          response: {
+            statusCode: result.statusCode,
+            headers: result.headers,
+            body: result.body,
+            error: result.error,
+          },
+          extracted: {},
+          target: body.target ?? null,
+          ...restResult,
+          executedAt: new Date().toISOString(),
+        };
+        await this.stepDebugRepo.save(
+          this.stepDebugRepo.create({
+            projectId,
+            caseId: body.caseId,
+            stepId: body.stepId,
+            record,
+            ...auditFieldsForCreate(),
+          }),
+        );
+        const rows = await this.stepDebugRepo.find({
+          where: {
+            caseId: body.caseId,
+            stepId: body.stepId,
+            createdBy: RequestContext.getUserName(),
+          },
+          order: { createdAt: "DESC" },
+          skip: 30,
+          take: 1000,
+        });
+        if (rows.length)
+          await this.stepDebugRepo.softDelete(rows.map((row) => row.id));
       }
     }
     return result;
   }
 
   @Get(":projectId/cases/:caseId/steps/:stepId/debug-records")
-  listStepDebugRecords(@Param("projectId") projectId: string, @Param("caseId") caseId: string, @Param("stepId") stepId: string) {
-    return this.stepDebugRepo.find({ where: { projectId, caseId, stepId, createdBy: RequestContext.getUserName() }, order: { createdAt: "DESC" }, take: 30 });
+  listStepDebugRecords(
+    @Param("projectId") projectId: string,
+    @Param("caseId") caseId: string,
+    @Param("stepId") stepId: string,
+  ) {
+    return this.stepDebugRepo.find({
+      where: {
+        projectId,
+        caseId,
+        stepId,
+        createdBy: RequestContext.getUserName(),
+      },
+      order: { createdAt: "DESC" },
+      take: 30,
+    });
   }
 
   @Delete(":projectId/cases/:caseId/steps/:stepId/debug-records")
-  clearStepDebugRecords(@Param("projectId") projectId: string, @Param("caseId") caseId: string, @Param("stepId") stepId: string) {
-    return this.stepDebugRepo.softDelete({ projectId, caseId, stepId, createdBy: RequestContext.getUserName() });
+  clearStepDebugRecords(
+    @Param("projectId") projectId: string,
+    @Param("caseId") caseId: string,
+    @Param("stepId") stepId: string,
+  ) {
+    return this.stepDebugRepo.softDelete({
+      projectId,
+      caseId,
+      stepId,
+      createdBy: RequestContext.getUserName(),
+    });
   }
 
   @Post(":projectId/transactions/:transactionId/cases/generate-assertions")

@@ -39,11 +39,12 @@ function runSingle(
 
 describe("TCP XML display formatting", () => {
   it("keeps the length prefix and formats the XML body", () => {
-    const body = "00001754\r\n<?xml version=\"1.0\"?><root><bizcode>0000</bizcode></root>";
+    const body =
+      '00001754\r\n<?xml version="1.0"?><root><bizcode>0000</bizcode></root>';
 
     expect(looksLikeXml(body)).toBe(true);
     expect(prettyPrintXml(body)).toBe(
-      "00001754\n<?xml version=\"1.0\"?>\n<root>\n\t<bizcode>0000</bizcode>\n</root>\n",
+      '00001754\n<?xml version="1.0"?>\n<root>\n\t<bizcode>0000</bizcode>\n</root>\n',
     );
   });
 });

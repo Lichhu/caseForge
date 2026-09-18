@@ -108,7 +108,8 @@ export function parseApiDocMessageFields(
   const exactDataTypeIndex = header.findIndex((cell) =>
     cell.includes("数据类型"),
   );
-  const dataTypeIndex = exactDataTypeIndex >= 0 ? exactDataTypeIndex : findIndex(["类型"]);
+  const dataTypeIndex =
+    exactDataTypeIndex >= 0 ? exactDataTypeIndex : findIndex(["类型"]);
   const lengthIndex = findIndex(["长度", "maxLength"]);
   const requiredIndex = findIndex(["是否必填"]);
   const descIndex = findIndex(["描述", "说明"]);

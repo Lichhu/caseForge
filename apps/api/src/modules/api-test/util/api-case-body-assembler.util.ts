@@ -402,7 +402,9 @@ function createXmlPath(xml: string, segments: string[], value: string) {
   }
   if (parentIndex < 0) return { xml, changed: false };
   const parent = parentSegments[parentIndex];
-  const missing = segments.slice(parentIndex + 1).map((segment) => segment.toLowerCase());
+  const missing = segments
+    .slice(parentIndex + 1)
+    .map((segment) => segment.toLowerCase());
   const escaped = escapeXmlValue(value);
   const nested = missing.reduceRight(
     (content, tag, index) =>
@@ -545,7 +547,9 @@ function applyJsonValueBySegments(
   if (Array.isArray(node)) {
     let changed = false;
     for (const item of node) {
-      if (applyJsonValueBySegments(item, segments, value, createMissing, true)) {
+      if (
+        applyJsonValueBySegments(item, segments, value, createMissing, true)
+      ) {
         changed = true;
       }
     }

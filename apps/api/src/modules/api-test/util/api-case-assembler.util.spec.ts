@@ -798,7 +798,9 @@ const SAMPLE_DOC_JSON_WITH_ARRAY_EXAMPLE = [
   "----",
   JSON.stringify({
     Transaction: {
-      Header: { sysHeader: { msgId: "OLD_MSG_ID", operation: "syncSytWorkOrder" } },
+      Header: {
+        sysHeader: { msgId: "OLD_MSG_ID", operation: "syncSytWorkOrder" },
+      },
       Body: {
         request: {
           bizHeader: { data: null },
@@ -806,8 +808,16 @@ const SAMPLE_DOC_JSON_WITH_ARRAY_EXAMPLE = [
             workOrderId: "afecaf68ffac46fd8882e80a308c6175d",
             data: {
               terminalList: [
-                { termId: "56000570", deviceModel: "000003", deviceModelName: "V8" },
-                { termId: "56000571", deviceModel: "000004", deviceModelName: "V9" },
+                {
+                  termId: "56000570",
+                  deviceModel: "000003",
+                  deviceModelName: "V8",
+                },
+                {
+                  termId: "56000571",
+                  deviceModel: "000004",
+                  deviceModelName: "V9",
+                },
               ],
             },
           },
@@ -831,7 +841,8 @@ describe("assembleCaseRequest (JSON, object array fields)", () => {
       caseType: "反",
       priority: "中",
       bodyOverrides: {
-        "Transaction/Body/request/bizBody/data/terminalList/deviceModelName": "",
+        "Transaction/Body/request/bizBody/data/terminalList/deviceModelName":
+          "",
       },
     };
 
@@ -860,7 +871,8 @@ describe("assembleCaseRequest (JSON, object array fields)", () => {
       caseType: "反",
       priority: "中",
       bodyOverrides: {
-        "Transaction/Body/request/bizBody/data/terminalList/deviceModelName": "INVALID",
+        "Transaction/Body/request/bizBody/data/terminalList/deviceModelName":
+          "INVALID",
       },
     };
 

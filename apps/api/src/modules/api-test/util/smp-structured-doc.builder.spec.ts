@@ -230,11 +230,10 @@ describe("buildStructuredMarkdownFromSmp", () => {
     const callList = [makeCallItem({ socketWay: "TEP", messageType: "XML" })];
     const testList = [makeTestItem()];
     const md = buildStructuredMarkdownFromSmp(callList, testList);
-    const readiness = assessDocReadiness(
-      md,
-      "tcp://33.114.5.56:60000",
-      { callServiceList: callList, serviceTestList: testList },
-    );
+    const readiness = assessDocReadiness(md, "tcp://33.114.5.56:60000", {
+      callServiceList: callList,
+      serviceTestList: testList,
+    });
     expect(readiness.ok).toBe(true);
     expect(readiness.fieldCount).toBeGreaterThan(0);
     expect(readiness.profile.transport).toBe("tcp");
@@ -305,7 +304,9 @@ describe("buildFieldTableFromSmpNodeLists", () => {
     expect(table).toContain(
       "| Transaction/Body/request/bizHeader | transaction_sn | 交易流水号 |  |  |  | Y |  |",
     );
-    expect(table).toContain("| Transaction/Body/request/bizBody | CUST_ID | 客户号 |  |  |  | Y |  |");
+    expect(table).toContain(
+      "| Transaction/Body/request/bizBody | CUST_ID | 客户号 |  |  |  | Y |  |",
+    );
   });
 
   it("returns null when both lists are empty", () => {

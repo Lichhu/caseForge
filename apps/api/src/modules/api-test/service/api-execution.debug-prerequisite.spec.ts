@@ -40,7 +40,12 @@ function buildPrerequisiteStep(overrides?: Partial<ApiCaseStep>): ApiCaseStep {
     request: { method: "POST", path: "/token", body: "{}" },
     expected: { assertions: [] },
     exports: [
-      { name: "accessToken", source: "body", expression: "$.token", required: true },
+      {
+        name: "accessToken",
+        source: "body",
+        expression: "$.token",
+        required: true,
+      },
     ],
     ...overrides,
   };
@@ -82,7 +87,9 @@ describe("debugRun 前置步骤变量提取", () => {
       const [prereqUrl] = fetchSpy.mock.calls[0];
       expect(prereqUrl).toBe("http://prereq.example:8080/token");
       const [, mainInit] = fetchSpy.mock.calls[1];
-      const mainBody = Buffer.from(mainInit?.body as ArrayBuffer).toString("utf8");
+      const mainBody = Buffer.from(mainInit?.body as ArrayBuffer).toString(
+        "utf8",
+      );
       expect(mainBody).toContain("tok-123");
       expect(mainBody).not.toContain("${accessToken}");
     } finally {
@@ -99,7 +106,11 @@ describe("debugRun 前置步骤变量提取", () => {
       await expect(
         service.debugRun({
           projectId: "project-1",
-          request: { method: "POST", path: "/biz", body: "${accessToken}" } as never,
+          request: {
+            method: "POST",
+            path: "/biz",
+            body: "${accessToken}",
+          } as never,
           target: { name: "调试", address: "http://biz.example:8080" },
           prerequisiteSteps: [buildPrerequisiteStep()],
         }),
@@ -107,7 +118,11 @@ describe("debugRun 前置步骤变量提取", () => {
       await expect(
         service.debugRun({
           projectId: "project-1",
-          request: { method: "POST", path: "/biz", body: "${accessToken}" } as never,
+          request: {
+            method: "POST",
+            path: "/biz",
+            body: "${accessToken}",
+          } as never,
           target: { name: "调试", address: "http://biz.example:8080" },
           prerequisiteSteps: [buildPrerequisiteStep()],
         }),
@@ -124,7 +139,11 @@ describe("debugRun 前置步骤变量提取", () => {
       await expect(
         service.debugRun({
           projectId: "project-1",
-          request: { method: "POST", path: "/biz", body: "${accessToken}" } as never,
+          request: {
+            method: "POST",
+            path: "/biz",
+            body: "${accessToken}",
+          } as never,
           target: { name: "调试", address: "http://biz.example:8080" },
           prerequisiteSteps: [buildPrerequisiteStep()],
         }),
@@ -141,7 +160,11 @@ describe("debugRun 前置步骤变量提取", () => {
       await expect(
         service.debugRun({
           projectId: "project-1",
-          request: { method: "POST", path: "/biz", body: "${accessToken}" } as never,
+          request: {
+            method: "POST",
+            path: "/biz",
+            body: "${accessToken}",
+          } as never,
           target: { name: "调试", address: "http://biz.example:8080" },
           prerequisiteSteps: [
             buildPrerequisiteStep({ target: { name: "", address: " " } }),

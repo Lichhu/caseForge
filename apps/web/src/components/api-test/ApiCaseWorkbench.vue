@@ -1529,7 +1529,7 @@ function markMainCaseStep(steps: ApiCaseStep[], index: number) {
 function caseSavePayload(row: ApiTestCaseRow, steps: ApiCaseStep[]) {
   const mainIndex = mainCaseStepIndex(row, steps);
   const normalizedSteps = markMainCaseStep(steps, mainIndex);
-  const mainStep = normalizedSteps[mainIndex] ?? normalizedSteps.at(-1)!;
+  const mainStep = normalizedSteps[mainIndex] ?? normalizedSteps[normalizedSteps.length - 1]!;
   return {
     endpointId: row.endpointId,
     title: row.title,
@@ -2358,7 +2358,7 @@ function buildSavePayload(): Record<string, unknown> | null {
     return null;
   }
   storeActiveStep();
-  const fallbackRequest = form.steps.at(-1)?.request ?? mergeRequestFromEditor({
+  const fallbackRequest = form.steps[form.steps.length - 1]?.request ?? mergeRequestFromEditor({
     mode: requestEditorMode.value,
     protocol: form.protocol,
     bodyFormat: form.bodyFormat,
@@ -2374,7 +2374,7 @@ function buildSavePayload(): Record<string, unknown> | null {
     requestTcpMeta: form.requestTcpMeta,
     requestBodyXml: form.requestBodyXml,
   });
-  const mainStep = form.steps.find((step) => step.isMainRequest) ?? form.steps.at(-1);
+  const mainStep = form.steps.find((step) => step.isMainRequest) ?? form.steps[form.steps.length - 1];
   const request = mainStep?.request ?? fallbackRequest;
   const expected = mainStep?.expected ?? buildExpectedFromRows(form.assertionRows);
   const payload: Record<string, unknown> = {
@@ -2457,7 +2457,7 @@ async function pasteCase() {
     const copiedSteps = copied.steps as ApiCaseStep[];
     const stepsWithIds = copiedSteps.map((step) => ({ ...cloneJson(step), id: randomUuid() }));
     const mainIndex = mainCaseStepIndex(
-      { title: String(copied.title || ''), request: stepsWithIds.at(-1)!.request },
+      { title: String(copied.title || ''), request: stepsWithIds[stepsWithIds.length - 1]!.request },
       stepsWithIds,
     );
     const steps = markMainCaseStep(stepsWithIds, mainIndex);

@@ -13,7 +13,10 @@ import {
 } from "typeorm";
 
 @Entity("api_requirement_dispatcher")
-@Index("uk_api_requirement_dispatcher_user", ["userName"], { unique: true, where: "deleted_at IS NULL" })
+@Index("uk_api_requirement_dispatcher_user", ["userName"], {
+  unique: true,
+  where: "deleted_at IS NULL",
+})
 export class ApiRequirementDispatcherEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;

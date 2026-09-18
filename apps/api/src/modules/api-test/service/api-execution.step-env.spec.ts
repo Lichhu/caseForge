@@ -33,9 +33,7 @@ describe("environmentFromStep TCP 地址解析", () => {
   });
 
   it("支持 socket2://host:port（环境服务回填格式）", () => {
-    const env = environmentFromStep(
-      makeTcpStep("socket2://32.114.71.6:60030"),
-    );
+    const env = environmentFromStep(makeTcpStep("socket2://32.114.71.6:60030"));
     expect(env.services?.[0]).toMatchObject({
       transport: "tcp",
       host: "32.114.71.6",

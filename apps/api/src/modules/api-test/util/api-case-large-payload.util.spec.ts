@@ -46,9 +46,9 @@ describe("extractLongRequestFieldPaths", () => {
   });
 
   it("returns empty list when the request table is missing", () => {
-    expect(extractLongRequestFieldPaths("基础信息\n----\n服务名称 | x")).toEqual(
-      [],
-    );
+    expect(
+      extractLongRequestFieldPaths("基础信息\n----\n服务名称 | x"),
+    ).toEqual([]);
   });
 });
 

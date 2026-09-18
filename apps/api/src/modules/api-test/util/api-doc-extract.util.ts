@@ -91,7 +91,9 @@ export function extractTextFromExcel(buffer: Buffer) {
 
 /** 单元格内换行（手动换行/合并单元格产生）会破坏「一行=一条记录」的文本约定，压成连续文本 */
 function normalizeCellText(cell: string | number | boolean) {
-  return String(cell ?? "").replace(/\s*\r?\n\s*/g, "").trim();
+  return String(cell ?? "")
+    .replace(/\s*\r?\n\s*/g, "")
+    .trim();
 }
 
 /** 合并单元格只有左上角有值：把值回填到被合并覆盖的单元格，避免下游表格出现空洞行 */

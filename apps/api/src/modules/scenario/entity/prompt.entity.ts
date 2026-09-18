@@ -21,7 +21,10 @@ import { DynamicInstructEntity } from "@dynamic-instruct/entity/dynamic-instruct
  * 提示词实体：归属某场景，含名称、内容、标签、排序及启用状态
  */
 @Entity("prompt_library")
-@Index("idx_scenario_name", ["scenarioId", "name"], { unique: true, where: "deleted_at IS NULL" })
+@Index("idx_scenario_name", ["scenarioId", "name"], {
+  unique: true,
+  where: "deleted_at IS NULL",
+})
 @Index("idx_scenario_sort", ["scenarioId", "sortOrder"])
 @Index("idx_scenario_id", ["scenarioId"])
 export class PromptEntity extends SoftDeletableEntity {

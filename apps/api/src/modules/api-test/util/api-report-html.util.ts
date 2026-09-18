@@ -69,7 +69,8 @@ export interface HtmlStepSnapshot {
 export function extractReportSteps(
   requestSnapshot?: Record<string, unknown> | null,
 ): HtmlStepSnapshot[] {
-  const steps = (requestSnapshot as { steps?: unknown } | null | undefined)?.steps;
+  const steps = (requestSnapshot as { steps?: unknown } | null | undefined)
+    ?.steps;
   return Array.isArray(steps) ? (steps as HtmlStepSnapshot[]) : [];
 }
 

@@ -115,7 +115,9 @@ export class ApiReportService {
   }
 
   async getReportExport(projectId: string, transactionId: string, id: string) {
-    const row = await this.exportRepo.findOne({ where: { id, projectId, transactionId } });
+    const row = await this.exportRepo.findOne({
+      where: { id, projectId, transactionId },
+    });
     if (!row) throw new NotFoundException("导出记录不存在");
     return row;
   }
@@ -125,10 +127,18 @@ export class ApiReportService {
       where: { projectId },
       order: { createdAt: "DESC" },
     });
-    const map = new Map<string, { id: string; format: string; fileName: string; createdAt: Date }>();
+    const map = new Map<
+      string,
+      { id: string; format: string; fileName: string; createdAt: Date }
+    >();
     for (const row of rows) {
       if (!map.has(row.transactionId)) {
-        map.set(row.transactionId, { id: row.id, format: row.format, fileName: row.fileName, createdAt: row.createdAt });
+        map.set(row.transactionId, {
+          id: row.id,
+          format: row.format,
+          fileName: row.fileName,
+          createdAt: row.createdAt,
+        });
       }
     }
     return map;
@@ -360,9 +370,7 @@ export class ApiReportService {
 
     return {
       reportCode,
-      setName: transaction
-        ? `${transaction.code} ${transaction.name}`
-        : "—",
+      setName: transaction ? `${transaction.code} ${transaction.name}` : "—",
       envName: env?.name ?? "—",
       transactionCount: transactionCodes.size,
       caseMeta,

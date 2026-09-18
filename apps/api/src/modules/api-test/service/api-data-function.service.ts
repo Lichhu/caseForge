@@ -167,9 +167,13 @@ export class ApiDataFunctionService {
   ) {
     const databaseName = body.databaseName?.trim() ?? "";
     if (
-      ["Oracle", "OceanBase-Oracle", "PostgreSQL", "KingbaseES", "GaussDB"].includes(
-        body.type,
-      ) &&
+      [
+        "Oracle",
+        "OceanBase-Oracle",
+        "PostgreSQL",
+        "KingbaseES",
+        "GaussDB",
+      ].includes(body.type) &&
       !databaseName
     )
       throw new BadRequestException(
@@ -273,8 +277,7 @@ export class ApiDataFunctionService {
         !row.description &&
         builtinDesc.has(row.name),
     );
-    for (const row of stale)
-      row.description = builtinDesc.get(row.name) ?? "";
+    for (const row of stale) row.description = builtinDesc.get(row.name) ?? "";
     if (stale.length) await this.functionRepo.save(stale);
     return missing.length
       ? [...publicRows, ...(await this.functionRepo.save(missing))]
@@ -366,13 +369,15 @@ export class ApiDataFunctionService {
         );
         const evaluated = await this.evaluate(projectId, fn, values, context);
         const resolved = match[3]
-          ? match[3].split(".").reduce<unknown>(
-              (current, key) =>
-                current && typeof current === "object"
-                  ? (current as Record<string, unknown>)[key]
-                  : undefined,
-              evaluated,
-            )
+          ? match[3]
+              .split(".")
+              .reduce<unknown>(
+                (current, key) =>
+                  current && typeof current === "object"
+                    ? (current as Record<string, unknown>)[key]
+                    : undefined,
+                evaluated,
+              )
           : evaluated;
         result = result.replace(match[0], String(resolved ?? ""));
       }

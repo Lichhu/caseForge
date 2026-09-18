@@ -19,7 +19,9 @@ export function sortCaseIdsByDependencies(
   const dependencies = new Map(caseIds.map((id) => [id, new Set<string>()]));
 
   for (const consumer of selectedCases) {
-    for (const match of JSON.stringify(consumer.request).matchAll(/\$\{([^{}]+)\}/g)) {
+    for (const match of JSON.stringify(consumer.request).matchAll(
+      /\$\{([^{}]+)\}/g,
+    )) {
       const dot = match[1].lastIndexOf(".");
       if (dot < 1) continue;
       const producer = byNumber.get(match[1].slice(0, dot));
@@ -30,7 +32,9 @@ export function sortCaseIdsByDependencies(
         );
       }
       if (producer.id === consumer.id) {
-        throw new BadRequestException(`案例 ${consumer.caseNo} 不能引用自身共享变量`);
+        throw new BadRequestException(
+          `案例 ${consumer.caseNo} 不能引用自身共享变量`,
+        );
       }
       dependencies.get(consumer.id)!.add(producer.id);
     }

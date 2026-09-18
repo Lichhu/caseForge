@@ -224,7 +224,9 @@ describe("ApiAssertionGenerateQueueService", () => {
 
   it("logs rejected background work instead of leaving it unhandled", async () => {
     const { service } = buildService();
-    const error = jest.spyOn((service as any).logger, "error").mockImplementation();
+    const error = jest
+      .spyOn((service as any).logger, "error")
+      .mockImplementation();
 
     (service as any).background(Promise.reject(new Error("database down")));
     await new Promise((resolve) => setImmediate(resolve));

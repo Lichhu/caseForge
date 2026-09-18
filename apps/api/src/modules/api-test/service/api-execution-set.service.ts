@@ -151,7 +151,10 @@ export class ApiExecutionSetService {
       transactionId,
       uniqueCaseIds,
     );
-    const sortedCaseIds = await this.sortByDependencies(projectId, uniqueCaseIds);
+    const sortedCaseIds = await this.sortByDependencies(
+      projectId,
+      uniqueCaseIds,
+    );
     await this.setCaseRepo.softDelete({ executionSetId: setId });
     if (!sortedCaseIds.length) {
       return { caseIds: [] as string[], caseCount: 0 };

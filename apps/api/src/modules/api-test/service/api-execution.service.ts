@@ -134,8 +134,13 @@ export class ApiExecutionService {
     const runtimeByCase = new Map<string, RuntimeEnvironment>();
     for (const testCase of cases) {
       if (testCase.steps?.length) {
-        const missing = testCase.steps.find((step) => !step.target?.address?.trim());
-        if (missing) throw new BadRequestException(`案例「${testCase.title}」的步骤「${missing.name}」未指定环境地址`);
+        const missing = testCase.steps.find(
+          (step) => !step.target?.address?.trim(),
+        );
+        if (missing)
+          throw new BadRequestException(
+            `案例「${testCase.title}」的步骤「${missing.name}」未指定环境地址`,
+          );
         runtimeByCase.set(testCase.id, environmentFromStep(testCase.steps[0]));
         continue;
       }
@@ -166,9 +171,13 @@ export class ApiExecutionService {
       if (!existing) {
         throw new BadRequestException("执行记录不存在");
       }
-      const existingItems = await this.runItemRepo.find({ where: { runId: existing.id } });
+      const existingItems = await this.runItemRepo.find({
+        where: { runId: existing.id },
+      });
       const rerunCaseIds = new Set(cases.map((testCase) => testCase.id));
-      preservedItems = existingItems.filter((item) => !rerunCaseIds.has(item.caseId));
+      preservedItems = existingItems.filter(
+        (item) => !rerunCaseIds.has(item.caseId),
+      );
       await this.runItemRepo.softDelete({
         runId: existing.id,
         caseId: In([...rerunCaseIds]),
@@ -204,41 +213,58 @@ export class ApiExecutionService {
     }
 
     const items: ApiTestRunItemEntity[] = [];
-    let passed = preservedItems.filter((item) => item.status === "passed").length;
-    let failed = preservedItems.filter((item) => item.status === "failed").length;
+    let passed = preservedItems.filter(
+      (item) => item.status === "passed",
+    ).length;
+    let failed = preservedItems.filter(
+      (item) => item.status === "failed",
+    ).length;
     let error = preservedItems.filter((item) => item.status === "error").length;
 
     const sharedVars: Record<string, string> = {};
-    await this.runWithConcurrency(cases, orderedFlow ? 1 : concurrency, async (testCase) => {
-      const caseEnv = runtimeByCase.get(testCase.id)!;
-      const item = await this.executeSingleCase({
-        runId: run.id,
-        testCase,
-        env: caseEnv,
-        vars: {
-          ...buildRuntimeVariables(caseEnv.variables, caseEnv.secrets),
-          ...sharedVars,
-        },
-        encoding: testCase.metadata?.debugEncoding ?? input.encoding,
-      });
-      items.push(item);
-      const exports = testCase.metadata?.exports ?? [];
-      for (const binding of exports) {
-        const value = extractExportValue(binding, item.requestSnapshot, item.responseSnapshot);
-        if (value !== undefined && value !== null && String(value) !== "") {
-          sharedVars[`${testCase.caseNo ?? testCase.id}.${binding.name}`] = String(value);
-        } else if (binding.required) {
-          item.status = "error";
-          item.responseSnapshot = {
-            ...(item.responseSnapshot ?? { status: 0, headers: {}, body: null }),
-            error: `共享变量提取失败：${binding.name}`,
-          };
+    await this.runWithConcurrency(
+      cases,
+      orderedFlow ? 1 : concurrency,
+      async (testCase) => {
+        const caseEnv = runtimeByCase.get(testCase.id)!;
+        const item = await this.executeSingleCase({
+          runId: run.id,
+          testCase,
+          env: caseEnv,
+          vars: {
+            ...buildRuntimeVariables(caseEnv.variables, caseEnv.secrets),
+            ...sharedVars,
+          },
+          encoding: testCase.metadata?.debugEncoding ?? input.encoding,
+        });
+        items.push(item);
+        const exports = testCase.metadata?.exports ?? [];
+        for (const binding of exports) {
+          const value = extractExportValue(
+            binding,
+            item.requestSnapshot,
+            item.responseSnapshot,
+          );
+          if (value !== undefined && value !== null && String(value) !== "") {
+            sharedVars[`${testCase.caseNo ?? testCase.id}.${binding.name}`] =
+              String(value);
+          } else if (binding.required) {
+            item.status = "error";
+            item.responseSnapshot = {
+              ...(item.responseSnapshot ?? {
+                status: 0,
+                headers: {},
+                body: null,
+              }),
+              error: `共享变量提取失败：${binding.name}`,
+            };
+          }
         }
-      }
-      if (item.status === "passed") passed += 1;
-      else if (item.status === "failed") failed += 1;
-      else error += 1;
-    });
+        if (item.status === "passed") passed += 1;
+        else if (item.status === "failed") failed += 1;
+        else error += 1;
+      },
+    );
 
     await this.runItemRepo.save([...preservedItems, ...items]);
     run.status = "completed";
@@ -753,8 +779,19 @@ export class ApiExecutionService {
     prerequisiteSteps?: ApiCaseStep[];
   }): Promise<DebugRunResult> {
     const env = input.target
-      ? environmentFromStep({ id: "debug", name: "调试", target: input.target, request: input.request, expected: input.expected ?? {}, exports: [] })
-      : (await this.environmentService.getRuntimeEnvironment(input.projectId, input.environmentId!, input.environmentServiceId)) as RuntimeEnvironment;
+      ? environmentFromStep({
+          id: "debug",
+          name: "调试",
+          target: input.target,
+          request: input.request,
+          expected: input.expected ?? {},
+          exports: [],
+        })
+      : ((await this.environmentService.getRuntimeEnvironment(
+          input.projectId,
+          input.environmentId!,
+          input.environmentServiceId,
+        )) as RuntimeEnvironment);
     const vars = buildRuntimeVariables(env.variables, env.secrets);
     let caseContext: DataFunctionContext | undefined;
     if (input.caseId) {
@@ -1134,16 +1171,44 @@ export class ApiExecutionService {
 
 export function environmentFromStep(step: ApiCaseStep): RuntimeEnvironment {
   const address = step.target?.address?.trim() ?? "";
-  const transport = step.request.transport ?? (step.request.framing ? "tcp" : "http");
+  const transport =
+    step.request.transport ?? (step.request.framing ? "tcp" : "http");
   if (transport === "tcp") {
     const parsed = parseServerAddress(address);
     if (!parsed.host || !parsed.port) {
-      throw new BadRequestException(`步骤「${step.name}」的 TCP 地址格式应为 host:port（如 32.114.71.6:60030，也支持 socket2://host:port）`);
+      throw new BadRequestException(
+        `步骤「${step.name}」的 TCP 地址格式应为 host:port（如 32.114.71.6:60030，也支持 socket2://host:port）`,
+      );
     }
-    return { id: step.id, baseUrl: "", headers: step.target?.headers ?? {}, variables: {}, secrets: {}, services: [{ id: step.id, name: step.target?.name || step.name, transport: "tcp", host: parsed.host, port: parsed.port, headers: step.target?.headers }] };
+    return {
+      id: step.id,
+      baseUrl: "",
+      headers: step.target?.headers ?? {},
+      variables: {},
+      secrets: {},
+      services: [
+        {
+          id: step.id,
+          name: step.target?.name || step.name,
+          transport: "tcp",
+          host: parsed.host,
+          port: parsed.port,
+          headers: step.target?.headers,
+        },
+      ],
+    };
   }
-  if (!/^https?:\/\//i.test(address)) throw new BadRequestException(`步骤「${step.name}」的 HTTP 地址必须以 http:// 或 https:// 开头`);
-  return { id: step.id, baseUrl: address, headers: step.target?.headers ?? {}, variables: {}, secrets: {} };
+  if (!/^https?:\/\//i.test(address))
+    throw new BadRequestException(
+      `步骤「${step.name}」的 HTTP 地址必须以 http:// 或 https:// 开头`,
+    );
+  return {
+    id: step.id,
+    baseUrl: address,
+    headers: step.target?.headers ?? {},
+    variables: {},
+    secrets: {},
+  };
 }
 
 function formatRunVersionCode(date: Date) {
@@ -1159,16 +1224,24 @@ function formatRunVersionCode(date: Date) {
 }
 
 function assertCaseDependencyOrder(cases: ApiTestCaseEntity[]) {
-  const indexByNumber = new Map(cases.filter((item) => item.caseNo).map((item, index) => [item.caseNo!, index]));
+  const indexByNumber = new Map(
+    cases
+      .filter((item) => item.caseNo)
+      .map((item, index) => [item.caseNo!, index]),
+  );
   for (const [index, testCase] of cases.entries()) {
-    for (const match of JSON.stringify(testCase.request).matchAll(/\$\{([^{}]+)\}/g)) {
+    for (const match of JSON.stringify(testCase.request).matchAll(
+      /\$\{([^{}]+)\}/g,
+    )) {
       const dot = match[1].lastIndexOf(".");
       if (dot < 1) continue;
       const producerNo = match[1].slice(0, dot);
       const producerIndex = indexByNumber.get(producerNo);
       if (producerIndex === undefined) continue;
       if (producerIndex >= index) {
-        throw new BadRequestException(`案例 ${testCase.caseNo} 引用了 ${producerNo} 的变量，请将 ${producerNo} 排在前面`);
+        throw new BadRequestException(
+          `案例 ${testCase.caseNo} 引用了 ${producerNo} 的变量，请将 ${producerNo} 排在前面`,
+        );
       }
     }
   }

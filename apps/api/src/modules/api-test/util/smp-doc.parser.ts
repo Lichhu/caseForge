@@ -10,11 +10,15 @@ export function parseEndpointsFromSmpData(
 
   const endpoints: ApiEndpointPayload[] = [];
   const tests = validTests.length
-    ? serviceTestList.map((item, index) => ({ item, index })).filter(({ item }) => isRecord(item))
+    ? serviceTestList
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => isRecord(item))
     : validCalls.map((item, index) => ({ item: {}, index }));
   tests.forEach(({ item: testItem, index }) => {
     const test = testItem as Record<string, unknown>;
-    const alignedCall = validTests.length ? callServiceList[index] : validCalls[index];
+    const alignedCall = validTests.length
+      ? callServiceList[index]
+      : validCalls[index];
     const callItem = isRecord(alignedCall)
       ? alignedCall
       : (callServiceList.find(isRecord) ?? {});
@@ -45,9 +49,7 @@ export function parseEndpointsFromSmpData(
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return (
-    value !== null && typeof value === "object" && !Array.isArray(value)
-  );
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function resolveMethod(

@@ -222,7 +222,9 @@ export class ApiTransactionService {
     if (!transaction) {
       throw new NotFoundException("交易码不存在");
     }
-    const uniqueIds = [...new Set(caseIds.map((id) => id.trim()).filter(Boolean))];
+    const uniqueIds = [
+      ...new Set(caseIds.map((id) => id.trim()).filter(Boolean)),
+    ];
     let nextIds: string[] = [];
     if (uniqueIds.length) {
       const existing = await this.caseRepo.find({

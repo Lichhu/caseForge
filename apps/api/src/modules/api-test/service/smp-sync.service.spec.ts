@@ -609,7 +609,9 @@ describe("SmpSyncService.refreshTransactionDocumentFromSmp", () => {
     const { service, transactionRepo, apiDocRepo, smpClient } = buildService();
     const callServiceData = [{ id: "same" }];
     const callServiceHash = hashData(callServiceData);
-    const oldTestInfoData = [{ requestBody: '{"custId":"old"}', requestUrl: "/test" }];
+    const oldTestInfoData = [
+      { requestBody: '{"custId":"old"}', requestUrl: "/test" },
+    ];
     const testInfoHash = hashData(oldTestInfoData, "requestBody");
     transactionRepo.findOne.mockResolvedValue(
       makeTransaction({ syncStatus: "success" }),

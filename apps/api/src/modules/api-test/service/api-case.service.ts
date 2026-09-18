@@ -141,15 +141,16 @@ export class ApiCaseService {
     payload: SaveApiCaseDto,
   ) {
     this.validateCasePayload(payload);
+    const caseData = normalizeCasePayload(payload);
     const endpoint = await this.requireEndpoint(
       projectId,
-      payload.endpointId,
+      caseData.endpointId,
       transactionId,
     );
     const transaction = await this.requireTransaction(projectId, transactionId);
     const userName = RequestContext.getUserName();
     const caseNo =
-      payload.caseNo?.trim() ||
+      caseData.caseNo?.trim() ||
       (await nextCaseNo(
         this.caseRepo,
         projectId,
@@ -159,20 +160,20 @@ export class ApiCaseService {
     const entity = this.caseRepo.create({
       projectId,
       endpointId: endpoint.id,
-      title: payload.title,
+      title: caseData.title,
       caseNo,
-      description: payload.description ?? "",
-      remark: payload.remark ?? "",
-      transactionCode: payload.transactionCode ?? transaction.code,
-      owner: payload.owner?.trim() || userName,
-      priority: payload.priority ?? "P1",
-      polarity: payload.polarity ?? "positive",
-      status: payload.status ?? "ready",
-      enabled: payload.enabled ?? true,
-      preconditions: payload.preconditions ?? [],
-      request: payload.request,
-      expected: payload.expected,
-      steps: payload.steps,
+      description: caseData.description ?? "",
+      remark: caseData.remark ?? "",
+      transactionCode: caseData.transactionCode ?? transaction.code,
+      owner: caseData.owner?.trim() || userName,
+      priority: caseData.priority ?? "P1",
+      polarity: caseData.polarity ?? "positive",
+      status: caseData.status ?? "ready",
+      enabled: caseData.enabled ?? true,
+      preconditions: caseData.preconditions ?? [],
+      request: caseData.request,
+      expected: caseData.expected,
+      steps: caseData.steps,
       metadata: {
         source: "manual",
         promptIds: payload.promptIds ?? [],
@@ -210,6 +211,7 @@ export class ApiCaseService {
     payload: SaveApiCaseDto,
   ) {
     this.validateCasePayload(payload);
+    const caseData = normalizeCasePayload(payload);
     const existing = await this.caseRepo.findOne({
       where: scopedWhere({ projectId, id: caseId }),
     });
@@ -219,28 +221,28 @@ export class ApiCaseService {
     await this.assertNoMutualCaseDependency(
       projectId,
       existing.caseNo,
-      payload.request,
+      caseData.request,
     );
-    if (payload.endpointId && payload.endpointId !== existing.endpointId) {
-      await this.requireEndpoint(projectId, payload.endpointId, transactionId);
-      existing.endpointId = payload.endpointId;
+    if (caseData.endpointId && caseData.endpointId !== existing.endpointId) {
+      await this.requireEndpoint(projectId, caseData.endpointId, transactionId);
+      existing.endpointId = caseData.endpointId;
     }
-    existing.title = payload.title;
-    if (payload.caseNo !== undefined) existing.caseNo = payload.caseNo;
-    existing.description = payload.description ?? "";
-    existing.remark = payload.remark ?? "";
-    if (payload.transactionCode !== undefined) {
-      existing.transactionCode = payload.transactionCode;
+    existing.title = caseData.title;
+    if (caseData.caseNo !== undefined) existing.caseNo = caseData.caseNo;
+    existing.description = caseData.description ?? "";
+    existing.remark = caseData.remark ?? "";
+    if (caseData.transactionCode !== undefined) {
+      existing.transactionCode = caseData.transactionCode;
     }
-    if (payload.owner !== undefined) existing.owner = payload.owner;
-    existing.priority = payload.priority ?? existing.priority;
-    existing.polarity = payload.polarity ?? existing.polarity;
-    existing.status = payload.status ?? existing.status;
-    if (payload.enabled !== undefined) existing.enabled = payload.enabled;
-    existing.preconditions = payload.preconditions ?? [];
-    existing.request = payload.request;
-    existing.expected = payload.expected;
-    existing.steps = payload.steps;
+    if (caseData.owner !== undefined) existing.owner = caseData.owner;
+    existing.priority = caseData.priority ?? existing.priority;
+    existing.polarity = caseData.polarity ?? existing.polarity;
+    existing.status = caseData.status ?? existing.status;
+    if (caseData.enabled !== undefined) existing.enabled = caseData.enabled;
+    existing.preconditions = caseData.preconditions ?? [];
+    existing.request = caseData.request;
+    existing.expected = caseData.expected;
+    existing.steps = caseData.steps;
     existing.metadata = {
       ...existing.metadata,
       source: existing.metadata?.source === "ai" ? "ai_edited" : "manual",
@@ -498,7 +500,11 @@ export class ApiCaseService {
       await this.caseRepo.softDelete({ id: In(caseIds), projectId });
     }
     await this.scenarioRepo.softDelete({ jobId });
-    await this.generateJobRepo.softDelete({ id: jobId, projectId, transactionId });
+    await this.generateJobRepo.softDelete({
+      id: jobId,
+      projectId,
+      transactionId,
+    });
     return { ok: true };
   }
 
@@ -1208,6 +1214,44 @@ function cloneStep(step: ApiCaseStep): ApiCaseStep {
   const clone = structuredClone(step);
   delete clone.isMainRequest;
   return { ...clone, id: crypto.randomUUID() };
+}
+
+export function normalizeCasePayload(payload: SaveApiCaseDto): SaveApiCaseDto {
+  const steps = payload.steps?.length ? payload.steps : undefined;
+  if (!steps) return payload;
+  const markedIndex = steps.findIndex((step) => step.isMainRequest);
+  const namedIndex = steps.findIndex(
+    (step) => step.name?.trim() === payload.title?.trim(),
+  );
+  const requestJson = JSON.stringify(payload.request);
+  const requestIndex = steps.findIndex(
+    (step) => JSON.stringify(step.request) === requestJson,
+  );
+  const mainIndex =
+    markedIndex >= 0
+      ? markedIndex
+      : namedIndex >= 0
+        ? namedIndex
+        : requestIndex >= 0
+          ? requestIndex
+          : 0;
+  const normalizedSteps = steps.map((step, index) => ({
+    ...step,
+    ...(index === mainIndex
+      ? { isMainRequest: true }
+      : { isMainRequest: undefined }),
+  }));
+  const mainStep =
+    normalizedSteps[mainIndex] ?? normalizedSteps[normalizedSteps.length - 1];
+  return mainStep
+    ? {
+        ...payload,
+        request: mainStep.request,
+        expected: mainStep.expected,
+        steps: normalizedSteps,
+        exports: mainStep.exports,
+      }
+    : payload;
 }
 
 function extractReferencedCaseNumbers(request: ApiCaseRequest) {

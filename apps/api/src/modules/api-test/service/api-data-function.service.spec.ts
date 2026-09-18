@@ -107,7 +107,9 @@ describe("ApiDataFunctionService", () => {
 
   it("returns a readable error when testing a database connection fails", async () => {
     const connectionService = new ApiDataFunctionService(
-      { findOne: jest.fn().mockResolvedValue({ id: "db", type: "MySQL" }) } as never,
+      {
+        findOne: jest.fn().mockResolvedValue({ id: "db", type: "MySQL" }),
+      } as never,
       {} as never,
     );
     jest
@@ -122,7 +124,10 @@ describe("ApiDataFunctionService", () => {
   it("awaits DM8 connection failures", async () => {
     const dmdb = require("dmdb");
     dmdb.getConnection.mockRejectedValueOnce(new Error("[20009] 连接超时"));
-    const connectionService = new ApiDataFunctionService({} as never, {} as never);
+    const connectionService = new ApiDataFunctionService(
+      {} as never,
+      {} as never,
+    );
 
     await expect(
       (connectionService as any).pool({
@@ -247,7 +252,9 @@ describe("ApiDataFunctionService", () => {
     ).resolves.toEqual({ flag: "true" });
 
     expect(query).toHaveBeenCalledWith(
-      expect.objectContaining({ sql: expect.stringContaining("FROM row_count LIMIT 1") }),
+      expect.objectContaining({
+        sql: expect.stringContaining("FROM row_count LIMIT 1"),
+      }),
       [6000000],
     );
   });

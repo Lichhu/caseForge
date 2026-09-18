@@ -89,31 +89,25 @@ describe("assertScenarioCoverage", () => {
 
   it("requires at least two positive pagination effectiveness cases", () => {
     expect(() =>
-      assertScenarioCoverage(
-        "pagination",
-        {
-          applicable: true,
-          reason: "分页字段存在",
-          cases: [testCase("positive")],
-        },
-      ),
+      assertScenarioCoverage("pagination", {
+        applicable: true,
+        reason: "分页字段存在",
+        cases: [testCase("positive")],
+      }),
     ).toThrow("分页实效");
   });
 
   it("accepts pagination results with two positive cases", () => {
     expect(() =>
-      assertScenarioCoverage(
-        "pagination",
-        {
-          applicable: true,
-          reason: "分页字段存在",
-          cases: [
-            { title: "首页查询", polarity: "positive", changes: [] },
-            { title: "翻页生效", polarity: "positive", changes: [] },
-            testCase("negative"),
-          ],
-        },
-      ),
+      assertScenarioCoverage("pagination", {
+        applicable: true,
+        reason: "分页字段存在",
+        cases: [
+          { title: "首页查询", polarity: "positive", changes: [] },
+          { title: "翻页生效", polarity: "positive", changes: [] },
+          testCase("negative"),
+        ],
+      }),
     ).not.toThrow();
   });
 

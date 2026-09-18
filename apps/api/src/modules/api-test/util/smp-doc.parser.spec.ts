@@ -62,6 +62,8 @@ describe("parseEndpointsFromSmpData", () => {
   });
 
   it("测试信息全为无效项时回退到服务信息", () => {
-    expect(parseEndpointsFromSmpData([callItem], [null, undefined])).toHaveLength(1);
+    expect(
+      parseEndpointsFromSmpData([callItem], [null, undefined]),
+    ).toHaveLength(1);
   });
 });

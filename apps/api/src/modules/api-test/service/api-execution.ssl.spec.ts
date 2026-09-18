@@ -54,14 +54,12 @@ function buildService(options: {
 }
 
 function mockFetchOk() {
-  return jest
-    .spyOn(globalThis, "fetch")
-    .mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    );
+  return jest.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
 }
 
 function lastFetchInit(fetchSpy: jest.SpyInstance) {

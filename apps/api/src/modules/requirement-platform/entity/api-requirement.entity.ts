@@ -22,7 +22,10 @@ export const API_REQUIREMENT_STATUSES = [
 export type ApiRequirementStatus = (typeof API_REQUIREMENT_STATUSES)[number];
 
 @Entity("api_requirement")
-@Index("uk_api_requirement_project_code", ["projectCode"], { unique: true, where: "deleted_at IS NULL" })
+@Index("uk_api_requirement_project_code", ["projectCode"], {
+  unique: true,
+  where: "deleted_at IS NULL",
+})
 @Index("idx_api_requirement_status", ["status"])
 export class ApiRequirementEntity extends SoftDeletableEntity {
   @PrimaryGeneratedColumn("uuid")

@@ -46,7 +46,7 @@ export function extractResponseValue(
   }
   const body = coerceAssertionBody(input.body);
   try {
-    if (expression.startsWith("$") ) {
+    if (expression.startsWith("$")) {
       const value = JSONPath({ path: expression, json: body as object });
       return Array.isArray(value) ? value[0] : value;
     }

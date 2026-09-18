@@ -352,7 +352,11 @@ export class SmpSyncService {
       order: { sortOrder: "ASC" },
     });
     if (!endpoints.length) {
-      await this.endpointRepo.softDelete({ projectId, transactionId, apiDocId });
+      await this.endpointRepo.softDelete({
+        projectId,
+        transactionId,
+        apiDocId,
+      });
       return;
     }
 
