@@ -209,6 +209,8 @@ export function toPublicApiCase(testCase: ApiTestCaseEntity) {
           exports: testCase.metadata?.exports ?? [],
         },
       ];
+  const mainStep =
+    steps.find((step) => step.isMainRequest) ?? steps[steps.length - 1];
   return {
     id: testCase.id,
     projectId: testCase.projectId,
@@ -225,8 +227,8 @@ export function toPublicApiCase(testCase: ApiTestCaseEntity) {
     enabled: testCase.enabled,
     preconditions: testCase.preconditions,
     steps,
-    request: testCase.request,
-    expected: testCase.expected,
+    request: mainStep?.request ?? testCase.request,
+    expected: mainStep?.expected ?? testCase.expected,
     metadata: testCase.metadata,
     createdBy: testCase.createdBy,
     ...(testCase.endpoint

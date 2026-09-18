@@ -1,4 +1,38 @@
 import { ApiCaseService, normalizeCasePayload } from "./api-case.service";
+import { toPublicApiCase } from "@common/http/public-response.util";
+
+describe("toPublicApiCase", () => {
+  it("exposes the marked main step request instead of a stale top-level example", () => {
+    const result = toPublicApiCase({
+      id: "case-1",
+      projectId: "project-1",
+      endpointId: "endpoint-1",
+      title: "翻页生效",
+      caseNo: "T-001",
+      transactionCode: "T",
+      owner: "tester",
+      priority: "P1",
+      polarity: "positive",
+      status: "ready",
+      enabled: true,
+      preconditions: [],
+      request: { method: "POST", path: "/", body: "<page>1</page>" },
+      expected: {},
+      steps: [
+        {
+          id: "main",
+          name: "翻页生效",
+          isMainRequest: true,
+          request: { method: "POST", path: "/", body: "<page>2</page>" },
+          expected: {},
+          exports: [],
+        },
+      ],
+    } as never);
+
+    expect(result.request.body).toContain("<page>2</page>");
+  });
+});
 
 describe("normalizeCasePayload", () => {
   it("keeps the AI-generated XML request when an after-step still has the example page", () => {

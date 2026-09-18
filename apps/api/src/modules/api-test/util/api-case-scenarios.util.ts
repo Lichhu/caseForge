@@ -98,6 +98,14 @@ function requestFieldLines(structuredMarkdown: string) {
     .slice(0, 120);
 }
 
+function completeFieldPath(path: string, code: string): string {
+  const normalizedPath = path.replace(/\/$/, "");
+  const lastSegment = normalizedPath.split("/").filter(Boolean).pop();
+  return lastSegment?.toLowerCase() === code.toLowerCase()
+    ? normalizedPath
+    : `${normalizedPath}/${code}`;
+}
+
 /** 请求报文全部字段路径（节点路径/节点代码，与 overrides 路径格式一致），按文档顺序去重 */
 export function extractRequestFieldPaths(structuredMarkdown: string): string[] {
   const seen = new Set<string>();
@@ -107,7 +115,7 @@ export function extractRequestFieldPaths(structuredMarkdown: string): string[] {
     const path = (cells[0] ?? "").replace(/\/$/, "");
     const code = cells[1] ?? "";
     if (!path || !code) continue;
-    const value = `${path}/${code}`;
+    const value = completeFieldPath(path, code);
     const key = value.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -143,7 +151,7 @@ export function extractFieldsByRequirement(structuredMarkdown: string): {
     const path = (cells[0] ?? "").replace(/\/$/, "");
     const code = cells[1] ?? "";
     if (!path || !code) continue;
-    const field = `${path}/${code}`;
+    const field = completeFieldPath(path, code);
     const key = field.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -217,7 +225,7 @@ export function validateScenarioAiResult(
       .slice(1)
       .map((line) => line.split("|").map((cell) => cell.trim()))
       .filter((cells) => cells[0] && cells[1])
-      .map((cells) => `${cells[0].replace(/\/$/, "")}/${cells[1]}`)
+      .map((cells) => completeFieldPath(cells[0], cells[1]))
       .map((path) => [path.toLowerCase(), path]),
   );
   const seen = new Set<string>();
@@ -326,7 +334,7 @@ function scenarioFieldPaths(
       return /(枚举|码值|取值|[0-9a-z]+\s*[-=:：]\s*[^,，;；]+)/i.test(text);
     })
     .filter((cells) => cells[0] && cells[1])
-    .map((cells) => `${cells[0].replace(/\/$/, "")}/${cells[1]}`);
+    .map((cells) => completeFieldPath(cells[0], cells[1]));
 }
 
 function assertEachFieldHasPolarities(

@@ -8,6 +8,7 @@ import {
   validateScenarioAiResult,
 } from "./api-case-scenarios.util";
 import type { ApiServiceProperty } from "@case-forge/shared";
+import { assembleBodyFromExample } from "./api-case-body-assembler.util";
 
 describe("parseScenarioAiResult", () => {
   it("coerces numeric change values to strings", () => {
@@ -45,6 +46,51 @@ describe("parseScenarioAiResult", () => {
 
     expect(result?.cases[0].changes[0].path).toBe("path/to/pageNum");
   });
+
+  it("turns an AI null override into an empty XML node", () => {
+    const doc = [
+      "请求报文",
+      "----",
+      "节点路径 | 节点代码 | 节点名称",
+      "Transaction/Body/request/bizBody/pagesize | pagesize | 每页条数",
+    ].join("\n");
+    const parsed = parseScenarioAiResult(
+      JSON.stringify({
+        applicable: true,
+        reason: "适用",
+        cases: [
+          {
+            title: "pagesize 为空",
+            polarity: "negative",
+            changes: [
+              {
+                path: "Transaction/Body/request/bizBody/pagesize",
+                value: null,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const validated = validateScenarioAiResult(parsed!, doc);
+    const overrides = Object.fromEntries(
+      validated.cases[0].changes.map((change) => [change.path, change.value]),
+    );
+    const result = assembleBodyFromExample({
+      exampleMessage:
+        "<Transaction><Body><request><bizBody><pagesize>10</pagesize></bizBody></request></Body></Transaction>",
+      overrides,
+      messageFormat: "xml",
+      createMissingPaths: true,
+    });
+
+    expect(validated.cases).toHaveLength(1);
+    expect(overrides).toEqual({
+      "Transaction/Body/request/bizBody/pagesize": "",
+    });
+    expect(result.body).toContain("<pagesize/>");
+    expect(result.body).not.toContain("<pagesize>10</pagesize>");
+  });
 });
 
 describe("validateScenarioAiResult", () => {
@@ -76,6 +122,38 @@ describe("validateScenarioAiResult", () => {
 
     expect(result.cases[0].changes[0].path).toBe(
       "Transaction/Body/request/bizbody/start",
+    );
+  });
+
+  it("accepts AI paths when the documented node path already includes the field code", () => {
+    const result = validateScenarioAiResult(
+      {
+        applicable: true,
+        reason: "适用",
+        cases: [
+          {
+            title: "必填字段 pagesize 缺失校验",
+            polarity: "negative",
+            changes: [
+              {
+                path: "Transaction/Body/request/bizBody/pagesize",
+                value: "",
+              },
+            ],
+          },
+        ],
+      },
+      [
+        "请求报文",
+        "----",
+        "节点路径 | 节点代码 | 节点名称",
+        "Transaction/Body/request/bizBody/pagesize | pagesize | 每页条数",
+      ].join("\n"),
+    );
+
+    expect(result.cases).toHaveLength(1);
+    expect(result.cases[0].changes[0].path).toBe(
+      "Transaction/Body/request/bizBody/pagesize",
     );
   });
 });
@@ -253,6 +331,21 @@ describe("required_fields scenario", () => {
         "Transaction/Body/request/bizBody/CUST_ID",
       ],
       optional: ["Transaction/Body/request/bizBody/MOBILE_NO"],
+    });
+  });
+
+  it("does not duplicate codes already present at the end of node paths", () => {
+    const fullPathDoc = [
+      "请求报文",
+      "----",
+      "节点路径 | 节点代码 | 节点名称 | 节点类型 | 数据类型 | 长度 | 是否必填 | 描述",
+      "Transaction/Body/request/bizBody/pagesize | pagesize | 每页条数 | 单节点 | NUMBER | 10 | Y |",
+      "Transaction/Body/request/bizBody/actorno | actorno | 操作员 | 单节点 | VARCHAR2 | 20 | N |",
+    ].join("\n");
+
+    expect(extractFieldsByRequirement(fullPathDoc)).toEqual({
+      required: ["Transaction/Body/request/bizBody/pagesize"],
+      optional: ["Transaction/Body/request/bizBody/actorno"],
     });
   });
 
