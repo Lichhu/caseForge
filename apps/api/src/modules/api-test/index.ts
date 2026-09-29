@@ -1,3 +1,7 @@
+import { ApiCaseTemplateService } from "./service/api-case-template.service";
+import { ApiCaseManagementService } from "./service/api-case-management.service";
+import { NotifyModule } from "@common/notify";
+import { ApiCaseReportDeliveryService } from "./service/api-case-report-delivery.service";
 import { Module } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
@@ -59,11 +63,15 @@ import { ApiStepLibraryService } from "./service/api-step-library.service";
       ApiReportExportEntity,
       CaseProjectEntity,
     ]),
+    NotifyModule,
     MinioStorageModule,
     AiWorkflowModule,
   ],
   controllers: [ApiTestController],
   providers: [
+    ApiCaseManagementService,
+    ApiCaseTemplateService,
+    ApiCaseReportDeliveryService,
     ApiDocService,
     ApiCaseService,
     ApiCaseGenerateQueueService,

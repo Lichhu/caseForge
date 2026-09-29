@@ -9,7 +9,7 @@
         aria-label="管理模块"
         @change="handleModuleChange"
       />
-      <span>以需求为维度，手动新建项目</span>
+      <p class="module-description">以需求为维度，手动新建项目</p>
     </div>
 
     <div class="project-action-row action-toolbar action-toolbar--block">
@@ -268,17 +268,18 @@ const apiStore = useApiTestStore();
 const router = useRouter();
 const isApiPlatform = computed(() => props.platform === 'api-test');
 
-/** 管理模块下拉：案例管理待后续开发 */
+/** 管理模块导航 */
 const moduleOptions = [
-  { value: 'requirement', label: '需求管理' },
   { value: 'project', label: '项目管理' },
-  { value: 'case', label: '案例管理（待开发）', disabled: true },
+  { value: 'requirement', label: '需求管理' },
+  { value: 'case', label: '案例管理' },
 ];
 
 function handleModuleChange(value: string) {
   if (value === 'requirement') {
     router.push({ path: '/api-test/requirement' });
   }
+  if (value === 'case') router.push({ path: '/api-test/cases' });
   // 项目管理即当前侧栏列表，无需跳转
 }
 const projectList = computed(() =>
@@ -732,9 +733,22 @@ function projectMeta(project: { runCount: number; requirementNo?: string | null 
   color: var(--cf-brand);
 }
 
-/* 管理模块下拉：替代原标题文本，保持标题字号与字重 */
+/* 与需求管理、案例管理保持一致的标题式模块导航。 */
+.project-section-title {
+  padding: 2px 2px 4px;
+}
+.module-description {
+  margin: 3px 0 0;
+  color: #667085;
+  font-size: 13px;
+}
+/* 避免全局 .project-section-title span 样式改变下拉内部对齐。 */
+.module-select :deep(.ant-select-selector span) {
+  margin-top: 0;
+}
+
 .module-select {
-  width: 100%;
+  width: 160px;
   margin-left: -8px;
 }
 
@@ -750,9 +764,9 @@ function projectMeta(project: { runCount: number; requirementNo?: string | null 
 
 .module-select :deep(.ant-select-selection-item) {
   color: #1d2939;
-  font-size: 16px;
+  font-size: 20px;
   font-weight: 600;
-  line-height: 1.35;
+  line-height: 1.25;
 }
 
 .project-list :deep(.ant-spin-nested-loading),

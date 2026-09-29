@@ -1221,3 +1221,35 @@ export async function generateDataFunctionScript(
     )
   ).data;
 }
+
+export async function publishCaseReport(projectId: string, transactionId: string, runId: string) {
+  return (await http.post<{ runId: string; fileName: string; reportUrl: string; notificationStatus: "queued" | "disabled" }>(
+    `${transactionBase(projectId, transactionId)}/reports/publish-case`, { runId },
+  )).data;
+}
+
+export type ManagedCaseRow = ApiTestCaseRow & { transactionId: string; requirementNo: string };
+export type { ManagedCaseSelection, ManagedCaseOptions, ManagedCaseQuery } from "@case-forge/shared";
+import type { ManagedCaseSelection, ManagedCaseOptions, ManagedCaseQuery } from "@case-forge/shared";
+export async function listManagedCases(params: ManagedCaseQuery) {
+  return (await http.get<{ rows: ManagedCaseRow[]; count: number; page: number; pageSize: number }>("api-test/case-management/cases", { params })).data;
+}
+export async function getManagedCaseOptions(params: ManagedCaseQuery) {
+  return (await http.get<ManagedCaseOptions>("api-test/case-management/options", { params })).data;
+}
+export async function selectManagedCases(params: ManagedCaseQuery) {
+  return (await http.get<ManagedCaseSelection[]>("api-test/case-management/selection", { params })).data;
+}
+export async function getManagedCaseDetails(ids: string[]) {
+  return (await http.post<ManagedCaseRow[]>("api-test/case-management/details", { ids })).data;
+}
+
+export interface CaseApplicationNode { id: string; name: string; isLeaf?: boolean; children?: CaseApplicationNode[]; }
+export async function listCaseApplicationSystems() { return (await http.get<CaseApplicationNode[]>("api-test/case-management/application-systems")).data; }
+export async function listCaseApplicationChildren(parentId: string) { return (await http.get<CaseApplicationNode[]>(`api-test/case-management/application-systems/${encodeURIComponent(parentId)}/children`)).data; }
+export async function listCaseDesigners() { return (await http.get<Array<{ userName: string; nickName: string }>>("api-test/case-management/designers")).data; }
+export async function exportCaseTemplate(payload: { caseIds: string[]; applicationPath: string; designer: string }) {
+  const response = await http.post("api-test/case-management/export", payload, { responseType: "blob" });
+  const fileName = `测试案例_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  return { blob: new Blob([response.data], { type: String(response.headers["content-type"] ?? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") }), fileName };
+}

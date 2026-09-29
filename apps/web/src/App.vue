@@ -27,7 +27,8 @@ const isPlatformRoute = computed(
   () =>
     route.name === 'case-forge' ||
     route.name === 'api-test' ||
-    route.name === 'requirement-platform',
+    route.name === 'requirement-platform' ||
+    route.name === 'case-management',
 );
 const current = computed(() => getPlatformByRoute(route));
 

@@ -6,6 +6,7 @@ const CaseForgeDashboardView = () =>
 const ApiTestDashboardView = () => import("@/views/ApiTestDashboardView.vue");
 const RequirementPlatformView = () =>
   import("@/views/RequirementPlatformView.vue");
+const CaseManagementView = () => import("@/views/CaseManagementView.vue");
 
 const router = createRouter({
   history: createWebHistory(),
@@ -29,6 +30,7 @@ const router = createRouter({
       component: ApiTestDashboardView,
       meta: { platform: "api-test", title: "智能接口测试平台" },
     },
+    { path: "/api-test/cases", name: "case-management", component: CaseManagementView, meta: { platform: "api-test", title: "案例管理" } },
     {
       path: "/api-test/requirement",
       name: "requirement-platform",

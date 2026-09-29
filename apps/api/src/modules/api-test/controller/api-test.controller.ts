@@ -1,3 +1,12 @@
+import { ExportApiCaseTemplateDto } from "../dto/api-case-template.dto";
+import { ApiCaseTemplateService } from "../service/api-case-template.service";
+import { ApiCaseManagementService } from "../service/api-case-management.service";
+import {
+  ListManagedCasesDto,
+  ManagedCaseDetailsDto,
+} from "../dto/list-managed-cases.dto";
+import { PublishCaseReportDto } from "@api-test/dto/publish-case-report.dto";
+import { ApiCaseReportDeliveryService } from "@api-test/service/api-case-report-delivery.service";
 import {
   BadRequestException,
   Body,
@@ -79,6 +88,9 @@ const UPLOAD_EXTENSIONS = ["xls", "xlsx"];
 @Controller("api-test")
 export class ApiTestController {
   constructor(
+    private readonly caseTemplate: ApiCaseTemplateService,
+    private readonly caseManagement: ApiCaseManagementService,
+    private readonly reportDelivery: ApiCaseReportDeliveryService,
     private readonly apiDocService: ApiDocService,
     private readonly apiCaseService: ApiCaseService,
     private readonly apiEnvironmentService: ApiEnvironmentService,
@@ -97,6 +109,58 @@ export class ApiTestController {
     @InjectRepository(ApiStepDebugRecordEntity)
     private readonly stepDebugRepo: Repository<ApiStepDebugRecordEntity>,
   ) {}
+
+  @Get("case-management/cases")
+  listManagedCases(@Query() query: ListManagedCasesDto) {
+    return this.caseManagement.list(query);
+  }
+
+  @Get("case-management/options")
+  managedCaseOptions(@Query() query: ListManagedCasesDto) {
+    return this.caseManagement.options(query);
+  }
+
+  @Get("case-management/selection")
+  managedCaseSelection(@Query() query: ListManagedCasesDto) {
+    return this.caseManagement.selection(query);
+  }
+
+  @Post("case-management/details")
+  managedCaseDetails(@Body() body: ManagedCaseDetailsDto) {
+    return this.caseManagement.details(body.ids);
+  }
+
+  @Get("case-management/application-systems")
+  listCaseApplicationSystems() {
+    return this.caseTemplate.listSystems();
+  }
+
+  @Get("case-management/application-systems/:parentId/children")
+  listCaseApplicationChildren(@Param("parentId") parentId: string) {
+    return this.caseTemplate.listTreeChildren(parentId);
+  }
+
+  @Get("case-management/designers")
+  listCaseDesigners() {
+    return this.caseTemplate.listDesigners();
+  }
+
+  @Post("case-management/export")
+  async exportCaseTemplate(
+    @Body() body: ExportApiCaseTemplateDto,
+    @Res() res: Response,
+  ) {
+    const file = await this.caseTemplate.export(body);
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${encodeURIComponent(file.fileName)}"`,
+    );
+    res.send(file.buffer);
+  }
 
   @Get("step-library")
   listStepLibrary() {
@@ -1041,6 +1105,15 @@ export class ApiTestController {
     @Query("runId") runId?: string,
   ) {
     return this.apiReportService.summary(projectId, runId, transactionId);
+  }
+
+  @Post(":projectId/transactions/:transactionId/reports/publish-case")
+  publishCaseReport(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+    @Body() body: PublishCaseReportDto,
+  ) {
+    return this.reportDelivery.publish(projectId, transactionId, body.runId);
   }
 
   @Post(":projectId/transactions/:transactionId/reports/export")

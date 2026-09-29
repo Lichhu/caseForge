@@ -161,3 +161,5 @@ export * from './platform';
 export * from './requirement-platform';
 export * from './scenario-scope';
 export * from './struct-doc';
+
+export * from "./api-case-management";

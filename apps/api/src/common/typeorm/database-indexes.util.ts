@@ -126,6 +126,16 @@ async function dropIndexIfExists(
 
 const INDEX_SPECS: Array<{ table: string; name: string; columns: string }> = [
   {
+    table: "api_test_case",
+    name: "idx_api_case_user_deleted_created",
+    columns: "createdBy, deleted_at, createdAt, id",
+  },
+  {
+    table: "api_test_case",
+    name: "idx_api_case_project_user_endpoint",
+    columns: "projectId, createdBy, endpointId, deleted_at",
+  },
+  {
     table: "case_project",
     name: "idx_case_project_user_platform_updated",
     columns: "createdBy, platform, updatedAt",

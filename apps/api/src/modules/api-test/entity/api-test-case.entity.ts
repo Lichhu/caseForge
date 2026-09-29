@@ -22,6 +22,18 @@ import {
 } from "typeorm";
 
 @Entity("api_test_case")
+@Index("idx_api_case_user_deleted_created", [
+  "createdBy",
+  "deletedAt",
+  "createdAt",
+  "id",
+])
+@Index("idx_api_case_project_user_endpoint", [
+  "projectId",
+  "createdBy",
+  "endpointId",
+  "deletedAt",
+])
 @Index("idx_api_test_case_project", ["projectId"])
 @Index("idx_api_test_case_project_endpoint", ["projectId", "endpointId"])
 export class ApiTestCaseEntity extends SoftDeletableEntity {

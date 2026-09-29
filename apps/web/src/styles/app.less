@@ -1152,6 +1152,23 @@ body.cf-immersive-active .platform-topbar {
   min-width: 0;
 }
 
+/* 管理模块 Select：由组件原生展开状态驱动箭头，三个入口共用。 */
+.module-select.ant-select .ant-select-arrow .anticon-down {
+  transform: rotate(0deg);
+  transform-origin: center;
+  transition: transform 0.2s ease;
+}
+
+.module-select.ant-select-open .ant-select-arrow .anticon-down {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .module-select.ant-select .ant-select-arrow .anticon-down {
+    transition: none;
+  }
+}
+
 /* 下拉触发按钮：展开时箭头旋转 */
 .dropdown-trigger-chevron {
   display: inline-block;

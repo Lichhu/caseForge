@@ -262,17 +262,18 @@ async function confirmRefuse() {
   }
 }
 
-/** 管理模块下拉：案例管理待后续开发 */
+/** 管理模块导航 */
 const moduleOptions = [
-  { value: 'requirement', label: '需求管理' },
   { value: 'project', label: '项目管理' },
-  { value: 'case', label: '案例管理（待开发）', disabled: true },
+  { value: 'requirement', label: '需求管理' },
+  { value: 'case', label: '案例管理' },
 ];
 
 function handleModuleChange(value: string) {
   if (value === 'project') {
     router.push({ path: '/api-test' });
   }
+  if (value === 'case') router.push({ path: '/api-test/cases' });
   // 需求管理即当前页，无需跳转
 }
 
