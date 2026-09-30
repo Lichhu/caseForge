@@ -14,6 +14,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseIntPipe,
   Put,
   Patch,
   Post,
@@ -118,6 +119,19 @@ export class ApiTestController {
   @Get("case-management/options")
   managedCaseOptions(@Query() query: ListManagedCasesDto) {
     return this.caseManagement.options(query);
+  }
+
+  @Get("case-management/execution-versions")
+  listExecutionVersions() {
+    return this.caseManagement.executionVersions();
+  }
+
+  @Get("case-management/execution-plans")
+  listExecutionPlans(
+    @Query("versionId", ParseIntPipe) versionId: number,
+    @Query("parentId", ParseIntPipe) parentId: number,
+  ) {
+    return this.caseManagement.executionPlans(versionId, parentId);
   }
 
   @Get("case-management/selection")
@@ -1113,7 +1127,12 @@ export class ApiTestController {
     @Param("transactionId") transactionId: string,
     @Body() body: PublishCaseReportDto,
   ) {
-    return this.reportDelivery.publish(projectId, transactionId, body.runId);
+    return this.reportDelivery.publish(
+      projectId,
+      transactionId,
+      body.runId,
+      body,
+    );
   }
 
   @Post(":projectId/transactions/:transactionId/reports/export")

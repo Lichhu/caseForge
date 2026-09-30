@@ -52,6 +52,9 @@ export interface AppConfig {
     serviceInfoListPath: string;
     callServiceInfoListPath: string;
     testInfoListPath: string;
+    uploadFileUrl: string;
+    receiveAutoResultUrl: string;
+    accessToken: string;
     /** demo 模式请求超时（毫秒） */
     requestTimeoutMs: number;
   };

@@ -92,6 +92,13 @@ export interface SmpResponse<T> {
   bizResText: string;
   data: T;
 }
+export interface SmpUploadedFile {
+  fileName?: string;
+  objectName?: string;
+  fileUrl?: string;
+  downloadUrl?: string;
+  [key: string]: unknown;
+}
 
 @Injectable()
 export class SmpClientService {
@@ -122,6 +129,42 @@ export class SmpClientService {
       throw new Error(`SMP 请求失败: HTTP ${response.status} ${text}`);
     }
     return response.json() as Promise<T>;
+  }
+
+  async uploadFile(fileName: string, buffer: Buffer): Promise<SmpUploadedFile> {
+    const form = new FormData();
+    form.append("files", new Blob([new Uint8Array(buffer)]), fileName);
+    const headers: Record<string, string> = {};
+    if (this.smpConfig.accessToken)
+      headers.access_token = this.smpConfig.accessToken;
+    const response = await fetch(this.smpConfig.uploadFileUrl, {
+      method: "POST",
+      headers,
+      body: form,
+      signal: AbortSignal.timeout(this.smpConfig.requestTimeoutMs),
+    });
+    if (!response.ok)
+      throw new Error(`测管文件上传失败: HTTP ${response.status}`);
+    const payload = (await response.json()) as { data?: SmpUploadedFile[] };
+    if (!payload.data?.[0]) throw new Error("测管文件上传未返回文件信息");
+    return payload.data[0];
+  }
+
+  async receiveAutoResult(body: unknown): Promise<unknown> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.smpConfig.accessToken)
+      headers.access_token = this.smpConfig.accessToken;
+    const response = await fetch(this.smpConfig.receiveAutoResultUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(this.smpConfig.requestTimeoutMs),
+    });
+    if (!response.ok)
+      throw new Error(`测管结果推送失败: HTTP ${response.status}`);
+    return response.json();
   }
 
   private async delay(ms = 300): Promise<void> {

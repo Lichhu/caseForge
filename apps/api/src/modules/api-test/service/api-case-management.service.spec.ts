@@ -50,12 +50,31 @@ describe("managed cases server pagination", () => {
     typeShim.mockRestore();
     service = new ApiCaseManagementService(
       source.getRepository(ApiTestCaseEntity),
+      { query: jest.fn() } as unknown as DataSource,
     );
   });
   afterEach(() => jest.restoreAllMocks());
   function query(input: Partial<ListManagedCasesDto> = {}) {
     return Object.assign(new ListManagedCasesDto(), input);
   }
+  it("loads execution versions and plans from the test-platform database", async () => {
+    const testDb = (service as any).testDb as DataSource;
+    const queryMock = jest
+      .spyOn(testDb, "query")
+      .mockResolvedValueOnce([
+        { id: 29, name: "版本 29", versionTime: "2026-09-29" },
+      ])
+      .mockResolvedValueOnce([
+        { id: 300, pid: 0, versionId: 29, name: "应用", roundNum: 1 },
+      ]);
+    await expect(service.executionVersions()).resolves.toEqual([
+      { id: "29", name: "版本 29", versionTime: "2026-09-29" },
+    ]);
+    await expect(service.executionPlans(29, 0)).resolves.toEqual([
+      { id: "300", pid: "0", versionId: "29", name: "应用", roundNum: 1 },
+    ]);
+    expect(queryMock.mock.calls[1][1]).toEqual([29, 0]);
+  });
   it("limits queries in TypeORM, with deterministic ordering and database count", async () => {
     const qb = (service as any).filtered(query());
     const mock = jest.spyOn(qb, "getManyAndCount").mockResolvedValue([[], 45]);

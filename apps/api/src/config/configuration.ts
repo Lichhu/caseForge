@@ -67,6 +67,13 @@ export default (): AppConfig => ({
     testInfoListPath:
       process.env.SMP_TEST_INFO_LIST ??
       "serviceManagementGovernanceController/selectTestInfoList",
+    uploadFileUrl:
+      process.env.SMP_UPLOAD_FILE_URL ??
+      "http://36.114.30.180:12001/api/auto/uploadFile",
+    receiveAutoResultUrl:
+      process.env.SMP_RECEIVE_AUTO_RESULT_URL ??
+      "http://36.114.30.180:12001/api/pre/execute/receiveAutoResult",
+    accessToken: process.env.SMP_ACCESS_TOKEN ?? "",
     requestTimeoutMs: Number(process.env.SMP_REQUEST_TIMEOUT_MS ?? 90000),
   },
   requirementPlatform: {

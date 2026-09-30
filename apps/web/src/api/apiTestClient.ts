@@ -1222,9 +1222,9 @@ export async function generateDataFunctionScript(
   ).data;
 }
 
-export async function publishCaseReport(projectId: string, transactionId: string, runId: string) {
+export async function publishCaseReport(projectId: string, transactionId: string, runId: string, selection: { versionId: string; applicationId: string; roundId: string }) {
   return (await http.post<{ runId: string; fileName: string; reportUrl: string; notificationStatus: "queued" | "disabled" }>(
-    `${transactionBase(projectId, transactionId)}/reports/publish-case`, { runId },
+    `${transactionBase(projectId, transactionId)}/reports/publish-case`, { runId, ...selection },
   )).data;
 }
 
@@ -1242,6 +1242,15 @@ export async function selectManagedCases(params: ManagedCaseQuery) {
 }
 export async function getManagedCaseDetails(ids: string[]) {
   return (await http.post<ManagedCaseRow[]>("api-test/case-management/details", { ids })).data;
+}
+
+export interface ExecutionVersionOption { id: string; name: string; versionTime: string; }
+export interface ExecutionPlanOption { id: string; pid: string; versionId: string; name: string; roundNum: number | string | null; }
+export async function listExecutionVersions() {
+  return (await http.get<ExecutionVersionOption[]>("api-test/case-management/execution-versions")).data;
+}
+export async function listExecutionPlans(versionId: string, parentId: string) {
+  return (await http.get<ExecutionPlanOption[]>("api-test/case-management/execution-plans", { params: { versionId, parentId } })).data;
 }
 
 export interface CaseApplicationNode { id: string; name: string; isLeaf?: boolean; children?: CaseApplicationNode[]; }

@@ -33,7 +33,7 @@
         <a-button
           type="primary"
           :disabled="!selectedCases.length || loading || selecting"
-          :loading="running || preparing"
+          :loading="running"
           @click="prepareExecution"
           >快捷批量执行</a-button
         >
@@ -177,6 +177,14 @@
         本次执行结果
         <span class="muted">{{ settledCount }} / {{ results.length }}</span>
       </h2>
+      <div class="execution-progress" aria-live="polite">
+        <div class="execution-progress-head">
+          <span>{{ running ? "执行并上传中" : "执行完成" }}</span>
+          <strong>{{ executionProgress }}%</strong>
+        </div>
+        <a-progress :percent="executionProgress" :status="executionProgressStatus" :show-info="false" />
+        <div class="execution-progress-detail">已完成 {{ settledCount }} / {{ results.length }} 个案例</div>
+      </div>
       <a-alert
         v-if="running"
         type="info"
@@ -251,6 +259,7 @@
       title="确认批量执行"
       ok-text="开始执行并发布报告"
       :confirm-loading="running"
+      :ok-button-props="{ disabled: !executionVersionId || !executionApplicationId || !executionRoundId }"
       @ok="runSelected"
     >
       <p>
@@ -259,19 +268,34 @@
       </p>
       <a-alert
         type="warning"
-        message="会向所选环境发送真实测试请求。未启用案例不可执行；通知关闭时只上传报告，不会伪报推送成功。"
+        message="会按照案例步骤中已配置的环境和地址发送真实测试请求。未启用案例不可执行；通知关闭时只上传报告，不会伪报推送成功。"
         show-icon
       />
-      <div
-        v-for="item in executionEnvironments"
-        :key="item.projectId"
-        class="environment-row"
-      >
-        <label>{{ item.label }}</label>
+      <div class="execution-fields">
+        <label>版本</label>
         <a-select
-          v-model:value="item.environmentId"
-          :options="item.options"
-          placeholder="请选择执行环境"
+          v-model:value="executionVersionId"
+          :options="executionVersionOptions"
+          :loading="executionOptionsLoading"
+          placeholder="请选择版本"
+          @change="onExecutionVersionChange"
+        />
+        <label>应用</label>
+        <a-select
+          v-model:value="executionApplicationId"
+          :options="executionApplicationOptions"
+          :loading="executionPlansLoading"
+          :disabled="!executionVersionId"
+          placeholder="请选择应用"
+          @change="onExecutionApplicationChange"
+        />
+        <label>轮次</label>
+        <a-select
+          v-model:value="executionRoundId"
+          :options="executionRoundOptions"
+          :loading="executionRoundsLoading"
+          :disabled="!executionApplicationId"
+          placeholder="请选择轮次"
         />
       </div>
     </a-modal>
@@ -288,6 +312,8 @@ import {
   getManagedCaseOptions,
   selectManagedCases,
   getManagedCaseDetails,
+  listExecutionVersions,
+  listExecutionPlans,
   listCaseApplicationSystems,
   listCaseApplicationChildren,
   listCaseDesigners,
@@ -295,7 +321,6 @@ import {
   type ManagedCaseRow,
   type ManagedCaseSelection,
   type ManagedCaseOptions,
-  listApiEnvironments,
   runApiCases,
   publishCaseReport,
 } from "@/api/apiTestClient";
@@ -342,23 +367,29 @@ const selectedKeys = ref<string[]>([]);
 const loading = ref(false);
 const loadError = ref("");
 const running = ref(false);
-const preparing = ref(false);
 const executionOpen = ref(false);
+const executionOptionsLoading = ref(false);
+const executionPlansLoading = ref(false);
+const executionRoundsLoading = ref(false);
+const executionVersionId = ref<string>();
+const executionApplicationId = ref<string>();
+const executionRoundId = ref<string>();
+const executionVersionOptions = ref<Array<{ value: string; label: string }>>([]);
+const executionApplicationOptions = ref<Array<{ value: string; label: string }>>([]);
+const executionRoundOptions = ref<Array<{ value: string; label: string }>>([]);
 const exportOpen = ref(false);
 const applicationPath = ref<string>();
 const designer = ref<string>();
 const applicationTree = ref<any[]>([]);
 const applicationChildrenCache = new Map<string, any[]>();
 const designerOptions = ref<Array<{ value: string; label: string }>>([]);
-const executionEnvironments = ref<
-  Array<{
-    projectId: string;
-    label: string;
-    environmentId?: string;
-    options: Array<{ value: string; label: string }>;
-  }>
->([]);
 const results = ref<Result[]>([]);
+const executionProgress = computed(() =>
+  results.value.length ? Math.round((settledCount.value / results.value.length) * 100) : 0,
+);
+const executionProgressStatus = computed(() =>
+  running.value ? "active" : results.value.some((item) => item.delivery.includes("失败") || item.execution === "执行请求失败") ? "exception" : "success",
+);
 const moduleOptions = [
   { value: "project", label: "项目管理" },
   { value: "requirement", label: "需求管理" },
@@ -633,32 +664,61 @@ async function confirmExport() {
   }
 }
 async function prepareExecution() {
-  if (preparing.value || running.value || publishing.value) return;
+  if (running.value || publishing.value) return;
   if (selectedCases.value.some((c) => !c.enabled)) {
     message.warning("选中案例包含未启用案例，请先启用或取消勾选");
     return;
   }
-  preparing.value = true;
-  const ids = [...new Set(selectedCases.value.map((c) => c.projectId))];
+  executionVersionId.value = undefined;
+  executionApplicationId.value = undefined;
+  executionRoundId.value = undefined;
+  executionApplicationOptions.value = [];
+  executionRoundOptions.value = [];
+  executionOpen.value = true;
+  executionOptionsLoading.value = true;
   try {
-    executionEnvironments.value = await Promise.all(
-      ids.map(async (id) => {
-        const environments = (await listApiEnvironments(id)).filter(
-          (e) => e.enabled,
-        );
-        return {
-          projectId: id,
-          label: projectOptions.value.find((p) => p.value === id)?.label || id,
-          environmentId: environments.find((e) => e.isDefault)?.id,
-          options: environments.map((e) => ({ value: e.id, label: e.name })),
-        };
-      }),
-    );
-    executionOpen.value = true;
+    const versions = await listExecutionVersions();
+    executionVersionOptions.value = versions.map((item) => ({
+      value: item.id,
+      label: item.name,
+    }));
   } catch {
-    message.error("加载执行环境失败，请重试");
+    message.error("加载执行版本失败，请重试");
   } finally {
-    preparing.value = false;
+    executionOptionsLoading.value = false;
+  }
+}
+async function onExecutionVersionChange(value?: string) {
+  executionApplicationId.value = undefined;
+  executionRoundId.value = undefined;
+  executionApplicationOptions.value = [];
+  executionRoundOptions.value = [];
+  if (!value) return;
+  executionPlansLoading.value = true;
+  try {
+    const plans = await listExecutionPlans(value, "0");
+    executionApplicationOptions.value = plans.map((item) => ({ value: item.id, label: item.name }));
+  } catch {
+    message.error("加载应用失败，请重试");
+  } finally {
+    executionPlansLoading.value = false;
+  }
+}
+async function onExecutionApplicationChange(value?: string) {
+  executionRoundId.value = undefined;
+  executionRoundOptions.value = [];
+  if (!value || !executionVersionId.value) return;
+  executionRoundsLoading.value = true;
+  try {
+    const plans = await listExecutionPlans(executionVersionId.value, value);
+    executionRoundOptions.value = plans.map((item) => ({
+      value: item.id,
+      label: item.roundNum == null ? item.name : `${item.name}（第 ${item.roundNum} 轮）`,
+    }));
+  } catch {
+    message.error("加载轮次失败，请重试");
+  } finally {
+    executionRoundsLoading.value = false;
   }
 }
 async function deliver(result: Result) {
@@ -670,6 +730,7 @@ async function deliver(result: Result) {
       result.projectId,
       result.transactionId,
       result.runId,
+      { versionId: executionVersionId.value!, applicationId: executionApplicationId.value!, roundId: executionRoundId.value! },
     );
     result.reportUrl = published.reportUrl;
     result.delivery =
@@ -684,11 +745,8 @@ async function deliver(result: Result) {
 }
 async function runSelected() {
   if (running.value || publishing.value || !selectedCases.value.length) return;
-  const environments = new Map(
-    executionEnvironments.value.map((e) => [e.projectId, e.environmentId]),
-  );
-  if (selectedCases.value.some((c) => !environments.get(c.projectId))) {
-    message.warning("请为所有需求选择执行环境");
+  if (!executionVersionId.value || !executionApplicationId.value || !executionRoundId.value) {
+    message.warning("请选择版本、应用和轮次");
     return;
   }
   results.value = selectedCases.value.map((c) => ({
@@ -707,15 +765,27 @@ async function runSelected() {
       try {
         const run = await runApiCases(result.projectId, result.transactionId, {
           caseIds: [result.caseId],
-          environmentId: environments.get(result.projectId),
         });
         result.runId = run.id;
         result.execution =
           run.totalCount === 1 && run.passedCount === 1 ? "通过" : "未通过";
         await deliver(result);
-      } catch {
+      } catch (error) {
         result.execution = "执行请求失败";
-        result.delivery = "可到结果报表核对执行记录后再决定是否重试";
+        result.delivery = error instanceof Error
+          ? error.message
+          : "执行请求失败，请检查案例步骤配置";
+        // 配置类 400（例如步骤未配置环境地址）对后续案例同样无效，立即停止，避免重复请求。
+        if (error instanceof Error && /未指定环境地址|未指定执行环境|Bad Request/i.test(error.message)) {
+          for (const pending of results.value) {
+            if (pending.execution === "待执行") {
+              pending.execution = "未执行";
+              pending.delivery = "因前置案例配置错误已跳过";
+            }
+          }
+          message.error(error.message);
+          break;
+        }
       }
     }
   } finally {
@@ -931,16 +1001,35 @@ onBeforeUnmount(() => {
 .results-card h2 {
   font-size: 18px;
 }
+.execution-progress {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--cf-border, #e5e7eb);
+  background: #fafafa;
+}
+.execution-progress-head {
+  display: flex;
+  justify-content: space-between;
+  color: var(--cf-text-secondary, #687280);
+  font-size: 13px;
+}
+.execution-progress-head strong {
+  color: var(--cf-text, #1f2937);
+}
+.execution-progress-detail {
+  color: var(--cf-text-secondary, #687280);
+  font-size: 12px;
+}
 .report-link {
   margin-left: 12px;
 }
-.environment-row {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 16px 0;
+.execution-fields {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px 12px;
+  margin-top: 20px;
 }
-
 .export-field {
   display: grid;
   grid-template-columns: 84px minmax(0, 1fr);

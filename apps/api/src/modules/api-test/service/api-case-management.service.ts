@@ -4,7 +4,9 @@ import type {
 } from "@case-forge/shared";
 import { Injectable, BadRequestException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { InjectDataSource } from "@nestjs/typeorm";
+import { DataSource, Repository } from "typeorm";
+import { TEST_PLATFORM_CONNECTION } from "@common/test-platform";
 import { RequestContext } from "@common/audit/request-context";
 import { toPublicApiCase } from "@common/http/public-response.util";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
@@ -36,7 +38,45 @@ export class ApiCaseManagementService {
   constructor(
     @InjectRepository(ApiTestCaseEntity)
     private readonly cases: Repository<ApiTestCaseEntity>,
+    @InjectDataSource(TEST_PLATFORM_CONNECTION)
+    private readonly testDb: DataSource,
   ) {}
+
+  async executionVersions() {
+    const rows = await this.testDb.query<
+      Array<{ id: string | number; name: string; versionTime: Date | string }>
+    >(
+      `SELECT id, name, version_time AS versionTime
+       FROM t_pre_version
+       WHERE data_status = 0
+       ORDER BY version_time DESC, id DESC`,
+    );
+    return rows.map((row) => ({ ...row, id: String(row.id) }));
+  }
+
+  async executionPlans(versionId: number, parentId: number) {
+    const rows = await this.testDb.query<
+      Array<{
+        id: string | number;
+        pid: string | number;
+        versionId: string | number;
+        name: string;
+        roundNum: string | number | null;
+      }>
+    >(
+      `SELECT id, pid, version_id AS versionId, name, round_num AS roundNum
+       FROM t_pre_execute_plan
+       WHERE version_id = ? AND data_status = 0 AND pid = ?
+       ORDER BY round_num ASC, id ASC`,
+      [versionId, parentId],
+    );
+    return rows.map((row) => ({
+      ...row,
+      id: String(row.id),
+      pid: String(row.pid),
+      versionId: String(row.versionId),
+    }));
+  }
 
   private base() {
     const user = RequestContext.getUserName();
