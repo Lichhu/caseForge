@@ -75,7 +75,7 @@ export class ApiCaseReportDeliveryService {
         {
           startTime: new Date().toISOString(),
           endTime: new Date().toISOString(),
-          caseNo: item.caseNo || item.caseId,
+          casesNo: item?.caseId ? `${'api-plaform:'}${item?.caseId}` : `${'api-plaform:'}${item?.caseNo}`,
           caseName: item.caseTitle,
           result: item.status === "passed" ? "成功" : "失败",
           message: "",

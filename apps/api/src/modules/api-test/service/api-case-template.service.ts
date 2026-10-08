@@ -27,6 +27,16 @@ function jsonText(value: unknown) {
       : JSON.stringify(value, null, 2);
 }
 
+function exportExpectedResult(row: ApiTestCaseEntity) {
+  const description = row.description?.trim();
+  if (description) return description;
+
+  const expected = jsonText(row.expected).trim();
+  if (expected && expected !== "{}" && expected !== "[]") return expected;
+
+  return "接口响应结果符合预期";
+}
+
 @Injectable()
 export class ApiCaseTemplateService {
   constructor(
@@ -144,12 +154,12 @@ export class ApiCaseTemplateService {
         `${name}${row.description ? ` ${row.description}` : ""}`,
         PRECONDITIONS,
         STEPS,
-        row.description || "",
+        exportExpectedResult(row),
         "",
         "",
         "",
         "是",
-        row.id,
+        `${'api-platform:'}${row.id}`,
         row.remark || "",
       ];
       fields.forEach((value, col) => (out.getCell(col + 1).value = value));
