@@ -156,7 +156,7 @@ export class ApiCaseTemplateService {
         "",
         "",
         "是",
-        `${'api-platform:'}${row.id}`,
+        `${'api-plaform:'}${row.id}`,
         row.remark || "",
       ];
       fields.forEach((value, col) => (out.getCell(col + 1).value = value));
