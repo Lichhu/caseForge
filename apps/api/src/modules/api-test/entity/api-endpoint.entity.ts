@@ -47,10 +47,10 @@ export class ApiEndpointEntity extends SoftDeletableEntity {
   @Column({ type: "text", nullable: true })
   summary?: string;
 
-  @Column({ type: "text", nullable: true })
+  @Column({ type: "longtext", nullable: true })
   requestNotes?: string;
 
-  @Column({ type: "text", nullable: true })
+  @Column({ type: "longtext", nullable: true })
   responseNotes?: string;
 
   @Column({ type: "json", nullable: true })
