@@ -382,7 +382,7 @@ const applicationPath = ref<string>();
 const designer = ref<string>();
 const applicationTree = ref<any[]>([]);
 const applicationChildrenCache = new Map<string, any[]>();
-const designerOptions = ref<Array<{ value: string; label: string }>>([]);
+const designerOptions = ref<Array<{ value: string; label: string; user: any }>>([]);
 const results = ref<Result[]>([]);
 const executionProgress = computed(() =>
   results.value.length ? Math.round((settledCount.value / results.value.length) * 100) : 0,
@@ -575,6 +575,7 @@ async function exportSelected() {
     designerOptions.value = users.map((user) => ({
       value: user.userName,
       label: `${user.nickName}（${user.userName}）`,
+      user
     }));
   } catch {
     message.error("加载导出选项失败，请重试");
@@ -645,10 +646,11 @@ async function confirmExport() {
   exporting.value = true;
   try {
     const rows = await getManagedCaseDetails([...selectedKeys.value]);
+    const picked = designerOptions.value.find((o) => o.value === designer.value);
     const file = await exportCaseTemplate({
       caseIds: rows.map((row) => row.id),
       applicationPath: `/${path.join("/")}`,
-      designer: designer.value,
+      designer: picked?.user?.nickName,
     });
     const url = URL.createObjectURL(file.blob);
     const anchor = document.createElement("a");

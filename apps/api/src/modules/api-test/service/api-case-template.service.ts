@@ -31,9 +31,6 @@ function exportExpectedResult(row: ApiTestCaseEntity) {
   const description = row.description?.trim();
   if (description) return description;
 
-  const expected = jsonText(row.expected).trim();
-  if (expected && expected !== "{}" && expected !== "[]") return expected;
-
   return "接口响应结果符合预期";
 }
 
