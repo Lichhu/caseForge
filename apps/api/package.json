@@ -5,9 +5,9 @@
   "description": "CaseForge NestJS API",
   "main": "src/bootstrap.ts",
   "scripts": {
-    "dev": "cross-env NODE_ENV=development nest start --debug --watch --entryFile bootstrap",
-    "local": "cross-env NODE_ENV=local nest start --debug --watch --entryFile bootstrap",
-    "start": "cross-env NODE_ENV=development ts-node -r tsconfig-paths/register src/bootstrap.ts",
+    "dev": "cross-env NODE_ENV=development NODE_OPTIONS=--openssl-legacy-provider nest start --debug --watch --entryFile bootstrap",
+    "local": "cross-env NODE_ENV=local NODE_OPTIONS=--openssl-legacy-provider nest start --debug --watch --entryFile bootstrap",
+    "start": "cross-env NODE_ENV=development NODE_OPTIONS=--openssl-legacy-provider ts-node -r tsconfig-paths/register src/bootstrap.ts",
     "build": "nest build",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",

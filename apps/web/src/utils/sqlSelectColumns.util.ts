@@ -1,7 +1,8 @@
 /**
  * 解析数据函数查询 SQL 的 SELECT 列名，供插入函数时「结果字段」下拉使用。
- * 支持别名（AS alias）与表名前缀列；WITH ... AS (...) 公共表表达式取外层
- * 最终 SELECT 的列；SELECT * 或无法解析时返回空数组，此时下拉退化为手动输入。
+ * 支持别名（AS alias，含 Unicode/中文及反引号、双引号、方括号包裹的引号标识符）
+ * 与表名前缀列；WITH ... AS (...) 公共表表达式取外层最终 SELECT 的列；
+ * SELECT * 或无法解析时返回空数组，此时下拉退化为手动输入。
  */
 export function parseSqlSelectColumns(sql: string): string[] {
   const flattened = sql.replace(/\s+/g, " ").trim();
@@ -9,13 +10,34 @@ export function parseSqlSelectColumns(sql: string): string[] {
   if (!list || list === "*") return [];
   const columns: string[] = [];
   for (const item of splitTopLevelItems(list)) {
-    const alias = item.match(/\bas\s+([A-Za-z_][A-Za-z0-9_]*)$/i);
-    const raw = alias ? alias[1] : (item.trim().split(".").pop() ?? "");
-    const name = raw.trim();
-    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && !columns.includes(name))
-      columns.push(name);
+    const alias = extractAlias(item);
+    const raw = alias ?? (item.trim().split(".").pop() ?? "");
+    const name = stripQuotes(raw.trim());
+    if (isIdentifier(name) && !columns.includes(name)) columns.push(name);
   }
   return columns;
+}
+
+/**
+ * 取 AS 后的别名：支持反引号/双引号/方括号包裹的标识符，以及以 Unicode
+ * 字母或下划线开头的裸标识符（如中文别名）。无 AS 别名时返回 undefined。
+ */
+function extractAlias(item: string): string | undefined {
+  const match = item.match(
+    /\bas\s+("([^"]+)"|`([^`]+)`|\[([^\]]+)\]|([\p{L}_][\p{L}\p{N}_$]*))$/iu,
+  );
+  if (!match) return undefined;
+  return match[2] ?? match[3] ?? match[4] ?? match[5];
+}
+
+/** 去掉标识符外层的引号/反引号/方括号 */
+function stripQuotes(name: string): string {
+  return name.replace(/^["`[]/, "").replace(/["`\]]$/, "");
+}
+
+/** 是否为合法列名/别名（允许 Unicode 字母、数字、下划线与 $） */
+function isIdentifier(name: string): boolean {
+  return /^[\p{L}_][\p{L}\p{N}_$]*$/u.test(name);
 }
 
 /**

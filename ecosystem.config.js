@@ -24,6 +24,11 @@ module.exports = {
       cwd: './apps/api',
       script: 'dist/bootstrap.js',
 
+      // 达梦 dmdb 驱动在建连「消息加密」时使用了 OpenSSL 3.0 默认禁用的
+      // legacy 算法（Node 17+ 报 error:0308010C ...::unsupported），
+      // 需在进程启动时启用 OpenSSL legacy provider。
+      node_args: '--openssl-legacy-provider',
+
       // —— 关键：单实例 fork，切勿改成 cluster ——
       instances: 1,
       exec_mode: 'fork',

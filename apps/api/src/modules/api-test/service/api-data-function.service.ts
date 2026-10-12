@@ -551,15 +551,28 @@ export class ApiDataFunctionService {
     sql += ["Oracle", "OceanBase-Oracle", "DM8"].includes(connection.type)
       ? " FETCH FIRST 1 ROWS ONLY"
       : " LIMIT 1";
-    const pool = await this.pool(connection);
+    let pool: DbPool | undefined;
     try {
+      pool = await this.pool(connection);
       const [rows] = await pool.query({ sql, timeout: 10000 }, params);
       const first = rows[0];
       const field = String(config.returnField ?? "");
       if (field) return first?.[field] ?? "";
       return first ?? "";
+    } catch (error) {
+      // 与 testConnection 一致：把驱动/数据库的原始报错包装成 400，
+      // 避免试运行 SQL 失败时只抛出无信息的 Internal server error。
+      throw new BadRequestException(
+        `SQL 执行失败: ${error instanceof Error ? error.message : String(error)}`,
+      );
     } finally {
-      await pool.end();
+      if (pool) {
+        try {
+          await pool.end();
+        } catch {
+          // 忽略关闭异常，不掩盖主错误
+        }
+      }
     }
   }
   private parseArgs(source: string) {
@@ -680,9 +693,10 @@ export class ApiDataFunctionService {
       return {
         query: async (input: any, params: unknown[] = []) => {
           const sql = typeof input === "string" ? input : input.sql;
-          let index = 0;
+          // dmdb 原生支持 `?` 位置绑定；若把 `?` 改写成 `:1/:2` 这类数字名，
+          // 达梦服务端不会将其识别为绑定参数，导致绑定数与占位符数不匹配而报错。
           const result = await conn.execute(
-            sql.replace(/\?/g, () => `:${++index}`),
+            sql,
             params.map((val) => ({ val })),
           );
           return [result.rows ?? [], result.metaData ?? []];
