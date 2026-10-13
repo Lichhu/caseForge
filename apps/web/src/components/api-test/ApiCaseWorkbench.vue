@@ -2654,8 +2654,24 @@ async function onGenerateAssertions() {
 }
 
 async function waitForAssertionResult(caseId: string, jobId: string) {
+  const startedAt = Date.now();
+  let consecutiveStatusErrors = 0;
   while (true) {
-    const status = await getAssertionGenerateStatus(projectId.value, transactionId.value, caseId, jobId);
+    if (Date.now() - startedAt > 15 * 60 * 1000) {
+      throw new Error('AI 任务等待超过 15 分钟，请检查 AI 服务和任务队列');
+    }
+    let status;
+    try {
+      status = await getAssertionGenerateStatus(projectId.value, transactionId.value, caseId, jobId);
+      consecutiveStatusErrors = 0;
+    } catch (error) {
+      consecutiveStatusErrors += 1;
+      if (consecutiveStatusErrors >= 5) {
+        throw new Error(`连续 ${consecutiveStatusErrors} 次查询 AI 任务状态失败：${error instanceof Error ? error.message : '未知错误'}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, ASSERTION_POLL_INTERVAL_MS));
+      continue;
+    }
     if (status.phase === 'completed') {
       return getAssertionGenerateResult(projectId.value, transactionId.value, caseId, jobId);
     }
@@ -2709,6 +2725,7 @@ async function onBatchGenerateAssertions() {
           if (responseIssue) throw new Error(result.error || responseIssue);
           const bodyText = typeof step.request.body === 'string' ? step.request.body.trim() : '';
           const job = await generateAssertions(projectId.value, transactionId.value, {
+            caseId: row.id,
             transport: step.request.transport || 'http',
             messageFormat: step.request.contentType?.includes('xml') || bodyText.startsWith('<') ? 'xml' : 'json',
             polarity: row.polarity,

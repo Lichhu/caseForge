@@ -462,11 +462,10 @@ export async function generateAssertionsFromResponse(
       .replace("{headers}", headersStr);
   }
 
-  const { text } = await aiWorkflow.runWithAiChat(prompt);
-  const assertions = aiWorkflow.parseJsonArray<ApiAssertion>(text) ?? [];
-
-  return normalizeGeneratedAssertions(
-    assertions
+  const parseAssertions = (text: string) => {
+    const assertions = aiWorkflow.parseJsonArray<ApiAssertion>(text) ?? [];
+    return normalizeGeneratedAssertions(
+      assertions
       .filter((a) => a && a.type && a.operator)
       .map((assertion) => ({
         ...assertion,
@@ -479,10 +478,28 @@ export async function generateAssertionsFromResponse(
                 )
                 .replace(/length\(\s*@\[\*\]\s*\)/g, "length(@)")
             : assertion.expression,
-      })),
-    {
-      messageFormat: input.messageFormat,
-      transport: input.transport,
-    },
-  );
+        })),
+      {
+        messageFormat: input.messageFormat,
+        transport: input.transport,
+      },
+    );
+  };
+
+  const first = await aiWorkflow.runWithAiChat(prompt);
+  const assertions = parseAssertions(first.text);
+  if (assertions.length) return assertions;
+
+  const retryPrompt = [
+    prompt,
+    "",
+    "上一次输出是空数组或未包含有效断言。请根据响应信息至少生成一条可执行断言。",
+    "只输出非空 JSON 数组；每条断言必须包含有效的 type 和 operator。",
+  ].join("\n");
+  const retry = await aiWorkflow.runWithAiChat(retryPrompt);
+  const retriedAssertions = parseAssertions(retry.text);
+  if (!retriedAssertions.length) {
+    throw new Error("AI 两次均未生成有效断言（返回空数组或格式无效）");
+  }
+  return retriedAssertions;
 }

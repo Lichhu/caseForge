@@ -286,6 +286,19 @@ describe("ApiAssertionGenerateQueueService", () => {
       expect(jobRepo.save).not.toHaveBeenCalled();
     });
 
+    it("does not reuse a running job from another case", async () => {
+      const { service, jobRepo } = buildService({ suppressPump: true });
+      const first = await service.enqueue({ ...baseInput, caseId: "case-a" });
+      first.status = "running";
+      jobRepo._store.set(first.id, first);
+
+      const second = await service.enqueue({ ...baseInput, caseId: "case-b" });
+
+      expect(second.id).not.toBe(first.id);
+      expect(second.caseId).toBe("case-b");
+      expect(jobRepo._store.size).toBe(2);
+    });
+
     it("serializes body as string", async () => {
       const { service, jobRepo } = buildService({ suppressPump: true });
       const job = await service.enqueue({

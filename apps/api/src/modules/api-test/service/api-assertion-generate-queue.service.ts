@@ -309,17 +309,27 @@ export class ApiAssertionGenerateQueueService
           // keep as string
         }
 
-        const assertions = await generateAssertionsFromResponse(
-          this.aiWorkflow,
-          {
-            transport: job.transport,
-            messageFormat: job.messageFormat,
-            polarity: job.polarity as "positive" | "negative",
-            statusCode: job.statusCode,
-            headers: job.headers,
-            body,
-          },
-        );
+        let assertions: ApiAssertion[] = [];
+        for (let attempt = 0; ; attempt += 1) {
+          try {
+            assertions = await generateAssertionsFromResponse(this.aiWorkflow, {
+              transport: job.transport,
+              messageFormat: job.messageFormat,
+              polarity: job.polarity as "positive" | "negative",
+              statusCode: job.statusCode,
+              headers: job.headers,
+              body,
+            });
+            break;
+          } catch (error) {
+            if (attempt >= 2 || !this.isTransientAiError(error)) throw error;
+            const delayMs = 1000 * 2 ** attempt;
+            this.logger.warn(
+              `断言生成临时失败，${delayMs}ms 后重试 job=${jobId} attempt=${attempt + 1}: ${(error as Error)?.message ?? error}`,
+            );
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+          }
+        }
 
         const latest = await this.jobRepo.findOne({ where: { id: jobId } });
         if (!latest) return;
@@ -350,6 +360,13 @@ export class ApiAssertionGenerateQueueService
   private background(task: Promise<unknown>) {
     void task.catch((error) =>
       this.logger.error(`后台队列异常: ${(error as Error)?.message ?? error}`),
+    );
+  }
+
+  private isTransientAiError(error: unknown) {
+    const message = (error as Error)?.message ?? String(error);
+    return /HTTP\s+(429|5\d\d)\b|timeout|timed out|AbortError|fetch failed|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up/i.test(
+      message,
     );
   }
 }

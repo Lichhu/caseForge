@@ -107,12 +107,13 @@ describe("compressApiStructuredDoc", () => {
 
 function createMockAiWorkflow(
   capturedPrompt: { value: string },
-  responseText: string,
+  responseText: string | string[],
 ) {
+  const responses = Array.isArray(responseText) ? responseText : [responseText];
   return {
     runWithAiChat: jest.fn(async (prompt: string) => {
       capturedPrompt.value = prompt;
-      return { text: responseText };
+      return { text: responses.shift() ?? "[]" };
     }),
     parseJsonArray: jest.fn(<T>(text: string): T[] | null => {
       try {
@@ -209,5 +210,37 @@ describe("generateAssertionsFromResponse", () => {
 
     expect(assertions).toHaveLength(2);
     expect(assertions.every((a) => a.type && a.operator)).toBe(true);
+  });
+
+  it("retries once when the model returns no valid assertions", async () => {
+    const captured = { value: "" };
+    const ai = createMockAiWorkflow(captured, ["[]", '[{"type":"status_code","operator":"eq","expected":"200"}]']);
+
+    const assertions = await generateAssertionsFromResponse(ai, {
+      transport: "http",
+      messageFormat: "json",
+      polarity: "positive",
+      statusCode: 200,
+      headers: {},
+      body: { ok: true },
+    });
+
+    expect(ai.runWithAiChat).toHaveBeenCalledTimes(2);
+    expect(ai.runWithAiChat.mock.calls[1][0]).toContain("至少生成一条可执行断言");
+    expect(assertions).toHaveLength(1);
+  });
+
+  it("throws a clear error when both model responses contain no valid assertions", async () => {
+    const ai = createMockAiWorkflow({ value: "" }, ["[]", "[]"]);
+
+    await expect(generateAssertionsFromResponse(ai, {
+      transport: "http",
+      messageFormat: "json",
+      polarity: "positive",
+      statusCode: 200,
+      headers: {},
+      body: { ok: true },
+    })).rejects.toThrow("AI 两次均未生成有效断言");
+    expect(ai.runWithAiChat).toHaveBeenCalledTimes(2);
   });
 });
