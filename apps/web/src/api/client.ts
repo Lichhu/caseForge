@@ -1,5 +1,5 @@
 import axios from "axios";
-import { getUserApiBaseUrl } from "@/utils/apiPath";
+import { getApiRoot, getUserApiBaseUrl } from "@/utils/apiPath";
 import { getUserName } from "@/utils/userContext";
 import type {
   CaseExcelRow,
@@ -27,8 +27,14 @@ export const http = axios.create({
 
 http.interceptors.request.use((config) => {
   config.headers = config.headers ?? {};
-  config.headers["X-User-Name"] = getUserName();
-  config.baseURL = getUserApiBaseUrl();
+  const userName = getUserName();
+  if (userName) {
+    config.headers["X-User-Name"] = userName;
+    config.baseURL = getUserApiBaseUrl();
+  } else {
+    delete config.headers["X-User-Name"];
+    config.baseURL = getApiRoot();
+  }
   return config;
 });
 

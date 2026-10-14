@@ -31,6 +31,11 @@
           >批量导出 · {{ selectedCases.length }}</a-button
         >
         <a-button
+          :disabled="!selectedCases.length || selectedCases.length > 1000 || loading || selecting || running"
+          @click="openBatchApplication"
+          >批量指定归属应用</a-button
+        >
+        <a-button
           type="primary"
           :disabled="!selectedCases.length || loading || selecting"
           :loading="running"
@@ -55,6 +60,20 @@
         />
       </div>
       <div class="filters">
+        <label class="filter-field filter-application-field"
+          >归属应用<a-tree-select
+            v-model:value="applicationFilterNode"
+            allow-clear
+            :load-data="loadApplicationChildren"
+            :tree-data="applicationTree"
+            placeholder="全部归属应用"
+            :tree-default-expand-all="false"
+            show-search
+            tree-node-filter-prop="title"
+            popup-class-name="export-application-dropdown"
+            :disabled="running"
+            @dropdown-visible-change="onApplicationFilterDropdown"
+        /></label>
         <label class="filter-field"
           >需求编号<a-select
             v-model:value="projectId"
@@ -136,6 +155,16 @@
             data-index="title"
             :ellipsis="true"
           />
+          <a-table-column title="归属应用" key="applicationPath" width="260">
+            <template #default="{ record }">
+              <div class="application-cell">
+                <a-tooltip :title="record.applicationPath || '未指定'">
+                  <span class="application-value">{{ record.applicationPath || "未指定" }}</span>
+                </a-tooltip>
+                <a-button type="link" size="small" :disabled="running" @click="editApplication(record)">{{ record.applicationPath ? "修改" : "指定" }}</a-button>
+              </div>
+            </template>
+          </a-table-column>
           <a-table-column title="版本" key="version" width="130"
             ><template #default="{ record }">{{
               versionLabel(record) || "未版本化"
@@ -227,22 +256,9 @@
       title="导出测试案例"
       ok-text="导出"
       :confirm-loading="exporting"
-      :ok-button-props="{ disabled: !applicationPath || !designer }"
+      :ok-button-props="{ disabled: !designer }"
       @ok="confirmExport"
     >
-      <div class="export-field">
-        <label>归属应用</label
-        ><a-tree-select
-          v-model:value="applicationPath"
-          :load-data="loadApplicationChildren"
-          :tree-data="applicationTree"
-          placeholder="请选择归属应用"
-          :tree-default-expand-all="false"
-          show-search
-          tree-node-filter-prop="title"
-          popup-class-name="export-application-dropdown"
-        />
-      </div>
       <div class="export-field">
         <label>设计人</label
         ><a-select
@@ -251,6 +267,56 @@
           option-filter-prop="label"
           placeholder="请选择设计人"
           :options="designerOptions"
+        />
+      </div>
+    </a-modal>
+    <a-modal
+      v-model:open="applicationEditOpen"
+      title="指定归属应用"
+      ok-text="保存"
+      :confirm-loading="savingApplication"
+      :ok-button-props="{ disabled: !editingCase }"
+      @ok="saveApplication"
+    >
+      <div class="export-field">
+        <label>案例</label>
+        <span>{{ editingCase?.caseNo || editingCase?.title }}</span>
+      </div>
+      <div class="export-field">
+        <label>归属应用</label>
+        <a-tree-select
+          v-model:value="editingApplicationNode"
+          :load-data="loadApplicationChildren"
+          :tree-data="applicationTree"
+          allow-clear
+          placeholder="请选择归属应用"
+          :tree-default-expand-all="false"
+          show-search
+          tree-node-filter-prop="title"
+          popup-class-name="export-application-dropdown"
+        />
+      </div>
+    </a-modal>
+    <a-modal
+      v-model:open="batchApplicationOpen"
+      title="批量指定归属应用"
+      ok-text="保存"
+      :confirm-loading="savingBatchApplication"
+      :ok-button-props="{ disabled: !batchApplicationNode || !selectedCases.length }"
+      @ok="saveBatchApplication"
+    >
+      <p>将为已选的 {{ selectedCases.length }} 条案例设置相同的归属应用。</p>
+      <div class="export-field">
+        <label>归属应用</label>
+        <a-tree-select
+          v-model:value="batchApplicationNode"
+          :load-data="loadApplicationChildren"
+          :tree-data="applicationTree"
+          placeholder="请选择归属应用"
+          :tree-default-expand-all="false"
+          show-search
+          tree-node-filter-prop="title"
+          popup-class-name="export-application-dropdown"
         />
       </div>
     </a-modal>
@@ -318,6 +384,8 @@ import {
   listCaseApplicationChildren,
   listCaseDesigners,
   exportCaseTemplate,
+  setManagedCaseApplication,
+  batchSetManagedCaseApplication,
   type ManagedCaseRow,
   type ManagedCaseSelection,
   type ManagedCaseOptions,
@@ -355,6 +423,7 @@ let selectionSequence = 0;
 let loadTimer: ReturnType<typeof setTimeout> | undefined;
 const projectId = ref<string>();
 const transactionId = ref<string>();
+const applicationFilterNode = ref<string>();
 const version = ref<string>();
 const keyword = ref("");
 const latestOnly = ref(true);
@@ -378,7 +447,13 @@ const executionVersionOptions = ref<Array<{ value: string; label: string }>>([])
 const executionApplicationOptions = ref<Array<{ value: string; label: string }>>([]);
 const executionRoundOptions = ref<Array<{ value: string; label: string }>>([]);
 const exportOpen = ref(false);
-const applicationPath = ref<string>();
+const applicationEditOpen = ref(false);
+const editingCase = ref<ManagedCaseRow>();
+const editingApplicationNode = ref<string>();
+const savingApplication = ref(false);
+const batchApplicationOpen = ref(false);
+const batchApplicationNode = ref<string>();
+const savingBatchApplication = ref(false);
 const designer = ref<string>();
 const applicationTree = ref<any[]>([]);
 const applicationChildrenCache = new Map<string, any[]>();
@@ -428,7 +503,13 @@ function changeModule(value: string) {
     );
 }
 function filters() {
+  const selectedApplicationPath = applicationFilterNode.value
+    ? findApplicationPath(applicationTree.value, applicationFilterNode.value)
+    : undefined;
   return {
+    applicationPath: selectedApplicationPath?.length
+      ? `/${selectedApplicationPath.join("/")}`
+      : undefined,
     projectId: projectId.value,
     transactionId: transactionId.value,
     versionCode: version.value,
@@ -518,7 +599,7 @@ watch(latestOnly, (value) => {
 watch([projectId, transactionId], () => {
   void loadOptions();
 });
-watch([projectId, transactionId, version, latestOnly, keyword], () => {
+watch([projectId, transactionId, applicationFilterNode, version, latestOnly, keyword], () => {
   clearSelection();
   executionOpen.value = false;
   currentPage.value = 1;
@@ -530,6 +611,7 @@ watch(
   [
     projectId,
     transactionId,
+    applicationFilterNode,
     version,
     latestOnly,
     keyword,
@@ -543,35 +625,16 @@ watch(
     if (loadTimer) clearTimeout(loadTimer);
     loadTimer = setTimeout(
       () => void loadCases(),
-      next[4] !== previous[4] ? 300 : 0,
+      next[5] !== previous[5] ? 300 : 0,
     );
   },
 );
 async function exportSelected() {
   if (exporting.value) return;
   exportOpen.value = true;
-  applicationPath.value = undefined;
   designer.value = undefined;
   try {
-    const [systems, users] = await Promise.all([
-      listCaseApplicationSystems(),
-      listCaseDesigners(),
-    ]);
-    // 不要在每次打开弹窗时清空已懒加载的子节点，否则第二次打开又回到未加载状态。
-    if (!applicationTree.value.length) {
-      applicationTree.value = systems.map((node) => {
-        const id = String(node.id);
-        const cached = applicationChildrenCache.get(id);
-        return {
-          ...node,
-          key: id,
-          value: id,
-          title: node.name,
-          isLeaf: cached ? cached.length === 0 : false,
-          ...(cached ? { children: cached } : {}),
-        };
-      });
-    }
+    const users = await listCaseDesigners();
     designerOptions.value = users.map((user) => ({
       value: user.userName,
       label: `${user.nickName}（${user.userName}）`,
@@ -580,6 +643,70 @@ async function exportSelected() {
   } catch {
     message.error("加载导出选项失败，请重试");
   }
+}
+async function ensureApplicationTree() {
+  if (applicationTree.value.length) return;
+  const systems = await listCaseApplicationSystems();
+  applicationTree.value = systems.map((node) => {
+    const id = String(node.id);
+    const cached = applicationChildrenCache.get(id);
+    return {
+      ...node,
+      key: id,
+      value: id,
+      title: node.name,
+      isLeaf: cached ? cached.length === 0 : false,
+      ...(cached ? { children: cached } : {}),
+    };
+  });
+}
+async function onApplicationFilterDropdown(open: boolean) {
+  if (!open) return;
+  try {
+    await ensureApplicationTree();
+  } catch {
+    message.error("加载归属应用筛选项失败，请重试");
+  }
+}
+async function editApplication(record: ManagedCaseRow) {
+  editingCase.value = record;
+  editingApplicationNode.value = undefined;
+  applicationEditOpen.value = true;
+  try {
+    await ensureApplicationTree();
+    if (record.applicationPath) {
+      editingApplicationNode.value = await resolveApplicationPathNode(
+        record.applicationPath,
+      );
+    }
+  } catch {
+    message.error("加载归属应用失败，请重试");
+  }
+}
+async function resolveApplicationPathNode(path: string) {
+  const parts = path.split("/").filter(Boolean);
+  let candidates = applicationTree.value;
+  let matched: any;
+  for (let index = 0; index < parts.length; index += 1) {
+    matched = candidates.find((node) => node.title === parts[index]);
+    if (!matched) return undefined;
+    if (index < parts.length - 1) {
+      await loadApplicationChildren(matched);
+      const refreshed = findApplicationNode(applicationTree.value, String(matched.key));
+      candidates = refreshed?.children ?? [];
+    }
+  }
+  return matched ? String(matched.value) : undefined;
+}
+function findApplicationNode(nodes: any[], key: string): any | undefined {
+  for (const node of nodes) {
+    if (String(node.key) === key) return node;
+    const found = node.children?.length
+      ? findApplicationNode(node.children, key)
+      : undefined;
+    if (found) return found;
+  }
+  return undefined;
 }
 async function loadApplicationChildren(node: any) {
   // TreeSelect 的 loadData 参数在不同 antd 版本中可能是 dataNode 或 { dataRef }，不能只读 node.id。
@@ -634,22 +761,25 @@ function findApplicationPath(
 }
 
 async function confirmExport() {
-  if (!applicationPath.value || !designer.value) return;
-  const path = findApplicationPath(
-    applicationTree.value,
-    String(applicationPath.value),
-  );
-  if (!path?.length) {
-    message.warning("归属应用路径加载不完整，请先展开并选择具体节点");
-    return;
-  }
+  if (!designer.value) return;
   exporting.value = true;
   try {
     const rows = await getManagedCaseDetails([...selectedKeys.value]);
+    const missingApplications = rows.filter((row) => !row.applicationPath?.trim());
+    if (missingApplications.length) {
+      const names = missingApplications
+        .slice(0, 5)
+        .map((row) => row.caseNo || row.title)
+        .join("、");
+      const remaining = missingApplications.length > 5
+        ? `等 ${missingApplications.length} 条案例`
+        : `${missingApplications.length} 条案例`;
+      message.warning(`以下案例未指定归属应用：${names}${missingApplications.length > 5 ? `（${remaining}）` : ""}，请先指定后再导出`);
+      return;
+    }
     const picked = designerOptions.value.find((o) => o.value === designer.value);
     const file = await exportCaseTemplate({
       caseIds: rows.map((row) => row.id),
-      applicationPath: `/${path.join("/")}`,
       designer: picked?.user?.nickName,
     });
     const url = URL.createObjectURL(file.blob);
@@ -663,6 +793,68 @@ async function confirmExport() {
     message.error("案例导出失败，请刷新后重试");
   } finally {
     exporting.value = false;
+  }
+}
+async function saveApplication() {
+  if (!editingCase.value || savingApplication.value) return;
+  const path = editingApplicationNode.value
+    ? findApplicationPath(applicationTree.value, editingApplicationNode.value)
+    : undefined;
+  if (editingApplicationNode.value && !path?.length) {
+    message.warning("归属应用路径加载不完整，请先展开并选择具体节点");
+    return;
+  }
+  savingApplication.value = true;
+  try {
+    const result = await setManagedCaseApplication(
+      editingCase.value.id,
+      path?.length ? `/${path.join("/")}` : null,
+    );
+    editingCase.value.applicationPath = result.applicationPath;
+    applicationEditOpen.value = false;
+    clearSelection();
+    await loadCases();
+    message.success("归属应用已保存");
+  } catch {
+    message.error("保存归属应用失败，请重试");
+  } finally {
+    savingApplication.value = false;
+  }
+}
+async function openBatchApplication() {
+  if (!selectedCases.value.length || selectedCases.value.length > 1000) return;
+  batchApplicationNode.value = undefined;
+  batchApplicationOpen.value = true;
+  try {
+    await ensureApplicationTree();
+  } catch {
+    message.error("加载归属应用失败，请重试");
+  }
+}
+async function saveBatchApplication() {
+  if (!batchApplicationNode.value || savingBatchApplication.value) return;
+  const path = findApplicationPath(
+    applicationTree.value,
+    batchApplicationNode.value,
+  );
+  if (!path?.length) {
+    message.warning("归属应用路径加载不完整，请先展开并选择具体节点");
+    return;
+  }
+  savingBatchApplication.value = true;
+  try {
+    const result = await batchSetManagedCaseApplication(
+      selectedCases.value.map((item) => item.id),
+      `/${path.join("/")}`,
+    );
+    batchApplicationOpen.value = false;
+    clearSelection();
+    await loadCases();
+    message.success(`已为 ${result.updated} 条案例指定归属应用`);
+  } catch {
+    message.error("批量指定归属应用失败，请刷新后重试");
+  } finally {
+    savingBatchApplication.value = false;
   }
 }
 async function prepareExecution() {
@@ -945,6 +1137,10 @@ onBeforeUnmount(() => {
 .filters .ant-select {
   width: 200px;
 }
+.filters .filter-application-field :deep(.ant-select),
+.filters .filter-application-field :deep(.ant-tree-select) {
+  width: 220px;
+}
 .filters .ant-input-affix-wrapper {
   width: 200px;
 }
@@ -980,6 +1176,18 @@ onBeforeUnmount(() => {
 .case-table-area :deep(.ant-table-cell) {
   padding-top: 12px;
   padding-bottom: 12px;
+}
+.application-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.application-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cf-text-secondary, #687280);
 }
 .case-pagination {
   flex-shrink: 0;

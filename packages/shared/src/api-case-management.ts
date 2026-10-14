@@ -4,6 +4,7 @@ export interface ManagedCaseQuery {
   pageSize?: number;
   projectId?: string;
   transactionId?: string;
+  applicationPath?: string;
   versionCode?: string;
   keyword?: string;
   latestOnly?: boolean;

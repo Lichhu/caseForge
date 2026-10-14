@@ -1,4 +1,8 @@
-import { ExportApiCaseTemplateDto } from "../dto/api-case-template.dto";
+import {
+  BatchSetManagedCaseApplicationDto,
+  ExportApiCaseTemplateDto,
+  SetManagedCaseApplicationDto,
+} from "../dto/api-case-template.dto";
 import { ApiCaseTemplateService } from "../service/api-case-template.service";
 import { ApiCaseManagementService } from "../service/api-case-management.service";
 import {
@@ -114,6 +118,24 @@ export class ApiTestController {
   @Get("case-management/cases")
   listManagedCases(@Query() query: ListManagedCasesDto) {
     return this.caseManagement.list(query);
+  }
+
+  @Patch("case-management/cases/:caseId/application")
+  setManagedCaseApplication(
+    @Param("caseId") caseId: string,
+    @Body() body: SetManagedCaseApplicationDto,
+  ) {
+    return this.caseManagement.setApplicationPath(caseId, body.applicationPath);
+  }
+
+  @Patch("case-management/cases/application")
+  batchSetManagedCaseApplication(
+    @Body() body: BatchSetManagedCaseApplicationDto,
+  ) {
+    return this.caseManagement.setApplicationPathForMany(
+      body.caseIds,
+      body.applicationPath,
+    );
   }
 
   @Get("case-management/options")

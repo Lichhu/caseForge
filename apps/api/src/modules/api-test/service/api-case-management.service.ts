@@ -2,12 +2,19 @@ import type {
   ManagedCaseOptions,
   ManagedCaseSelection,
 } from "@case-forge/shared";
-import { Injectable, BadRequestException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { InjectDataSource } from "@nestjs/typeorm";
 import { DataSource, Repository } from "typeorm";
 import { TEST_PLATFORM_CONNECTION } from "@common/test-platform";
-import { RequestContext } from "@common/audit/request-context";
+import {
+  auditFieldsForUpdate,
+  RequestContext,
+} from "@common/audit/request-context";
 import { toPublicApiCase } from "@common/http/public-response.util";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { ApiTestCaseEntity } from "../entity/api-test-case.entity";
@@ -112,6 +119,16 @@ export class ApiCaseManagementService {
       qb.andWhere("t.id = :transactionId", {
         transactionId: query.transactionId,
       });
+    if (query.applicationPath) {
+      const escapedPath = query.applicationPath.replace(/[!%_]/g, (char) => `!${char}`);
+      qb.andWhere(
+        "(c.applicationPath = :applicationPath OR c.applicationPath LIKE :applicationPathPrefix ESCAPE '!')",
+        {
+          applicationPath: query.applicationPath,
+          applicationPathPrefix: `${escapedPath}/%`,
+        },
+      );
+    }
     const current = managedVersion("c");
     if (query.versionCode)
       qb.andWhere(`${current.label} = :versionCode`, {
@@ -200,6 +217,40 @@ export class ApiCaseManagementService {
       (rows as JoinedCase[]).map((row) => [row.id, this.publicRow(row)]),
     );
     return ids.map((id) => byId.get(id)!);
+  }
+
+  async setApplicationPath(
+    caseId: string,
+    applicationPath: string | null | undefined,
+  ) {
+    const row = await this.base()
+      .andWhere("c.id = :caseId", { caseId })
+      .getOne();
+    if (!row) throw new NotFoundException("案例不存在或无权访问");
+    row.applicationPath = applicationPath?.trim() || null;
+    await this.cases.save({ ...row, ...auditFieldsForUpdate() });
+    return { id: row.id, applicationPath: row.applicationPath };
+  }
+
+  async setApplicationPathForMany(caseIds: string[], applicationPath: string) {
+    if (!caseIds.length || caseIds.length > 1000)
+      throw new BadRequestException("一次最多批量指定 1000 条案例");
+    const rows = await this.base()
+      .andWhere("c.id IN (:...caseIds)", { caseIds })
+      .getMany();
+    if (rows.length !== caseIds.length)
+      throw new BadRequestException("部分案例不存在或无权访问，请重新选择");
+    const normalizedPath = applicationPath.trim();
+    if (!normalizedPath)
+      throw new BadRequestException("请选择归属应用");
+    await this.cases.save(
+      rows.map((row) => ({
+        ...row,
+        applicationPath: normalizedPath,
+        ...auditFieldsForUpdate(),
+      })),
+    );
+    return { updated: rows.length, applicationPath: normalizedPath };
   }
 
   /** 独立轻量筛选项，不通过拉取所有案例推导选项。 */

@@ -141,6 +141,10 @@ const flowSteps = [
 ];
 
 async function loadList() {
+  if (!currentUser) {
+    rows.value = [];
+    return;
+  }
   loading.value = true;
   try {
     const result = await fetchRequirementList();
@@ -284,6 +288,13 @@ onMounted(() => {
 
 <template>
   <main class="app-frame app-frame--nested">
+    <a-alert
+      v-if="!currentUser"
+      type="warning"
+      show-icon
+      message="当前浏览器没有用户上下文，请通过上游平台入口链接进入。"
+      class="identity-warning"
+    />
     <section class="requirement-workspace">
       <header class="topbar">
         <div>

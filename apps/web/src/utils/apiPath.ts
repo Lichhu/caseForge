@@ -7,5 +7,6 @@ export function getApiRoot() {
 
 /** 带当前用户的 API 基址，如 /api/v1/system */
 export function getUserApiBaseUrl() {
-  return `${getApiRoot()}/${encodeURIComponent(getUserName())}`;
+  const userName = getUserName();
+  return userName ? `${getApiRoot()}/${encodeURIComponent(userName)}` : getApiRoot();
 }

@@ -63,7 +63,6 @@ export class ApiCaseTemplateService {
 
   async export(input: {
     caseIds: string[];
-    applicationPath: string;
     designer: string;
   }) {
     if (!input.caseIds.length || input.caseIds.length > 1000)
@@ -88,6 +87,13 @@ export class ApiCaseTemplateService {
       .getMany();
     if (rows.length !== input.caseIds.length)
       throw new BadRequestException("部分案例不存在或无权访问");
+    const missingApplications = rows.filter(
+      (row) => !row.applicationPath?.trim(),
+    );
+    if (missingApplications.length)
+      throw new BadRequestException(
+        `有 ${missingApplications.length} 条案例未指定归属应用，请先指定后再导出`,
+      );
     const txMap = new Map<string, ApiTransactionEntity>();
     const projectMap = new Map<string, CaseProjectEntity>();
     for (const id of input.caseIds) {
@@ -141,7 +147,7 @@ export class ApiCaseTemplateService {
       const fields = [
         index + 1,
         `${service} - ${name}`,
-        input.applicationPath,
+        row.applicationPath!,
         name,
         row.polarity === "negative" ? "反" : "正",
         "准生产",

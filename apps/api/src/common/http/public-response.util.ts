@@ -219,6 +219,7 @@ export function toPublicApiCase(testCase: ApiTestCaseEntity) {
     caseNo: testCase.caseNo,
     description: testCase.description ?? "",
     remark: testCase.remark,
+    applicationPath: testCase.applicationPath ?? null,
     transactionCode: testCase.transactionCode,
     owner: testCase.owner,
     priority: testCase.priority,

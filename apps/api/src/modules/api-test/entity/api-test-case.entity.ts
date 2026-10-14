@@ -65,6 +65,9 @@ export class ApiTestCaseEntity extends SoftDeletableEntity {
   @Column({ type: "text", nullable: true })
   remark?: string;
 
+  @Column({ type: "text", nullable: true })
+  applicationPath?: string | null;
+
   @Column({ length: 128, nullable: true })
   transactionCode?: string;
 

@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 const DEFAULT_USER = "system";
+const EMPTY_USER = "";
 
 const storage = new AsyncLocalStorage<{ userName: string }>();
 
@@ -11,7 +12,7 @@ export class RequestContext {
   }
 
   static getUserName() {
-    return storage.getStore()?.userName || DEFAULT_USER;
+    return storage.getStore()?.userName ?? DEFAULT_USER;
   }
 }
 
@@ -31,16 +32,16 @@ export function resolveUserNameFromRequest(input: {
   const rawQuery = Array.isArray(input.query) ? input.query[0] : input.query;
   const raw = (rawHeader || rawQuery || "").trim();
   if (!raw) {
-    return DEFAULT_USER;
+    return EMPTY_USER;
   }
   return decodeUserName(raw);
 }
 
 function decodeUserName(raw: string) {
   try {
-    return decodeURIComponent(raw).trim() || DEFAULT_USER;
+    return decodeURIComponent(raw).trim();
   } catch {
-    return raw.trim() || DEFAULT_USER;
+    return raw.trim();
   }
 }
 

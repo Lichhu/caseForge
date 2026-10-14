@@ -31,15 +31,13 @@ import {
   type PlatformMeta,
 } from '@/constants/platform';
 import { dismissAppMessages } from '@/utils/globalFeedback';
-import { getUserName } from '@/utils/userContext';
 
 const route = useRoute();
 const platforms = PLATFORMS;
 const current = computed(() => getPlatformByRoute(route));
 
 function buildPlatformLocation(platform: PlatformMeta) {
-  const params = new URLSearchParams({ userName: getUserName() });
-  return `${platform.route}?${params.toString()}`;
+  return platform.route;
 }
 
 function switchPlatform(platform: PlatformMeta) {

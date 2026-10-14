@@ -79,6 +79,7 @@ export async function applyApiTestSchemaMigrations(runner: Queryable) {
   await ensureApiEndpointTransactionColumn(runner);
   await ensureApiTransactionTable(runner);
   await ensureApiTestCaseColumns(runner);
+  await ensureApiCaseApplicationPathColumn(runner);
   await ensureApiCaseGenerateJobColumns(runner);
   await ensureExecutionPlatformTables(runner);
   await ensureRunnerPlatformColumns(runner);
@@ -380,6 +381,14 @@ async function ensureApiTestCaseColumns(runner: Queryable) {
         ADD COLUMN owner VARCHAR(255) NULL AFTER transactionCode
     `);
   }
+}
+
+async function ensureApiCaseApplicationPathColumn(runner: Queryable) {
+  if (!(await tableExists(runner, "api_test_case"))) return;
+  if (await columnExists(runner, "api_test_case", "applicationPath")) return;
+  await runner.query(
+    "ALTER TABLE api_test_case ADD COLUMN applicationPath TEXT NULL",
+  );
 }
 
 async function ensureRunnerPlatformColumns(runner: Queryable) {

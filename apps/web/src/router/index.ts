@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
-import { getUserName, syncUserNameFromQuery } from "@/utils/userContext";
+import { getUserName } from "@/utils/userContext";
 
 const CaseForgeDashboardView = () =>
   import("@/views/CaseForgeDashboardView.vue");
@@ -13,10 +13,7 @@ const router = createRouter({
   routes: [
     {
       path: "/",
-      redirect: () => ({
-        path: "/case-forge",
-        query: { userName: getUserName() },
-      }),
+      redirect: "/case-forge",
     },
     {
       path: "/case-forge",
@@ -41,18 +38,12 @@ const router = createRouter({
 });
 
 router.beforeEach((to) => {
-  syncUserNameFromQuery(to.query);
-
-  const userName = getUserName();
-  if (to.query.userName === userName) {
-    return true;
+  if (typeof to.query.userName !== "undefined") {
+    const query = { ...to.query };
+    delete query.userName;
+    return { path: to.path, query, hash: to.hash, replace: true };
   }
-  return {
-    path: to.path,
-    query: { ...to.query, userName },
-    hash: to.hash,
-    replace: true,
-  };
+  return true;
 });
 
 router.afterEach((to) => {

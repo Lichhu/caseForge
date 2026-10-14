@@ -38,6 +38,11 @@ export class ListManagedCasesDto implements ManagedCaseQuery {
 
   @IsOptional()
   @IsString()
+  @MaxLength(2048)
+  applicationPath?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(128)
   versionCode?: string;
 

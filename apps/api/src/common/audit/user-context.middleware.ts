@@ -1,4 +1,4 @@
-import { Injectable, NestMiddleware } from "@nestjs/common";
+import { Injectable, NestMiddleware, UnauthorizedException } from "@nestjs/common";
 import { NextFunction, Request, Response } from "express";
 import { RequestContext, resolveUserNameFromRequest } from "./request-context";
 import { extractAndRewriteUserNamePath } from "./user-name-path.util";
@@ -15,6 +15,9 @@ export class UserContextMiddleware implements NestMiddleware {
       header: req.headers["x-user-name"],
       query: req.query.userName as string | string[] | undefined,
     });
+    if (!userName) {
+      return next(new UnauthorizedException("缺少用户身份，请通过带 userName 的入口链接进入"));
+    }
     RequestContext.run(userName, () => next());
   }
 }

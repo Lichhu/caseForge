@@ -104,13 +104,21 @@ describe("managed cases server pagination", () => {
   });
   it("applies keyword outside the latest-version subquery, escapes literal wildcards", () => {
     const qb = (service as any).filtered(
-      query({ keyword: "_%!", projectId: "p", transactionId: "t" }),
+      query({
+        keyword: "_%!",
+        projectId: "p",
+        transactionId: "t",
+        applicationPath: "/手机银行",
+      }),
     );
     expect(qb.getParameters()).toMatchObject({
       keyword: "%!_!%!!%",
       projectId: "p",
       transactionId: "t",
+      applicationPath: "/手机银行",
+      applicationPathPrefix: "/手机银行/%",
     });
+    expect(qb.getSql()).toContain("`c`.`applicationPath` LIKE ? ESCAPE '!'");
     expect(qb.getSql()).toContain("ESCAPE '!'");
     const sql = qb.getQuery();
     expect(sql.indexOf("NOT EXISTS")).toBeLessThan(
@@ -146,6 +154,38 @@ describe("managed cases server pagination", () => {
     jest.spyOn(service as any, "base").mockReturnValue(qb);
     jest.spyOn(qb, "getMany").mockResolvedValue([]);
     await expect(service.details(["missing"])).rejects.toThrow("无权访问");
+  });
+  it("updates all selected cases with one application path after owner validation", async () => {
+    const qb = (service as any).base();
+    jest.spyOn(service as any, "base").mockReturnValue(qb);
+    jest.spyOn(qb, "getMany").mockResolvedValue([{ id: "a" }, { id: "b" }]);
+    const save = jest
+      .spyOn((service as any).cases, "save")
+      .mockImplementation(async (rows) => rows);
+
+    const result = await RequestContext.run("alice", () =>
+      service.setApplicationPathForMany(["a", "b"], "/手机银行/保险"),
+    );
+
+    expect(result).toEqual({ updated: 2, applicationPath: "/手机银行/保险" });
+    expect(qb.getParameters().caseIds).toEqual(["a", "b"]);
+    expect(save).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "a", applicationPath: "/手机银行/保险" }),
+        expect.objectContaining({ id: "b", applicationPath: "/手机银行/保险" }),
+      ]),
+    );
+  });
+  it("does not partially update when any selected case is inaccessible", async () => {
+    const qb = (service as any).base();
+    jest.spyOn(service as any, "base").mockReturnValue(qb);
+    jest.spyOn(qb, "getMany").mockResolvedValue([{ id: "a" }]);
+    const save = jest.spyOn((service as any).cases, "save");
+
+    await expect(
+      service.setApplicationPathForMany(["a", "missing"], "/手机银行"),
+    ).rejects.toThrow("无权访问");
+    expect(save).not.toHaveBeenCalled();
   });
   it("validates page bounds, sizes, boolean false and export batch limits", async () => {
     expect(
