@@ -2,6 +2,7 @@
   <aside class="project-sidebar">
     <div class="project-section-title">
       <a-select
+        v-if="isApiPlatform"
         class="module-select"
         value="project"
         :bordered="false"
@@ -9,6 +10,7 @@
         aria-label="管理模块"
         @change="handleModuleChange"
       />
+      <h2 v-else class="project-section-heading">项目管理</h2>
       <p class="module-description">以需求为维度，手动新建项目</p>
     </div>
 

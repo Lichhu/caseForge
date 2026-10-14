@@ -279,7 +279,7 @@
   <a-modal
     v-model:open="generateModalOpen"
     title="AI 生成案例"
-    :width="800"
+    :width="960"
     ok-text="开始生成"
     cancel-text="取消"
     :confirm-loading="generatingCases"
@@ -301,6 +301,46 @@
             <a-select v-model:value="generationProfile.messageFormat" :options="messageFormatOptions" />
           </a-form-item>
         </div>
+        <section class="generation-scenarios-panel">
+          <div class="generation-scenarios-heading">
+            <div><strong>适用场景</strong><span>{{ selectedServicePropertyLabel }} · {{ matchedApiScenarios.length }} 个场景</span></div>
+          </div>
+          <div v-if="scenarioLibraryLoading" class="generation-scenarios-state">正在加载场景与提示词…</div>
+          <div v-else-if="!matchedApiScenarios.length" class="generation-scenarios-state">
+            暂无匹配场景，请在接口测试场景库中维护场景和提示词。
+          </div>
+          <div v-else class="generation-scenarios-content">
+            <nav class="generation-scenario-list" aria-label="适用场景">
+              <button
+                v-for="scenario in matchedApiScenarios"
+                :key="scenario.id"
+                type="button"
+                :class="['generation-scenario-option', { 'is-active': selectedApiScenarioId === scenario.id }]"
+                @click="selectedApiScenarioId = scenario.id"
+              >
+                <span class="generation-scenario-option-name">{{ scenario.name }}</span>
+                <span class="generation-scenario-option-meta">{{ scenario.category }} · {{ activeScenarioPrompts(scenario).length }} 条提示词</span>
+              </button>
+            </nav>
+            <div class="generation-prompt-list">
+              <div v-if="!selectedScenarioPrompts.length" class="generation-scenarios-state generation-scenarios-state--inline">该场景暂无启用的提示词</div>
+              <article v-for="prompt in selectedScenarioPrompts" :key="prompt.id" class="generation-prompt-item">
+                <div class="generation-prompt-item-heading">
+                  <strong>{{ prompt.name }}</strong>
+                  <a-tag v-if="prompt.isDefault" color="blue">默认</a-tag>
+                </div>
+                <p v-if="prompt.tags.length" class="generation-prompt-tags">{{ prompt.tags.join(' / ') }}</p>
+                <pre :class="['generation-prompt-content', { 'is-expanded': expandedPromptIds.has(prompt.id) }]">{{ prompt.content }}</pre>
+                <button
+                  v-if="prompt.content.length > 280"
+                  type="button"
+                  class="generation-prompt-toggle"
+                  @click="togglePromptExpanded(prompt.id)"
+                >{{ expandedPromptIds.has(prompt.id) ? '收起' : '展开全文' }}</button>
+              </article>
+            </div>
+          </div>
+        </section>
         <section class="step-orchestration large-payload-panel">
           <div class="step-orchestration-head">
             <div><strong>大报文测试</strong><span>请求报文长度 &gt; 100000 的字段会自动附加大报文与空字段案例；开启后为所选字段额外附加这两类案例</span></div>
@@ -745,6 +785,9 @@ const DOC_TABLE_PAGE_SIZE = 100;
 const apiStore = useApiTestStore();
 const popupContainer = () => document.body;
 const nestedDropdownStyle = { zIndex: NESTED_OVERLAY_Z_INDEX + 1 };
+const scenarioLibraryLoading = ref(false);
+const selectedApiScenarioId = ref('');
+const expandedPromptIds = ref(new Set<string>());
 const sections = ref<ApiDocTableSection[]>([]);
 const sectionData = ref<Record<string, string>[][]>([]);
 const sectionPages = ref<number[]>([]);
@@ -1097,6 +1140,52 @@ const servicePropertyOptions = [
   ['management_non_accounting', '管理类非涉账'], ['management_accounting', '管理类涉账'],
   ['accounting', '记账类'], ['reversal', '冲正类'], ['file', '文件类'], ['push', '推送类'],
 ].map(([value, label]) => ({ value, label }));
+const selectedServicePropertyLabel = computed(() =>
+  servicePropertyOptions.find((option) => option.value === generationProfile.serviceProperty)?.label ?? generationProfile.serviceProperty,
+);
+const matchedApiScenarios = computed(() => {
+  const property = generationProfile.serviceProperty;
+  const accounting = ['query_accounting', 'management_accounting', 'accounting', 'reversal'].includes(property);
+  const propertyKeywords: Record<string, string[]> = {
+    query_non_accounting: ['查询', '非涉帐', '非涉账'],
+    query_accounting: ['查询', '涉帐', '涉账'],
+    management_non_accounting: ['管理', '非涉帐', '非涉账'],
+    management_accounting: ['管理', '涉帐', '涉账'],
+    accounting: ['账务', '记账', '涉帐', '涉账'],
+    reversal: ['冲正', '涉帐', '涉账'],
+    file: ['文件', '非涉帐', '非涉账'],
+    push: ['推送', '非涉帐', '非涉账'],
+  };
+  const keywords = propertyKeywords[property] ?? [];
+  return apiStore.apiScenarios
+    .filter((scenario) => scenario.isActive)
+    .filter((scenario) => {
+      if (scenario.category === '通用规则') return true;
+      const searchable = [scenario.name, scenario.description, scenario.category, ...scenario.prompts.flatMap((prompt) => prompt.tags ?? [])].join(' ');
+      const hasAccountingScenario = /涉帐|涉账|账务|记账|冲正/.test(searchable);
+      if (hasAccountingScenario && !accounting) return false;
+      return keywords.some((keyword) => searchable.includes(keyword));
+    });
+});
+const selectedApiScenario = computed(() =>
+  matchedApiScenarios.value.find((scenario) => scenario.id === selectedApiScenarioId.value) ?? matchedApiScenarios.value[0],
+);
+function activeScenarioPrompts(scenario: (typeof apiStore.apiScenarios)[number]) {
+  return scenario.prompts.filter((prompt) => prompt.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
+}
+const selectedScenarioPrompts = computed(() => selectedApiScenario.value ? activeScenarioPrompts(selectedApiScenario.value) : []);
+watch(matchedApiScenarios, (scenarios) => {
+  if (!scenarios.some((scenario) => scenario.id === selectedApiScenarioId.value)) {
+    selectedApiScenarioId.value = scenarios[0]?.id ?? '';
+  }
+}, { immediate: true });
+watch(() => generationProfile.serviceProperty, () => { expandedPromptIds.value.clear(); });
+function togglePromptExpanded(id: string) {
+  const next = new Set(expandedPromptIds.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  expandedPromptIds.value = next;
+}
 const transportOptions = [{ value: 'http', label: 'HTTP' }, { value: 'socket', label: 'SOCKET' }];
 const messageFormatOptions = [{ value: 'json', label: 'JSON' }, { value: 'xml', label: 'XML' }, { value: 'text', label: 'TEXT' }];
 const filteredChannels = computed(() => {
@@ -1596,6 +1685,12 @@ async function onGenerate() {
   generationProfile.exampleMessage = exampleMessage.value.trim();
   selectedChannelIds.value = selectedChannelIds.value.filter((id) => generationProfile.channels.some((channel) => channel.id === id));
   generateModalOpen.value = true;
+  scenarioLibraryLoading.value = true;
+  void apiStore.loadApiScenarioLibrary().catch(() => {
+    message.error('加载接口测试场景失败');
+  }).finally(() => {
+    scenarioLibraryLoading.value = false;
+  });
   void refreshStepLibrary();
 }
 
@@ -1818,6 +1913,163 @@ async function onSave() {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+.generation-scenarios-panel {
+  margin: 0 0 16px;
+  border: 1px solid #d9dde5;
+  border-radius: 6px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.generation-scenarios-heading {
+  padding: 10px 12px;
+  border-bottom: 1px solid #e4e7ec;
+  background: #fafbfc;
+}
+
+.generation-scenarios-heading > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.generation-scenarios-heading strong {
+  color: #344054;
+  font-size: 14px;
+}
+
+.generation-scenarios-heading span,
+.generation-scenario-option-meta {
+  color: #667085;
+  font-size: 12px;
+}
+
+.generation-scenarios-content {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.34fr) minmax(0, 1fr);
+  min-height: 190px;
+  max-height: 330px;
+}
+
+.generation-scenario-list {
+  overflow-y: auto;
+  border-right: 1px solid #e4e7ec;
+  background: #fafbfc;
+}
+
+.generation-scenario-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid #eaecf0;
+  background: transparent;
+  color: #344054;
+  text-align: left;
+  cursor: pointer;
+}
+
+.generation-scenario-option:hover {
+  background: #f2f4f7;
+}
+
+.generation-scenario-option.is-active {
+  border-left: 2px solid #1677ff;
+  background: #eaf3ff;
+  color: #0958d9;
+}
+
+.generation-scenario-option-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.generation-scenario-option-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generation-prompt-list {
+  overflow-y: auto;
+  padding: 10px;
+}
+
+.generation-prompt-item {
+  padding: 10px 11px;
+  border: 1px solid #e4e7ec;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.generation-prompt-item + .generation-prompt-item {
+  margin-top: 8px;
+}
+
+.generation-prompt-item-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #344054;
+  font-size: 13px;
+}
+
+.generation-prompt-item-heading :deep(.ant-tag) {
+  margin: 0;
+}
+
+.generation-prompt-tags {
+  margin: 5px 0 0;
+  color: #667085;
+  font-size: 11px;
+}
+
+.generation-prompt-content {
+  margin: 8px 0 0;
+  color: #475467;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 7;
+  overflow: hidden;
+}
+
+.generation-prompt-content.is-expanded {
+  display: block;
+  overflow: visible;
+}
+
+.generation-prompt-toggle {
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #1677ff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.generation-scenarios-state {
+  display: grid;
+  min-height: 120px;
+  padding: 16px;
+  place-items: center;
+  color: #98a2b3;
+  font-size: 13px;
+  text-align: center;
+}
+
+.generation-scenarios-state--inline {
+  min-height: 160px;
 }
 
 .step-orchestration {
@@ -2342,6 +2594,25 @@ async function onSave() {
   .generation-profile-grid,
   .channel-editor-row {
     grid-template-columns: 1fr;
+  }
+
+  .generation-scenarios-content {
+    grid-template-columns: 1fr;
+    max-height: 420px;
+  }
+
+  .generation-scenario-list {
+    display: flex;
+    max-height: 120px;
+    border-right: 0;
+    border-bottom: 1px solid #e4e7ec;
+  }
+
+  .generation-scenario-option {
+    flex: 0 0 180px;
+    min-height: 58px;
+    border-right: 1px solid #eaecf0;
+    border-bottom: 0;
   }
 
   .channel-editor-columns {
