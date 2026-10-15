@@ -6,6 +6,8 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Inject,
+  forwardRef,
 } from "@nestjs/common";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 import { CreateProjectDto } from "@project-manage/dto/create-project.dto";
@@ -28,6 +30,7 @@ import {
   scopedWhere,
 } from "@common/audit/user-scope";
 import { toPublicProject } from "@common/http/public-response.util";
+import { RequirementPlatformService } from "@requirement-platform/service/requirement-platform.service";
 
 function normalizeRequirementNo(raw: string): string {
   const trimmed = raw.trim();
@@ -45,6 +48,11 @@ export type ProjectListItem = ReturnType<typeof toPublicProject> & {
   generationCount: number;
   caseCount: number;
   isClaimedFromPlatform: boolean;
+  requirementOwner?: string | null;
+  requirementCreator?: string | null;
+  requirementCreatedAt?: Date | null;
+  requirementId?: string | null;
+  requirementStatus?: string | null;
 };
 
 /**
@@ -65,6 +73,8 @@ export class ProjectManageService {
     private readonly apiRequirementRepo: Repository<ApiRequirementEntity>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
+    @Inject(forwardRef(() => RequirementPlatformService))
+    private readonly requirementPlatform: RequirementPlatformService,
   ) {}
 
   /**
@@ -76,24 +86,7 @@ export class ProjectManageService {
   ): Promise<ReturnType<typeof toPublicProject>> {
     const platform: ProjectPlatform = dto.platform ?? "case-forge";
     if (platform === "api-test") {
-      const title = dto.title?.trim();
-      const requirementNo = dto.requirementNo?.trim();
-      if (!title) {
-        throw new BadRequestException("请输入需求名称");
-      }
-      if (!requirementNo) {
-        throw new BadRequestException("请输入需求编号（XQxxxx-xxxx-xx）");
-      }
-      const normalizedRequirementNo = normalizeRequirementNo(requirementNo);
-      await this.assertApiTestRequirementAvailable(normalizedRequirementNo);
-      const project = this.projectRepo.create({
-        title,
-        description: dto.description?.trim() || "",
-        requirementNo: normalizedRequirementNo,
-        platform,
-        ...auditFieldsForCreate(),
-      });
-      return toPublicProject(await this.projectRepo.save(project));
+      throw new BadRequestException("接口测试项目必须从需求管理中认领创建");
     }
 
     const total = await this.projectRepo.count({
@@ -130,21 +123,21 @@ export class ProjectManageService {
     input: string = "",
     platform: ProjectPlatform = "case-forge",
     month?: string,
+    requirementStatus: string = "testing",
   ): Promise<{ rows: ProjectListItem[]; count: number; caseCount: number }> {
     if (page < 1 || size < 1) {
       throw new Error("Invalid page or size value.");
     }
 
-    const query = applyUserScope(
-      this.projectRepo
+    const query = this.projectRepo
         .createQueryBuilder("project")
         .where("project.platform = :platform", { platform })
         .orderBy("project.createdAt", "DESC")
         .addOrderBy("project.id", "DESC")
         .skip((page - 1) * size)
-        .take(size),
-      "project",
-    );
+        .take(size);
+
+    applyUserScope(query, "project");
 
     const keyword = input.trim();
     if (keyword) {
@@ -175,6 +168,27 @@ export class ProjectManageService {
       );
     }
 
+    if (platform === "api-test" && requirementStatus !== "all") {
+      query.andWhere(
+        `(EXISTS (
+          SELECT 1 FROM api_requirement req WHERE req.claimedProjectId = project.id
+            AND req.deleted_at IS NULL AND req.status = :requirementStatus
+        ) OR NOT EXISTS (
+          SELECT 1 FROM api_requirement req WHERE req.claimedProjectId = project.id
+            AND req.deleted_at IS NULL
+        ))`,
+        { requirementStatus },
+      );
+    }
+
+    if (platform === "api-test") {
+      query.andWhere(`NOT EXISTS (
+        SELECT 1 FROM api_requirement deleted_req
+        WHERE deleted_req.claimedProjectId = project.id
+          AND deleted_req.deleted_at IS NOT NULL
+      )`);
+    }
+
     const allProjectIds = (
       await query
         .clone()
@@ -188,6 +202,24 @@ export class ProjectManageService {
     const generationCountMap = await this.getGenerationCountMap(projectIds);
     const caseCountMap = await this.getCaseCountMap(projectIds, platform);
     const claimedProjectIdSet = await this.getClaimedProjectIdSet(projectIds);
+    const projectRequirementNos = rows
+      .map((row) => row.requirementNo?.trim())
+      .filter((value): value is string => Boolean(value));
+    const requirements = projectIds.length
+      ? await this.apiRequirementRepo.find({
+          where: [
+            { claimedProjectId: In(projectIds) },
+            ...(projectRequirementNos.length
+              ? [{ projectCode: In(projectRequirementNos) }]
+              : []),
+          ],
+        })
+      : [];
+    const requirementByProject = new Map<string, ApiRequirementEntity>();
+    for (const item of requirements) {
+      if (item.claimedProjectId) requirementByProject.set(String(item.claimedProjectId), item);
+      if (item.projectCode) requirementByProject.set(`code:${item.projectCode}`, item);
+    }
 
     return {
       rows: rows.map((row) => ({
@@ -195,6 +227,26 @@ export class ProjectManageService {
         generationCount: generationCountMap.get(String(row.id)) ?? 0,
         caseCount: caseCountMap.get(String(row.id)) ?? 0,
         isClaimedFromPlatform: claimedProjectIdSet.has(String(row.id)),
+        requirementOwner:
+          requirementByProject.get(String(row.id))?.claimedBy ??
+          requirementByProject.get(`code:${row.requirementNo?.trim()}`)?.claimedBy ??
+          null,
+        requirementCreator:
+          requirementByProject.get(String(row.id))?.createdBy ??
+          requirementByProject.get(`code:${row.requirementNo?.trim()}`)?.createdBy ??
+          null,
+        requirementCreatedAt:
+          requirementByProject.get(String(row.id))?.createdAt ??
+          requirementByProject.get(`code:${row.requirementNo?.trim()}`)?.createdAt ??
+          null,
+        requirementId:
+          requirementByProject.get(String(row.id))?.id ??
+          requirementByProject.get(`code:${row.requirementNo?.trim()}`)?.id ??
+          null,
+        requirementStatus:
+          requirementByProject.get(String(row.id))?.status ??
+          requirementByProject.get(`code:${row.requirementNo?.trim()}`)?.status ??
+          null,
       })),
       count,
       caseCount: [
@@ -209,6 +261,9 @@ export class ProjectManageService {
    */
   async getProject(projectId: string): Promise<ProjectListItem> {
     const project = await findOwnedProject(this.projectRepo, projectId);
+    if (project.platform === "api-test") {
+      await this.requirementPlatform.assertProjectOperational(projectId);
+    }
 
     const generationCountMap = await this.getGenerationCountMap([
       String(project.id),
@@ -237,6 +292,9 @@ export class ProjectManageService {
     dto: UpdateProjectDto,
   ): Promise<ReturnType<typeof toPublicProject>> {
     const project = await findOwnedProject(this.projectRepo, projectId);
+    if (project.platform === "api-test") {
+      await this.requirementPlatform.assertProjectOperational(projectId);
+    }
 
     if (project.platform === "api-test") {
       if (dto.title !== undefined) {
@@ -303,6 +361,10 @@ export class ProjectManageService {
   async deleteProject(
     projectId: string,
   ): Promise<{ id: string; deleted: boolean }> {
+    const target = await this.projectRepo.findOne({ where: scopedWhere({ id: projectId }) });
+    if (target?.platform === "api-test") {
+      throw new BadRequestException("接口测试项目不可删除，请在需求管理中软删除需求");
+    }
     await this.assertProjectNotClaimed([projectId]);
     await this.dataSource.transaction(async (manager) => {
       const project = await manager.findOne(CaseProjectEntity, {
@@ -330,6 +392,9 @@ export class ProjectManageService {
     if (!uniqueIds.length) {
       return { ids: [], deleted: true };
     }
+
+    const apiProjects = await this.projectRepo.find({ where: { id: In(uniqueIds), platform: "api-test" } });
+    if (apiProjects.length) throw new BadRequestException("接口测试项目不可删除，请在需求管理中软删除需求");
 
     await this.assertProjectNotClaimed(uniqueIds);
 

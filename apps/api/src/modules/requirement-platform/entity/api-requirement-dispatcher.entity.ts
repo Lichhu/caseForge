@@ -25,8 +25,8 @@ export class ApiRequirementDispatcherEntity extends SoftDeletableEntity {
   @Column()
   userName: string;
 
-  @Column({ nullable: true })
-  remark?: string;
+  @Column({ type: "varchar", nullable: true })
+  remark?: string | null;
 
   @CreateDateColumn()
   createdAt: Date;

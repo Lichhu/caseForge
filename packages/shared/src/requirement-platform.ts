@@ -2,7 +2,9 @@
 export const REQUIREMENT_STATUSES = [
   'pending_dispatch',
   'pending_claim',
-  'claimed',
+  'testing',
+  'completed',
+  'returned',
 ] as const;
 
 export type RequirementStatus = (typeof REQUIREMENT_STATUSES)[number];
@@ -10,8 +12,10 @@ export type RequirementStatus = (typeof REQUIREMENT_STATUSES)[number];
 /** 需求状态中文标签 */
 export const REQUIREMENT_STATUS_LABELS: Record<RequirementStatus, string> = {
   pending_dispatch: '待分发',
-  pending_claim: '待认领',
-  claimed: '已认领',
+  pending_claim: '待受理',
+  testing: '测试中',
+  completed: '已完成',
+  returned: '已打回',
 };
 
 /** 需求平台列表条目 */
@@ -33,9 +37,17 @@ export interface RequirementPlatformItem {
   claimedAt?: string | null;
   /** 认领时自动创建的接口测试项目 id */
   claimedProjectId?: string | null;
+  completedAt?: string | null;
+  sourceUpdatedAt?: string | null;
   refuseReason?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface RequirementDispatcher {
+  id: string;
+  userName: string;
+  remark?: string | null;
 }
 
 /** 需求平台列表响应 */
@@ -44,6 +56,7 @@ export interface RequirementPlatformListResult {
   count: number;
   /** 当前用户是否为分发人（白名单） */
   isDispatcher: boolean;
+  isMember?: boolean;
   /** 是否正在同步 */
   syncing: boolean;
 }

@@ -491,8 +491,9 @@ body.cf-immersive-active .platform-topbar {
   width: 100%;
   padding: 8px 7px;
   border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(16 24 40 / 4%);
   color: #344054;
   cursor: pointer;
   user-select: none;
@@ -525,12 +526,6 @@ body.cf-immersive-active .platform-topbar {
   text-align: left;
 }
 
-.project-requirement {
-  color: #667085;
-  font-size: 11px;
-  line-height: 1.35;
-}
-
 .project-item:hover:not(.active) {
   border-color: var(--cf-border);
   background: #f9fafb;
@@ -541,6 +536,195 @@ body.cf-immersive-active .platform-topbar {
   border-color: var(--cf-brand-border);
   background: var(--cf-brand-soft);
   color: var(--cf-brand-hover);
+}
+
+/* ===== 项目管理侧栏 · 结构改版(方案二)新增 ===== */
+
+/* 状态筛选 Tab:替代原单个下拉 */
+.project-status-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+}
+
+.project-status-tab {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: 1px solid #d0d5dd;
+  border-radius: 999px;
+  background: #fff;
+  color: #475467;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease,
+    background-color 0.12s ease;
+}
+
+.project-status-tab:hover {
+  border-color: var(--cf-brand);
+  color: var(--cf-brand);
+}
+
+.project-status-tab.active {
+  border-color: var(--cf-brand);
+  background: #fff5f6;
+  color: var(--cf-brand);
+  font-weight: 600;
+}
+
+/* 条目标题行:标题 + 状态徽标 */
+.project-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.project-title-row .project-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+}
+
+/* 状态徽标:测试中/待分发/待受理/已完成/已打回 */
+.project-status-badge {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.project-status-badge.status-testing {
+  background: #eef4ff;
+  color: #175cd3;
+}
+
+.project-status-badge.status-pending_dispatch {
+  background: #f2f4f7;
+  color: #475467;
+}
+
+.project-status-badge.status-pending_claim {
+  background: #fff6ed;
+  color: #c4320a;
+}
+
+.project-status-badge.status-completed {
+  background: #ecfdf3;
+  color: #027a48;
+}
+
+.project-status-badge.status-returned {
+  background: #fef3f2;
+  color: #b42318;
+}
+
+/* 元信息行:需求编号 + 案例徽标 */
+.project-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  width: 100%;
+  min-width: 0;
+  margin-top: 5px;
+}
+
+.project-requirement-no {
+  color: #1d2939;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.project-case-badge {
+  flex-shrink: 0;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #f2f4f7;
+  color: #475467;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+/* 时间 + hover 操作行 */
+.project-time-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  margin-top: 4px;
+}
+
+.project-time {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #98a2b3;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: padding-right 0.12s ease;
+}
+
+/* 「标记已完成」/「恢复为测试中」:默认隐藏,悬停条目时出现 */
+.project-complete-btn {
+  position: absolute;
+  right: 0;
+  flex-shrink: 0;
+  opacity: 0;
+  visibility: hidden;
+  padding: 1px 10px;
+  border: 1px solid var(--cf-brand);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--cf-brand);
+  font-size: 11px;
+  line-height: 1.6;
+  cursor: pointer;
+  transition:
+    opacity 0.12s ease,
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.project-item:hover .project-complete-btn,
+.project-item:focus-within .project-complete-btn {
+  opacity: 1;
+  visibility: visible;
+}
+
+.project-item:hover .project-time,
+.project-item:focus-within .project-time {
+  padding-right: 106px;
+}
+
+.project-complete-btn:hover:not(:disabled) {
+  background: var(--cf-brand);
+  color: #fff;
+}
+
+.project-complete-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* 已完成条目整体置灰降透明度 */
+.project-item.is-completed {
+  opacity: 0.65;
+}
+
+.project-item.is-completed .project-title {
+  color: #475467 !important;
 }
 
 .project-edit,

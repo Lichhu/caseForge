@@ -28,10 +28,39 @@ export async function runPreSyncSchemaPatch() {
 
   try {
     await applyApiTestSchemaMigrations(queryable);
+    await migrateApiRequirementStatus(queryable);
     await migrateStructDocProjectIndex(queryable);
   } finally {
     await connection.end();
   }
+}
+
+async function migrateApiRequirementStatus(queryable: {
+  query: (sql: string, params?: unknown[]) => Promise<unknown>;
+}) {
+  const tables = (await queryable.query("SHOW TABLES LIKE 'api_requirement'")) as Array<Record<string, unknown>>;
+  if (!tables.length) return;
+  const columns = (await queryable.query("SHOW COLUMNS FROM api_requirement LIKE 'status'")) as Array<{ Type?: string }>;
+  const allColumns = (await queryable.query("SHOW COLUMNS FROM api_requirement")) as Array<{ Field?: string }>;
+  if (!allColumns.some((column) => column.Field === "createdBy")) {
+    await queryable.query("ALTER TABLE api_requirement ADD COLUMN createdBy VARCHAR(255) NULL DEFAULT 'system' AFTER projectName");
+  }
+  const type = columns[0]?.Type ?? "";
+  if (!type.startsWith("enum(")) return;
+
+  // Widen first so legacy values can be normalized without MySQL strict-mode truncation.
+  await queryable.query("ALTER TABLE api_requirement MODIFY status VARCHAR(32) NOT NULL DEFAULT 'pending_dispatch'");
+  await queryable.query(`
+    UPDATE api_requirement
+    SET status = CASE
+      WHEN status = 'claimed' THEN 'testing'
+      WHEN status IN ('pending_dispatch','pending_claim','testing','completed','returned') THEN status
+      ELSE 'pending_dispatch'
+    END
+  `);
+  await queryable.query(
+    "ALTER TABLE api_requirement MODIFY status ENUM('pending_dispatch','pending_claim','testing','completed','returned') NOT NULL DEFAULT 'pending_dispatch'",
+  );
 }
 
 if (require.main === module) {

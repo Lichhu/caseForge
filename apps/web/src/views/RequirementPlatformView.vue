@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { computed, markRaw, onMounted, ref } from 'vue';
+import { computed, markRaw, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { Empty, message } from 'ant-design-vue';
+import { Empty, message, Modal } from 'ant-design-vue';
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   InboxOutlined,
   SendOutlined,
   SyncOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  TeamOutlined,
 } from '@ant-design/icons-vue';
 import type { RequirementClaimCandidate, RequirementPlatformItem, RequirementStatus } from '@case-forge/shared';
 import { REQUIREMENT_STATUS_LABELS } from '@case-forge/shared';
@@ -18,6 +21,15 @@ import {
   fetchRequirementList,
   refuseRequirement,
   syncRequirements,
+  createRequirement,
+  updateRequirement,
+  deleteRequirement,
+  setRequirementStatus,
+  fetchPoolMembers,
+  searchPoolCandidates,
+  addPoolMember,
+  removePoolMember,
+  type RequirementPoolMember,
 } from '@/api/requirementPlatform';
 import { getUserName } from '@/utils/userContext';
 
@@ -27,10 +39,29 @@ const currentUser = getUserName();
 const loading = ref(false);
 const rows = ref<RequirementPlatformItem[]>([]);
 const isDispatcher = ref(false);
+const isMember = ref(false);
 const syncing = ref(false);
+const createVisible = ref(false);
+const createSubmitting = ref(false);
+const createForm = ref({ projectCode: '', projectName: '' });
+const editVisible = ref(false);
+const editSubmitting = ref(false);
+const editForm = ref({ id: '', projectCode: '', projectName: '' });
+const poolVisible = ref(false);
+const poolLoading = ref(false);
+const poolMembers = ref<RequirementPoolMember[]>([]);
+const poolCandidates = ref<Array<{ userName: string; nickName: string }>>([]);
+const poolSearch = ref('');
+const poolSelectedUser = ref<string>();
+const poolSaving = ref(false);
 
-const statusFilter = ref<'all' | RequirementStatus>('all');
+const statusFilter = ref<'all' | RequirementStatus>('pending_dispatch');
+const ownerFilter = ref('');
+const ownerOptions = ref<Array<{ userName: string; nickName: string }>>([]);
 const keyword = ref('');
+const page = ref(1);
+const pageSize = ref(20);
+const total = ref(0);
 
 /** 状态概览卡片元信息（兼作状态筛选器） */
 const STAT_META: {
@@ -42,8 +73,10 @@ const STAT_META: {
 }[] = [
   { key: 'all', label: '全部需求', color: '#b60f2d', foot: '数据来源：测管平台', icon: markRaw(InboxOutlined) },
   { key: 'pending_dispatch', label: '待分发', color: '#fa8c16', foot: '等待分发人指派', icon: markRaw(SendOutlined) },
-  { key: 'pending_claim', label: '待认领', color: '#1677ff', foot: '等待认领人确认', icon: markRaw(ClockCircleOutlined) },
-  { key: 'claimed', label: '已认领', color: '#52c41a', foot: '已自动创建项目', icon: markRaw(CheckCircleOutlined) },
+  { key: 'pending_claim', label: '待受理', color: '#1677ff', foot: '等待受理人确认', icon: markRaw(ClockCircleOutlined) },
+  { key: 'testing', label: '测试中', color: '#52c41a', foot: '已创建接口项目', icon: markRaw(CheckCircleOutlined) },
+  { key: 'completed', label: '已完成', color: '#13c2c2', foot: '等待源系统移交校验', icon: markRaw(CheckCircleOutlined) },
+  { key: 'returned', label: '已打回', color: '#f5222d', foot: '恢复测试中后才可操作', icon: markRaw(ClockCircleOutlined) },
 ];
 
 const statCards = computed(() => {
@@ -52,7 +85,9 @@ const statCards = computed(() => {
     all: total,
     pending_dispatch: 0,
     pending_claim: 0,
-    claimed: 0,
+    testing: 0,
+    completed: 0,
+    returned: 0,
   };
   for (const row of rows.value) counts[row.status] += 1;
   return STAT_META.map((meta) => ({
@@ -70,42 +105,37 @@ function toggleFilter(key: 'all' | RequirementStatus) {
   statusFilter.value = statusFilter.value === key ? 'all' : key;
 }
 
+const showDispatcherFilter = computed(() => statusFilter.value !== 'pending_dispatch');
+
 const hasActiveFilter = computed(
   () => statusFilter.value !== 'all' || keyword.value.trim() !== '',
 );
 
 function clearFilters() {
   statusFilter.value = 'all';
+  ownerFilter.value = currentUser;
   keyword.value = '';
 }
 
-const filteredRows = computed(() => {
-  const input = keyword.value.trim().toLowerCase();
-  return rows.value.filter((row) => {
-    if (statusFilter.value !== 'all' && row.status !== statusFilter.value) {
-      return false;
-    }
-    if (!input) return true;
-    return (
-      row.projectCode.toLowerCase().includes(input) ||
-      row.projectName.toLowerCase().includes(input)
-    );
-  });
-});
+const filteredRows = computed(() => rows.value);
 
-const columns = [
+const columns = computed(() => [
   { title: '需求编号', dataIndex: 'projectCode', key: 'projectCode', width: 170 },
-  { title: '需求名', dataIndex: 'projectName', key: 'projectName', ellipsis: true },
+  { title: '需求名', dataIndex: 'projectName', key: 'projectName', width: 280, ellipsis: true },
+  { title: '创建时间', dataIndex: 'createdAt', key: 'createdAt', width: 160 },
   { title: '需求状态', dataIndex: 'status', key: 'status', width: 96 },
   { title: '分发信息', key: 'dispatch', width: 230 },
   { title: '认领信息', key: 'claim', width: 230 },
   { title: '操作', key: 'action', width: 150 },
-];
+  { title: '管理', key: 'manage', width: 110 },
+].filter((column) => column.key !== 'manage' || isDispatcher.value));
 
 const STATUS_COLORS: Record<RequirementStatus, string> = {
   pending_dispatch: 'orange',
   pending_claim: 'blue',
-  claimed: 'green',
+  testing: 'green',
+  completed: 'cyan',
+  returned: 'red',
 };
 
 function statusColor(status: RequirementStatus) {
@@ -126,10 +156,15 @@ function personLabel(name?: string | null, account?: string | null) {
 }
 
 function canDispatch(row: RequirementPlatformItem) {
-  return isDispatcher.value && row.status !== 'claimed';
+  return isDispatcher.value && row.status === 'pending_dispatch';
 }
 
 function canActClaim(row: RequirementPlatformItem) {
+  return (row.status === 'pending_claim' && row.dispatchedTo === currentUser) ||
+    (row.status === 'pending_dispatch' && isMember.value);
+}
+
+function canRefuse(row: RequirementPlatformItem) {
   return row.status === 'pending_claim' && row.dispatchedTo === currentUser;
 }
 
@@ -137,7 +172,7 @@ function canActClaim(row: RequirementPlatformItem) {
 const flowSteps = [
   { title: '同步需求', desc: '分发人从测管平台拉取「SIT 测试中」的需求' },
   { title: '分发到人', desc: '分发人将需求指派给测试认领人' },
-  { title: '认领启动', desc: '认领人确认后自动创建接口测试项目' },
+  { title: '受理启动', desc: '受理人确认后自动创建接口测试项目' },
 ];
 
 async function loadList() {
@@ -147,15 +182,45 @@ async function loadList() {
   }
   loading.value = true;
   try {
-    const result = await fetchRequirementList();
+    const result = await fetchRequirementList({
+      page: page.value,
+      size: pageSize.value,
+      status: statusFilter.value,
+      keyword: keyword.value,
+      owner: ownerFilter.value,
+    });
     rows.value = result.rows;
+    total.value = result.count;
     isDispatcher.value = result.isDispatcher;
+    isMember.value = Boolean(result.isMember);
     syncing.value = result.syncing;
+    ownerOptions.value = result.ownerOptions ?? [];
   } catch (error) {
     message.error(error instanceof Error ? error.message : '加载需求列表失败');
   } finally {
     loading.value = false;
   }
+}
+
+let searchTimer: ReturnType<typeof setTimeout> | undefined;
+watch(statusFilter, (status) => {
+  if (status === 'pending_dispatch') {
+    ownerFilter.value = '';
+  } else if (!ownerFilter.value) {
+    ownerFilter.value = currentUser;
+  }
+});
+
+watch([statusFilter, keyword, ownerFilter], () => {
+  page.value = 1;
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => void loadList(), keyword.value ? 300 : 0);
+});
+
+function handleTableChange(pagination: { current?: number; pageSize?: number }) {
+  page.value = pagination.current ?? 1;
+  pageSize.value = pagination.pageSize ?? pageSize.value;
+  void loadList();
 }
 
 async function handleSync() {
@@ -171,6 +236,72 @@ async function handleSync() {
   } finally {
     syncing.value = false;
   }
+}
+
+async function confirmCreate() {
+  if (!createForm.value.projectCode.trim() || !createForm.value.projectName.trim()) {
+    message.warning('需求编号和需求名必填');
+    return;
+  }
+  createSubmitting.value = true;
+  try {
+    await createRequirement(createForm.value);
+    createVisible.value = false;
+    createForm.value = { projectCode: '', projectName: '' };
+    await loadList();
+    message.success('需求创建成功');
+  } catch (error) { message.error(error instanceof Error ? error.message : '创建失败'); }
+  finally { createSubmitting.value = false; }
+}
+
+async function openPool() {
+  poolVisible.value = true;
+  await loadPoolMembers();
+  await searchPoolUsers('');
+}
+
+async function loadPoolMembers() {
+  poolLoading.value = true;
+  try { poolMembers.value = await fetchPoolMembers(); }
+  catch (error) { message.error(error instanceof Error ? error.message : '加载人员池失败'); }
+  finally { poolLoading.value = false; }
+}
+
+let poolSearchTimer: ReturnType<typeof setTimeout> | undefined;
+function handlePoolSearch(value: string) {
+  poolSearch.value = value;
+  if (poolSearchTimer) clearTimeout(poolSearchTimer);
+  poolSearchTimer = setTimeout(() => void searchPoolUsers(value), 250);
+}
+
+async function searchPoolUsers(value: string) {
+  try { poolCandidates.value = await searchPoolCandidates(value); }
+  catch (error) { message.error(error instanceof Error ? error.message : '搜索用户失败'); }
+}
+
+async function addSelectedPoolUser() {
+  if (!poolSelectedUser.value) { message.warning('请选择用户'); return; }
+  poolSaving.value = true;
+  try {
+    await addPoolMember(poolSelectedUser.value);
+    poolSelectedUser.value = undefined;
+    poolSearch.value = '';
+    await loadPoolMembers();
+    poolCandidates.value = [];
+    message.success('已添加到人员池');
+  } catch (error) { message.error(error instanceof Error ? error.message : '添加失败'); }
+  finally { poolSaving.value = false; }
+}
+
+async function deletePoolUser(member: RequirementPoolMember) {
+  if (member.isDispatcher) return;
+  poolSaving.value = true;
+  try {
+    await removePoolMember(member.id);
+    await Promise.all([loadPoolMembers(), searchPoolUsers(poolSearch.value)]);
+    message.success('已从人员池移除');
+  } catch (error) { message.error(error instanceof Error ? error.message : '移除失败'); }
+  finally { poolSaving.value = false; }
 }
 
 // ---------------- 分发 ----------------
@@ -214,7 +345,7 @@ async function confirmDispatch() {
   dispatchSubmitting.value = true;
   try {
     await dispatchRequirement(record.id, dispatchTarget.value);
-    message.success('分发成功，需求进入待认领');
+    message.success('分发成功，需求进入待受理');
     dispatchVisible.value = false;
     await loadList();
   } catch (error) {
@@ -238,6 +369,59 @@ async function handleClaim(row: RequirementPlatformItem) {
   } finally {
     claimSubmittingId.value = '';
   }
+}
+
+async function markCompleted(row: RequirementPlatformItem) {
+  try { await setRequirementStatus(row.id, 'completed'); await loadList(); message.success('需求已标记为已完成'); }
+  catch (error) { message.error(error instanceof Error ? error.message : '操作失败'); }
+}
+
+async function restoreTesting(row: RequirementPlatformItem) {
+  try { await setRequirementStatus(row.id, 'testing'); await loadList(); message.success('需求已恢复为测试中'); }
+  catch (error) { message.error(error instanceof Error ? error.message : '操作失败'); }
+}
+
+async function openEdit(row: RequirementPlatformItem) {
+  editForm.value = { id: row.id, projectCode: row.projectCode, projectName: row.projectName };
+  editVisible.value = true;
+}
+
+async function confirmEdit() {
+  const code = editForm.value.projectCode.trim();
+  const name = editForm.value.projectName.trim();
+  if (!code || !name) {
+    message.warning('需求编号和需求名必填');
+    return;
+  }
+  editSubmitting.value = true;
+  try {
+    await updateRequirement(editForm.value.id, { projectCode: code, projectName: name });
+    editVisible.value = false;
+    await loadList();
+    message.success('需求已更新');
+  } catch (error) { message.error(error instanceof Error ? error.message : '编辑失败'); }
+  finally { editSubmitting.value = false; }
+}
+
+async function removeRecord(row: RequirementPlatformItem) {
+  Modal.confirm({
+    title: '删除需求',
+    content: `确定软删除需求「${row.projectName}」？`,
+    okText: '删除',
+    cancelText: '取消',
+    okType: 'danger',
+    centered: true,
+    onOk: async () => {
+      try {
+        await deleteRequirement(row.id);
+        await loadList();
+        message.success('需求已删除');
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : '删除失败');
+        throw error;
+      }
+    },
+  });
 }
 
 const refuseVisible = ref(false);
@@ -313,39 +497,16 @@ onMounted(() => {
             <template #icon><SyncOutlined /></template>
             {{ syncing ? '同步中…' : '同步需求' }}
           </a-button>
+          <a-button @click="createVisible = true">手动创建</a-button>
+          <a-button @click="openPool"><template #icon><TeamOutlined /></template>人员池</a-button>
         </div>
       </header>
-
-      <div class="requirement-stats">
-        <button
-          v-for="card in statCards"
-          :key="card.key"
-          type="button"
-          class="stat-card"
-          :class="{ active: statusFilter === card.key }"
-          :aria-pressed="statusFilter === card.key"
-          @click="toggleFilter(card.key)"
-        >
-          <span class="stat-card-head">
-            <span class="stat-dot" :style="{ background: card.color }" />
-            <span class="stat-label">{{ card.label }}</span>
-            <component :is="card.icon" class="stat-icon" :style="{ color: card.color }" />
-          </span>
-          <span class="stat-value">{{ card.count }}</span>
-          <span class="stat-bar">
-            <i :style="{ width: `${card.pct}%`, background: card.color }" />
-          </span>
-          <span class="stat-foot">
-            {{ card.foot }}<template v-if="card.key !== 'all'"> · 占比 {{ card.pct }}%</template>
-          </span>
-        </button>
-      </div>
 
       <div class="requirement-list-card">
         <div class="list-card-head">
           <div class="list-card-title">
             <strong>需求列表</strong>
-            <span class="list-card-count">{{ filteredRows.length }} 条</span>
+            <span class="list-card-count">{{ total }} 条</span>
             <a-button
               v-if="hasActiveFilter"
               type="link"
@@ -357,19 +518,39 @@ onMounted(() => {
             </a-button>
           </div>
           <div class="list-card-tools">
-            <span v-if="!isDispatcher" class="requirement-hint">
-              仅展示分发给你与已认领的需求
-            </span>
+            <span v-if="!isDispatcher" class="requirement-hint">人员池需求</span>
             <a-input-search
               v-model:value="keyword"
               class="requirement-search"
               placeholder="搜索需求编号 / 需求名"
               allow-clear
             />
+            <a-select
+              v-if="showDispatcherFilter"
+              v-model:value="ownerFilter"
+              class="requirement-status-select"
+              style="width: 170px"
+              allow-clear
+              placeholder="需求归属人"
+              :options="ownerOptions.map((owner) => ({ value: owner.userName, label: `${owner.nickName}（${owner.userName}）` }))"
+            />
+            <a-select
+              v-model:value="statusFilter"
+              class="requirement-status-select"
+              style="width: 120px"
+              :options="[
+                { value: 'all', label: '全部状态' },
+                { value: 'pending_dispatch', label: '待分发' },
+                { value: 'pending_claim', label: '待受理' },
+                { value: 'testing', label: '测试中' },
+                { value: 'completed', label: '已完成' },
+                { value: 'returned', label: '已打回' },
+              ]"
+            />
           </div>
         </div>
 
-        <div v-if="!rows.length && !loading" class="requirement-empty">
+        <div v-if="!total && !loading" class="requirement-empty">
           <a-empty :image="Empty.PRESENTED_IMAGE_SIMPLE" description="暂无需求数据">
             <a-button
               v-if="isDispatcher"
@@ -393,12 +574,6 @@ onMounted(() => {
           </ol>
         </div>
 
-        <div v-else-if="!filteredRows.length && !loading" class="requirement-empty">
-          <a-empty description="没有符合筛选条件的需求">
-            <a-button @click="clearFilters">清除筛选</a-button>
-          </a-empty>
-        </div>
-
         <div v-else class="list-card-body">
           <a-table
             :columns="columns"
@@ -406,7 +581,9 @@ onMounted(() => {
             :loading="loading"
             row-key="id"
             size="middle"
-            :pagination="{ pageSize: 15, showSizeChanger: false, showTotal: (total: number) => `共 ${total} 条` }"
+            :scroll="{ x: 1120 }"
+            :pagination="{ current: page, pageSize, total, showSizeChanger: true, pageSizeOptions: ['20', '50', '100'], showTotal: (count: number) => `共 ${count} 条` }"
+            @change="handleTableChange"
           >
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'projectCode'">
@@ -416,6 +593,9 @@ onMounted(() => {
                 <a-tag :color="statusColor(record.status as RequirementStatus)">
                   {{ REQUIREMENT_STATUS_LABELS[record.status as RequirementStatus] }}
                 </a-tag>
+              </template>
+              <template v-else-if="column.key === 'createdAt'">
+                <span class="cell-muted">{{ formatTime(record.createdAt) }}</span>
               </template>
               <template v-else-if="column.key === 'dispatch'">
                 <div v-if="record.dispatchedTo" class="cell-stack">
@@ -431,7 +611,7 @@ onMounted(() => {
                 </span>
               </template>
               <template v-else-if="column.key === 'claim'">
-                <div v-if="record.status === 'claimed' && record.claimedBy" class="cell-stack">
+                <div v-if="['testing', 'completed', 'returned'].includes(record.status) && record.claimedBy" class="cell-stack">
                   <span class="cell-main">
                     {{ personLabel(record.claimedByName, record.claimedBy) }}
                   </span>
@@ -447,8 +627,10 @@ onMounted(() => {
                     type="primary"
                     @click="openDispatch(record as RequirementPlatformItem)"
                   >
-                    {{ record.status === 'pending_claim' ? '改派' : '分发' }}
+                    分发
                   </a-button>
+                  <a-button v-if="record.status === 'testing' && (isDispatcher || record.claimedBy === currentUser)" size="small" @click="markCompleted(record as RequirementPlatformItem)">完成</a-button>
+                  <a-button v-if="record.status === 'returned' && (isDispatcher || record.claimedBy === currentUser)" size="small" @click="restoreTesting(record as RequirementPlatformItem)">恢复测试</a-button>
                   <a-button
                     v-if="canActClaim(record as RequirementPlatformItem)"
                     size="small"
@@ -459,7 +641,7 @@ onMounted(() => {
                     认领
                   </a-button>
                   <a-button
-                    v-if="canActClaim(record as RequirementPlatformItem)"
+                    v-if="canRefuse(record as RequirementPlatformItem)"
                     size="small"
                     danger
                     @click="openRefuse(record as RequirementPlatformItem)"
@@ -474,11 +656,70 @@ onMounted(() => {
                   </span>
                 </div>
               </template>
+              <template v-else-if="column.key === 'manage'">
+                <div class="action-cell">
+                  <a-button v-if="isDispatcher" size="small" aria-label="编辑需求" @click="openEdit(record as RequirementPlatformItem)">
+                    <EditOutlined />
+                  </a-button>
+                  <a-button v-if="isDispatcher" size="small" danger aria-label="删除需求" @click="removeRecord(record as RequirementPlatformItem)">
+                    <DeleteOutlined />
+                  </a-button>
+                  <span v-if="!isDispatcher" class="cell-muted">-</span>
+                </div>
+              </template>
             </template>
           </a-table>
         </div>
       </div>
     </section>
+
+    <a-modal v-model:open="createVisible" title="手动创建需求" ok-text="创建" cancel-text="取消" :confirm-loading="createSubmitting" @ok="confirmCreate">
+      <a-form layout="vertical">
+        <a-form-item label="需求编号" required><a-input v-model:value="createForm.projectCode" placeholder="XQ2026-0818-01" /></a-form-item>
+        <a-form-item label="需求名" required><a-input v-model:value="createForm.projectName" placeholder="请输入需求名" /></a-form-item>
+      </a-form>
+    </a-modal>
+
+    <a-modal v-model:open="editVisible" title="编辑需求" ok-text="保存" cancel-text="取消" :confirm-loading="editSubmitting" @ok="confirmEdit">
+      <a-form layout="vertical">
+        <a-form-item label="需求编号" required><a-input v-model:value="editForm.projectCode" maxlength="64" /></a-form-item>
+        <a-form-item label="需求名" required><a-input v-model:value="editForm.projectName" maxlength="120" /></a-form-item>
+      </a-form>
+    </a-modal>
+
+    <a-modal v-model:open="poolVisible" title="需求人员池" :footer="null" width="560px">
+      <div class="pool-add-row">
+        <a-select
+          v-model:value="poolSelectedUser"
+          show-search
+          :filter-option="false"
+          :search-value="poolSearch"
+          :options="poolCandidates.map((user) => ({ value: user.userName, label: `${user.nickName}（${user.userName}）` }))"
+          placeholder="搜索姓名或账号"
+          :virtual="true"
+          class="pool-user-select"
+          @search="handlePoolSearch"
+        />
+        <a-button type="primary" :loading="poolSaving" @click="addSelectedPoolUser">添加成员</a-button>
+      </div>
+      <a-spin :spinning="poolLoading">
+        <a-list :data-source="poolMembers" item-layout="horizontal" class="pool-member-list">
+          <template #renderItem="{ item }">
+            <a-list-item>
+              <div class="pool-member-identity">
+                <span class="pool-member-name">{{ item.nickName }}</span>
+                <span class="pool-member-account">{{ item.userName }}</span>
+              </div>
+              <div class="pool-member-actions">
+                <a-tag v-if="item.isDispatcher" color="red">分发人</a-tag>
+                <a-button v-else size="small" danger :loading="poolSaving" @click="deletePoolUser(item)">移除</a-button>
+              </div>
+            </a-list-item>
+          </template>
+          <template #emptyText>人员池暂无普通成员</template>
+        </a-list>
+      </a-spin>
+    </a-modal>
 
     <a-modal
       v-model:open="dispatchVisible"
@@ -830,6 +1071,67 @@ onMounted(() => {
   margin-bottom: 12px;
   color: rgba(60, 60, 67, 0.75);
   font-size: 13px;
+}
+
+.pool-add-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.pool-user-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.pool-member-list {
+  max-height: 420px;
+  overflow: auto;
+}
+
+.pool-member-list :deep(.ant-list-item) {
+  min-height: 54px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.pool-member-list :deep(.ant-list-item:hover) {
+  background: #f6f8fb;
+}
+
+.pool-member-identity,
+.pool-member-actions {
+  display: flex;
+  align-items: center;
+}
+
+.pool-member-identity {
+  flex: 1;
+  min-width: 0;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.pool-member-name {
+  overflow: hidden;
+  color: var(--cf-text);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.pool-member-account {
+  flex: 0 0 auto;
+  color: var(--cf-text-muted);
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.pool-member-actions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  margin-left: 16px;
 }
 
 @media (max-width: 960px) {

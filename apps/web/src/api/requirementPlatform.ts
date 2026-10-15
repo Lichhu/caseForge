@@ -12,13 +12,65 @@ export interface RequirementPlatformListResponse {
   rows: RequirementPlatformItem[];
   count: number;
   isDispatcher: boolean;
+  isMember?: boolean;
+  ownerOptions: Array<{ userName: string; nickName: string }>;
   syncing: boolean;
+  page: number;
+  size: number;
+}
+
+export async function createRequirement(payload: { projectCode: string; projectName: string }) {
+  const { data } = await http.post<RequirementPlatformItem>("/requirement-platform/requirements", payload);
+  return data;
+}
+
+export async function updateRequirement(id: string, payload: Partial<{ projectCode: string; projectName: string }>) {
+  const { data } = await http.patch<RequirementPlatformItem>(`/requirement-platform/requirements/${id}`, payload);
+  return data;
+}
+
+export async function deleteRequirement(id: string) {
+  const { data } = await http.delete<{ id: string; deleted: boolean }>(`/requirement-platform/requirements/${id}`);
+  return data;
+}
+
+export interface RequirementPoolMember {
+  id: string;
+  userName: string;
+  nickName: string;
+  remark?: string | null;
+  isDispatcher?: boolean;
+}
+
+export async function fetchPoolMembers(): Promise<RequirementPoolMember[]> {
+  const { data } = await http.get<RequirementPoolMember[]>("/requirement-platform/members");
+  return data;
+}
+
+export async function searchPoolCandidates(keyword: string): Promise<Array<{ userName: string; nickName: string }>> {
+  const { data } = await http.get<Array<{ userName: string; nickName: string }>>("/requirement-platform/members/candidates", { params: { keyword } });
+  return data;
+}
+
+export async function addPoolMember(userName: string): Promise<RequirementPoolMember> {
+  const { data } = await http.post<RequirementPoolMember>("/requirement-platform/members", { userName });
+  return data;
+}
+
+export async function removePoolMember(id: string): Promise<void> {
+  await http.delete(`/requirement-platform/members/${id}`);
+}
+
+export async function setRequirementStatus(id: string, status: "testing" | "completed") {
+  const { data } = await http.patch<RequirementPlatformItem>(`/requirement-platform/requirements/${id}/status`, { status });
+  return data;
 }
 
 /** 需求平台列表（分发人全量，普通用户仅与自己相关的） */
-export async function fetchRequirementList(): Promise<RequirementPlatformListResponse> {
+export async function fetchRequirementList(params: { page: number; size: number; status: string; keyword: string; owner?: string }): Promise<RequirementPlatformListResponse> {
   const { data } = await http.get<RequirementPlatformListResponse>(
     "/requirement-platform/requirements",
+    { params },
   );
   return data;
 }

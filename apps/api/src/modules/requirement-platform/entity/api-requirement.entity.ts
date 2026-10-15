@@ -16,7 +16,9 @@ import {
 export const API_REQUIREMENT_STATUSES = [
   "pending_dispatch",
   "pending_claim",
-  "claimed",
+  "testing",
+  "completed",
+  "returned",
 ] as const;
 
 export type ApiRequirementStatus = (typeof API_REQUIREMENT_STATUSES)[number];
@@ -38,6 +40,9 @@ export class ApiRequirementEntity extends SoftDeletableEntity {
   /** 需求名（源库 b_project.project_name） */
   @Column({ type: "varchar" })
   projectName: string;
+
+  @Column({ type: "varchar", nullable: true, default: "system" })
+  createdBy?: string | null;
 
   /** 分发/认领状态，默认待分发 */
   @Column({
@@ -72,6 +77,14 @@ export class ApiRequirementEntity extends SoftDeletableEntity {
 
   @Column({ type: "datetime", nullable: true })
   claimedAt?: Date | null;
+
+  /** 标记为已完成的时间 */
+  @Column({ type: "datetime", nullable: true })
+  completedAt?: Date | null;
+
+  /** 最近一次从测管平台读取源需求状态的时间 */
+  @Column({ type: "datetime", nullable: true })
+  sourceUpdatedAt?: Date | null;
 
   /** 认领时自动创建的接口测试项目 id（case_project.id） */
   @Column({ type: "varchar", nullable: true })

@@ -105,7 +105,7 @@ describe("RequirementNotifyService 事件通知", () => {
     const { service, messageService } = buildService();
     service.notifyClaimed(
       requirement({
-        status: "claimed",
+        status: "testing",
         dispatchedBy: "boss",
         claimedBy: "zhangsan",
         claimedByName: "张三",

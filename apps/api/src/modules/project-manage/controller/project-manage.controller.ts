@@ -63,6 +63,8 @@ export class ProjectManageController {
       Number(size) || 15,
       input,
       platform,
+      undefined,
+      platform === "api-test" ? "testing" : "all",
     );
     return {
       count: result.count,
@@ -76,6 +78,11 @@ export class ProjectManageController {
         runCount: row.generationCount,
         caseCount: row.caseCount,
         isClaimedFromPlatform: row.isClaimedFromPlatform,
+        requirementOwner: row.requirementOwner,
+        requirementCreator: row.requirementCreator,
+        requirementCreatedAt: row.requirementCreatedAt?.toISOString() ?? null,
+        requirementId: row.requirementId,
+        requirementStatus: row.requirementStatus,
       })),
     };
   }
@@ -104,6 +111,7 @@ export class ProjectManageController {
     @Query("input") input?: string,
     @Query("platform") platform: ProjectPlatform = "case-forge",
     @Query("month") month?: string,
+    @Query("requirementStatus") requirementStatus?: string,
   ) {
     return await this.pmService.listProjects(
       Number(page) || 1,
@@ -111,6 +119,7 @@ export class ProjectManageController {
       input,
       platform,
       month,
+      requirementStatus ?? "testing",
     );
   }
 

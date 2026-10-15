@@ -28,6 +28,9 @@ export class SchemaPatchService implements OnModuleInit {
     await this.ensureStructDocParseMetaColumns();
     await this.ensureServiceIgnoreSslVerifyColumn();
     await this.ensureApiRequirementOverdueNotifiedColumn();
+    await this.ensureApiRequirementWorkflowColumns();
+    await this.backfillLegacyApiRequirements();
+    await this.migrateLegacyRequirementStatusToTesting();
     await this.ensureNotifyMessageTable();
     await migrateStructDocProjectIndex(this.dataSource);
     await ensureCaseEditorUtf8mb4TextColumns(this.dataSource, this.logger);
@@ -334,6 +337,116 @@ export class SchemaPatchService implements OnModuleInit {
         AFTER refuseReason
     `);
     this.logger.log("api_requirement.overdueNotifiedAt 列已补齐");
+  }
+
+  private async ensureApiRequirementWorkflowColumns() {
+    const tables: Array<Record<string, string>> = await this.dataSource.query(
+      "SHOW TABLES LIKE 'api_requirement'",
+    );
+    if (!tables.length) return;
+    const columns: Array<{ Field: string }> = await this.dataSource.query(
+      "SHOW COLUMNS FROM api_requirement",
+    );
+    const names = new Set(columns.map((column) => column.Field));
+    if (!names.has("createdBy")) {
+      await this.dataSource.query(
+        "ALTER TABLE api_requirement ADD COLUMN createdBy VARCHAR(255) NULL DEFAULT 'system' AFTER projectName",
+      );
+    }
+    if (!names.has("completedAt")) {
+      await this.dataSource.query(
+        "ALTER TABLE api_requirement ADD COLUMN completedAt DATETIME NULL COMMENT '需求完成时间' AFTER claimedAt",
+      );
+    }
+    if (!names.has("sourceUpdatedAt")) {
+      await this.dataSource.query(
+        "ALTER TABLE api_requirement ADD COLUMN sourceUpdatedAt DATETIME NULL COMMENT '测管平台来源更新时间' AFTER completedAt",
+      );
+    }
+    const enumRows: Array<{ Type: string }> = await this.dataSource.query(
+      "SHOW COLUMNS FROM api_requirement LIKE 'status'",
+    );
+    const enumType = enumRows[0]?.Type ?? "";
+    if (!enumType.includes("testing") || !enumType.includes("returned")) {
+      await this.dataSource.query(
+        "ALTER TABLE api_requirement MODIFY status VARCHAR(32) NOT NULL DEFAULT 'pending_dispatch'",
+      );
+      await this.dataSource.query(
+        `UPDATE api_requirement SET status = CASE
+          WHEN status = 'claimed' THEN 'testing'
+          WHEN status IN ('pending_dispatch','pending_claim','testing','completed','returned') THEN status
+          ELSE 'pending_dispatch'
+        END`,
+      );
+      await this.dataSource.query(
+        "ALTER TABLE api_requirement MODIFY status ENUM('pending_dispatch','pending_claim','testing','completed','returned') NOT NULL DEFAULT 'pending_dispatch'",
+      );
+    }
+    const memberTables: Array<Record<string, string>> = await this.dataSource.query(
+      "SHOW TABLES LIKE 'api_requirement_member'",
+    );
+    if (!memberTables.length) {
+      await this.dataSource.query(`
+        CREATE TABLE api_requirement_member (
+          id CHAR(36) NOT NULL PRIMARY KEY,
+          userName VARCHAR(255) NOT NULL,
+          remark VARCHAR(255) NULL,
+          createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+          deleted_at DATETIME(6) NULL,
+          UNIQUE KEY uk_api_requirement_member_user (userName, deleted_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+      `);
+    }
+  }
+
+  private async backfillLegacyApiRequirements() {
+    const tables: Array<Record<string, string>> = await this.dataSource.query(
+      "SHOW TABLES LIKE 'api_requirement'",
+    );
+    if (!tables.length) return;
+    await this.dataSource.query(`
+      INSERT INTO api_requirement
+        (id, projectCode, projectName, createdBy, status, claimedBy, claimedAt, claimedProjectId, createdAt, updatedAt)
+      SELECT UUID(), p.requirementNo, COALESCE(NULLIF(p.title, ''), p.requirementNo),
+        COALESCE(NULLIF(p.createdBy, ''), 'system'), 'testing',
+        NULLIF(p.createdBy, ''), p.createdAt, p.id, p.createdAt, p.updatedAt
+      FROM case_project p
+      WHERE p.platform = 'api-test'
+        AND p.requirementNo IS NOT NULL AND TRIM(p.requirementNo) <> ''
+        AND p.deleted_at IS NULL
+        AND p.id = (
+          SELECT MIN(p2.id) FROM case_project p2
+          WHERE p2.platform = 'api-test'
+            AND p2.requirementNo = p.requirementNo
+            AND p2.deleted_at IS NULL
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM api_requirement r
+          WHERE r.projectCode = p.requirementNo
+        )
+    `);
+  }
+
+  private async migrateLegacyRequirementStatusToTesting() {
+    await this.dataSource.query(`
+      CREATE TABLE IF NOT EXISTS api_requirement_migration_marker (
+        name VARCHAR(100) NOT NULL PRIMARY KEY,
+        createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    const rows: Array<{ name: string }> = await this.dataSource.query(
+      "SELECT name FROM api_requirement_migration_marker WHERE name = 'legacy-projects-testing'",
+    );
+    if (rows.length) return;
+    await this.dataSource.query(`
+      UPDATE api_requirement r
+      INNER JOIN case_project p ON p.id = r.claimedProjectId
+      SET r.status = 'testing'
+      WHERE p.platform = 'api-test' AND p.deleted_at IS NULL AND r.status = 'completed'
+    `);
+    await this.dataSource.query(
+      "INSERT INTO api_requirement_migration_marker (name) VALUES ('legacy-projects-testing')",
+    );
   }
 
   private async ensureNotifyMessageTable() {

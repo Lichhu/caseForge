@@ -58,6 +58,11 @@ http.interceptors.response.use(
 export interface ProjectListItem extends CaseForgeProject {
   runCount: number;
   caseCount: number;
+  requirementOwner?: string | null;
+  requirementCreator?: string | null;
+  requirementCreatedAt?: string | null;
+  requirementId?: string | null;
+  requirementStatus?: string | null;
 }
 
 export interface ProjectListQuery {
@@ -66,6 +71,7 @@ export interface ProjectListQuery {
   size?: number;
   input?: string;
   month?: string;
+  requirementStatus?: string;
 }
 
 export interface ProjectListResult {
@@ -84,6 +90,11 @@ function mapProjectListRow(raw: {
   generationCount?: number;
   caseCount?: number;
   isClaimedFromPlatform?: boolean;
+  requirementOwner?: string | null;
+  requirementCreator?: string | null;
+  requirementCreatedAt?: string | null;
+  requirementId?: string | null;
+  requirementStatus?: string | null;
 }): ProjectListItem {
   return {
     id: raw.id,
@@ -101,6 +112,11 @@ function mapProjectListRow(raw: {
     runCount: raw.generationCount ?? 0,
     caseCount: raw.caseCount ?? 0,
     isClaimedFromPlatform: raw.isClaimedFromPlatform ?? false,
+    requirementOwner: raw.requirementOwner ?? null,
+    requirementCreator: raw.requirementCreator ?? null,
+    requirementCreatedAt: raw.requirementCreatedAt ?? null,
+    requirementId: raw.requirementId ?? null,
+    requirementStatus: raw.requirementStatus ?? null,
   };
 }
 
@@ -286,6 +302,7 @@ export async function listProjects(
       size,
       ...(input ? { input } : {}),
       ...(query.month ? { month: query.month } : {}),
+      ...(query.requirementStatus ? { requirementStatus: query.requirementStatus } : {}),
     },
   });
   return {

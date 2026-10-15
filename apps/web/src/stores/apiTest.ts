@@ -131,6 +131,7 @@ interface State {
   projectListTotal: number;
   projectListKeyword: string;
   projectListMonth: string;
+  projectListRequirementStatus: string;
   projectListCaseCount: number;
   activeProjectId: string;
   transactions: ApiTransactionRow[];
@@ -169,6 +170,7 @@ export const useApiTestStore = defineStore("apiTest", {
     projectListTotal: 0,
     projectListKeyword: "",
     projectListMonth: "",
+    projectListRequirementStatus: "testing",
     projectListCaseCount: 0,
     activeProjectId: localStorage.getItem(activeProjectKey) ?? "",
     transactions: [],
@@ -276,12 +278,14 @@ export const useApiTestStore = defineStore("apiTest", {
       size?: number;
       keyword?: string;
       month?: string;
+      requirementStatus?: string;
       resetPage?: boolean;
     }) {
       if (options?.keyword !== undefined) {
         this.projectListKeyword = options.keyword;
       }
       if (options?.month !== undefined) this.projectListMonth = options.month;
+      if (options?.requirementStatus !== undefined) this.projectListRequirementStatus = options.requirementStatus;
       if (options?.size !== undefined) {
         this.projectListPageSize = normalizeProjectPageSize(options.size);
       }
@@ -298,6 +302,7 @@ export const useApiTestStore = defineStore("apiTest", {
           size: this.projectListPageSize,
           input: this.projectListKeyword,
           month: this.projectListMonth,
+          requirementStatus: this.projectListRequirementStatus,
         });
 
       let result = await fetchPage(this.projectListPage);

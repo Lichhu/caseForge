@@ -39,6 +39,7 @@ export class RequirementSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RequirementSyncService.name);
   private syncing = false;
   private timer?: NodeJS.Timeout;
+  private statusTimer?: NodeJS.Timeout;
 
   constructor(
     @InjectRepository(ApiRequirementEntity)
@@ -66,12 +67,35 @@ export class RequirementSyncService implements OnModuleInit, OnModuleDestroy {
       }, intervalMs);
       this.logger.log(`需求定时同步已启用，间隔 ${intervalMs}ms`);
     }
+    this.statusTimer = setInterval(() => {
+      this.refreshCompletedStatuses().catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`需求状态回查失败: ${message}`);
+      });
+    }, Math.max(intervalMs, 60000));
   }
 
   onModuleDestroy() {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = undefined;
+    }
+    if (this.statusTimer) clearInterval(this.statusTimer);
+  }
+
+  private async refreshCompletedStatuses() {
+    const completedRows = await this.requirementRepo.find({ where: { status: "completed" } });
+    for (const requirement of completedRows) {
+      const source = await this.testProjectRepo.findOne({
+        where: { projectCode: requirement.projectCode, dataStatus: 1 },
+      });
+      if (!source) continue;
+      requirement.sourceUpdatedAt = new Date();
+      if (source.demandStatus?.trim().toLowerCase() === "sit移交") {
+        requirement.status = "returned";
+        requirement.completedAt = null;
+      }
+      await this.requirementRepo.save(requirement);
     }
   }
 
@@ -118,6 +142,7 @@ export class RequirementSyncService implements OnModuleInit, OnModuleDestroy {
               projectCode,
               projectName: project.projectName?.trim() || projectCode,
               status: "pending_dispatch",
+              sourceUpdatedAt: new Date(),
             }),
           );
           added += 1;

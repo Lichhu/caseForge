@@ -11,15 +11,15 @@
         @change="handleModuleChange"
       />
       <h2 v-else class="project-section-heading">项目管理</h2>
-      <p class="module-description">以需求为维度，手动新建项目</p>
+      <p class="module-description">以需求为维度管理接口测试项目</p>
     </div>
 
     <div class="project-action-row action-toolbar action-toolbar--block">
-      <a-button type="primary" block @click="onNewProject">
+      <a-button v-if="!isApiPlatform" type="primary" block @click="onNewProject">
         <template #icon><PlusOutlined /></template>
         新建项目
       </a-button>
-      <a-button @click="toggleDeleteMode">
+      <a-button v-if="!isApiPlatform" @click="toggleDeleteMode">
         {{ deleteMode ? '退出' : '删除' }}
       </a-button>
     </div>
@@ -54,6 +54,21 @@
           @change="handleMonthChange"
         />
       </div>
+    </div>
+
+    <div v-if="isApiPlatform" class="project-status-tabs" role="tablist" aria-label="需求状态筛选">
+      <button
+        v-for="tab in statusTabs"
+        :key="tab.value"
+        type="button"
+        role="tab"
+        class="project-status-tab"
+        :class="{ active: requirementStatus === tab.value }"
+        :aria-selected="requirementStatus === tab.value"
+        @click="handleRequirementStatusChange(tab.value)"
+      >
+        {{ tab.label }}
+      </button>
     </div>
 
     <div v-if="selectedMonth" class="project-month-chip">
@@ -91,7 +106,11 @@
             v-for="project in projectList"
             :key="project.id"
             class="project-item"
-            :class="{ active: project.id === activeProjectId, batch: deleteMode }"
+            :class="{
+              active: project.id === activeProjectId,
+              batch: deleteMode,
+              'is-completed': isApiPlatform && project.requirementStatus === 'completed',
+            }"
             role="button"
             tabindex="0"
             @click="handleProjectClick(project.id)"
@@ -110,16 +129,46 @@
               <!-- 标题用纯 CSS 单行省略 + 外层 Tooltip：a-typography-text 的 -->
               <!-- :ellipsis="{ tooltip }" 会禁用 CSS 省略并走 ResizeObserver+rAF -->
               <!-- JS 测量，临界条数下滚动条变化会引发测量-重排振荡（列表抖动） -->
-              <a-tooltip :title="cleanProjectTitle(project.title)">
-                <span class="project-title">{{ cleanProjectTitle(project.title) }}</span>
-              </a-tooltip>
-              <span v-if="project.requirementNo" class="project-requirement">
-                {{ project.requirementNo }} · {{ project.caseCount }} 条案例
-              </span>
-              <span v-else class="project-requirement">{{ project.caseCount }} 条案例</span>
+              <div class="project-title-row">
+                <a-tooltip :title="cleanProjectTitle(project.title)">
+                  <span class="project-title">{{ cleanProjectTitle(project.title) }}</span>
+                </a-tooltip>
+                <span
+                  v-if="isApiPlatform && project.requirementStatus"
+                  class="project-status-badge"
+                  :class="`status-${project.requirementStatus}`"
+                >
+                  {{ requirementStatusLabel(project.requirementStatus) }}
+                </span>
+              </div>
+              <div class="project-meta-row">
+                <span v-if="project.requirementNo" class="project-requirement-no">{{ project.requirementNo }}</span>
+                <span class="project-case-badge">{{ project.caseCount }} 案例</span>
+              </div>
+              <div v-if="isApiPlatform && project.requirementCreatedAt" class="project-time-row">
+                <span class="project-time">创建于 {{ formatProjectTime(project.requirementCreatedAt) }}</span>
+                <button
+                  v-if="project.requirementId && project.requirementStatus === 'testing'"
+                  type="button"
+                  class="project-complete-btn"
+                  :disabled="saving"
+                  @click.stop="markRequirementCompleted(project)"
+                >
+                  标记已完成
+                </button>
+                <button
+                  v-else-if="project.requirementId && project.requirementStatus === 'returned'"
+                  type="button"
+                  class="project-complete-btn"
+                  :disabled="saving"
+                  @click.stop="restoreRequirementTesting(project)"
+                >
+                  恢复为测试中
+                </button>
+              </div>
             </div>
             <button
-              v-if="!deleteMode"
+              v-if="!deleteMode && !isApiPlatform"
               class="project-edit"
               :disabled="saving"
               aria-label="编辑项目"
@@ -180,6 +229,7 @@
     </div>
 
     <a-modal
+      v-if="!isApiPlatform"
       v-model:open="createModalOpen"
       :title="isApiPlatform ? '新建项目' : '新建需求项目'"
       ok-text="创建"
@@ -257,6 +307,7 @@ import { PROJECT_PAGE_SIZE_OPTIONS } from '@case-forge/shared';
 import { useCaseForgeStore } from '@/stores/caseForge';
 import { useApiTestStore } from '@/stores/apiTest';
 import type { ProjectListItem } from '@/api/client';
+import { setRequirementStatus } from '@/api/requirementPlatform';
 
 const props = withDefaults(
   defineProps<{
@@ -289,6 +340,28 @@ const projectList = computed(() =>
 );
 const keyword = ref('');
 const selectedMonth = ref('');
+const requirementStatus = ref('testing');
+
+/** 需求状态筛选 Tab（结构改版：由下拉改为顶部 Tab） */
+const statusTabs = [
+  { value: 'testing', label: '测试中' },
+  { value: 'completed', label: '已完成' },
+  { value: 'returned', label: '已打回' },
+  { value: 'all', label: '全部' },
+];
+
+const requirementStatusLabels: Record<string, string> = {
+  testing: '测试中',
+  pending_dispatch: '待分发',
+  pending_claim: '待受理',
+  completed: '已完成',
+  returned: '已打回',
+};
+
+function requirementStatusLabel(status: string) {
+  return requirementStatusLabels[status] || status;
+}
+
 const listLoading = ref(false);
 const deleteMode = ref(false);
 const deleting = ref(false);
@@ -357,6 +430,7 @@ async function reloadProjects(options?: {
   size?: number;
   keyword?: string;
   month?: string;
+  requirementStatus?: string;
   resetPage?: boolean;
 }) {
   listLoading.value = true;
@@ -373,6 +447,11 @@ async function reloadProjects(options?: {
 
 function handleMonthChange(value: string | null) {
   void reloadProjects({ page: 1, month: value || '' });
+}
+
+function handleRequirementStatusChange(value: string) {
+  requirementStatus.value = value;
+  void reloadProjects({ page: 1, requirementStatus: value });
 }
 
 function clearMonthFilter() {
@@ -639,6 +718,42 @@ function cleanProjectTitle(title: string) {
       .replace(/\.(docx?|md)$/i, '')
       .trim() || '未命名项目'
   );
+}
+
+function formatProjectTime(value?: string | null) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('zh-CN', { hour12: false });
+}
+
+async function markRequirementCompleted(project: ProjectListItem) {
+  if (!project.requirementId || saving.value) return;
+  saving.value = true;
+  try {
+    await setRequirementStatus(project.requirementId, 'completed');
+    message.success('需求已标记为已完成');
+    await reloadProjects({ page: listPage.value });
+  } catch (error) {
+    message.error((error as Error)?.message || '状态更新失败');
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function restoreRequirementTesting(project: ProjectListItem) {
+  if (!project.requirementId || saving.value) return;
+  saving.value = true;
+  try {
+    await setRequirementStatus(project.requirementId, 'testing');
+    message.success('需求已恢复为测试中');
+    await reloadProjects({ page: listPage.value, requirementStatus: 'testing' });
+    requirementStatus.value = 'testing';
+  } catch (error) {
+    message.error((error as Error)?.message || '状态更新失败');
+  } finally {
+    saving.value = false;
+  }
 }
 
 function projectMeta(project: { runCount: number; requirementNo?: string | null }) {

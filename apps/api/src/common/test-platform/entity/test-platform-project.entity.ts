@@ -24,4 +24,5 @@ export class TestPlatformProjectEntity {
 
   @Column({ name: "data_status", type: "tinyint" })
   dataStatus: number;
+
 }

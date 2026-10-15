@@ -1,7 +1,7 @@
 /**
  * @file 项目管理 Nest 模块
  */
-import { Module } from "@nestjs/common";
+import { Module, forwardRef } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { CaseEditorEntity } from "@case-editor/entity/case-editor.entity";
 import { CaseNodeMetadataEntity } from "@case-editor/entity/case-node-metadata.entity";
@@ -13,6 +13,7 @@ import { ApiRequirementEntity } from "@requirement-platform/entity/api-requireme
 import { ProjectManageController } from "./controller/project-manage.controller";
 import { ProjectManageService } from "./service/project-manage.service";
 import { CaseProjectEntity } from "./entity/project.entity";
+import { RequirementPlatformModule } from "@requirement-platform/index";
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { CaseProjectEntity } from "./entity/project.entity";
       CaseNodeMetadataEntity,
       ApiRequirementEntity,
     ]),
+    forwardRef(() => RequirementPlatformModule),
   ],
   controllers: [ProjectManageController],
   providers: [ProjectManageService],

@@ -60,7 +60,7 @@
           <a-empty
             v-if="!apiStore.activeProjectId"
             class="empty-state workbench-empty"
-            description="请先在左侧新建项目（需填写需求编号 XQxxxx-xxxx-xx）"
+            description="请先在需求管理中认领需求"
           />
           <ApiTransactionList v-else-if="!apiStore.inTransactionWorkspace" />
           <keep-alive v-else>
