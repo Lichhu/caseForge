@@ -184,6 +184,7 @@ export function buildScenarioPrompts(input: {
     "先判断场景是否适用；不适用时 cases 返回空数组并说明原因。",
     "适用时仅返回字段修改计划，不返回完整请求报文。",
     "只输出一个 JSON 对象：{applicable,reason,cases:[{title,polarity,changes:[{path,value}],expected}]}。",
+    'polarity 只能取英文枚举值 "positive"（正向案例）或 "negative"（反向案例），不得输出「正向」「反向」等中文取值。',
     "changes.path 必须使用请求字段完整路径；不得编造请求字段。",
     `场景规则：${scenarioRule(input.scenarioKey)}`,
     `交易码：${input.transactionCode}`,
@@ -415,6 +416,7 @@ export function parseScenarioAiResult(text: string): ScenarioAiResult | null {
       )
       .map((item) => ({
         ...item,
+        polarity: normalizePolarity(item.polarity),
         changes: item.changes
           .filter((change) => change && typeof change.path === "string")
           .map((change) => ({
@@ -426,4 +428,12 @@ export function parseScenarioAiResult(text: string): ScenarioAiResult | null {
   } catch {
     return null;
   }
+}
+
+/** AI 偶尔把枚举值翻成中文，统一归一为文档约定的英文取值 */
+const NEGATIVE_POLARITY_PATTERN = /^(negative|neg|反向|反|负向|异常|失败)$/i;
+
+function normalizePolarity(value: unknown): "positive" | "negative" {
+  const text = String(value ?? "").trim();
+  return NEGATIVE_POLARITY_PATTERN.test(text) ? "negative" : "positive";
 }

@@ -47,6 +47,47 @@ describe("parseScenarioAiResult", () => {
     expect(result?.cases[0].changes[0].path).toBe("path/to/pageNum");
   });
 
+  it("normalizes Chinese polarity labels to the documented enums", () => {
+    const result = parseScenarioAiResult(
+      JSON.stringify({
+        applicable: true,
+        reason: "适用",
+        cases: [
+          {
+            title: "客户号必填缺失校验",
+            polarity: "反向",
+            changes: [
+              { path: "Transaction/Body/request/bizBody/CUST_ID", value: "" },
+            ],
+          },
+          {
+            title: "非必填字段置空",
+            polarity: "正向",
+            changes: [
+              { path: "Transaction/Body/request/bizBody/MOBILE_NO", value: "" },
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(result?.cases.map((item) => item.polarity)).toEqual([
+      "negative",
+      "positive",
+    ]);
+  });
+
+  it("defaults an unrecognized polarity to positive", () => {
+    const result = parseScenarioAiResult(
+      JSON.stringify({
+        applicable: true,
+        cases: [{ title: "无法识别极性", polarity: "未知", changes: [] }],
+      }),
+    );
+
+    expect(result?.cases[0].polarity).toBe("positive");
+  });
+
   it("turns an AI null override into an empty XML node", () => {
     const doc = [
       "请求报文",
@@ -513,6 +554,52 @@ describe("required_fields scenario", () => {
         },
         doc,
       ),
+    ).not.toThrow();
+  });
+
+  it("accepts AI results whose polarity is written in Chinese", () => {
+    const parsed = parseScenarioAiResult(
+      JSON.stringify({
+        applicable: true,
+        reason: "存在必填字段",
+        cases: [
+          {
+            title: "交易流水号为空",
+            polarity: "反向",
+            changes: [
+              {
+                path: "Transaction/Body/request/bizHeader/transaction_sn",
+                value: "",
+              },
+            ],
+          },
+          {
+            title: "客户号为空",
+            polarity: "反向",
+            changes: [
+              {
+                path: "Transaction/Body/request/bizBody/CUST_ID",
+                value: "",
+              },
+            ],
+          },
+          {
+            title: "非必填字段全为空",
+            polarity: "正向",
+            changes: [
+              {
+                path: "Transaction/Body/request/bizBody/MOBILE_NO",
+                value: "",
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    if (!parsed) throw new Error("AI 结果解析失败");
+
+    expect(() =>
+      assertScenarioCoverage("required_fields", parsed, doc),
     ).not.toThrow();
   });
 
