@@ -1143,6 +1143,7 @@ const servicePropertyOptions = [
 const selectedServicePropertyLabel = computed(() =>
   servicePropertyOptions.find((option) => option.value === generationProfile.serviceProperty)?.label ?? generationProfile.serviceProperty,
 );
+const LARGE_PAYLOAD_SCENARIO_NAME = '大报文与文件上传';
 const matchedApiScenarios = computed(() => {
   const property = generationProfile.serviceProperty;
   const accounting = ['query_accounting', 'management_accounting', 'accounting', 'reversal'].includes(property);
@@ -1159,6 +1160,7 @@ const matchedApiScenarios = computed(() => {
   const keywords = propertyKeywords[property] ?? [];
   return apiStore.apiScenarios
     .filter((scenario) => scenario.isActive)
+    .filter((scenario) => largePayloadEnabled.value || scenario.name !== LARGE_PAYLOAD_SCENARIO_NAME)
     .filter((scenario) => {
       if (scenario.category === '通用规则') return true;
       const searchable = [scenario.name, scenario.description, scenario.category, ...scenario.prompts.flatMap((prompt) => prompt.tags ?? [])].join(' ');

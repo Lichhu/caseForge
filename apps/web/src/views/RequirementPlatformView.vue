@@ -11,6 +11,7 @@ import {
   EditOutlined,
   DeleteOutlined,
   TeamOutlined,
+  PlusOutlined,
 } from '@ant-design/icons-vue';
 import type { RequirementClaimCandidate, RequirementPlatformItem, RequirementStatus } from '@case-forge/shared';
 import { REQUIREMENT_STATUS_LABELS } from '@case-forge/shared';
@@ -19,6 +20,7 @@ import {
   dispatchRequirement,
   fetchClaimCandidates,
   fetchRequirementList,
+  fetchRequirementApplications,
   refuseRequirement,
   syncRequirements,
   createRequirement,
@@ -43,7 +45,9 @@ const isMember = ref(false);
 const syncing = ref(false);
 const createVisible = ref(false);
 const createSubmitting = ref(false);
-const createForm = ref({ projectCode: '', projectName: '' });
+const createForm = ref({ projectCode: '', projectName: '', applicationName: undefined as string | undefined });
+const applicationOptions = ref<string[]>([]);
+const applicationLoading = ref(false);
 const editVisible = ref(false);
 const editSubmitting = ref(false);
 const editForm = ref({ id: '', projectCode: '', projectName: '' });
@@ -59,6 +63,7 @@ const statusFilter = ref<'all' | RequirementStatus>('pending_dispatch');
 const ownerFilter = ref('');
 const ownerOptions = ref<Array<{ userName: string; nickName: string }>>([]);
 const keyword = ref('');
+const applicationFilter = ref<string | undefined>();
 const page = ref(1);
 const pageSize = ref(20);
 const total = ref(0);
@@ -108,13 +113,17 @@ function toggleFilter(key: 'all' | RequirementStatus) {
 const showDispatcherFilter = computed(() => statusFilter.value !== 'pending_dispatch');
 
 const hasActiveFilter = computed(
-  () => statusFilter.value !== 'all' || keyword.value.trim() !== '',
+  () =>
+    statusFilter.value !== 'all' ||
+    keyword.value.trim() !== '' ||
+    Boolean(applicationFilter.value),
 );
 
 function clearFilters() {
   statusFilter.value = 'all';
   ownerFilter.value = currentUser;
   keyword.value = '';
+  applicationFilter.value = undefined;
 }
 
 const filteredRows = computed(() => rows.value);
@@ -122,6 +131,7 @@ const filteredRows = computed(() => rows.value);
 const columns = computed(() => [
   { title: '需求编号', dataIndex: 'projectCode', key: 'projectCode', width: 170 },
   { title: '需求名', dataIndex: 'projectName', key: 'projectName', width: 280, ellipsis: true },
+  { title: '所属应用', dataIndex: 'applicationName', key: 'applicationName', width: 180, ellipsis: true },
   { title: '创建时间', dataIndex: 'createdAt', key: 'createdAt', width: 160 },
   { title: '需求状态', dataIndex: 'status', key: 'status', width: 96 },
   { title: '分发信息', key: 'dispatch', width: 230 },
@@ -188,6 +198,7 @@ async function loadList() {
       status: statusFilter.value,
       keyword: keyword.value,
       owner: ownerFilter.value,
+      application: applicationFilter.value,
     });
     rows.value = result.rows;
     total.value = result.count;
@@ -211,7 +222,7 @@ watch(statusFilter, (status) => {
   }
 });
 
-watch([statusFilter, keyword, ownerFilter], () => {
+watch([statusFilter, keyword, ownerFilter, applicationFilter], () => {
   page.value = 1;
   if (searchTimer) clearTimeout(searchTimer);
   searchTimer = setTimeout(() => void loadList(), keyword.value ? 300 : 0);
@@ -239,19 +250,40 @@ async function handleSync() {
 }
 
 async function confirmCreate() {
-  if (!createForm.value.projectCode.trim() || !createForm.value.projectName.trim()) {
-    message.warning('需求编号和需求名必填');
+  const { projectCode, projectName, applicationName } = createForm.value;
+  if (!projectCode.trim() || !projectName.trim() || !applicationName) {
+    message.warning('需求编号、需求名和所属应用必填');
     return;
   }
   createSubmitting.value = true;
   try {
-    await createRequirement(createForm.value);
+    await createRequirement({ projectCode, projectName, applicationName });
     createVisible.value = false;
-    createForm.value = { projectCode: '', projectName: '' };
+    createForm.value = { projectCode: '', projectName: '', applicationName: undefined };
     await loadList();
     message.success('需求创建成功');
   } catch (error) { message.error(error instanceof Error ? error.message : '创建失败'); }
   finally { createSubmitting.value = false; }
+}
+
+async function loadApplicationOptions(silent = false) {
+  applicationLoading.value = true;
+  try {
+    applicationOptions.value = await fetchRequirementApplications();
+  } catch (error) {
+    applicationOptions.value = [];
+    if (!silent) {
+      message.error(error instanceof Error ? error.message : '加载所属应用失败');
+    }
+  } finally {
+    applicationLoading.value = false;
+  }
+}
+
+async function openCreate() {
+  createForm.value = { projectCode: '', projectName: '', applicationName: undefined };
+  createVisible.value = true;
+  await loadApplicationOptions();
 }
 
 async function openPool() {
@@ -467,6 +499,7 @@ function handleModuleChange(value: string) {
 
 onMounted(() => {
   void loadList();
+  void loadApplicationOptions(true);
 });
 </script>
 
@@ -493,11 +526,11 @@ onMounted(() => {
           <p>接口测试需求分发与认领 · 数据来源：测管平台（SIT 测试中）+ 服管校验</p>
         </div>
         <div v-if="isDispatcher" class="topbar-actions action-toolbar action-toolbar--compact">
-          <a-button type="primary" :loading="syncing" @click="handleSync">
+          <a-button :loading="syncing" @click="handleSync">
             <template #icon><SyncOutlined /></template>
             {{ syncing ? '同步中…' : '同步需求' }}
           </a-button>
-          <a-button @click="createVisible = true">手动创建</a-button>
+          <a-button @click="openCreate"><template #icon><PlusOutlined /></template>手动创建</a-button>
           <a-button @click="openPool"><template #icon><TeamOutlined /></template>人员池</a-button>
         </div>
       </header>
@@ -533,6 +566,15 @@ onMounted(() => {
               allow-clear
               placeholder="需求归属人"
               :options="ownerOptions.map((owner) => ({ value: owner.userName, label: `${owner.nickName}（${owner.userName}）` }))"
+            />
+            <a-select
+              v-model:value="applicationFilter"
+              class="requirement-status-select"
+              style="width: 180px"
+              allow-clear
+              show-search
+              placeholder="全部应用"
+              :options="applicationOptions.map((name) => ({ value: name, label: name }))"
             />
             <a-select
               v-model:value="statusFilter"
@@ -677,6 +719,16 @@ onMounted(() => {
       <a-form layout="vertical">
         <a-form-item label="需求编号" required><a-input v-model:value="createForm.projectCode" placeholder="XQ2026-0818-01" /></a-form-item>
         <a-form-item label="需求名" required><a-input v-model:value="createForm.projectName" placeholder="请输入需求名" /></a-form-item>
+        <a-form-item label="归属应用" required>
+          <a-select
+            v-model:value="createForm.applicationName"
+            show-search
+            allow-clear
+            :loading="applicationLoading"
+            :options="applicationOptions.map((name) => ({ value: name, label: name }))"
+            placeholder="请选择归属应用"
+          />
+        </a-form-item>
       </a-form>
     </a-modal>
 

@@ -5,7 +5,10 @@
       <section class="main-workspace">
         <header v-if="!immersiveMode" class="topbar">
           <div>
-            <h1>{{ headerTitle }}</h1>
+            <div class="topbar-heading">
+              <h1>{{ headerTitle }}</h1>
+              <span v-if="activeApplicationName" class="topbar-app-tag">{{ activeApplicationName }}</span>
+            </div>
             <p>{{ headerSubtitle }}</p>
           </div>
           <div class="topbar-actions action-toolbar action-toolbar--compact">
@@ -127,6 +130,11 @@ const headerSubtitle = computed(() => {
   return '以需求为维度管理接口测试';
 });
 
+/** 当前需求归属应用（取自需求快照或源库），用于在标题后展示 */
+const activeApplicationName = computed(
+  () => apiStore.activeProject?.applicationName?.trim() || '',
+);
+
 function canOpenStage(stage: ApiWorkspaceStage | string) {
   if (stage === 'api-document') return true;
   if (stage === 'api-cases') return Boolean(apiStore.canEnterCases);
@@ -187,5 +195,29 @@ onBeforeUnmount(() => {
 .app-frame.is-loading .stage-workspace {
   opacity: 0.96;
   pointer-events: none;
+}
+
+/* 标题行：需求编号 + 归属应用标签 */
+.topbar-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.topbar-app-tag {
+  flex: 0 0 auto;
+  max-width: 280px;
+  overflow: hidden;
+  padding: 1px 10px;
+  border: 1px solid var(--cf-border);
+  border-radius: 999px;
+  background: var(--cf-canvas);
+  color: var(--cf-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

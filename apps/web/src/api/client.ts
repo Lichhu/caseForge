@@ -63,6 +63,7 @@ export interface ProjectListItem extends CaseForgeProject {
   requirementCreatedAt?: string | null;
   requirementId?: string | null;
   requirementStatus?: string | null;
+  applicationName?: string | null;
 }
 
 export interface ProjectListQuery {
@@ -95,6 +96,7 @@ function mapProjectListRow(raw: {
   requirementCreatedAt?: string | null;
   requirementId?: string | null;
   requirementStatus?: string | null;
+  applicationName?: string | null;
 }): ProjectListItem {
   return {
     id: raw.id,
@@ -117,6 +119,7 @@ function mapProjectListRow(raw: {
     requirementCreatedAt: raw.requirementCreatedAt ?? null,
     requirementId: raw.requirementId ?? null,
     requirementStatus: raw.requirementStatus ?? null,
+    applicationName: raw.applicationName ?? null,
   };
 }
 
@@ -292,6 +295,7 @@ export async function listProjects(
       generationCount?: number;
       caseCount?: number;
       isClaimedFromPlatform?: boolean;
+      applicationName?: string | null;
     }>;
     count: number;
     caseCount: number;

@@ -24,14 +24,21 @@ export class RequirementPlatformController {
     @Query("status") status = "all",
     @Query("keyword") keyword = "",
     @Query("owner") owner = "",
+    @Query("application") application = "",
   ) {
-    return this.platformService.list({ page: Number(page), size: Number(size), status, keyword, owner });
+    return this.platformService.list({ page: Number(page), size: Number(size), status, keyword, owner, application });
   }
 
   @Post("requirements")
   @ApiOperation({ summary: "手动创建需求" })
   async create(@Body() dto: CreateRequirementDto) {
     return this.platformService.create(dto);
+  }
+
+  @Get("applications")
+  @ApiOperation({ summary: "需求所属应用选项" })
+  async listApplications() {
+    return this.platformService.listApplications();
   }
 
   @Patch("requirements/:id")

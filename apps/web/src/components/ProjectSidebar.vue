@@ -133,6 +133,9 @@
                 <a-tooltip :title="cleanProjectTitle(project.title)">
                   <span class="project-title">{{ cleanProjectTitle(project.title) }}</span>
                 </a-tooltip>
+                <span v-if="isApiPlatform && project.applicationName" class="project-application-name">
+                  {{ project.applicationName }}
+                </span>
                 <span
                   v-if="isApiPlatform && project.requirementStatus"
                   class="project-status-badge"

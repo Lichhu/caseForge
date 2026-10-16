@@ -83,6 +83,7 @@ export class ProjectManageController {
         requirementCreatedAt: row.requirementCreatedAt?.toISOString() ?? null,
         requirementId: row.requirementId,
         requirementStatus: row.requirementStatus,
+        applicationName: row.applicationName,
       })),
     };
   }

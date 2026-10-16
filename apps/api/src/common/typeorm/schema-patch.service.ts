@@ -29,6 +29,7 @@ export class SchemaPatchService implements OnModuleInit {
     await this.ensureServiceIgnoreSslVerifyColumn();
     await this.ensureApiRequirementOverdueNotifiedColumn();
     await this.ensureApiRequirementWorkflowColumns();
+    await this.ensureApiRequirementApplicationNameColumn();
     await this.backfillLegacyApiRequirements();
     await this.migrateLegacyRequirementStatusToTesting();
     await this.ensureNotifyMessageTable();
@@ -397,6 +398,21 @@ export class SchemaPatchService implements OnModuleInit {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
       `);
     }
+  }
+
+  private async ensureApiRequirementApplicationNameColumn() {
+    const tables: Array<Record<string, string>> = await this.dataSource.query(
+      "SHOW TABLES LIKE 'api_requirement'",
+    );
+    if (!tables.length) return;
+    const rows: Array<{ Field: string }> = await this.dataSource.query(
+      "SHOW COLUMNS FROM api_requirement LIKE 'applicationName'",
+    );
+    if (rows.length) return;
+    await this.dataSource.query(
+      "ALTER TABLE api_requirement ADD COLUMN applicationName VARCHAR(255) NULL COMMENT '所属应用名称' AFTER projectName",
+    );
+    this.logger.log("api_requirement.applicationName 列已补齐");
   }
 
   private async backfillLegacyApiRequirements() {

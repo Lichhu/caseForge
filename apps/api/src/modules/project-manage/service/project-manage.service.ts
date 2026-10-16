@@ -31,6 +31,8 @@ import {
 } from "@common/audit/user-scope";
 import { toPublicProject } from "@common/http/public-response.util";
 import { RequirementPlatformService } from "@requirement-platform/service/requirement-platform.service";
+import { TestPlatformProjectEntity } from "@common/test-platform/entity/test-platform-project.entity";
+import { TEST_PLATFORM_CONNECTION } from "@common/test-platform";
 
 function normalizeRequirementNo(raw: string): string {
   const trimmed = raw.trim();
@@ -53,6 +55,7 @@ export type ProjectListItem = ReturnType<typeof toPublicProject> & {
   requirementCreatedAt?: Date | null;
   requirementId?: string | null;
   requirementStatus?: string | null;
+  applicationName?: string | null;
 };
 
 /**
@@ -71,6 +74,8 @@ export class ProjectManageService {
     private readonly apiTestCaseRepo: Repository<ApiTestCaseEntity>,
     @InjectRepository(ApiRequirementEntity)
     private readonly apiRequirementRepo: Repository<ApiRequirementEntity>,
+    @InjectRepository(TestPlatformProjectEntity, TEST_PLATFORM_CONNECTION)
+    private readonly testPlatformProjectRepo: Repository<TestPlatformProjectEntity>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
     @Inject(forwardRef(() => RequirementPlatformService))
@@ -220,6 +225,15 @@ export class ProjectManageService {
       if (item.claimedProjectId) requirementByProject.set(String(item.claimedProjectId), item);
       if (item.projectCode) requirementByProject.set(`code:${item.projectCode}`, item);
     }
+    const sourceProjects = platform === "api-test" && projectRequirementNos.length
+      ? await this.testPlatformProjectRepo.find({
+          where: { projectCode: In(projectRequirementNos), dataStatus: 0 },
+          select: ["projectCode", "applicationName"],
+        })
+      : [];
+    const applicationNameByCode = new Map(
+      sourceProjects.map((item) => [item.projectCode?.trim(), item.applicationName?.trim() || null]),
+    );
 
     return {
       rows: rows.map((row) => ({
@@ -246,6 +260,12 @@ export class ProjectManageService {
         requirementStatus:
           requirementByProject.get(String(row.id))?.status ??
           requirementByProject.get(`code:${row.requirementNo?.trim()}`)?.status ??
+          null,
+        // 优先用手工创建时记录的需求应用快照，其次回退到源库 b_project
+        applicationName:
+          requirementByProject.get(String(row.id))?.applicationName?.trim() ||
+          requirementByProject.get(`code:${row.requirementNo?.trim()}`)?.applicationName?.trim() ||
+          applicationNameByCode.get(row.requirementNo?.trim() ?? "") ||
           null,
       })),
       count,

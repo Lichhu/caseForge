@@ -25,6 +25,8 @@ export interface RequirementPlatformItem {
   projectCode: string;
   /** 需求名（源库 b_project.project_name） */
   projectName: string;
+  /** 所属应用（源库 b_project.application_name） */
+  applicationName?: string | null;
   status: RequirementStatus;
   /** 被分发人（认领候选人账号） */
   dispatchedTo?: string | null;

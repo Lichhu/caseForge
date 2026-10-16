@@ -14,6 +14,8 @@ import { ProjectManageController } from "./controller/project-manage.controller"
 import { ProjectManageService } from "./service/project-manage.service";
 import { CaseProjectEntity } from "./entity/project.entity";
 import { RequirementPlatformModule } from "@requirement-platform/index";
+import { TestPlatformProjectEntity } from "@common/test-platform/entity/test-platform-project.entity";
+import { TEST_PLATFORM_CONNECTION } from "@common/test-platform";
 
 @Module({
   imports: [
@@ -27,6 +29,7 @@ import { RequirementPlatformModule } from "@requirement-platform/index";
       CaseNodeMetadataEntity,
       ApiRequirementEntity,
     ]),
+    TypeOrmModule.forFeature([TestPlatformProjectEntity], TEST_PLATFORM_CONNECTION),
     forwardRef(() => RequirementPlatformModule),
   ],
   controllers: [ProjectManageController],

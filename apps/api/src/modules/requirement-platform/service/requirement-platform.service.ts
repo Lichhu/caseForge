@@ -17,7 +17,7 @@ import { TEST_PLATFORM_CONNECTION } from "@common/test-platform";
 import { TestPlatformSysUserEntity } from "@common/test-platform/entity/test-platform-sys-user.entity";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { getScopedUserName } from "@common/audit/user-scope";
-import { DataSource, EntityManager, Repository } from "typeorm";
+import { DataSource, EntityManager, In, Repository } from "typeorm";
 import {
   RequirementSyncService,
   type RequirementSyncSummary,
@@ -34,6 +34,7 @@ export interface PublicRequirement {
   id: string;
   projectCode: string;
   projectName: string;
+  applicationName?: string | null;
   status: ApiRequirementStatus;
   dispatchedTo?: string | null;
   dispatchedToName?: string | null;
@@ -65,6 +66,8 @@ export class RequirementPlatformService {
     private readonly sysUserRepo: Repository<TestPlatformSysUserEntity>,
     @InjectRepository(TestPlatformProjectEntity, TEST_PLATFORM_CONNECTION)
     private readonly sourceProjectRepo: Repository<TestPlatformProjectEntity>,
+    @InjectDataSource(TEST_PLATFORM_CONNECTION)
+    private readonly testDb: DataSource,
     @InjectDataSource()
     private readonly dataSource: DataSource,
     private readonly syncService: RequirementSyncService,
@@ -74,7 +77,7 @@ export class RequirementPlatformService {
   /**
    * 需求列表：人员池成员和分发人可见全量，其他用户不可见
    */
-  async list(options: { page: number; size: number; status?: string; keyword?: string; owner?: string }): Promise<{
+  async list(options: { page: number; size: number; status?: string; keyword?: string; owner?: string; application?: string }): Promise<{
     rows: PublicRequirement[];
     count: number;
     isDispatcher: boolean;
@@ -111,8 +114,36 @@ export class RequirementPlatformService {
         );
       }
     }
+    const application = options.application?.trim();
+    if (application) {
+      // 手工创建的需求直接存了应用快照；同步入库的需求应用名来自源库 b_project
+      const matchedProjects = await this.sourceProjectRepo.find({
+        where: { applicationName: application, dataStatus: 0 },
+        select: ["projectCode"],
+      });
+      const projectCodes = matchedProjects
+        .map((project) => project.projectCode?.trim())
+        .filter((code): code is string => Boolean(code));
+      if (projectCodes.length) {
+        query.andWhere(
+          "(requirement.applicationName = :application OR requirement.projectCode IN (:...projectCodes))",
+          { application, projectCodes },
+        );
+      } else {
+        query.andWhere("requirement.applicationName = :application", { application });
+      }
+    }
     query.orderBy("requirement.createdAt", "DESC").skip((page - 1) * size).take(size);
     const [rows, count] = await query.getManyAndCount();
+    const sourceProjects = rows.length
+      ? await this.sourceProjectRepo.find({
+          where: { projectCode: In(rows.map((row) => row.projectCode)), dataStatus: 0 },
+          select: ["projectCode", "applicationName"],
+        })
+      : [];
+    const applicationNameByCode = new Map(
+      sourceProjects.map((project) => [project.projectCode, project.applicationName?.trim() || null]),
+    );
     const members = await this.memberRepo.find({ order: { createdAt: "ASC" } });
     const dispatchers = await this.dispatcherRepo.find({ order: { createdAt: "ASC" } });
     const users = await this.sysUserRepo.find({ where: { status: "0", delFlag: "0" } });
@@ -122,7 +153,10 @@ export class RequirementPlatformService {
       ...dispatchers.map((dispatcher) => dispatcher.userName),
     ])];
     return {
-      rows: rows.map((row) => this.toPublic(row)),
+      rows: rows.map((row) => ({
+        ...this.toPublic(row),
+        applicationName: row.applicationName?.trim() || applicationNameByCode.get(row.projectCode) || null,
+      })),
       count,
       isDispatcher,
       isMember,
@@ -141,7 +175,10 @@ export class RequirementPlatformService {
     await this.assertRequirementViewer();
     const projectCode = dto.projectCode.trim();
     const projectName = dto.projectName.trim();
-    if (!projectCode || !projectName) throw new BadRequestException("需求编号和需求名必填");
+    const applicationName = dto.applicationName.trim();
+    if (!projectCode || !projectName || !applicationName) {
+      throw new BadRequestException("需求编号、需求名和所属应用必填");
+    }
     await this.assertCodeAvailable(projectCode);
     const deletedRow = await this.requirementRepo.findOne({
       where: { projectCode },
@@ -154,6 +191,7 @@ export class RequirementPlatformService {
         await requirementRepo.restore(deletedRow.id);
         await requirementRepo.update(deletedRow.id, {
           projectName,
+          applicationName,
           createdBy: userName,
           status: "pending_dispatch",
           dispatchedTo: null,
@@ -175,11 +213,21 @@ export class RequirementPlatformService {
       row = await this.requirementRepo.save(this.requirementRepo.create({
         projectCode,
         projectName,
+        applicationName,
         createdBy: userName,
         status: "pending_dispatch",
       }));
     }
     return this.toPublic(row);
+  }
+
+  async listApplications(): Promise<string[]> {
+    await this.assertRequirementViewer();
+    const rows = await this.testDb.query<Array<{ systemName: string }>>(
+      "SELECT system_name AS systemName FROM b_asset_common_system_tree WHERE parent_id = ? AND data_status = 0 ORDER BY system_name",
+      [1],
+    );
+    return rows.map((row) => row.systemName.trim()).filter(Boolean);
   }
 
   async update(id: string, dto: UpdateRequirementDto): Promise<PublicRequirement> {
@@ -283,14 +331,14 @@ export class RequirementPlatformService {
     const completed = await this.requirementRepo.find({ where: { status: "completed" } });
     for (const row of completed) {
       if (!row.claimedProjectId) continue;
-      const source = await this.sourceProjectRepo.findOne({ where: { projectCode: row.projectCode, dataStatus: 1 } });
+      const source = await this.sourceProjectRepo.findOne({ where: { projectCode: row.projectCode, dataStatus: 0 } });
       if (!source) continue;
       row.sourceUpdatedAt = new Date();
       if (source.demandStatus?.trim().toLowerCase() === "sit移交") {
         row.status = "returned";
         row.completedAt = null;
+        await this.requirementRepo.save(row);
       }
-      await this.requirementRepo.save(row);
     }
   }
 
@@ -572,6 +620,7 @@ export class RequirementPlatformService {
       id: row.id,
       projectCode: row.projectCode,
       projectName: row.projectName,
+      applicationName: row.applicationName,
       status: row.status,
       dispatchedTo: row.dispatchedTo,
       dispatchedToName: row.dispatchedToName,

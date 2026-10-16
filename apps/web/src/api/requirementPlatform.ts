@@ -19,8 +19,13 @@ export interface RequirementPlatformListResponse {
   size: number;
 }
 
-export async function createRequirement(payload: { projectCode: string; projectName: string }) {
+export async function createRequirement(payload: { projectCode: string; projectName: string; applicationName: string }) {
   const { data } = await http.post<RequirementPlatformItem>("/requirement-platform/requirements", payload);
+  return data;
+}
+
+export async function fetchRequirementApplications(): Promise<string[]> {
+  const { data } = await http.get<string[]>("/requirement-platform/applications");
   return data;
 }
 
@@ -67,7 +72,7 @@ export async function setRequirementStatus(id: string, status: "testing" | "comp
 }
 
 /** 需求平台列表（分发人全量，普通用户仅与自己相关的） */
-export async function fetchRequirementList(params: { page: number; size: number; status: string; keyword: string; owner?: string }): Promise<RequirementPlatformListResponse> {
+export async function fetchRequirementList(params: { page: number; size: number; status: string; keyword: string; owner?: string; application?: string }): Promise<RequirementPlatformListResponse> {
   const { data } = await http.get<RequirementPlatformListResponse>(
     "/requirement-platform/requirements",
     { params },

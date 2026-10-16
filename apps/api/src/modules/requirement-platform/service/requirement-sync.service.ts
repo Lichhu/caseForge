@@ -66,13 +66,14 @@ export class RequirementSyncService implements OnModuleInit, OnModuleDestroy {
         });
       }, intervalMs);
       this.logger.log(`需求定时同步已启用，间隔 ${intervalMs}ms`);
+      this.statusTimer = setInterval(() => {
+        this.refreshCompletedStatuses().catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          this.logger.error(`需求状态回查失败: ${message}`);
+        });
+      }, intervalMs);
+      this.logger.log(`需求状态回查已启用，间隔 ${intervalMs}ms`);
     }
-    this.statusTimer = setInterval(() => {
-      this.refreshCompletedStatuses().catch((error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        this.logger.error(`需求状态回查失败: ${message}`);
-      });
-    }, Math.max(intervalMs, 60000));
   }
 
   onModuleDestroy() {
@@ -87,15 +88,16 @@ export class RequirementSyncService implements OnModuleInit, OnModuleDestroy {
     const completedRows = await this.requirementRepo.find({ where: { status: "completed" } });
     for (const requirement of completedRows) {
       const source = await this.testProjectRepo.findOne({
-        where: { projectCode: requirement.projectCode, dataStatus: 1 },
+        where: { projectCode: requirement.projectCode, dataStatus: 0 },
       });
       if (!source) continue;
       requirement.sourceUpdatedAt = new Date();
       if (source.demandStatus?.trim().toLowerCase() === "sit移交") {
         requirement.status = "returned";
         requirement.completedAt = null;
+        await this.requirementRepo.save(requirement);
+        this.logger.log(`需求 ${requirement.projectCode} 状态更新为 returned`);
       }
-      await this.requirementRepo.save(requirement);
     }
   }
 
