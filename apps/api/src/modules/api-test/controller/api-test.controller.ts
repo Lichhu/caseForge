@@ -897,6 +897,8 @@ export class ApiTestController {
         name: string;
         address: string;
         headers?: Record<string, string>;
+        environmentId?: string;
+        environmentServiceId?: string;
       };
       stepId?: string;
       environmentServiceId?: string;

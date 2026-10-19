@@ -1631,7 +1631,14 @@ function currentStepFromForm(): ApiCaseStep {
     ...(form.steps[activeStepIndex.value]?.isMainRequest
       ? { isMainRequest: true }
       : {}),
-    target: targetAddress ? { name: targetName, address: targetAddress } : undefined,
+    target: targetAddress
+      ? {
+          name: targetName,
+          address: targetAddress,
+          environmentId: apiStore.selectedEnvironmentId || undefined,
+          environmentServiceId: debugServiceId.value || undefined,
+        }
+      : undefined,
     request: buildDebugRequest(),
     expected: buildExpectedFromRows(form.assertionRows),
     exports: form.exports.filter((item) => item.name.trim()).map(({ name, source, expression, required }) => ({ name: name.trim(), source, expression: source === 'status' ? undefined : expression.trim(), required })),
@@ -2208,7 +2215,12 @@ async function onBatchSaveRequest() {
         if (batchRequest.method) next.request.method = batchRequest.method;
         if (batchRequest.path?.trim()) next.request.path = batchRequest.path.trim();
         if (batchRequest.encoding) next.request.encoding = batchRequest.encoding;
-        if (serviceAddress) next.target = { name: environment?.name || next.target?.name || '', address: serviceAddress };
+        if (serviceAddress) next.target = {
+          name: environment?.name || next.target?.name || '',
+          address: serviceAddress,
+          environmentId: batchEnvironmentId.value || undefined,
+          environmentServiceId: batchEnvironmentServiceId.value || undefined,
+        };
         updated += 1;
         return next;
       });
@@ -2549,7 +2561,14 @@ async function onDebugRun(showResult = true) {
         expected: buildExpectedFromRows(form.assertionRows),
         polarity: form.polarity,
         environmentId: apiStore.selectedEnvironmentId || undefined,
-        target: form.stepTargetAddress.trim() ? { name: form.stepTargetName.trim(), address: form.stepTargetAddress.trim() } : undefined,
+        target: form.stepTargetAddress.trim()
+          ? {
+              name: form.stepTargetName.trim(),
+              address: form.stepTargetAddress.trim(),
+              environmentId: apiStore.selectedEnvironmentId || undefined,
+              environmentServiceId: debugServiceId.value || undefined,
+            }
+          : undefined,
         stepId: form.steps[activeStepIndex.value]?.id,
         environmentServiceId: debugServiceId.value || apiStore.selectedEnvironmentServiceId || undefined,
         encoding: debugEncoding.value,
@@ -2596,7 +2615,12 @@ async function onGenerateAssertions() {
       expected: buildExpectedFromRows(form.assertionRows),
       polarity: form.polarity,
       environmentId: apiStore.selectedEnvironmentId || undefined,
-      target: { name: form.stepTargetName.trim(), address: form.stepTargetAddress.trim() },
+      target: {
+        name: form.stepTargetName.trim(),
+        address: form.stepTargetAddress.trim(),
+        environmentId: apiStore.selectedEnvironmentId || undefined,
+        environmentServiceId: debugServiceId.value || undefined,
+      },
       stepId: form.steps[activeStepIndex.value]?.id,
       environmentServiceId: debugServiceId.value || undefined,
       encoding: debugEncoding.value,
@@ -2687,7 +2711,14 @@ async function onBatchGenerateAssertions() {
   const fallbackEnv = apiStore.environments.find((item) => item.id === batchEnvironmentId.value);
   const fallbackService = (apiStore.environmentServices[batchEnvironmentId.value] ?? []).find((item) => item.id === batchEnvironmentServiceId.value);
   const fallbackAddress = fallbackService?.serverAddress?.trim() || fallbackService?.baseUrl?.trim() || (fallbackService?.host && fallbackService.port ? `${fallbackService.host}:${fallbackService.port}` : '');
-  const fallbackTarget = fallbackAddress ? { name: fallbackEnv?.name ?? '', address: fallbackAddress } : null;
+  const fallbackTarget = fallbackAddress
+    ? {
+        name: fallbackEnv?.name ?? '',
+        address: fallbackAddress,
+        environmentId: batchEnvironmentId.value || undefined,
+        environmentServiceId: batchEnvironmentServiceId.value || undefined,
+      }
+    : null;
   const allCases = await listAllApiCases(projectId.value, transactionId.value);
   const selectedSteps = allCases.flatMap((row) => caseStepRows(row).filter((step) => batchSelectedSteps.has(batchStepKey(row.id, step.id))));
   if (!selectedSteps.length) return;

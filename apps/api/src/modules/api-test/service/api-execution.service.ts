@@ -236,6 +236,8 @@ export class ApiExecutionService {
             ...sharedVars,
           },
           encoding: testCase.metadata?.debugEncoding ?? input.encoding,
+          environmentId: input.environmentId,
+          environmentServiceId: input.environmentServiceId,
         });
         items.push(item);
         const exports = testCase.metadata?.exports ?? [];
@@ -382,6 +384,8 @@ export class ApiExecutionService {
     env: RuntimeEnvironment;
     vars: Record<string, string>;
     encoding?: string;
+    environmentId?: string;
+    environmentServiceId?: string;
   }) {
     const steps = input.testCase.steps;
     const caseContext: DataFunctionContext = {
@@ -411,12 +415,23 @@ export class ApiExecutionService {
               metadata: { ...input.testCase.metadata, exports: step.exports },
             },
           );
+          const ignoreSslVerify = await this.resolveStepIgnoreSslVerify({
+            projectId: input.testCase.projectId,
+            step,
+            environmentId:
+              input.testCase.metadata?.debugEnvironmentId ??
+              input.environmentId,
+            environmentServiceId:
+              input.testCase.metadata?.debugEnvironmentServiceId ??
+              input.environmentServiceId,
+          });
           const result = await this.executeSingleStep({
             ...input,
             testCase: stepCase,
             env: environmentFromStep(step),
             vars,
             caseContext,
+            ignoreSslVerify,
           });
           const extracted: Record<string, string> = {};
           for (const binding of step.exports) {
@@ -480,6 +495,25 @@ export class ApiExecutionService {
     return final;
   }
 
+  /** 步骤执行时按步骤绑定（或案例调试选择）的环境服务继承忽略证书校验开关。 */
+  private async resolveStepIgnoreSslVerify(input: {
+    projectId: string;
+    step: ApiCaseStep;
+    environmentId?: string;
+    environmentServiceId?: string;
+  }): Promise<boolean> {
+    const environmentId =
+      input.step.target?.environmentId ?? input.environmentId;
+    const environmentServiceId =
+      input.step.target?.environmentServiceId ?? input.environmentServiceId;
+    if (!environmentId || !environmentServiceId) return false;
+    return this.environmentService.getServiceIgnoreSslVerify(
+      input.projectId,
+      environmentId,
+      environmentServiceId,
+    );
+  }
+
   private async executeSingleStep(input: {
     runId: string;
     testCase: ApiTestCaseEntity;
@@ -487,6 +521,7 @@ export class ApiExecutionService {
     vars: Record<string, string>;
     encoding?: string;
     caseContext?: DataFunctionContext;
+    ignoreSslVerify?: boolean;
   }) {
     const substituted = substituteDeep(
       input.testCase.request,
@@ -543,6 +578,7 @@ export class ApiExecutionService {
     vars: Record<string, string>;
     request: ApiCaseRequest;
     encoding?: string;
+    ignoreSslVerify?: boolean;
   }) {
     const service = this.resolveRuntimeService(input.env, "http");
     const baseUrl = this.resolveHttpBaseUrl(input.env, service);
@@ -593,7 +629,7 @@ export class ApiExecutionService {
             ),
             signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
           },
-          service?.ignoreSslVerify,
+          input.ignoreSslVerify ?? service?.ignoreSslVerify,
         );
       }
       if (!response) throw new Error("请求未执行");
@@ -812,6 +848,9 @@ export class ApiExecutionService {
         vars,
         encoding: input.encoding,
         caseContext,
+        environmentId: input.target?.environmentId ?? input.environmentId,
+        environmentServiceId:
+          input.target?.environmentServiceId ?? input.environmentServiceId,
       });
     }
     const substituted = substituteDeep(input.request, vars) as ApiCaseRequest;
@@ -830,15 +869,19 @@ export class ApiExecutionService {
     });
     // 按步骤地址调试时，继承所选环境服务的“忽略证书校验”开关；显式传参优先
     let sslOverride = input.ignoreSslVerify;
+    const targetEnvironmentId =
+      input.target?.environmentId ?? input.environmentId;
+    const targetEnvironmentServiceId =
+      input.target?.environmentServiceId ?? input.environmentServiceId;
     if (
       sslOverride === undefined &&
       input.target &&
-      input.environmentId &&
-      input.environmentServiceId &&
+      targetEnvironmentId &&
+      targetEnvironmentServiceId &&
       (await this.environmentService.getServiceIgnoreSslVerify(
         input.projectId,
-        input.environmentId,
-        input.environmentServiceId,
+        targetEnvironmentId,
+        targetEnvironmentServiceId,
       ))
     ) {
       sslOverride = true;
@@ -876,6 +919,8 @@ export class ApiExecutionService {
     vars: Record<string, string>;
     encoding?: string;
     caseContext?: DataFunctionContext;
+    environmentId?: string;
+    environmentServiceId?: string;
   }) {
     for (const step of input.steps) {
       if (!step.target?.address?.trim()) {
@@ -891,6 +936,12 @@ export class ApiExecutionService {
         expected: step.expected ?? {},
         metadata: { exports: step.exports ?? [] },
       });
+      const ignoreSslVerify = await this.resolveStepIgnoreSslVerify({
+        projectId: input.projectId,
+        step,
+        environmentId: input.environmentId,
+        environmentServiceId: input.environmentServiceId,
+      });
       const result = await this.executeSingleStep({
         runId: "debug",
         testCase: stepCase,
@@ -898,6 +949,7 @@ export class ApiExecutionService {
         vars: input.vars,
         encoding: input.encoding,
         caseContext: input.caseContext,
+        ignoreSslVerify,
       });
       if (result.status === "error") {
         const reason =

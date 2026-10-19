@@ -157,7 +157,7 @@ export class ApiEnvironmentService {
     serviceId: string,
   ): Promise<boolean> {
     const row = await this.serviceRepo.findOne({
-      where: { environmentId, id: serviceId, enabled: true },
+      where: { projectId, environmentId, id: serviceId, enabled: true },
     });
     return Boolean(row?.ignoreSslVerify);
   }

@@ -7,15 +7,73 @@ import { ApiExecutionService } from "@api-test/service/api-execution.service";
  * 开关挂在环境下的服务（api_test_environment_service.ignoreSslVerify）上：
  * - 环境路径执行/调试按解析出的服务取开关，传导到 fetch（undici dispatcher）；
  * - 按步骤地址（target）调试时继承所选环境服务的开关；
+ * - 执行平台执行带步骤的案例时，按步骤绑定的环境服务继承开关；
  * - debug-run 显式传参可覆盖服务开关。
  */
 function buildService(options: {
   serviceIgnoreSsl?: boolean;
   inheritIgnoreSsl?: boolean;
+  caseWithStep?: boolean;
+  bindStepService?: boolean;
 }) {
-  const caseRepo = { findOne: jest.fn().mockResolvedValue(null) };
-  const runRepo = {};
-  const runItemRepo = { create: jest.fn((entity: unknown) => entity) };
+  const stepCase = {
+    id: "case-1",
+    projectId: "project-1",
+    title: "步骤案例",
+    caseNo: "001",
+    enabled: true,
+    request: { method: "GET", path: "/ping" },
+    expected: { assertions: [] },
+    steps: [
+      {
+        id: "step-1",
+        name: "请求",
+        target: {
+          name: "环境",
+          address: "https://self-signed.example:8443",
+          ...(options.bindStepService === false
+            ? {}
+            : { environmentId: "env-1", environmentServiceId: "svc-1" }),
+        },
+        request: { method: "GET", path: "/ping" },
+        expected: {
+          assertions: [
+            {
+              type: "status_code",
+              operator: "eq",
+              expression: "",
+              expected: "200",
+            },
+          ],
+        },
+        exports: [],
+      },
+    ],
+    metadata:
+      options.bindStepService === false
+        ? {
+            debugEnvironmentId: "env-1",
+            debugEnvironmentServiceId: "svc-1",
+          }
+        : {},
+  };
+  const caseRepo = {
+    findOne: jest.fn().mockResolvedValue(null),
+    find: jest
+      .fn()
+      .mockResolvedValue(options.caseWithStep ? [stepCase] : []),
+  };
+  const runRepo = {
+    create: jest.fn((entity: Record<string, unknown>) => ({
+      ...entity,
+      id: "run-1",
+    })),
+    save: jest.fn(async (entity: Record<string, unknown>) => entity),
+  };
+  const runItemRepo = {
+    create: jest.fn((entity: unknown) => entity),
+    save: jest.fn(async (items: unknown) => items),
+  };
   const runtimeEnv = {
     id: "env-1",
     baseUrl: "https://self-signed.example:8443",
@@ -139,6 +197,65 @@ describe("debugRun HTTPS 忽略证书校验（服务级开关）", () => {
         ignoreSslVerify: false,
       });
       expect(lastFetchInit(fetchSpy)).not.toEqual(
+        expect.objectContaining({ dispatcher: expect.anything() }),
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+});
+
+describe("执行平台 HTTPS 忽略证书校验（步骤级服务开关）", () => {
+  it("步骤绑定的服务开启 ignoreSslVerify 时，执行平台请求跳过证书校验", async () => {
+    const { service, environmentService } = buildService({
+      inheritIgnoreSsl: true,
+      caseWithStep: true,
+    });
+    jest
+      .spyOn(service, "getRunDetail")
+      .mockResolvedValue({ id: "run-1" } as never);
+    const fetchSpy = mockFetchOk();
+    try {
+      await service.runCases({
+        projectId: "project-1",
+        caseIds: ["case-1"],
+        concurrency: 1,
+      });
+      expect(environmentService.getServiceIgnoreSslVerify).toHaveBeenCalledWith(
+        "project-1",
+        "env-1",
+        "svc-1",
+      );
+      expect(lastFetchInit(fetchSpy)).toEqual(
+        expect.objectContaining({ dispatcher: expect.anything() }),
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("旧案例步骤未绑定服务时，回退使用案例调试环境服务的开关", async () => {
+    const { service, environmentService } = buildService({
+      inheritIgnoreSsl: true,
+      caseWithStep: true,
+      bindStepService: false,
+    });
+    jest
+      .spyOn(service, "getRunDetail")
+      .mockResolvedValue({ id: "run-1" } as never);
+    const fetchSpy = mockFetchOk();
+    try {
+      await service.runCases({
+        projectId: "project-1",
+        caseIds: ["case-1"],
+        concurrency: 1,
+      });
+      expect(environmentService.getServiceIgnoreSslVerify).toHaveBeenCalledWith(
+        "project-1",
+        "env-1",
+        "svc-1",
+      );
+      expect(lastFetchInit(fetchSpy)).toEqual(
         expect.objectContaining({ dispatcher: expect.anything() }),
       );
     } finally {
