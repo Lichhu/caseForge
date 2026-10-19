@@ -471,6 +471,7 @@ import {
 import {
   caseForgePageSizeOptionLabels,
   executionProfileBadgeColor,
+  isDbStep,
   normalizeCaseForgePageSize,
   resolveExecutionProfile,
 } from '@case-forge/shared';
@@ -650,6 +651,8 @@ function onLinkedExpand(expanded: boolean, record: { id: string }) {
 }
 
 function stepTargetLabel(step: ApiCaseStep) {
+  if (isDbStep(step))
+    return `数据库 · ${step.db?.mode === 'execute' ? '改数据' : '查询'}`;
   return step.target?.address?.trim() || '未指定环境地址';
 }
 

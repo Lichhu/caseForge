@@ -49,6 +49,7 @@ function buildService() {
     environmentService as never,
     {} as never,
     { resolveDeep } as never,
+    {} as never,
   );
   return { service, resolveDeep };
 }

@@ -4,6 +4,7 @@ import type {
   ApiCaseExport,
   AssertionResult,
 } from "@case-forge/shared";
+import { isDbExportSource } from "@case-forge/shared";
 import { JSONPath } from "jsonpath-plus";
 import jmespath from "jmespath";
 import { select } from "xpath";
@@ -65,13 +66,15 @@ export interface ExecutionSnapshot {
 /**
  * 提取步骤共享变量：source 为 request 时从本步骤实际发出的请求快照
  * （变量替换 + 数据函数解析后）中提取，其余来源从响应快照中提取。
+ * SQL 步骤用 row/rows/rowCount/affectedRows，从查询结果或影响行数中提取。
  */
 export function extractExportValue(
   binding: Pick<ApiCaseExport, "source" | "expression">,
   requestSnapshot: Record<string, unknown> | undefined | null,
   responseSnapshot: Record<string, unknown> | undefined | null,
 ): unknown {
-  if (binding.source === "request") {
+  const source = binding.source as string;
+  if (source === "request") {
     return extractResponseValue("body", binding.expression, {
       body: requestSnapshot?.body,
       headers:
@@ -79,12 +82,59 @@ export function extractExportValue(
       statusCode: 0,
     });
   }
-  return extractResponseValue(binding.source, binding.expression, {
-    body: responseSnapshot?.body,
-    headers:
-      (responseSnapshot?.headers as Record<string, string> | undefined) ?? {},
-    statusCode: (responseSnapshot?.status as number | undefined) ?? 0,
-  });
+  if (isDbExportSource(source)) {
+    const body = dbStepResponseBody(responseSnapshot);
+    if (source === "row") return pickRowField(body.row, binding.expression);
+    if (source === "rows") return body.rows;
+    return source === "rowCount" ? body.rowCount : body.affectedRows;
+  }
+  return extractResponseValue(
+    source as "body" | "header" | "status",
+    binding.expression,
+    {
+      body: responseSnapshot?.body,
+      headers:
+        (responseSnapshot?.headers as Record<string, string> | undefined) ?? {},
+      statusCode: (responseSnapshot?.status as number | undefined) ?? 0,
+    },
+  );
+}
+
+/** SQL 步骤的响应体固定为 { rows, row, rowCount, affectedRows } */
+function dbStepResponseBody(
+  responseSnapshot: Record<string, unknown> | undefined | null,
+) {
+  const body = responseSnapshot?.body;
+  return (body && typeof body === "object" ? body : {}) as Record<
+    string,
+    unknown
+  >;
+}
+
+/** 从查询结果的一行里按点路径取值；表达式留空时返回整行 */
+function pickRowField(row: unknown, expression?: string): unknown {
+  if (!row || typeof row !== "object") return row;
+  if (!expression) return row;
+  return expression
+    .split(".")
+    .filter(Boolean)
+    .reduce<unknown>(
+      (current, key) =>
+        current && typeof current === "object"
+          ? (current as Record<string, unknown>)[key]
+          : undefined,
+      row,
+    );
+}
+
+/**
+ * 提取结果转成变量值：对象与数组按 JSON 字符串存，
+ * 避免「全部行」或「留空取整行」被 String() 变成 [object Object]。
+ */
+export function exportValueToString(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
 }
 
 function compareValues(

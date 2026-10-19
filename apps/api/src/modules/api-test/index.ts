@@ -38,6 +38,7 @@ import { ApiReportService } from "./service/api-report.service";
 import { SmpClientService } from "./service/smp-client.service";
 import { SmpSyncService } from "./service/smp-sync.service";
 import { ApiDataFunctionService } from "./service/api-data-function.service";
+import { SqlStepRunnerService } from "./service/sql-step-runner.service";
 import { ApiStepLibraryService } from "./service/api-step-library.service";
 
 @Module({
@@ -85,6 +86,7 @@ import { ApiStepLibraryService } from "./service/api-step-library.service";
     SmpSyncService,
     ApiDataFunctionService,
     ApiStepLibraryService,
+    SqlStepRunnerService,
   ],
   exports: [
     ApiDocService,

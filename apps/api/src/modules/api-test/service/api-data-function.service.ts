@@ -5,8 +5,6 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { createPool } from "mysql2/promise";
-import { createRequire } from "node:module";
 import { randomInt, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { DOMParser } from "@xmldom/xmldom";
@@ -22,10 +20,12 @@ import {
   SaveDataFunctionDto,
   SaveDatabaseConnectionDto,
 } from "@api-test/dto/save-data-function.dto";
+import { encryptSecrets } from "@api-test/util/secret-crypto.util";
 import {
-  decryptSecrets,
-  encryptSecrets,
-} from "@api-test/util/secret-crypto.util";
+  createDatabasePool,
+  databaseTestSql,
+  type DbPool,
+} from "@api-test/util/database-pool.util";
 
 type FormulaPart = {
   id?: string;
@@ -43,12 +43,6 @@ export const SAMPLE_CONTEXT: DataFunctionContext = {
   caseName: "示例案例名称",
   caseNo: "CASE-0001",
 };
-type DbPool = {
-  query: (sql: any, params?: any[]) => Promise<any>;
-  end: () => Promise<void>;
-};
-const nodeRequire = createRequire(__filename);
-
 const BUILTIN_FUNCTIONS = [
   {
     name: "DATE_YYYYMMDD",
@@ -617,99 +611,11 @@ export class ApiDataFunctionService {
     return value;
   }
   private async pool(row: ApiDatabaseConnectionEntity) {
-    const password = decryptSecrets(row.passwordEncrypted).password ?? "";
-    if (
-      [
-        "MariaDB",
-        "MySQL",
-        "TiDB",
-        "OceanBase-MySQL",
-        "GoldenDB",
-        "GaussDB-MySQL",
-      ].includes(row.type)
-    )
-      return createPool({
-        host: row.host,
-        port: row.port,
-        ...(row.databaseName ? { database: row.databaseName } : {}),
-        user: row.username,
-        password,
-        connectionLimit: 1,
-        connectTimeout: 5000,
-      }) as unknown as DbPool;
-    if (["PostgreSQL", "KingbaseES", "GaussDB"].includes(row.type)) {
-      const { Pool } = nodeRequire("pg");
-      const pool = new Pool({
-        host: row.host,
-        port: row.port,
-        ...(row.databaseName ? { database: row.databaseName } : {}),
-        user: row.username,
-        password,
-        max: 1,
-        connectionTimeoutMillis: 5000,
-      });
-      pool.on("error", (error: Error) =>
-        this.logger.error(`PostgreSQL 连接池异常: ${error.message}`),
-      );
-      return {
-        query: async (input: any, params: unknown[] = []) => {
-          const sql = typeof input === "string" ? input : input.sql;
-          let index = 0;
-          const result = await pool.query(
-            sql.replace(/\?/g, () => `$${++index}`),
-            params,
-          );
-          return [result.rows, result.fields];
-        },
-        end: () => pool.end(),
-      } satisfies DbPool;
-    }
-    if (["Oracle", "OceanBase-Oracle"].includes(row.type)) {
-      const oracledb = nodeRequire("oracledb");
-      const conn = await oracledb.getConnection({
-        user: row.username,
-        password,
-        connectString: `${row.host}:${row.port}/${row.databaseName}`,
-      });
-      return {
-        query: async (input: any, params: unknown[] = []) => {
-          const sql = typeof input === "string" ? input : input.sql;
-          let index = 0;
-          const result = await conn.execute(
-            sql.replace(/\?/g, () => `:${++index}`),
-            params,
-            { outFormat: oracledb.OUT_FORMAT_OBJECT },
-          );
-          return [result.rows ?? [], result.metaData ?? []];
-        },
-        end: () => conn.close(),
-      } satisfies DbPool;
-    }
-    if (row.type === "DM8") {
-      const dmdb = nodeRequire("dmdb");
-      const conn = await dmdb.getConnection(
-        `dm://${encodeURIComponent(row.username)}:${encodeURIComponent(password)}@${row.host}:${row.port}`,
-      );
-      return {
-        query: async (input: any, params: unknown[] = []) => {
-          const sql = typeof input === "string" ? input : input.sql;
-          // dmdb 原生支持 `?` 位置绑定；若把 `?` 改写成 `:1/:2` 这类数字名，
-          // 达梦服务端不会将其识别为绑定参数，导致绑定数与占位符数不匹配而报错。
-          const result = await conn.execute(
-            sql,
-            params.map((val) => ({ val })),
-          );
-          return [result.rows ?? [], result.metaData ?? []];
-        },
-        end: () => conn.close(),
-      } satisfies DbPool;
-    }
-    throw new BadRequestException(`${row.type} 驱动尚未配置`);
+    // 驱动适配统一在 database-pool.util，SQL 步骤复用同一份实现
+    return createDatabasePool(row, this.logger);
   }
   private testSql(type: string) {
-    return ["Oracle", "OceanBase-Oracle"].includes(type)
-      ? "SELECT 1 FROM DUAL"
-      : "SELECT 1";
+    return databaseTestSql(type);
   }
   private publicConnection(row: ApiDatabaseConnectionEntity) {
     const { passwordEncrypted, ...publicRow } = row;

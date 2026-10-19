@@ -259,6 +259,33 @@ function buildPayloadSection(item: HtmlRunItem) {
       sections.push(
         `<div class="step-bar">步骤${index + 1}：${escapeHtml(step.stepName || "未命名步骤")}${statusText} ${step.durationMs ?? 0}ms</div>`,
       );
+      // SQL 步骤没有请求报文，展示连接、SQL 与参数，以及结果行数
+      if (String(step.request?.kind ?? "") === "db") {
+        const mode =
+          String(step.request?.mode ?? "") === "execute" ? "改数据" : "查询";
+        const connection = (step.request?.connection ?? {}) as {
+          type?: unknown;
+          host?: unknown;
+          port?: unknown;
+          databaseName?: unknown;
+          username?: unknown;
+        };
+        const address = connection.host
+          ? `${String(connection.host)}:${String(connection.port ?? "")}${connection.databaseName ? `/${String(connection.databaseName)}` : ""}`
+          : "";
+        sections.push(
+          `<div class="step-bar step-bar--url">数据库：${escapeHtml(String(step.request?.connectionName ?? step.request?.connectionId ?? "—"))}${connection.type ? `（${escapeHtml(String(connection.type))}）` : ""} · ${mode}${address ? ` · ${escapeHtml(address)}` : ""}${connection.username ? ` · 用户 ${escapeHtml(String(connection.username))}` : ""}</div>`,
+        );
+        sections.push(`<div class="step-bar">SQL 语句</div>`);
+        sections.push(
+          `<pre class="payload"><code>${escapeHtml(prettyPayload(step.request?.sql) || "（无 SQL）")}</code></pre>`,
+        );
+        sections.push(`<div class="step-bar">执行结果</div>`);
+        sections.push(
+          `<pre class="payload"><code>${escapeHtml(prettyPayload(step.response?.body) || step.response?.error || "（无结果）")}</code></pre>`,
+        );
+        return sections.join("\n");
+      }
       sections.push(
         `<div class="step-bar step-bar--url">请求地址：${escapeHtml(requestUrl(step.request))}</div>`,
       );

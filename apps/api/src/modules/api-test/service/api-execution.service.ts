@@ -15,23 +15,39 @@ import { ApiExecutionSetService } from "./api-execution-set.service";
 import {
   buildRuntimeVariables,
   substituteDeep,
+  substituteSqlVariables,
 } from "@api-test/util/variable-substitute.util";
 import {
   isAllPassed,
   runAssertions,
   extractExportValue,
+  exportValueToString,
 } from "@api-test/util/assertion-runner.util";
 import type {
   ApiCaseExpected,
   ApiCaseRequest,
+  ApiDbCaseStep,
+  ApiHttpCaseStep,
   ApiRunItemStatus,
   ApiCaseStep,
 } from "@case-forge/shared";
-import { groupParallelSteps, parseServerAddress } from "@case-forge/shared";
+import {
+  DB_STEP_SNAPSHOT_MAX_ROWS,
+  groupParallelSteps,
+  isDbStep,
+  isHttpStep,
+  parseServerAddress,
+} from "@case-forge/shared";
 import { toPublicApiRun } from "@common/http/public-response.util";
 import { ApiDataFunctionService } from "./api-data-function.service";
 import type { DataFunctionContext } from "./api-data-function.service";
 import { SAMPLE_CONTEXT } from "./api-data-function.service";
+import { SqlStepRunnerService } from "./sql-step-runner.service";
+import {
+  createDbStepLockSession,
+  type DbStepLockResource,
+  type DbStepLockSession,
+} from "@api-test/util/db-step-lock.util";
 import type { ApiStepTarget } from "@case-forge/shared";
 
 const DEFAULT_CONCURRENCY = 5;
@@ -92,6 +108,7 @@ export class ApiExecutionService {
     private readonly environmentService: ApiEnvironmentService,
     private readonly executionSetService: ApiExecutionSetService,
     private readonly dataFunctionService: ApiDataFunctionService,
+    private readonly sqlStepRunner: SqlStepRunnerService,
   ) {}
 
   async runCases(input: {
@@ -134,14 +151,25 @@ export class ApiExecutionService {
     const runtimeByCase = new Map<string, RuntimeEnvironment>();
     for (const testCase of cases) {
       if (testCase.steps?.length) {
-        const missing = testCase.steps.find(
-          (step) => !step.target?.address?.trim(),
-        );
+        const httpSteps = testCase.steps.filter(isHttpStep);
+        const missing = httpSteps.find((step) => !step.target?.address?.trim());
         if (missing)
           throw new BadRequestException(
             `案例「${testCase.title}」的步骤「${missing.name}」未指定环境地址`,
           );
-        runtimeByCase.set(testCase.id, environmentFromStep(testCase.steps[0]));
+        // 全是 SQL 步骤的案例不需要环境，给一个空环境占位
+        runtimeByCase.set(
+          testCase.id,
+          httpSteps.length
+            ? environmentFromStep(httpSteps[0])
+            : {
+                id: testCase.id,
+                baseUrl: "",
+                headers: {},
+                variables: {},
+                secrets: {},
+              },
+        );
         continue;
       }
       const environmentId =
@@ -245,9 +273,10 @@ export class ApiExecutionService {
             item.requestSnapshot,
             item.responseSnapshot,
           );
-          if (value !== undefined && value !== null && String(value) !== "") {
+          const text = exportValueToString(value);
+          if (text !== "") {
             sharedVars[`${testCase.caseNo ?? testCase.id}.${binding.name}`] =
-              String(value);
+              text;
           } else if (binding.required) {
             item.status = "error";
             item.responseSnapshot = {
@@ -390,6 +419,31 @@ export class ApiExecutionService {
     };
     if (!steps?.length)
       return this.executeSingleStep({ ...input, caseContext });
+    // SQL 步骤占位：跑到第一个 SQL 步骤时占位，案例结束（跑完 / 报错 / 超时）统一释放
+    const lockSession = createDbStepLockSession();
+    try {
+      return await this.runCaseSteps({
+        ...input,
+        caseContext,
+        lockSession,
+        lockResources: await this.collectDbStepLockResources(steps),
+      });
+    } finally {
+      await lockSession.release();
+    }
+  }
+
+  private async runCaseSteps(input: {
+    runId: string;
+    testCase: ApiTestCaseEntity;
+    env: RuntimeEnvironment;
+    vars: Record<string, string>;
+    encoding?: string;
+    caseContext: DataFunctionContext;
+    lockSession: DbStepLockSession;
+    lockResources: DbStepLockResource[];
+  }) {
+    const steps = input.testCase.steps ?? [];
     const vars = { ...input.vars };
     const stepResults: Array<Record<string, unknown>> = [];
     let final: ApiTestRunItemEntity | undefined;
@@ -401,23 +455,24 @@ export class ApiExecutionService {
       const outcomes = await Promise.all(
         group.map(async (step) => {
           const startedAt = new Date().toISOString();
-          const stepCase = Object.assign(
-            new ApiTestCaseEntity(),
-            input.testCase,
-            {
-              title: `${input.testCase.title} / ${step.name}`,
-              request: step.request,
-              expected: step.expected,
-              metadata: { ...input.testCase.metadata, exports: step.exports },
-            },
-          );
-          const result = await this.executeSingleStep({
-            ...input,
-            testCase: stepCase,
-            env: environmentFromStep(step),
-            vars,
-            caseContext,
-          });
+          const result = isDbStep(step)
+            ? await this.executeDbStep({
+                runId: input.runId,
+                testCase: input.testCase,
+                step,
+                vars,
+                caseContext: input.caseContext,
+                lockSession: input.lockSession,
+                lockResources: input.lockResources,
+              })
+            : await this.executeHttpStep({
+                runId: input.runId,
+                testCase: input.testCase,
+                step,
+                vars,
+                caseContext: input.caseContext,
+                encoding: input.encoding,
+              });
           const extracted: Record<string, string> = {};
           for (const binding of step.exports) {
             const value = extractExportValue(
@@ -425,8 +480,8 @@ export class ApiExecutionService {
               result.requestSnapshot,
               result.responseSnapshot,
             );
-            if (value !== undefined && value !== null && String(value) !== "")
-              extracted[binding.name] = String(value);
+            const text = exportValueToString(value);
+            if (text !== "") extracted[binding.name] = text;
             else if (binding.required) {
               result.status = "error";
               result.responseSnapshot = {
@@ -478,6 +533,153 @@ export class ApiExecutionService {
       error: final.responseSnapshot?.error,
     };
     return final;
+  }
+
+  /** 请求步骤：单独构造步骤级案例对象，沿用原有单步执行链路 */
+  private async executeHttpStep(input: {
+    runId: string;
+    testCase: ApiTestCaseEntity;
+    step: ApiHttpCaseStep;
+    vars: Record<string, string>;
+    caseContext: DataFunctionContext;
+    encoding?: string;
+  }) {
+    const stepCase = Object.assign(new ApiTestCaseEntity(), input.testCase, {
+      title: `${input.testCase.title} / ${input.step.name}`,
+      request: input.step.request,
+      expected: input.step.expected,
+      metadata: { ...input.testCase.metadata, exports: input.step.exports },
+    });
+    return this.executeSingleStep({
+      runId: input.runId,
+      testCase: stepCase,
+      env: environmentFromStep(input.step),
+      vars: input.vars,
+      caseContext: input.caseContext,
+      encoding: input.encoding,
+    });
+  }
+
+  /**
+   * SQL 步骤：解析变量与数据函数 → 按连接排队占位 → 执行 → 生成与请求步骤一致的结果结构。
+   * 失败统一记 error，让案例在出错步骤停下。
+   */
+  private async executeDbStep(input: {
+    runId: string;
+    testCase: ApiTestCaseEntity;
+    step: ApiDbCaseStep;
+    vars: Record<string, string>;
+    caseContext: DataFunctionContext;
+    lockSession: DbStepLockSession;
+    lockResources: DbStepLockResource[];
+  }): Promise<ApiTestRunItemEntity> {
+    const title = `${input.testCase.title} / ${input.step.name}`;
+    const config = input.step.db;
+    const started = Date.now();
+    const requestSnapshot: Record<string, unknown> = {
+      kind: "db",
+      mode: config?.mode,
+      connectionId: config?.connectionId,
+      sql: config?.sql,
+    };
+    try {
+      /*
+       * 取值直接在 SQL 里写 ${共享变量}（数据函数同一套语法）：
+       * 先替换变量（值按 SQL 字面量转义单引号），再解析数据函数。
+       */
+      const sql = String(
+        await this.dataFunctionService.resolveDeep(
+          input.testCase.projectId,
+          substituteSqlVariables(config?.sql ?? "", input.vars),
+          input.caseContext,
+        ),
+      );
+      requestSnapshot.sql = sql;
+      // 占位：资源名默认取数据库连接，案例结束才释放（不是 SQL 执行完就放）
+      await input.lockSession.acquire(input.lockResources);
+      const result = await this.sqlStepRunner.run({
+        connectionId: config?.connectionId,
+        mode: config?.mode,
+        sql,
+        maxAffectedRows: config?.maxAffectedRows,
+        timeoutMs: config?.timeoutMs,
+      });
+      requestSnapshot.connectionName = result.connectionName;
+      /* 执行记录里要能看出打到哪个库，带上连接定位信息（不含密码） */
+      requestSnapshot.connection = result.connection;
+      return this.runItemRepo.create({
+        runId: input.runId,
+        caseId: input.testCase.id,
+        caseTitle: title,
+        status: "passed" as ApiRunItemStatus,
+        durationMs: result.durationMs,
+        requestSnapshot,
+        responseSnapshot: {
+          status: 0,
+          headers: {},
+          body: {
+            rows: result.rows.slice(0, DB_STEP_SNAPSHOT_MAX_ROWS),
+            row: result.rows[0] ?? null,
+            rowCount: result.rowCount,
+            affectedRows: result.affectedRows ?? null,
+            truncated: result.rows.length > DB_STEP_SNAPSHOT_MAX_ROWS,
+          },
+        },
+        assertions: [],
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "SQL 执行失败";
+      return this.runItemRepo.create({
+        runId: input.runId,
+        caseId: input.testCase.id,
+        caseTitle: title,
+        status: "error" as ApiRunItemStatus,
+        durationMs: Date.now() - started,
+        requestSnapshot,
+        responseSnapshot: {
+          status: 0,
+          headers: {},
+          body: null,
+          error: message,
+        },
+        assertions: [
+          {
+            name: "SQL 执行",
+            passed: false,
+            expected: "SQL 执行成功",
+            actual: message,
+          },
+        ],
+      });
+    }
+  }
+
+  /**
+   * 案例里用到的 SQL 步骤占位资源：资源名默认取数据库连接 id，
+   * 名字用于排队报错文案，查不到连接时留给执行阶段报错。
+   */
+  private async collectDbStepLockResources(
+    steps: ApiCaseStep[],
+  ): Promise<DbStepLockResource[]> {
+    const ids = [
+      ...new Set(
+        steps
+          .filter(isDbStep)
+          .map((step) => step.db?.connectionId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const resources: DbStepLockResource[] = [];
+    for (const id of ids) {
+      let label = id;
+      try {
+        label = (await this.sqlStepRunner.requireConnection(id)).name || id;
+      } catch {
+        // 连接不存在时照常占位，真正的报错由执行阶段给出
+      }
+      resources.push({ key: id, label });
+    }
+    return resources;
   }
 
   private async executeSingleStep(input: {
@@ -878,31 +1080,18 @@ export class ApiExecutionService {
     caseContext?: DataFunctionContext;
   }) {
     for (const step of input.steps) {
-      if (!step.target?.address?.trim()) {
-        throw new BadRequestException(
-          `前置步骤「${step.name}」未配置环境地址，无法提取其共享变量`,
-        );
-      }
-      const stepCase = Object.assign(new ApiTestCaseEntity(), {
-        id: step.id,
-        projectId: input.projectId,
-        title: step.name,
-        request: step.request,
-        expected: step.expected ?? {},
-        metadata: { exports: step.exports ?? [] },
-      });
-      const result = await this.executeSingleStep({
-        runId: "debug",
-        testCase: stepCase,
-        env: environmentFromStep(step),
-        vars: input.vars,
-        encoding: input.encoding,
-        caseContext: input.caseContext,
-      });
+      const result = isDbStep(step)
+        ? await this.runDebugDbStep({
+            projectId: input.projectId,
+            step,
+            vars: input.vars,
+            caseContext: input.caseContext,
+          })
+        : await this.runDebugHttpStep({ ...input, step });
       if (result.status === "error") {
         const reason =
           (result.responseSnapshot as { error?: string } | undefined)?.error ??
-          "请求执行失败";
+          "执行失败";
         throw new BadRequestException(
           `前置步骤「${step.name}」执行失败：${reason}`,
         );
@@ -913,14 +1102,73 @@ export class ApiExecutionService {
           result.requestSnapshot,
           result.responseSnapshot,
         );
-        if (value !== undefined && value !== null && String(value) !== "") {
-          input.vars[binding.name] = String(value);
+        const text = exportValueToString(value);
+        if (text !== "") {
+          input.vars[binding.name] = text;
         } else if (binding.required) {
           throw new BadRequestException(
             `前置步骤「${step.name}」的共享变量「${binding.name}」提取失败`,
           );
         }
       }
+    }
+  }
+
+  private async runDebugHttpStep(input: {
+    projectId: string;
+    step: ApiHttpCaseStep;
+    vars: Record<string, string>;
+    encoding?: string;
+    caseContext?: DataFunctionContext;
+  }) {
+    const { step } = input;
+    if (!step.target?.address?.trim()) {
+      throw new BadRequestException(
+        `前置步骤「${step.name}」未配置环境地址，无法提取其共享变量`,
+      );
+    }
+    const stepCase = Object.assign(new ApiTestCaseEntity(), {
+      id: step.id,
+      projectId: input.projectId,
+      title: step.name,
+      request: step.request,
+      expected: step.expected ?? {},
+      metadata: { exports: step.exports ?? [] },
+    });
+    return this.executeSingleStep({
+      runId: "debug",
+      testCase: stepCase,
+      env: environmentFromStep(step),
+      vars: input.vars,
+      encoding: input.encoding,
+      caseContext: input.caseContext,
+    });
+  }
+
+  /** 调试前置步骤命中 SQL 步骤：单独占位、执行完立刻释放 */
+  private async runDebugDbStep(input: {
+    projectId: string;
+    step: ApiDbCaseStep;
+    vars: Record<string, string>;
+    caseContext?: DataFunctionContext;
+  }) {
+    const lockSession = createDbStepLockSession();
+    try {
+      return await this.executeDbStep({
+        runId: "debug",
+        testCase: Object.assign(new ApiTestCaseEntity(), {
+          id: input.step.id,
+          projectId: input.projectId,
+          title: input.step.name,
+        }),
+        step: input.step,
+        vars: input.vars,
+        caseContext: input.caseContext ?? SAMPLE_CONTEXT,
+        lockSession,
+        lockResources: await this.collectDbStepLockResources([input.step]),
+      });
+    } finally {
+      await lockSession.release();
     }
   }
 
@@ -1169,7 +1417,7 @@ export class ApiExecutionService {
   }
 }
 
-export function environmentFromStep(step: ApiCaseStep): RuntimeEnvironment {
+export function environmentFromStep(step: ApiHttpCaseStep): RuntimeEnvironment {
   const address = step.target?.address?.trim() ?? "";
   const transport =
     step.request.transport ?? (step.request.framing ? "tcp" : "http");

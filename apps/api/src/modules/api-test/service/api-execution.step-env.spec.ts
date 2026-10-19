@@ -1,7 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
 import { environmentFromStep } from "@api-test/service/api-execution.service";
 import { parseServerAddress } from "@case-forge/shared";
-import type { ApiCaseStep } from "@case-forge/shared";
+import type { ApiHttpCaseStep } from "@case-forge/shared";
 
 /**
  * Socket 调试地址解析回归测试。
@@ -11,7 +11,7 @@ import type { ApiCaseStep } from "@case-forge/shared";
  * 导致调试 Socket 案例时报「TCP 地址格式应为 host:port」。
  */
 
-function makeTcpStep(address: string): ApiCaseStep {
+function makeTcpStep(address: string): ApiHttpCaseStep {
   return {
     id: "step-1",
     name: "调试",
@@ -19,7 +19,7 @@ function makeTcpStep(address: string): ApiCaseStep {
     request: { method: "", path: "", transport: "tcp" },
     expected: {},
     exports: [],
-  } as unknown as ApiCaseStep;
+  } as unknown as ApiHttpCaseStep;
 }
 
 describe("environmentFromStep TCP 地址解析", () => {

@@ -51,6 +51,13 @@ export class PreviewDataFunctionDto extends SaveDataFunctionDto {
   @IsObject() values: Record<string, unknown>;
 }
 
+/** SQL 步骤试运行：只跑查询，返回列名与前若干行 */
+export class PreviewSqlStepDto {
+  @IsString() @IsNotEmpty() connectionId: string;
+  @IsString() @IsNotEmpty() sql: string;
+  @IsOptional() @IsInt() @Min(1000) @Max(60000) timeoutMs?: number;
+}
+
 export class GenerateDataFunctionScriptDto {
   @IsIn(["javascript", "python"]) language: "javascript" | "python";
   @IsArray() @IsString({ each: true }) params: string[];

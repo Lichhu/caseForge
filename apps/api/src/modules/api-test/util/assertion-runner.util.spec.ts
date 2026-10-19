@@ -8,6 +8,7 @@ import {
   runAssertions,
   isAllPassed,
   extractExportValue,
+  exportValueToString,
   type AssertionRunInput,
 } from "./assertion-runner.util";
 
@@ -688,5 +689,70 @@ describe("extractExportValue", () => {
       responseSnapshot,
     );
     expect(value).toBeUndefined();
+  });
+});
+
+describe("SQL 步骤变量提取", () => {
+  const responseSnapshot = {
+    status: 0,
+    headers: {},
+    body: {
+      rows: [
+        { id: 7, amount: "100.00" },
+        { id: 8, amount: "200.00" },
+      ],
+      row: { id: 7, amount: "100.00" },
+      rowCount: 2,
+      affectedRows: 3,
+    },
+  };
+
+  it("row 按字段取值，留空取整行", () => {
+    expect(
+      extractExportValue(
+        { source: "row", expression: "amount" },
+        undefined,
+        responseSnapshot,
+      ),
+    ).toBe("100.00");
+    expect(
+      extractExportValue({ source: "row" }, undefined, responseSnapshot),
+    ).toEqual({ id: 7, amount: "100.00" });
+  });
+
+  it("rowCount / affectedRows 取行数", () => {
+    expect(
+      extractExportValue({ source: "rowCount" }, undefined, responseSnapshot),
+    ).toBe(2);
+    expect(
+      extractExportValue(
+        { source: "affectedRows" },
+        undefined,
+        responseSnapshot,
+      ),
+    ).toBe(3);
+  });
+
+  it("对象与数组转变量值用 JSON，不会变成 [object Object]", () => {
+    const rows = extractExportValue(
+      { source: "rows" },
+      undefined,
+      responseSnapshot,
+    );
+    expect(exportValueToString(rows)).toBe(
+      '[{"id":7,"amount":"100.00"},{"id":8,"amount":"200.00"}]',
+    );
+    expect(exportValueToString({ id: 7 })).toBe('{"id":7}');
+    expect(exportValueToString(undefined)).toBe("");
+    expect(exportValueToString(0)).toBe("0");
+  });
+
+  it("查询结果为空时按取不到处理", () => {
+    const empty = { status: 0, headers: {}, body: { rows: [], row: null } };
+    expect(
+      exportValueToString(
+        extractExportValue({ source: "row" }, undefined, empty),
+      ),
+    ).toBe("");
   });
 });

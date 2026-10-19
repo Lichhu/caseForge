@@ -136,8 +136,76 @@ export interface ApiStepTarget {
   headers?: Record<string, string>;
 }
 
-export interface ApiCaseStep {
+/** 步骤类型：缺省为请求步骤，兼容历史数据 */
+export type ApiCaseStepKind = "http" | "db";
+
+/** SQL 步骤用法：query 只查数据，execute 改数据 */
+export type ApiDbStepMode = "query" | "execute";
+
+/**
+ * SQL 步骤的变量提取来源：
+ * row=第一行的某个字段，rows=整个结果集，rowCount=查询条数，affectedRows=update 影响行数
+ */
+export const DB_EXPORT_SOURCES = [
+  "row",
+  "rows",
+  "rowCount",
+  "affectedRows",
+] as const;
+
+/** 是否为 SQL 步骤专用的提取来源 */
+export function isDbExportSource(source: string) {
+  return (DB_EXPORT_SOURCES as readonly string[]).includes(source);
+}
+
+/** 改数据的影响行数上限默认值 */
+export const DB_STEP_DEFAULT_MAX_AFFECTED_ROWS = 500;
+/** SQL 执行超时默认值与上限（毫秒） */
+export const DB_STEP_DEFAULT_TIMEOUT_MS = 10000;
+export const DB_STEP_MAX_TIMEOUT_MS = 60000;
+/** SQL 步骤结果快照最多保留的行数，超出只记行数不记明细 */
+export const DB_STEP_SNAPSHOT_MAX_ROWS = 100;
+
+/** 归一化 SQL 执行超时：缺省 10 秒，范围 1 秒 ~ 60 秒 */
+export function resolveDbStepTimeoutMs(raw?: number | null): number {
+  if (raw === undefined || raw === null || !Number.isFinite(raw))
+    return DB_STEP_DEFAULT_TIMEOUT_MS;
+  return Math.min(
+    Math.max(Math.floor(raw), 1000),
+    DB_STEP_MAX_TIMEOUT_MS,
+  );
+}
+
+/** 归一化影响行数上限：缺省 500 行，范围 1 ~ 100000 行 */
+export function resolveDbStepMaxAffectedRows(raw?: number | null): number {
+  if (raw === undefined || raw === null || !Number.isFinite(raw))
+    return DB_STEP_DEFAULT_MAX_AFFECTED_ROWS;
+  return Math.min(
+    Math.max(Math.floor(raw), 1),
+    DB_STEP_DEFAULT_MAX_AFFECTED_ROWS * 200,
+  );
+}
+
+/**
+ * SQL 步骤配置。
+ * @param connectionId - 手动选择的数据库连接 id
+ * @param mode - 查询 / 改数据，需与 SQL 语句类型一致
+ * @param sql - 单条 SQL；取值直接在语句里写 `${共享变量}`，执行前替换（值按 SQL 字面量转义）
+ * @param maxAffectedRows - execute 模式的影响行数上限，超过直接报错
+ * @param timeoutMs - 单条 SQL 超时
+ */
+export interface ApiDbStepConfig {
+  connectionId: string;
+  mode: ApiDbStepMode;
+  sql: string;
+  maxAffectedRows?: number;
+  timeoutMs?: number;
+}
+
+/** 请求步骤（原有步骤类型） */
+export interface ApiHttpCaseStep {
   id: string;
+  kind?: "http";
   name: string;
   /** AI 生成案例中的主请求步骤；前置/后置步骤不设置 */
   isMainRequest?: boolean;
@@ -149,15 +217,101 @@ export interface ApiCaseStep {
   parallelWithPrevious?: boolean;
 }
 
-/** 按 parallelWithPrevious 标记分组：相邻开启标记的步骤同组，未标记的步骤自成一组 */
-export function groupParallelSteps<T extends { parallelWithPrevious?: boolean }>(steps: T[]): T[][] {
+/**
+ * SQL 步骤：选一个数据库连接执行单条 SQL。
+ * 查询结果可通过 exports 提取成变量给后续步骤用；SQL 步骤始终串行，不参与并发组。
+ */
+export interface ApiDbCaseStep {
+  id: string;
+  kind: "db";
+  name: string;
+  db: ApiDbStepConfig;
+  exports: ApiCaseExport[];
+}
+
+export type ApiCaseStep = ApiHttpCaseStep | ApiDbCaseStep;
+
+/** 是否为 SQL 步骤 */
+export function isDbStep(
+  step: { kind?: string } | null | undefined,
+): step is ApiDbCaseStep {
+  return step?.kind === "db";
+}
+
+/** 是否为请求步骤（kind 缺省按请求步骤处理，兼容历史数据） */
+export function isHttpStep(
+  step: { kind?: string } | null | undefined,
+): step is ApiHttpCaseStep {
+  return !isDbStep(step);
+}
+
+/**
+ * 按 parallelWithPrevious 标记分组：相邻开启标记的步骤同组，未标记的步骤自成一组。
+ * SQL 步骤始终自成一组（开关类操作有先后依赖，不与请求步骤并发）。
+ */
+export function groupParallelSteps<
+  T extends { parallelWithPrevious?: boolean; kind?: string },
+>(steps: T[]): T[][] {
   const groups: T[][] = [];
   for (const step of steps) {
     const last = groups[groups.length - 1];
-    if (step.parallelWithPrevious && last?.length) last.push(step);
+    const previous = last?.[last.length - 1];
+    const canJoin =
+      Boolean(step.parallelWithPrevious) &&
+      !isDbStep(step) &&
+      Boolean(previous) &&
+      !isDbStep(previous);
+    if (canJoin) last.push(step);
     else groups.push([step]);
   }
   return groups;
+}
+
+/** SQL 语句最简归一化：去掉注释与字符串字面量，便于判断语句类型和安全性 */
+function normalizeSqlForCheck(sql: string) {
+  return String(sql ?? "")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/--[^\n]*/g, " ")
+    .replace(/'(?:[^']|'')*'/g, "''")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** SQL 语句类型：query=查询，execute=改数据，unsupported=第一版不支持，unknown=空语句 */
+export function detectDbSqlKind(
+  sql: string,
+): "query" | "execute" | "unsupported" | "unknown" {
+  const source = normalizeSqlForCheck(sql);
+  if (!source) return "unknown";
+  if (/^(?:select|with)\b/i.test(source)) return "query";
+  if (/^update\b/i.test(source)) return "execute";
+  return "unsupported";
+}
+
+/**
+ * SQL 步骤的统一校验，保存时和执行时都会调用（前后端共用，避免两处漂移）。
+ * 通过校验返回 null，否则返回可直接展示的错误文案。
+ */
+export function validateDbStepSql(
+  sql: string,
+  mode: ApiDbStepMode,
+): string | null {
+  const source = normalizeSqlForCheck(sql);
+  if (!source) return "请填写 SQL";
+  if (/;\s*\S/.test(source)) return "只允许单条 SQL，不要用分号拼接多条语句";
+  // 已经改成直接在 SQL 里写 ${变量名}，老的 :参数名 写法给明确提示，避免丢给数据库报语法错
+  if (/(?<!:):([A-Za-z_]\w*)/.test(source))
+    return "SQL 里不再支持 :参数名 占位，请改成 ${变量名}（可用「插入变量」选择）";
+  const kind = detectDbSqlKind(sql);
+  if (kind === "unsupported")
+    return "第一版 SQL 步骤只支持 select 查询和 update 改数据";
+  if (mode === "query" && kind === "execute")
+    return "当前是查询模式，不能执行 update 语句";
+  if (mode === "execute" && kind === "query")
+    return "当前是改数据模式，请填写 update 语句";
+  if (kind === "execute" && !/\bwhere\b/i.test(source))
+    return "update 必须带 where 条件，避免改动整张表";
+  return null;
 }
 
 export interface ApiTestCasePayload {
@@ -194,8 +348,20 @@ export interface ApiTestCasePayload {
 
 export interface ApiCaseExport {
   name: string;
-  /** 提取来源：request 表示从本步骤实际发出的请求报文（函数解析后）中提取 */
-  source: "body" | "header" | "status" | "request";
+  /**
+   * 提取来源：
+   * - 请求步骤：`request` 表示从本步骤实际发出的请求报文（函数解析后）中提取，其余取自响应
+   * - SQL 步骤：`row`/`rows` 取查询结果，`rowCount`/`affectedRows` 取行数
+   */
+  source:
+    | "body"
+    | "header"
+    | "status"
+    | "request"
+    | "row"
+    | "rows"
+    | "rowCount"
+    | "affectedRows";
   expression?: string;
   required?: boolean;
 }

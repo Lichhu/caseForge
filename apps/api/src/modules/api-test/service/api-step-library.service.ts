@@ -5,7 +5,7 @@ import {
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
-import type { ApiCaseStep } from "@case-forge/shared";
+import { isDbStep, type ApiCaseStep } from "@case-forge/shared";
 import { RequestContext } from "@common/audit/request-context";
 import {
   auditFieldsForCreate,
@@ -29,8 +29,13 @@ export class ApiStepLibraryService {
 
   async save(input: { name: string; step: ApiCaseStep }, id?: string) {
     if (!input.name?.trim()) throw new BadRequestException("请填写步骤名称");
-    if (!input.step?.request || !input.step?.expected)
-      throw new BadRequestException("步骤内容不完整");
+    const step = input.step;
+    if (!step) throw new BadRequestException("步骤内容不完整");
+    // SQL 步骤没有请求报文，改判连接与 SQL 是否齐全
+    const incomplete = isDbStep(step)
+      ? !step.db?.connectionId || !step.db.sql?.trim()
+      : !step.request || !step.expected;
+    if (incomplete) throw new BadRequestException("步骤内容不完整");
     if (!id)
       return this.repo.save(
         this.repo.create({

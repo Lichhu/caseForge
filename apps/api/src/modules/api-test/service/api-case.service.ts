@@ -34,7 +34,11 @@ import {
 import { toPublicApiCase } from "@common/http/public-response.util";
 import {
   DEFAULT_CASE_FORGE_PAGE_SIZE,
+  detectDbSqlKind,
+  isDbStep,
+  isHttpStep,
   normalizeCaseForgePageSize,
+  validateDbStepSql,
 } from "@case-forge/shared";
 import { ApiCaseGenerateQueueService } from "./api-case-generate-queue.service";
 import { ApiCaseGenerateJobEntity } from "@api-test/entity/api-case-generate-job.entity";
@@ -1134,6 +1138,8 @@ export class ApiCaseService {
       throw new BadRequestException("同一案例内共享变量名不能重复");
     }
 
+    this.validateDbSteps(payload.steps);
+
     const transport =
       payload.request?.transport ??
       (payload.request?.framing?.type === "length-prefix" ? "tcp" : "http");
@@ -1151,6 +1157,28 @@ export class ApiCaseService {
       (typeof payload.request.body === "string" && !payload.request.body.trim())
     ) {
       throw new BadRequestException("TCP 案例必须配置请求报文体");
+    }
+  }
+
+  /**
+   * SQL 步骤保存前校验：连接必填、单条 SQL、update 必须带 where、
+   * mode 与语句类型一致。执行阶段会再校验一次，这里是为了尽早给出可读报错。
+   */
+  private validateDbSteps(steps: ApiCaseStep[] | undefined) {
+    for (const step of steps ?? []) {
+      if (!isDbStep(step)) continue;
+      const config = step.db;
+      if (!config?.connectionId)
+        throw new BadRequestException(
+          `SQL 步骤「${step.name}」未选择数据库连接`,
+        );
+      const sql = config.sql ?? "";
+      const mode =
+        config.mode ??
+        (detectDbSqlKind(sql) === "execute" ? "execute" : "query");
+      const issue = validateDbStepSql(sql, mode);
+      if (issue)
+        throw new BadRequestException(`SQL 步骤「${step.name}」：${issue}`);
     }
   }
 
@@ -1212,20 +1240,23 @@ export class ApiCaseService {
 
 function cloneStep(step: ApiCaseStep): ApiCaseStep {
   const clone = structuredClone(step);
-  delete clone.isMainRequest;
+  if (isHttpStep(clone)) delete clone.isMainRequest;
   return { ...clone, id: crypto.randomUUID() };
 }
 
 export function normalizeCasePayload(payload: SaveApiCaseDto): SaveApiCaseDto {
   const steps = payload.steps?.length ? payload.steps : undefined;
   if (!steps) return payload;
-  const markedIndex = steps.findIndex((step) => step.isMainRequest);
+  // 主步骤只从请求步骤里挑，SQL 步骤没有请求报文
+  const markedIndex = steps.findIndex(
+    (step) => isHttpStep(step) && step.isMainRequest,
+  );
   const namedIndex = steps.findIndex(
     (step) => step.name?.trim() === payload.title?.trim(),
   );
   const requestJson = JSON.stringify(payload.request);
   const requestIndex = steps.findIndex(
-    (step) => JSON.stringify(step.request) === requestJson,
+    (step) => isHttpStep(step) && JSON.stringify(step.request) === requestJson,
   );
   const mainIndex =
     markedIndex >= 0
@@ -1234,15 +1265,32 @@ export function normalizeCasePayload(payload: SaveApiCaseDto): SaveApiCaseDto {
         ? namedIndex
         : requestIndex >= 0
           ? requestIndex
-          : 0;
+          : steps.findIndex(isHttpStep);
+  const resolvedIndex = mainIndex >= 0 ? mainIndex : 0;
   const normalizedSteps = steps.map((step, index) => ({
     ...step,
-    ...(index === mainIndex
+    // SQL 步骤不需要主请求标记，模式缺省时按 SQL 语句类型补齐
+    ...(isDbStep(step)
+      ? {
+          db: {
+            ...step.db,
+            mode:
+              step.db?.mode ??
+              (detectDbSqlKind(step.db?.sql ?? "") === "execute"
+                ? "execute"
+                : "query"),
+          },
+          isMainRequest: undefined,
+        }
+      : {}),
+    ...(index === resolvedIndex && isHttpStep(step)
       ? { isMainRequest: true }
       : { isMainRequest: undefined }),
   }));
-  const mainStep =
-    normalizedSteps[mainIndex] ?? normalizedSteps[normalizedSteps.length - 1];
+  const resolvedStep = normalizedSteps[resolvedIndex];
+  const mainStep = isHttpStep(resolvedStep)
+    ? resolvedStep
+    : normalizedSteps.find(isHttpStep);
   return mainStep
     ? {
         ...payload,
@@ -1251,7 +1299,7 @@ export function normalizeCasePayload(payload: SaveApiCaseDto): SaveApiCaseDto {
         steps: normalizedSteps,
         exports: mainStep.exports,
       }
-    : payload;
+    : { ...payload, steps: normalizedSteps };
 }
 
 function extractReferencedCaseNumbers(request: ApiCaseRequest) {

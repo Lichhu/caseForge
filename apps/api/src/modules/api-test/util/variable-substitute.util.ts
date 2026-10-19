@@ -15,6 +15,26 @@ export function substituteVariables(
   );
 }
 
+/**
+ * SQL 步骤的变量替换：SQL 里直接写 `${变量名}`（和数据函数同一套语法），
+ * 不做驱动参数绑定，替换值按 SQL 字符串字面量规则把单引号转义成两个，
+ * 避免变量里带引号时把语句写坏。
+ */
+export function substituteSqlVariables(
+  input: string,
+  vars: Record<string, string>,
+) {
+  return input.replace(
+    VAR_PATTERN,
+    (_, dollarKey: string, braceKey: string) => {
+      const key = dollarKey ?? braceKey;
+      if (vars[key] === undefined)
+        return dollarKey ? `\${${key}}` : `{{${key}}}`;
+      return String(vars[key]).replace(/'/g, "''");
+    },
+  );
+}
+
 export function substituteDeep<T>(value: T, vars: Record<string, string>): T {
   if (typeof value === "string") {
     return substituteVariables(value, vars) as T;

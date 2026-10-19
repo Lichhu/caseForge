@@ -2,7 +2,8 @@ import { ApiDocEntity } from "@api-test/entity/api-doc.entity";
 import { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
 import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
 import { ApiTestEnvironmentServiceEntity } from "@api-test/entity/api-test-environment-service.entity";
-import { formatServerAddress } from "@case-forge/shared";
+import { formatServerAddress, isHttpStep } from "@case-forge/shared";
+import type { ApiHttpCaseStep } from "@case-forge/shared";
 import { ApiTestExecutionSetEntity } from "@api-test/entity/api-test-execution-set.entity";
 import { ApiTestRunEntity } from "@api-test/entity/api-test-run.entity";
 import { ApiTestRunItemEntity } from "@api-test/entity/api-test-run-item.entity";
@@ -210,7 +211,10 @@ export function toPublicApiCase(testCase: ApiTestCaseEntity) {
         },
       ];
   const mainStep =
-    steps.find((step) => step.isMainRequest) ?? steps[steps.length - 1];
+    steps.find(
+      (step): step is ApiHttpCaseStep =>
+        isHttpStep(step) && Boolean(step.isMainRequest),
+    ) ?? [...steps].reverse().find(isHttpStep);
   return {
     id: testCase.id,
     projectId: testCase.projectId,

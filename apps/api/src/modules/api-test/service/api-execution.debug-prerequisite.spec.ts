@@ -1,6 +1,6 @@
 import { BadRequestException } from "@nestjs/common";
 import { ApiExecutionService } from "@api-test/service/api-execution.service";
-import type { ApiCaseStep } from "@case-forge/shared";
+import type { ApiHttpCaseStep } from "@case-forge/shared";
 
 /**
  * 调试前置步骤回归测试。
@@ -28,11 +28,14 @@ function buildService() {
     environmentService as never,
     executionSetService as never,
     dataFunctionService as never,
+    {} as never,
   );
   return { service };
 }
 
-function buildPrerequisiteStep(overrides?: Partial<ApiCaseStep>): ApiCaseStep {
+function buildPrerequisiteStep(
+  overrides?: Partial<ApiHttpCaseStep>,
+): ApiHttpCaseStep {
   return {
     id: "step-1",
     name: "获取令牌",

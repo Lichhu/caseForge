@@ -752,6 +752,7 @@ import KeyValueRowsEditor from '@/components/api-test/KeyValueRowsEditor.vue';
 import { IMMERSIVE_OVERLAY_Z_INDEX, NESTED_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import { useApiTestStore } from '@/stores/apiTest';
 import type { ApiCaseRequest, ApiCaseStep, ApiDocGenerationProfile } from '@case-forge/shared';
+import { isDbStep } from '@case-forge/shared';
 import * as XLSX from 'xlsx';
 import {
   parseApiDocTableText,
@@ -1006,6 +1007,11 @@ async function quickAddLibraryStep() { const step: ApiCaseStep = { id: randomUui
 function stepLibraryRowProps(record: ApiStepLibraryRow) { return { onClick: () => void editLibraryStep(record) }; }
 function copyLibraryStepRecord(record: ApiStepLibraryRow) { copyStepToClipboard(record.step); message.success('步骤已复制，可在案例步骤列表粘贴'); }
 async function editLibraryStep(row: ApiStepLibraryRow) {
+  /* SQL 步骤还没有请求报文编辑器，指引到案例步骤列表里改 */
+  if (isDbStep(row.step)) {
+    message.warning('SQL 步骤请在案例步骤列表里编辑');
+    return;
+  }
   const request = row.step.request;
   const body = typeof request.body === 'string' ? request.body : JSON.stringify(request.body ?? {}, null, 2);
   const bodyFormat = request.contentType?.includes('xml') ? 'xml' : request.contentType?.includes('text/plain') ? 'text' : 'json';

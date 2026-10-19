@@ -224,8 +224,8 @@
                         @change="onBatchStepChange(row.id, step.id, $event)"
                       />
                       <span class="batch-step-name" :title="step.name">{{ step.name || '未命名步骤' }}</span>
-                      <span class="batch-step-env">{{ step.target?.name || '未选择环境' }}</span>
-                      <span class="batch-step-address" :title="step.target?.address">{{ step.target?.address || '未选择地址' }}</span>
+                      <span class="batch-step-env">{{ batchStepEnvLabel(step) }}</span>
+                      <span class="batch-step-address" :title="batchStepAddressLabel(step)">{{ batchStepAddressLabel(step) }}</span>
                       <span
                         v-if="batchStepRunState(row.id, step.id)"
                         class="batch-case-summary-status"
@@ -365,6 +365,18 @@
                     <div class="case-steps-hint">同组步骤同时发出；组内步骤不能互相引用提取变量</div>
                   </div>
                   <div class="action-toolbar">
+                    <a-dropdown :trigger="['click']">
+                      <a-button size="small" type="primary">
+                        <template #icon><PlusOutlined /></template>
+                        新增步骤
+                      </a-button>
+                      <template #overlay>
+                        <a-menu @click="onAddStepMenu">
+                          <a-menu-item key="http">请求步骤</a-menu-item>
+                          <a-menu-item key="db">SQL 步骤</a-menu-item>
+                        </a-menu>
+                      </template>
+                    </a-dropdown>
                     <a-button size="small" @click="pasteStep">
                       <template #icon><CopyOutlined /></template>
                       粘贴步骤
@@ -384,15 +396,19 @@
                     <div class="case-step-row-summary" role="button" tabindex="0" @click="openStepEditor(index)" @keydown.enter="openStepEditor(index)">
                       <span class="case-step-order">{{ index + 1 }}</span>
                       <span class="case-step-row-name">
+                        <a-tag v-if="stepIsDb(step)" class="case-step-kind-tag">SQL</a-tag>
                         {{ step.name || '未命名步骤' }}
-                        <a-tag v-if="parallelGroupNumber(index) && !step.parallelWithPrevious" class="case-parallel-tag">并行组 {{ parallelGroupNumber(index) }}</a-tag>
+                        <a-tag v-if="parallelGroupNumber(index) && !stepParallelGroup(step)" class="case-parallel-tag">并行组 {{ parallelGroupNumber(index) }}</a-tag>
                       </span>
-                      <span>{{ step.target?.name || '未选择环境' }}</span>
-                      <span class="case-step-row-address">{{ step.target?.address || '未选择地址' }}</span>
+                      <span>{{ stepTargetLabel(step) }}</span>
+                      <span class="case-step-row-address" :title="stepAddressLabel(step)">{{ stepAddressLabel(step) }}</span>
                     </div>
                     <div class="case-step-parallel" @click.stop>
-                      <a-tooltip v-if="index" title="与上一步并发执行">
+                      <a-tooltip v-if="index && stepCanParallel(step)" title="与上一步并发执行">
                         <a-switch v-model:checked="step.parallelWithPrevious" size="small" checked-children="∥" un-checked-children="∥" />
+                      </a-tooltip>
+                      <a-tooltip v-else-if="stepIsDb(step)" title="SQL 步骤按顺序串行执行">
+                        <span class="case-step-serial-hint">串行</span>
                       </a-tooltip>
                     </div>
                     <div class="case-step-actions" @click.stop>
@@ -570,7 +586,7 @@
                             </button>
                           </div>
                           <div v-if="canBeautifyBody" class="case-editor-chrome-actions">
-                            <a-button type="link" size="small" :disabled="!hasBodyCursor || !hasAvailableSharedVariable" @click="openSharedVariableInsert"><LinkOutlined /> 插入变量</a-button>
+                            <a-button type="link" size="small" :disabled="!hasBodyCursor || !hasAvailableSharedVariable" @click="openBodyVariableInsert"><LinkOutlined /> 插入变量</a-button>
                             <a-button type="link" size="small" :disabled="!hasBodyCursor" @click="openBodyFunctionInsert"><CodeOutlined /> 插入函数</a-button>
                             <a-button
                               type="link"
@@ -631,6 +647,82 @@
                 </div>
               </div>
 
+              <div v-show="editorMainTab === 'steps' && stepDetailTab === 'sql'" class="case-editor-panel case-sql-panel">
+                <div class="case-assertion-shell">
+                  <div class="case-assertion-toolbar">
+                    <div>
+                      <strong>SQL 语句</strong>
+                      <div class="case-steps-hint">选连接写一条 SQL：查询用 select，改数据只能用 update 且必须带 where；SQL 步骤按连接排队串行执行</div>
+                    </div>
+                    <div class="case-assertion-toolbar-actions">
+                      <a-button
+                        size="small"
+                        :loading="dbStepPreviewRunning"
+                        :title="currentDbStepMode === 'execute' ? '试运行会在事务里执行这条 update 并回滚，报告影响行数，数据不会改动' : '试运行这条查询，确认返回的字段名'"
+                        @click="runDbStepPreview"
+                      >
+                        <template #icon><ThunderboltOutlined /></template>
+                        试运行
+                      </a-button>
+                      <a-tag :color="currentDbStepMode === 'execute' ? 'red' : 'blue'">{{ dbStepModeLabel(currentDbStepMode) }}</a-tag>
+                    </div>
+                  </div>
+                  <div class="case-sql-toolbar">
+                    <div class="case-sql-field">
+                      <span>数据库连接</span>
+                      <a-select
+                        v-model:value="form.stepDbConnectionId"
+                        :options="dbConnectionOptions"
+                        size="small"
+                        placeholder="选择数据库连接"
+                        show-search
+                        option-filter-prop="label"
+                        allow-clear
+                        :get-popup-container="popupContainer"
+                        :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }"
+                      />
+                    </div>
+                    <div class="case-sql-field">
+                      <span>影响行数上限</span>
+                      <a-tooltip
+                        :title="currentDbStepMode === 'execute' ? 'update 影响行数超过上限会直接报错' : '查询步骤不涉及影响行数，只有 update 才生效'"
+                        :get-popup-container="popupContainer"
+                        :overlay-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 20 }"
+                      >
+                        <a-input-number
+                          v-model:value="form.stepDbMaxAffectedRows"
+                          size="small"
+                          :min="1"
+                          :max="100000"
+                          :disabled="currentDbStepMode !== 'execute'"
+                        />
+                      </a-tooltip>
+                    </div>
+                    <div class="case-sql-field">
+                      <span>超时（毫秒）</span>
+                      <a-input-number v-model:value="form.stepDbTimeoutMs" size="small" :min="1000" :max="DB_STEP_MAX_TIMEOUT_MS" />
+                    </div>
+                  </div>
+                  <div class="case-sql-editor">
+                    <div class="case-sql-editor-actions">
+                      <a-button type="link" size="small" :disabled="!hasAvailableSharedVariable" @click="openDbStepVariableInsert"><LinkOutlined /> 插入变量</a-button>
+                      <a-button type="link" size="small" @click="openDbStepFunctionInsert"><CodeOutlined /> 插入函数</a-button>
+                    </div>
+                    <a-textarea
+                      v-model:value="form.stepDbSql"
+                      class="case-sql-textarea"
+                      :rows="6"
+                      placeholder="select id from t_user where id = '${userId}'&#10;update t_switch set status = 1 where id = '${switchId}'"
+                      @focus="rememberSqlCursor"
+                      @click="rememberSqlCursor"
+                      @keyup="rememberSqlCursor"
+                    />
+                  </div>
+                  <div class="case-steps-hint">取值直接在 SQL 里写 ${变量名}（前面的步骤提取出来的共享变量），或点「插入变量 / 插入函数」从列表里选；执行前替换成真实值，值里的单引号会按 SQL 字面量转义</div>
+                  <div v-if="dbStepSqlIssue" class="case-sql-issue">{{ dbStepSqlIssue }}</div>
+                </div>
+              </div>
+
               <div v-show="editorMainTab === 'steps' && stepDetailTab === 'assertion'" class="case-editor-panel case-assertion-panel">
                 <div class="case-assertion-shell">
                   <div class="case-assertion-toolbar">
@@ -667,9 +759,12 @@
               <div v-show="editorMainTab === 'steps' && stepDetailTab === 'variables'" class="case-editor-panel case-assertion-panel">
                 <div class="case-assertion-shell">
                   <div class="case-assertion-toolbar">
-                    <div><strong>变量提取（{{ form.exports.length }}）</strong></div>
+                    <div>
+                      <strong>变量提取（{{ form.exports.length }}）</strong>
+                      <div v-if="form.stepKind === 'db'" class="case-steps-hint">首行字段取第一行的某个字段，全部行取整个结果集（JSON），结果行数取查询条数，影响行数取 update 改动的行数；变量名在后续步骤写 ${变量名} 引用</div>
+                    </div>
                     <div class="case-assertion-toolbar-actions">
-                      <a-button type="primary" size="small" :loading="debugRunning" @click="addExportFromDebug">
+                      <a-button v-if="form.stepKind !== 'db'" type="primary" size="small" :loading="debugRunning" @click="addExportFromDebug">
                         <template #icon><ThunderboltOutlined /></template>
                         调试添加
                       </a-button>
@@ -678,13 +773,26 @@
                   <div class="case-step-response-list">
                   <a-table :data-source="form.exports" :pagination="false" size="small" row-key="rowId">
                     <a-table-column title="变量名" key="name">
-                      <template #default="{ record }"><a-input v-model:value="record.name" placeholder="accessToken" /></template>
+                      <template #default="{ record }"><a-input v-model:value="record.name" :placeholder="form.stepKind === 'db' ? 'userId' : 'accessToken'" /></template>
                     </a-table-column>
-                    <a-table-column title="来源" key="source" :width="110">
-                      <template #default="{ record }"><a-select v-model:value="record.source" size="small" :options="exportSourceOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }" /></template>
+                    <a-table-column title="来源" key="source" :width="132">
+                      <template #default="{ record }"><a-select v-model:value="record.source" size="small" :options="exportSourceOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1, minWidth: 150 }" /></template>
                     </a-table-column>
-                    <a-table-column title="提取表达式" key="expression">
-                      <template #default="{ record }"><a-input v-model:value="record.expression" placeholder="josn:$.Transaction... | xml:/Transaction/./. " /></template>
+                    <a-table-column :title="form.stepKind === 'db' ? '字段' : '提取表达式'" key="expression">
+                      <template #default="{ record }">
+                        <template v-if="form.stepKind === 'db'">
+                          <a-auto-complete
+                            v-if="record.source === 'row'"
+                            v-model:value="record.expression"
+                            :options="dbStepColumnOptions"
+                            placeholder="字段名，如 id、amount；留空取整行"
+                            :get-popup-container="popupContainer"
+                            :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }"
+                          />
+                          <span v-else class="case-export-not-needed">不需要填</span>
+                        </template>
+                        <a-input v-else v-model:value="record.expression" placeholder="josn:$.Transaction... | xml:/Transaction/./. " />
+                      </template>
                     </a-table-column>
                     <a-table-column title="引用" key="reference" :width="160">
                       <template #default="{ record }"><code v-if="record.name">{{ variableReference(record.name) }}</code></template>
@@ -695,12 +803,12 @@
                     </a-table-column>
                   </a-table>
                   </div>
-                  <a-empty v-if="!form.exports.length" description="从本步骤请求/响应中提取共享变量，后续步骤用 ${变量名} 引用" />
+                  <a-empty v-if="!form.exports.length" :description="form.stepKind === 'db' ? '从 SQL 查询结果中提取共享变量，后续步骤用 ${变量名} 引用' : '从本步骤请求/响应中提取共享变量，后续步骤用 ${变量名} 引用'" />
                 </div>
               </div>
                       <div class="case-step-modal-footer">
-                        <a-button :loading="debugRunning" :disabled="!form.stepTargetAddress.trim()" @click="onDebugRun()"><ThunderboltOutlined />调试</a-button>
-                        <span></span>
+                        <a-button :loading="debugRunning" :disabled="form.stepKind === 'db' || !form.stepTargetAddress.trim()" @click="onDebugRun()"><ThunderboltOutlined />调试</a-button>
+                        <span class="case-step-modal-footer-hint">{{ form.stepKind === 'db' ? 'SQL 步骤暂不支持单步调试，保存后执行整个案例即可验证' : '' }}</span>
                         <a-button @click="cancelStepEditor">取消</a-button>
                         <a-button type="primary" @click="confirmStepEditor">确认</a-button>
                       </div>
@@ -811,6 +919,51 @@
 
     <a-modal v-model:open="sharedVariableInsertOpen" title="插入变量" :z-index="NESTED_OVERLAY_Z_INDEX + 10" ok-text="插入" @ok="insertSharedVariable">
       <a-select v-model:value="sharedVariableName" style="width: 100%" :options="sharedVariableOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 11 }" placeholder="选择变量" />
+    </a-modal>
+
+    <a-modal
+      v-model:open="dbStepPreviewOpen"
+      title="SQL 试运行"
+      :width="960"
+      :z-index="NESTED_OVERLAY_Z_INDEX + 30"
+      :footer="null"
+    >
+      <div v-if="dbStepPreview" class="case-sql-preview">
+        <div class="case-sql-preview-meta">
+          <template v-if="dbStepPreview.rolledBack">连接 {{ dbStepPreview.connectionName }}{{ previewConnectionAddress }} · 影响 {{ dbStepPreview.affectedRows ?? '未知' }} 行 · 已在事务里回滚，数据没有改动 · {{ dbStepPreview.durationMs }}ms</template>
+          <template v-else>连接 {{ dbStepPreview.connectionName }}{{ previewConnectionAddress }} · 返回 {{ dbStepPreview.rowCount }} 行 · 耗时 {{ dbStepPreview.durationMs }}ms<span v-if="dbStepPreview.truncated">（最多展示 50 行）</span></template>
+        </div>
+        <div v-if="dbStepPreview.rolledBack && dbStepPreview.affectedRows === 0" class="case-sql-issue">
+          这条 update 影响 0 行，真实执行会直接报错停下：请检查 where 条件是否写错，或目标数据本来就是该状态
+        </div>
+        <div v-else-if="dbStepPreview.rolledBack && dbStepPreview.connectionReadonly" class="case-sql-issue">
+          连接「{{ dbStepPreview.connectionName }}」标记为只读，真实执行会被拦下来；要改数据请先在数据库连接里取消只读
+        </div>
+        <div v-if="!dbStepPreview.rolledBack" class="case-sql-preview-columns">
+          <span>字段：</span>
+          <template v-if="dbStepPreview.columns.length">
+            <a-tag v-for="column in dbStepPreview.columns" :key="column" class="case-sql-preview-tag">
+              {{ column }}
+              <a class="case-sql-preview-extract" title="提取成变量" @click="extractPreviewColumn(column)">提取</a>
+            </a-tag>
+          </template>
+          <span v-else class="case-export-not-needed">没有识别到字段</span>
+        </div>
+        <a-table
+          v-if="!dbStepPreview.rolledBack"
+          :data-source="dbStepPreview.rows"
+          :columns="dbStepPreviewColumns"
+          :pagination="false"
+          size="small"
+          :row-key="dbStepPreviewRowKey"
+          :scroll="{ x: 'max-content', y: 320 }"
+        >
+          <template #bodyCell="{ column, record }">
+            <span class="case-sql-preview-cell">{{ dbStepPreviewCell(record as Record<string, unknown>, String(column.key)) }}</span>
+          </template>
+        </a-table>
+      </div>
+      <a-empty v-else description="没有试运行结果" />
     </a-modal>
 
     <a-modal v-model:open="debugExportOpen" title="手动添加" :z-index="NESTED_OVERLAY_Z_INDEX + 10" ok-text="添加" @ok="confirmDebugExport">
@@ -943,12 +1096,26 @@ import { message, Modal } from 'ant-design-vue';
 import type { MenuProps } from 'ant-design-vue';
 import {
   caseForgePageSizeOptionLabels,
+  DB_STEP_DEFAULT_MAX_AFFECTED_ROWS,
+  DB_STEP_DEFAULT_TIMEOUT_MS,
+  DB_STEP_MAX_TIMEOUT_MS,
+  detectDbSqlKind,
+  isDbExportSource,
+  isDbStep,
+  isHttpStep,
   normalizeCaseForgePageSize,
+  validateDbStepSql,
 } from '@case-forge/shared';
-import type { ApiCaseRequest, ApiCaseStep } from '@case-forge/shared';
+import type {
+  ApiCaseRequest,
+  ApiCaseStep,
+  ApiDbStepMode,
+  ApiHttpCaseStep,
+} from '@case-forge/shared';
 import { copyText } from '@/utils/copyText';
 import type { ApiTestCaseRow, DebugRunResult } from '@/api/apiTestClient';
-import { clearStepDebugRecords, listStepDebugRecords, listAllApiCases, listDataFunctions, debugRunCase, generateAssertions, getAssertionGenerateStatus, getAssertionGenerateResult } from '@/api/apiTestClient';
+import { clearStepDebugRecords, listStepDebugRecords, listAllApiCases, listDataFunctions, listDatabaseConnections, debugRunCase, generateAssertions, getAssertionGenerateStatus, getAssertionGenerateResult, previewSqlStep } from '@/api/apiTestClient';
+import type { ApiDatabaseConnectionRow } from '@/api/apiTestClient';
 import { useApiTestStore } from '@/stores/apiTest';
 import { randomUuid } from '@/utils/randomUuid';
 import KeyValueRowsEditor from '@/components/api-test/KeyValueRowsEditor.vue';
@@ -980,7 +1147,10 @@ import {
   type SocketRequestMeta,
 } from '@/utils/casePayloadFormat.util';
 import { messagePathOptions } from '@/utils/messagePathOptions';
-import { dataFunctionFieldOptions } from '@/utils/sqlSelectColumns.util';
+import {
+  dataFunctionFieldOptions,
+  parseSqlSelectColumns,
+} from '@/utils/sqlSelectColumns.util';
 import { getDebugResponseIssue, parseDebugResponseBody, responsePaths } from '@/utils/debugResponse.util';
 import { copyStepToClipboard, readStepFromClipboard } from '@/utils/stepClipboard.util';
 
@@ -1002,6 +1172,27 @@ function currentBodyText() {
   return form.bodyFormat === 'json' ? form.requestBodyJson : form.bodyFormat === 'xml' ? form.requestBodyXml : form.requestBodyText;
 }
 
+/**
+ * 插入变量 / 插入函数的落点：请求报文文本框或 SQL 步骤的 SQL 文本框。
+ * 两边共用同一套插入弹窗，靠 insertTarget 决定插到哪里。
+ */
+const insertTarget = ref<'body' | 'sql'>('body');
+const sqlInsertCursor = reactive({ start: 0, end: 0 });
+const hasSqlCursor = ref(false);
+
+function activeInsertCursor() {
+  return insertTarget.value === 'sql' ? sqlInsertCursor : bodyFunctionCursor;
+}
+
+function activeInsertText() {
+  return insertTarget.value === 'sql' ? form.stepDbSql : currentBodyText();
+}
+
+function setActiveInsertText(value: string) {
+  if (insertTarget.value === 'sql') form.stepDbSql = value;
+  else setCurrentBodyText(value);
+}
+
 function setCurrentBodyText(value: string) {
   if (form.bodyFormat === 'json') form.requestBodyJson = value;
   else if (form.bodyFormat === 'xml') form.requestBodyXml = value;
@@ -1013,10 +1204,18 @@ function rememberBodyCursor(event: Event) {
   bodyFunctionCursor.start = input.selectionStart;
   bodyFunctionCursor.end = input.selectionEnd;
   hasBodyCursor.value = true;
+  insertTarget.value = 'body';
 }
 
 async function openBodyFunctionInsert() {
   if (!hasBodyCursor.value) return;
+  insertTarget.value = 'body';
+  await openFunctionInsert();
+}
+
+/** 插入函数弹窗本体：请求报文和 SQL 步骤共用，落点由 insertTarget 决定 */
+async function openFunctionInsert() {
+  if (!projectId.value) return;
   const rows = await listDataFunctions(projectId.value);
   bodyFunctions.value = rows;
   bodyFunctionName.value ||= rows[0]?.name ?? '';
@@ -1027,8 +1226,11 @@ function insertBodyFunction() {
   if (!bodyFunctionName.value) return message.warning('请选择函数');
   if (selectedBodyFunction.value?.type === 'sql' && !bodyFunctionField.value.trim()) return message.warning('请选择结果字段');
   const expression = bodyFunctionPreview.value;
-  const body = currentBodyText();
-  setCurrentBodyText(`${body.slice(0, bodyFunctionCursor.start)}${expression}${body.slice(bodyFunctionCursor.end)}`);
+  const cursor = activeInsertCursor();
+  const text = activeInsertText();
+  setActiveInsertText(
+    `${text.slice(0, cursor.start)}${expression}${text.slice(cursor.end)}`,
+  );
   bodyFunctionInsertOpen.value = false;
 }
 
@@ -1069,6 +1271,11 @@ const bodyFunctionFieldOptions = computed(() =>
   dataFunctionFieldOptions(selectedBodyFunction.value?.config).map((value) => ({ value })),
 );
 function bodyPathOptions(index: number) {
+  /* SQL 步骤没有请求报文，函数参数改给共享变量候选 */
+  if (insertTarget.value === 'sql')
+    return sharedVariableOptions.value
+      .filter((item) => !item.disabled)
+      .map((item) => ({ label: item.label, value: `\${${item.value}}` }));
   const keyword = (bodyFunctionArgs.value[index] ?? '').trim().toLowerCase();
   return messagePathOptions(currentBodyText()).filter((item) => !keyword || item.value.toLowerCase().includes(keyword));
 }
@@ -1300,16 +1507,26 @@ function applyStepTargetToSelection(target?: { name: string; address: string }) 
   }
 }
 const editorMainTab = ref<'basic' | 'steps'>('steps');
-const stepDetailTab = ref<'request' | 'assertion' | 'variables'>('request');
+const stepDetailTab = ref<'request' | 'assertion' | 'variables' | 'sql'>(
+  'request',
+);
 const editorMainTabs = [
   { key: 'basic' as const, label: '基础信息' },
   { key: 'steps' as const, label: '步骤列表' },
 ];
-const stepDetailTabs = [
+const httpStepDetailTabs = [
   { key: 'request' as const, label: '请求报文' },
   { key: 'assertion' as const, label: '断言' },
   { key: 'variables' as const, label: '变量提取' },
 ];
+const dbStepDetailTabs = [
+  { key: 'sql' as const, label: 'SQL 语句' },
+  { key: 'variables' as const, label: '变量提取' },
+];
+/** SQL 步骤没有请求报文，断言留给第二步，标签页按类型切换 */
+const stepDetailTabs = computed(() =>
+  form.stepKind === 'db' ? dbStepDetailTabs : httpStepDetailTabs,
+);
 const requestTab = ref<'params' | 'body' | 'headers'>('body');
 const requestViewMode = ref<'template' | 'curl'>('template');
 const requestConfigExpanded = ref(false);
@@ -1478,6 +1695,8 @@ const batchExpandedCaseIds = reactive(new Set<string>());
 const batchSelectedSteps = reactive(new Set<string>());
 function batchStepKey(caseId: string, stepId: string) { return `${caseId}|${stepId}`; }
 function caseStepRows(row: ApiTestCaseRow): ApiCaseStep[] { return row.steps?.length ? row.steps : [{ id: row.id, name: row.title, request: row.request, expected: row.expected, exports: row.metadata?.exports ?? [] }]; }
+function batchStepEnvLabel(step: ApiCaseStep) { return isDbStep(step) ? dbConnectionName(step.db?.connectionId) : step.target?.name || '未选择环境'; }
+function batchStepAddressLabel(step: ApiCaseStep) { return stepAddressLabel(step); }
 function toggleBatchCaseExpand(caseId: string) { if (batchExpandedCaseIds.has(caseId)) batchExpandedCaseIds.delete(caseId); else batchExpandedCaseIds.add(caseId); }
 function toggleBatchStep(caseId: string, stepId: string, checked: boolean) { if (checked) batchSelectedSteps.add(batchStepKey(caseId, stepId)); else batchSelectedSteps.delete(batchStepKey(caseId, stepId)); }
 function onBatchStepChange(caseId: string, stepId: string, event: { target: { checked: boolean } }) { toggleBatchStep(caseId, stepId, event.target.checked); }
@@ -1486,7 +1705,18 @@ function clearCaseSteps(row: ApiTestCaseRow) { for (const step of caseStepRows(r
 function selectAllBatchSteps() { for (const row of selectedRows.value) selectAllSteps(row); }
 function clearAllBatchSteps() { batchSelectedSteps.clear(); }
 function selectedStepCountForCase(row: ApiTestCaseRow) { return caseStepRows(row).filter((step) => batchSelectedSteps.has(batchStepKey(row.id, step.id))).length; }
-function batchStepStatus(step: ApiCaseStep) { return step.target?.address ? { label: '配置完整', className: 'is-ready' } : { label: '缺少地址', className: 'is-failed' }; }
+function batchStepStatus(step: ApiCaseStep) {
+  if (isDbStep(step))
+    return currentDbStepIssueFor(step)
+      ? { label: '配置不全', className: 'is-failed' }
+      : { label: '配置完整', className: 'is-ready' };
+  return step.target?.address ? { label: '配置完整', className: 'is-ready' } : { label: '缺少地址', className: 'is-failed' };
+}
+function currentDbStepIssueFor(step: ApiCaseStep) {
+  if (!isDbStep(step)) return null;
+  if (!step.db?.connectionId) return '请选择数据库连接';
+  return validateDbStepSql(step.db?.sql ?? '', step.db?.mode ?? 'query');
+}
 const batchConfigExpanded = ref(false);
 const batchStepErrors = reactive<Record<string, string>>({});
 function batchStepRunState(caseId: string, stepId: string) {
@@ -1511,25 +1741,38 @@ function mainCaseStepIndex(
   row: Pick<ApiTestCaseRow, 'request' | 'title'>,
   steps: ApiCaseStep[],
 ) {
-  const markedIndex = steps.findIndex((step) => step.isMainRequest);
+  // 主步骤只从请求步骤里挑，SQL 步骤没有请求报文
+  const markedIndex = steps.findIndex(
+    (step) => isHttpStep(step) && step.isMainRequest,
+  );
   if (markedIndex >= 0) return markedIndex;
   const namedIndex = steps.findIndex((step) => step.name?.trim() === row.title?.trim());
   if (namedIndex >= 0) return namedIndex;
   const request = JSON.stringify(row.request);
-  const index = steps.findIndex((step) => JSON.stringify(step.request) === request);
-  return index >= 0 ? index : 0;
+  const index = steps.findIndex(
+    (step) => isHttpStep(step) && JSON.stringify(step.request) === request,
+  );
+  if (index >= 0) return index;
+  const httpIndex = steps.findIndex(isHttpStep);
+  return httpIndex >= 0 ? httpIndex : 0;
 }
 function markMainCaseStep(steps: ApiCaseStep[], index: number) {
   return steps.map((step, stepIndex) => {
-    const clone = { ...step };
-    delete clone.isMainRequest;
-    return stepIndex === index ? { ...clone, isMainRequest: true } : clone;
+    /* 步骤是响应式对象（Proxy），只能用 JSON 深拷贝，structuredClone 会抛 DataCloneError */
+    const clone = cloneJson(step);
+    if (isHttpStep(clone)) delete clone.isMainRequest;
+    return stepIndex === index && isHttpStep(clone)
+      ? { ...clone, isMainRequest: true }
+      : clone;
   });
 }
 function caseSavePayload(row: ApiTestCaseRow, steps: ApiCaseStep[]) {
   const mainIndex = mainCaseStepIndex(row, steps);
   const normalizedSteps = markMainCaseStep(steps, mainIndex);
-  const mainStep = normalizedSteps[mainIndex] ?? normalizedSteps[normalizedSteps.length - 1]!;
+  const resolvedStep = normalizedSteps[mainIndex];
+  const mainStep = isHttpStep(resolvedStep)
+    ? resolvedStep
+    : normalizedSteps.find(isHttpStep);
   return {
     endpointId: row.endpointId,
     title: row.title,
@@ -1541,9 +1784,13 @@ function caseSavePayload(row: ApiTestCaseRow, steps: ApiCaseStep[]) {
     polarity: row.polarity,
     status: row.status,
     enabled: row.enabled,
-    request: mainStep.request,
-    expected: mainStep.expected,
-    exports: mainStep.exports,
+    ...(mainStep && isHttpStep(mainStep)
+      ? {
+          request: mainStep.request,
+          expected: mainStep.expected,
+          exports: mainStep.exports,
+        }
+      : {}),
     steps: normalizedSteps,
     debugEnvironmentId: row.metadata?.debugEnvironmentId,
     debugEnvironmentServiceId: row.metadata?.debugEnvironmentServiceId,
@@ -1599,12 +1846,19 @@ const form = reactive({
   requestTcpMeta: null as SocketRequestMeta | null,
   requestBodyXml: '',
   assertionRows: [] as AssertionRow[],
-  exports: [] as Array<{ rowId: string; name: string; source: 'body' | 'header' | 'status' | 'request'; expression: string; required: boolean }>,
+  exports: [] as Array<{ rowId: string; name: string; source: ApiCaseExportSource; expression: string; required: boolean }>,
   steps: [] as ApiCaseStep[],
   stepName: '',
   stepTargetName: '',
   stepTargetAddress: '',
+  /** 当前编辑的步骤类型：请求步骤 / SQL 步骤 */
+  stepKind: 'http' as 'http' | 'db',
+  stepDbConnectionId: '',
+  stepDbSql: '',
+  stepDbMaxAffectedRows: DB_STEP_DEFAULT_MAX_AFFECTED_ROWS,
+  stepDbTimeoutMs: DB_STEP_DEFAULT_TIMEOUT_MS,
 });
+type ApiCaseExportSource = ApiCaseStep['exports'][number]['source'];
 const activeStepIndex = ref(0);
 const expandedStepId = ref('');
 const stepEditModalOpen = ref(false);
@@ -1621,34 +1875,256 @@ function openDebugRecordDetail(row: DebugHistoryRow) { debugRecordDetail.value =
 const CASE_CLIPBOARD_KEY = 'caseforge:api-case-clipboard';
 function cloneJson<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }
 
+/* ---------------- SQL 步骤相关 ---------------- */
+
+const databaseConnections = ref<ApiDatabaseConnectionRow[]>([]);
+const dbConnectionOptions = computed(() =>
+  databaseConnections.value.map((item) => ({
+    label: `${item.name}（${item.type}）${item.readonly ? ' · 只读' : ''}`,
+    value: item.id,
+  })),
+);
+/**
+ * 数据库连接列表：force 时强制刷新。
+ * 连接可能在别处被改过「只读」标记，打开步骤时要能立刻反映，不能一直用缓存的旧状态。
+ */
+async function ensureDatabaseConnections(force = false) {
+  if (!projectId.value) return;
+  if (!force && databaseConnections.value.length) return;
+  try {
+    databaseConnections.value = await listDatabaseConnections(projectId.value);
+  } catch {
+    databaseConnections.value = [];
+  }
+}
+function dbConnectionName(connectionId?: string) {
+  if (!connectionId) return '未选择数据库';
+  return (
+    databaseConnections.value.find((item) => item.id === connectionId)?.name ??
+    '连接已失效'
+  );
+}
+function dbStepModeLabel(mode?: ApiDbStepMode) {
+  return mode === 'execute' ? '改数据' : '查询';
+}
+/** 步骤列表「环境」列：SQL 步骤显示数据库连接 */
+function stepTargetLabel(step: ApiCaseStep) {
+  return isDbStep(step)
+    ? dbConnectionName(step.db?.connectionId)
+    : step.target?.name || '未选择环境';
+}
+/** 步骤列表「地址」列：SQL 步骤显示模式与 SQL 摘要 */
+function stepAddressLabel(step: ApiCaseStep) {
+  if (!isDbStep(step)) return step.target?.address || '未选择地址';
+  const sql = (step.db?.sql ?? '').replace(/\s+/g, ' ').trim();
+  return `${dbStepModeLabel(step.db?.mode)} · ${sql ? `${sql.slice(0, 60)}${sql.length > 60 ? '…' : ''}` : '未填写 SQL'}`;
+}
+function stepIsDb(step: ApiCaseStep) {
+  return isDbStep(step);
+}
+/** SQL 步骤始终串行，不参与并发组 */
+function stepCanParallel(step: ApiCaseStep) {
+  return !isDbStep(step);
+}
+function stepParallelGroup(step: ApiCaseStep) {
+  return isDbStep(step) ? undefined : step.parallelWithPrevious;
+}
+function clearStepParallel(step: ApiCaseStep) {
+  if (isHttpStep(step)) step.parallelWithPrevious = undefined;
+}
+function collectExportRows() {
+  return form.exports
+    .filter((item) => item.name.trim())
+    .map((item) => ({
+      name: item.name.trim(),
+      source: item.source,
+      expression:
+        item.source === 'status' || item.source === 'rowCount' || item.source === 'affectedRows'
+          ? undefined
+          : item.expression.trim(),
+      required: item.required,
+    }));
+}
+/** 查询还是改数据完全由 SQL 语句决定，用户不用选，也不会选错 */
+const currentDbStepMode = computed<ApiDbStepMode>(() =>
+  detectDbSqlKind(form.stepDbSql) === 'execute' ? 'execute' : 'query',
+);
+/** 编辑中的 SQL 步骤即时校验，确认时给可读报错 */
+function currentDbStepIssue() {
+  if (!form.stepDbConnectionId) return '请先选择数据库连接';
+  return validateDbStepSql(form.stepDbSql, currentDbStepMode.value);
+}
+/** SQL 里 SELECT 出来的列，作为变量提取「字段」的候选 */
+const dbStepColumnOptions = computed(() =>
+  parseSqlSelectColumns(form.stepDbSql).map((value) => ({ value })),
+);
+/** SQL 试运行结果：字段名 + 前若干行，用来确认变量提取的字段 */
+const dbStepPreviewOpen = ref(false);
+const dbStepPreviewRunning = ref(false);
+const dbStepPreview = ref<Awaited<ReturnType<typeof previewSqlStep>> | null>(null);
+const dbStepPreviewColumns = computed(() =>
+  (dbStepPreview.value?.columns ?? []).map((column) => ({
+    title: column,
+    dataIndex: column,
+    key: column,
+    ellipsis: true,
+  })),
+);
+/** 试运行弹窗里顺带显示打到哪个库，不用回数据库连接去查 */
+const previewConnectionAddress = computed(() => {
+  const connection = dbStepPreview.value?.connection;
+  if (!connection) return '';
+  const target = `${connection.host}:${connection.port}${connection.databaseName ? `/${connection.databaseName}` : ''}`;
+  return `（${connection.type} ${target}${connection.username ? ` · ${connection.username}` : ''}）`;
+});
+function dbStepPreviewRowKey(_record: Record<string, unknown>, index?: number) {
+  return `preview-row-${index ?? 0}`;
+}
+function dbStepPreviewCell(record: Record<string, unknown>, key: string) {
+  const value = record?.[key];
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+async function runDbStepPreview() {
+  if (!projectId.value) return;
+  const issue = currentDbStepIssue();
+  if (issue) return message.warning(issue);
+  dbStepPreviewRunning.value = true;
+  try {
+    dbStepPreview.value = await previewSqlStep(projectId.value, {
+      connectionId: form.stepDbConnectionId,
+      sql: form.stepDbSql,
+      timeoutMs: form.stepDbTimeoutMs,
+    });
+    dbStepPreviewOpen.value = true;
+  } catch (error) {
+    message.error((error as Error)?.message || '试运行失败');
+  } finally {
+    dbStepPreviewRunning.value = false;
+  }
+}
+/** 把试运行看到的字段直接加成变量提取行 */
+function extractPreviewColumn(column: string) {
+  if (form.exports.some((item) => item.source === 'row' && item.expression.trim() === column))
+    return message.info(`字段 ${column} 已经提取过了`);
+  form.exports.push({
+    rowId: randomUuid(),
+    name: column,
+    source: 'row',
+    expression: column,
+    required: false,
+  });
+  message.success(`已添加变量 ${column}`);
+}
+/** SQL 面板里的实时提示：连接未选、语句问题都在这里给 */
+const dbStepSqlIssue = computed(() => currentDbStepIssue());
+/** SQL 框里的光标位置，插入变量/函数时按光标插入 */
+function rememberSqlCursor(event: Event) {
+  const input = event.target as HTMLTextAreaElement;
+  sqlInsertCursor.start = input.selectionStart ?? form.stepDbSql.length;
+  sqlInsertCursor.end = input.selectionEnd ?? sqlInsertCursor.start;
+  hasSqlCursor.value = true;
+  insertTarget.value = 'sql';
+}
+/** 没点过 SQL 框时插到末尾，按钮不用先聚焦也能用 */
+function focusSqlInsertTarget() {
+  insertTarget.value = 'sql';
+  if (!hasSqlCursor.value) {
+    sqlInsertCursor.start = form.stepDbSql.length;
+    sqlInsertCursor.end = form.stepDbSql.length;
+    hasSqlCursor.value = true;
+  }
+}
+function openDbStepVariableInsert() {
+  focusSqlInsertTarget();
+  openSharedVariableInsert();
+}
+function openDbStepFunctionInsert() {
+  focusSqlInsertTarget();
+  void openFunctionInsert();
+}
+
 function currentStepFromForm(): ApiCaseStep {
+  const existing = form.steps[activeStepIndex.value];
+  const id = existing?.id ?? randomUuid();
+  const name =
+    form.stepName.trim() || `步骤 ${activeStepIndex.value + 1}`;
+  if (form.stepKind === 'db') {
+    return {
+      id,
+      kind: 'db',
+      name,
+      db: {
+        connectionId: form.stepDbConnectionId,
+        mode: currentDbStepMode.value,
+        sql: form.stepDbSql,
+        maxAffectedRows: form.stepDbMaxAffectedRows,
+        timeoutMs: form.stepDbTimeoutMs,
+      },
+      exports: collectExportRows(),
+    };
+  }
   /* target 只取步骤编辑器中显式选择的环境/地址，新建步骤默认为空，保存时不再回退调试栏当前选择 */
   const targetName = form.stepTargetName.trim();
   const targetAddress = form.stepTargetAddress.trim();
   return {
-    id: form.steps[activeStepIndex.value]?.id ?? randomUuid(),
-    name: form.stepName.trim() || `步骤 ${activeStepIndex.value + 1}`,
-    ...(form.steps[activeStepIndex.value]?.isMainRequest
+    id,
+    name,
+    ...(isHttpStep(existing) && existing.isMainRequest
       ? { isMainRequest: true }
       : {}),
     target: targetAddress ? { name: targetName, address: targetAddress } : undefined,
     request: buildDebugRequest(),
     expected: buildExpectedFromRows(form.assertionRows),
-    exports: form.exports.filter((item) => item.name.trim()).map(({ name, source, expression, required }) => ({ name: name.trim(), source, expression: source === 'status' ? undefined : expression.trim(), required })),
-    parallelWithPrevious: activeStepIndex.value > 0 ? form.steps[activeStepIndex.value]?.parallelWithPrevious : undefined,
+    exports: collectExportRows(),
+    parallelWithPrevious:
+      activeStepIndex.value > 0 && existing
+        ? stepParallelGroup(existing)
+        : undefined,
   };
 }
 
 function storeActiveStep() { if (form.steps.length) form.steps[activeStepIndex.value] = currentStepFromForm(); }
 function loadStep(step: ApiCaseStep) {
   form.stepName = step.name;
+  form.exports = step.exports.map((item) => ({
+    rowId: randomUuid(),
+    name: item.name,
+    /* SQL 步骤来源必须是查询结果；老数据里残留的 body 这类来源归到「首行字段」 */
+    source:
+      isDbStep(step) && !isDbExportSource(item.source) ? 'row' : item.source,
+    expression: item.expression ?? '',
+    required: item.required ?? false,
+  }));
+  if (isDbStep(step)) {
+    form.stepKind = 'db';
+    form.stepDbConnectionId = step.db?.connectionId ?? '';
+    form.stepDbSql = step.db?.sql ?? '';
+    form.stepDbMaxAffectedRows = step.db?.maxAffectedRows ?? DB_STEP_DEFAULT_MAX_AFFECTED_ROWS;
+    form.stepDbTimeoutMs = step.db?.timeoutMs ?? DB_STEP_DEFAULT_TIMEOUT_MS;
+    hasSqlCursor.value = false;
+    /* SQL 步骤没有请求报文，清空请求表单避免误显示上一个步骤的内容 */
+    form.stepTargetName = '';
+    form.stepTargetAddress = '';
+    applyRequestToForm({ method: 'POST', path: '/' });
+    form.assertionRows = [];
+    stepDetailTab.value = 'sql';
+    /* 每次都刷新连接列表，避免连接在别处取消只读后这里还显示旧状态 */
+    void ensureDatabaseConnections(true);
+    return;
+  }
+  form.stepKind = 'http';
   form.stepTargetName = step.target?.name ?? '';
   form.stepTargetAddress = step.target?.address ?? '';
   applyRequestToForm(step.request);
   form.assertionRows = assertionsToRows(step.expected?.assertions);
-  form.exports = step.exports.map((item) => ({ rowId: randomUuid(), name: item.name, source: item.source, expression: item.expression ?? '', required: item.required ?? false }));
+  if (stepDetailTab.value === 'sql') stepDetailTab.value = 'request';
 }
-function selectStep(index: number) { storeActiveStep(); activeStepIndex.value = index; loadStep(form.steps[index]); if (stepEditModalOpen.value) applyStepTargetToSelection(form.steps[index].target); }
+function stepHttpTarget(step: ApiCaseStep | undefined) {
+  return step && isHttpStep(step) ? step.target : undefined;
+}
+function selectStep(index: number) { storeActiveStep(); activeStepIndex.value = index; loadStep(form.steps[index]); if (stepEditModalOpen.value) applyStepTargetToSelection(stepHttpTarget(form.steps[index])); }
 function toggleStep(index: number) { if (form.steps[index].id === expandedStepId.value) { storeActiveStep(); expandedStepId.value = ''; return; } selectStep(index); expandedStepId.value = form.steps[index].id; }
 function openStepEditor(index: number) {
   storeActiveStep();
@@ -1657,7 +2133,7 @@ function openStepEditor(index: number) {
   loadStep(form.steps[index]);
   expandedStepId.value = form.steps[index].id;
   stepEditModalOpen.value = true;
-  applyStepTargetToSelection(form.steps[index].target);
+  applyStepTargetToSelection(stepHttpTarget(form.steps[index]));
 }
 function cancelStepEditor() {
   if (stepEditSnapshot.value) {
@@ -1669,19 +2145,33 @@ function cancelStepEditor() {
   expandedStepId.value = '';
 }
 function confirmStepEditor() {
+  const issue = form.stepKind === 'db' ? currentDbStepIssue() : null;
+  if (issue) {
+    message.warning(issue);
+    return;
+  }
   storeActiveStep();
   stepEditSnapshot.value = null;
   stepEditModalOpen.value = false;
   expandedStepId.value = '';
 }
-function createBlankStep(name: string): ApiCaseStep {
+function createBlankStep(name: string, kind: 'http' | 'db' = 'http'): ApiCaseStep {
+  if (kind === 'db')
+    return {
+      id: randomUuid(),
+      kind: 'db',
+      name,
+      db: { connectionId: '', mode: 'query', sql: '' },
+      exports: [],
+    };
   return { id: randomUuid(), name, request: { method: 'POST', path: '/' }, expected: {}, exports: [] };
 }
-function addStep() { storeActiveStep(); const step = createBlankStep(`步骤 ${form.steps.length + 1}`); form.steps.push(step); activeStepIndex.value = form.steps.length - 1; expandedStepId.value = ''; loadStep(step); }
+function addStep(kind: 'http' | 'db' = 'http') { storeActiveStep(); const step = createBlankStep(`步骤 ${form.steps.length + 1}`, kind); form.steps.push(step); activeStepIndex.value = form.steps.length - 1; expandedStepId.value = ''; loadStep(step); }
+function onAddStepMenu(info: { key?: string | number }) { addStep(info?.key === 'db' ? 'db' : 'http'); }
 
-function addStepAfter(index: number) {
+function addStepAfter(index: number, kind: 'http' | 'db' = 'http') {
   storeActiveStep();
-  const step = createBlankStep(`步骤 ${form.steps.length + 1}`);
+  const step = createBlankStep(`步骤 ${form.steps.length + 1}`, kind);
   form.steps.splice(index + 1, 0, step);
   activeStepIndex.value = index + 1;
   expandedStepId.value = '';
@@ -1692,27 +2182,37 @@ function moveStep(index: number, offset: number) {
   const activeId = form.steps[activeStepIndex.value].id;
   const next = index + offset;
   [form.steps[index], form.steps[next]] = [form.steps[next], form.steps[index]];
-  form.steps[0].parallelWithPrevious = undefined;
+  clearStepParallel(form.steps[0]);
   activeStepIndex.value = form.steps.findIndex((step) => step.id === activeId);
 }
-function removeStep(index: number) { if (form.steps.length === 1) return; const removedId = form.steps[index].id; form.steps.splice(index, 1); form.steps[0].parallelWithPrevious = undefined; activeStepIndex.value = Math.min(index, form.steps.length - 1); if (expandedStepId.value === removedId) expandedStepId.value = ''; loadStep(form.steps[activeStepIndex.value]); }
+function removeStep(index: number) { if (form.steps.length === 1) return; const removedId = form.steps[index].id; form.steps.splice(index, 1); clearStepParallel(form.steps[0]); activeStepIndex.value = Math.min(index, form.steps.length - 1); if (expandedStepId.value === removedId) expandedStepId.value = ''; loadStep(form.steps[activeStepIndex.value]); }
 function copyActiveStep() { storeActiveStep(); copyStepToClipboard(form.steps[activeStepIndex.value]); message.success('步骤已复制'); }
-function pasteStep() { const step = readStepFromClipboard(); if (!step) return message.warning('没有可粘贴的步骤'); storeActiveStep(); form.steps.push({ ...cloneJson(step), id: randomUuid(), parallelWithPrevious: undefined }); activeStepIndex.value = form.steps.length - 1; expandedStepId.value = ''; loadStep(form.steps[activeStepIndex.value]); message.success('步骤已粘贴'); }
+function pasteStep() { const step = readStepFromClipboard(); if (!step) return message.warning('没有可粘贴的步骤'); storeActiveStep(); const pasted = cloneJson(step); pasted.id = randomUuid(); clearStepParallel(pasted); form.steps.push(pasted); activeStepIndex.value = form.steps.length - 1; expandedStepId.value = ''; loadStep(form.steps[activeStepIndex.value]); message.success('步骤已粘贴'); }
 async function openDebugHistory() { if (!projectId.value || !apiStore.activeCaseId) return; debugHistory.value = await listStepDebugRecords(projectId.value, apiStore.activeCaseId, form.steps[activeStepIndex.value].id); debugHistoryOpen.value = true; }
 async function clearDebugHistory() { if (!projectId.value || !apiStore.activeCaseId) return; await clearStepDebugRecords(projectId.value, apiStore.activeCaseId, form.steps[activeStepIndex.value].id); debugHistory.value = []; }
 
 const sharedVariableInsertOpen = ref(false);
 const sharedVariableName = ref('');
-const exportSourceOptions = [
+const httpExportSourceOptions = [
   { label: '响应体', value: 'body' },
   { label: '请求体', value: 'request' },
   { label: '响应头', value: 'header' },
   { label: '状态码', value: 'status' },
 ];
+const dbExportSourceOptions = [
+  { label: '首行字段', value: 'row' },
+  { label: '全部行', value: 'rows' },
+  { label: '结果行数', value: 'rowCount' },
+  { label: '影响行数', value: 'affectedRows' },
+];
+/** SQL 步骤从查询结果提取，请求步骤从报文提取 */
+const exportSourceOptions = computed(() =>
+  form.stepKind === 'db' ? dbExportSourceOptions : httpExportSourceOptions,
+);
 const sharedVariableOptions = computed(() => {
   const variables = new Map<string, { label: string; disabled?: boolean }>();
   let groupStart = activeStepIndex.value;
-  while (groupStart > 0 && form.steps[groupStart]?.parallelWithPrevious) groupStart -= 1;
+  while (groupStart > 0 && stepParallelGroup(form.steps[groupStart])) groupStart -= 1;
   form.steps.slice(0, activeStepIndex.value).forEach((step, index) => {
     for (const item of step.exports ?? []) {
       const name = (item.name ?? '').trim();
@@ -1739,7 +2239,8 @@ function parallelGroupNumber(index: number) {
   let group = 0;
   for (let start = 0; start < form.steps.length;) {
     let end = start + 1;
-    while (end < form.steps.length && form.steps[end].parallelWithPrevious) end += 1;
+    /* SQL 步骤不参与并发组，遇到就断开 */
+    while (end < form.steps.length && stepParallelGroup(form.steps[end])) end += 1;
     if (end - start > 1) group += 1;
     if (index >= start && index < end) return end - start > 1 ? group : undefined;
     start = end;
@@ -1760,7 +2261,14 @@ const debugRequestPathOptions = computed(() => responsePaths(debugRequestBody.va
 const debugExportPathOptions = computed(() => (debugExportSource.value === 'request' ? debugRequestPathOptions.value : debugResponsePathOptions.value));
 
 function addExportRow() {
-  form.exports.push({ rowId: randomUuid(), name: '', source: 'body', expression: '', required: true });
+  /* SQL 步骤的来源是查询结果，请求步骤才是响应/请求报文 */
+  form.exports.push({
+    rowId: randomUuid(),
+    name: '',
+    source: form.stepKind === 'db' ? 'row' : 'body',
+    expression: '',
+    required: true,
+  });
 }
 
 async function addExportFromDebug() {
@@ -1793,11 +2301,20 @@ function openSharedVariableInsert() {
   sharedVariableInsertOpen.value = true;
 }
 
+/** 请求报文的插入变量入口：显式把落点切回报文，避免沿用上一次 SQL 的落点 */
+function openBodyVariableInsert() {
+  insertTarget.value = 'body';
+  openSharedVariableInsert();
+}
+
 function insertSharedVariable() {
   if (!sharedVariableName.value) return message.warning('请选择变量');
-  const body = currentBodyText();
+  const cursor = activeInsertCursor();
+  const text = activeInsertText();
   const expression = `\${${sharedVariableName.value}}`;
-  setCurrentBodyText(`${body.slice(0, bodyFunctionCursor.start)}${expression}${body.slice(bodyFunctionCursor.end)}`);
+  setActiveInsertText(
+    `${text.slice(0, cursor.start)}${expression}${text.slice(cursor.end)}`,
+  );
   sharedVariableInsertOpen.value = false;
 }
 
@@ -2124,6 +2641,8 @@ function loadForm(row: ApiTestCaseRow) {
   activeStepIndex.value = mainIndex;
   expandedStepId.value = '';
   loadStep(form.steps[activeStepIndex.value]);
+  /* 案例里含 SQL 步骤时补齐连接名，否则列表只能显示 id */
+  if (form.steps.some(stepIsDb)) void ensureDatabaseConnections();
   /* legacy fields remain populated by loadStep for existing editor controls */
   form.exports = (form.steps[activeStepIndex.value].exports ?? []).map((item) => ({
     rowId: randomUuid(),
@@ -2203,6 +2722,8 @@ async function onBatchSaveRequest() {
       if (!steps.some((step) => batchSelectedSteps.has(batchStepKey(row.id, step.id)))) continue;
       const nextSteps = steps.map((step) => {
         if (!batchSelectedSteps.has(batchStepKey(row.id, step.id))) return step;
+        /* SQL 步骤没有请求报文和环境地址，批量设置只作用于请求步骤 */
+        if (isDbStep(step)) return step;
         const next = cloneJson(step);
         if (batchRequest.protocol) next.request.transport = batchRequest.protocol === 'socket' ? 'tcp' : 'http';
         if (batchRequest.method) next.request.method = batchRequest.method;
@@ -2358,7 +2879,8 @@ function buildSavePayload(): Record<string, unknown> | null {
     return null;
   }
   storeActiveStep();
-  const fallbackRequest = form.steps[form.steps.length - 1]?.request ?? mergeRequestFromEditor({
+  const lastHttpStep = [...form.steps].reverse().find(isHttpStep);
+  const fallbackRequest = lastHttpStep?.request ?? mergeRequestFromEditor({
     mode: requestEditorMode.value,
     protocol: form.protocol,
     bodyFormat: form.bodyFormat,
@@ -2374,7 +2896,12 @@ function buildSavePayload(): Record<string, unknown> | null {
     requestTcpMeta: form.requestTcpMeta,
     requestBodyXml: form.requestBodyXml,
   });
-  const mainStep = form.steps.find((step) => step.isMainRequest) ?? form.steps[form.steps.length - 1];
+  const mainStep =
+    form.steps.find(
+      (step): step is ApiHttpCaseStep =>
+        isHttpStep(step) && Boolean(step.isMainRequest),
+    ) ??
+    lastHttpStep;
   const request = mainStep?.request ?? fallbackRequest;
   const expected = mainStep?.expected ?? buildExpectedFromRows(form.assertionRows);
   const payload: Record<string, unknown> = {
@@ -2407,7 +2934,17 @@ function buildSavePayload(): Record<string, unknown> | null {
 
 async function persistCase(options?: { silent?: boolean }): Promise<boolean> {
   if (!projectId.value || !transactionId.value) return false;
-  const payload = buildSavePayload();
+  let payload: Record<string, unknown> | null = null;
+  try {
+    payload = buildSavePayload();
+  } catch (error) {
+    /* 组装报文出错时不要让按钮静默失效，直接给出原因 */
+    if (!options?.silent)
+      message.error(
+        `保存前处理失败：${(error as Error)?.message || '未知错误'}`,
+      );
+    return false;
+  }
   if (!payload) return false;
   const caseId = isNewCase.value ? undefined : apiStore.activeCaseId;
   saving.value = true;
@@ -2441,7 +2978,14 @@ async function onSave() {
 }
 
 async function onCopy() {
-  const payload = buildSavePayload();
+  let payload: Record<string, unknown> | null = null;
+  try {
+    payload = buildSavePayload();
+  } catch (error) {
+    return message.error(
+      `复制前处理失败：${(error as Error)?.message || '未知错误'}`,
+    );
+  }
   if (!payload) return message.warning('请填写案例名称');
   const { title, description, remark, owner, polarity, status, enabled, steps } = payload;
   localStorage.setItem(CASE_CLIPBOARD_KEY, JSON.stringify({ title, description, remark, owner, polarity, status, enabled, steps }));
@@ -2456,8 +3000,9 @@ async function pasteCase() {
     if (!endpoint) return message.warning('当前交易没有可承载案例的接口端点');
     const copiedSteps = copied.steps as ApiCaseStep[];
     const stepsWithIds = copiedSteps.map((step) => ({ ...cloneJson(step), id: randomUuid() }));
+    const lastHttpStep = [...stepsWithIds].reverse().find(isHttpStep);
     const mainIndex = mainCaseStepIndex(
-      { title: String(copied.title || ''), request: stepsWithIds[stepsWithIds.length - 1]!.request },
+      { title: String(copied.title || ''), request: lastHttpStep?.request ?? { method: 'POST', path: '/' } },
       stepsWithIds,
     );
     const steps = markMainCaseStep(stepsWithIds, mainIndex);
@@ -2467,8 +3012,9 @@ async function pasteCase() {
       endpointId: endpoint.id,
       title: `${String(copied.title || '未命名案例')} 副本`,
       transactionCode: apiStore.activeTransaction?.code,
-      request: mainStep.request,
-      expected: mainStep.expected,
+      ...(isHttpStep(mainStep)
+        ? { request: mainStep.request, expected: mainStep.expected }
+        : {}),
       exports: mainStep.exports,
       steps,
     });
@@ -2509,7 +3055,7 @@ function referencedVariableKeys(value: unknown): Set<string> {
  */
 function collectDebugPrerequisiteSteps(steps: ApiCaseStep[], targetIndex: number, targetRequest: ApiCaseRequest): ApiCaseStep[] {
   let boundary = targetIndex;
-  while (boundary > 0 && steps[boundary]?.parallelWithPrevious) boundary -= 1;
+  while (boundary > 0 && stepParallelGroup(steps[boundary])) boundary -= 1;
   const candidates = steps.slice(0, boundary);
   if (!candidates.length) return [];
   const needed = referencedVariableKeys(targetRequest);
@@ -2521,11 +3067,18 @@ function collectDebugPrerequisiteSteps(steps: ApiCaseStep[], targetIndex: number
       if (included.has(step.id)) continue;
       if (!(step.exports ?? []).some((item) => needed.has((item.name ?? '').trim()))) continue;
       included.add(step.id);
-      for (const key of referencedVariableKeys(step.request)) needed.add(key);
+      for (const key of stepReferencedVariables(step)) needed.add(key);
       changed = true;
     }
   }
   return candidates.filter((step) => included.has(step.id));
+}
+
+/** SQL 步骤没有请求报文，改看参数值里引用了哪些共享变量 */
+function stepReferencedVariables(step: ApiCaseStep) {
+  /* SQL 步骤的取值直接写在 SQL 文本里，变量引用扫 SQL 即可 */
+  if (isDbStep(step)) return referencedVariableKeys(step.db?.sql ?? '');
+  return referencedVariableKeys((step as ApiHttpCaseStep).request);
 }
 
 async function onDebugRun(showResult = true) {
@@ -2691,7 +3244,12 @@ async function onBatchGenerateAssertions() {
   const allCases = await listAllApiCases(projectId.value, transactionId.value);
   const selectedSteps = allCases.flatMap((row) => caseStepRows(row).filter((step) => batchSelectedSteps.has(batchStepKey(row.id, step.id))));
   if (!selectedSteps.length) return;
-  if (!fallbackTarget && selectedSteps.every((step) => !step.target?.address)) {
+  const httpSelectedSteps = selectedSteps.filter(isHttpStep);
+  if (!httpSelectedSteps.length) {
+    message.warning('SQL 步骤的断言在下一步支持，本次请选择请求步骤');
+    return;
+  }
+  if (!fallbackTarget && httpSelectedSteps.every((step) => !step.target?.address)) {
     message.warning('所选步骤都没有执行地址，请先给步骤配置地址，或在批量设置中选择执行环境');
     return;
   }
@@ -2709,6 +3267,8 @@ async function onBatchGenerateAssertions() {
         const step = nextSteps[stepIndex];
         const stepKey = batchStepKey(row.id, step.id);
         if (!batchSelectedSteps.has(stepKey)) continue;
+        /* SQL 步骤的断言留到第二步，这里只处理请求步骤 */
+        if (!isHttpStep(step)) continue;
         batchAssertionStatuses[stepKey] = 'running';
         try {
           const target = step.target?.address ? step.target : fallbackTarget;
@@ -4054,6 +4614,7 @@ function onBatchDelete() {
   .case-request-summary { grid-template-columns: auto minmax(0, 1fr) auto; }
   .case-request-summary-encoding { display: none; }
   .case-target-bar { grid-template-columns: 1fr; }
+  .case-sql-toolbar { grid-template-columns: 1fr; }
   .case-protocol-bar,
   .case-protocol-bar--socket,
   .case-protocol-bar--mq { grid-template-columns: 1fr; }
@@ -4508,6 +5069,47 @@ function onBatchDelete() {
 .case-step-order { color: #c8102e; font-weight: 700; }
 .case-step-row-name { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .case-parallel-tag { margin-left: 8px; color: #8b000f; border-color: #efb7c1; background: #fff5f5; font-size: 11px; }
+.case-step-kind-tag {
+  margin-right: 6px;
+  color: #0958d9;
+  border-color: #adc6ff;
+  background: #f0f5ff;
+  font-size: 11px;
+}
+.case-step-serial-hint { color: #98a2b3; font-size: 12px; }
+.case-sql-panel { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+/* SQL 面板字段用「标签在上、控件在下」，避免长标签挤进固定宽度的标签列 */
+.case-sql-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #eaecf0;
+}
+.case-sql-field { display: grid; gap: 4px; min-width: 0; }
+.case-sql-field > span { color: #667085; font-size: 12px; }
+.case-sql-field :deep(.ant-select),
+.case-sql-field :deep(.ant-input-number) { width: 100%; }
+.case-sql-editor { display: flex; flex: 1; flex-direction: column; gap: 4px; min-height: 0; }
+.case-sql-editor-actions { display: flex; justify-content: flex-end; gap: 4px; }
+.case-sql-textarea {
+  /* SQL 框占满剩余高度，超出在框内滚动，不把弹窗内容顶出去 */
+  flex: 1;
+  min-height: 160px;
+  resize: none;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.case-sql-issue { color: #c8102e; font-size: 12px; }
+.case-export-not-needed { color: #98a2b3; font-size: 12px; }
+.case-sql-preview { display: flex; flex-direction: column; gap: 10px; }
+.case-sql-preview-meta { color: #667085; font-size: 12px; }
+.case-sql-preview-columns { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: #667085; font-size: 12px; }
+.case-sql-preview-tag { margin: 0; }
+.case-sql-preview-extract { margin-left: 6px; cursor: pointer; }
+.case-sql-preview-cell { word-break: break-all; }
 .case-step-row-summary > span:nth-child(3) { color: #606875; }
 .case-step-row-address { flex: 1; overflow: hidden; color: #7a8290; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -4541,12 +5143,14 @@ function onBatchDelete() {
 :global(.case-step-editor-modal .case-step-detail-tabs) { flex-shrink: 0; }
 .case-step-detail-tabs { display: flex; margin-bottom: 12px; border-bottom: 1px solid #eaecf0; }
 .case-step-editor-modal :deep(.case-request-panel),
-.case-step-editor-modal :deep(.case-assertion-panel) { flex: 1; min-height: 0; height: auto; }
+.case-step-editor-modal :deep(.case-assertion-panel),
+.case-step-editor-modal :deep(.case-sql-panel) { flex: 1; min-height: 0; height: auto; }
 .case-step-editor-modal :deep(.ant-tabs) { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .case-step-editor-modal :deep(.ant-tabs-content-holder) { display: flex; flex: 1; min-height: 0; overflow: hidden; }
 .case-step-editor-modal :deep(.ant-tabs-content) { display: flex; flex: 1; min-height: 0; }
 .case-step-editor-modal :deep(.ant-tabs-tabpane-active) { display: flex; flex: 1; min-height: 0; flex-direction: column; overflow: hidden; }
 :global(.case-step-editor-modal .case-assertion-panel) { display: flex; flex: 1; min-height: 0; height: auto; overflow: hidden; }
+:global(.case-step-editor-modal .case-sql-panel) { display: flex; flex: 1; min-height: 0; height: auto; overflow: hidden; }
 :global(.case-step-editor-modal .case-assertion-shell) { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; }
 :global(.case-step-editor-modal .assertion-rows-editor) { min-height: 0; height: 100%; }
 :global(.case-step-editor-modal .assertion-rows-body) { flex: 1; min-height: 0; max-height: none; overflow: auto; }
@@ -4554,6 +5158,7 @@ function onBatchDelete() {
 .case-step-response-list :deep(.ant-table) { min-width: 640px; }
 .case-step-editor-modal .case-step-fields { margin-bottom: 14px; }
 .case-step-modal-footer { display: grid; flex-shrink: 0; grid-template-columns: auto 1fr auto auto; gap: 10px; align-items: center; margin: 20px -24px 0; padding: 14px 24px; border-top: 1px solid #eaecf0; background: #fafbfc; }
+.case-step-modal-footer-hint { color: #98a2b3; font-size: 12px; line-height: 1.4; }
 
 .case-step-fields {
   display: grid;

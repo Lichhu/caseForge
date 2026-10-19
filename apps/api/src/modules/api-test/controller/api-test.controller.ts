@@ -83,9 +83,11 @@ import {
 import {
   GenerateDataFunctionScriptDto,
   PreviewDataFunctionDto,
+  PreviewSqlStepDto,
   SaveDataFunctionDto,
   SaveDatabaseConnectionDto,
 } from "@api-test/dto/save-data-function.dto";
+import { SqlStepRunnerService } from "@api-test/service/sql-step-runner.service";
 
 const UPLOAD_EXTENSIONS = ["xls", "xlsx"];
 
@@ -109,6 +111,7 @@ export class ApiTestController {
     private readonly assertionGenerateQueueService: ApiAssertionGenerateQueueService,
     private readonly dataFunctionService: ApiDataFunctionService,
     private readonly stepLibraryService: ApiStepLibraryService,
+    private readonly sqlStepRunner: SqlStepRunnerService,
     @InjectRepository(CaseProjectEntity)
     private readonly projectRepo: Repository<CaseProjectEntity>,
     @InjectRepository(ApiStepDebugRecordEntity)
@@ -260,6 +263,12 @@ export class ApiTestController {
     @Param("id") id: string,
   ) {
     return this.dataFunctionService.metadata(projectId, id);
+  }
+
+  /** SQL 步骤试运行：确认字段名后再配变量提取 */
+  @Post(":projectId/sql-steps/preview")
+  previewSqlStep(@Body() body: PreviewSqlStepDto) {
+    return this.sqlStepRunner.preview(body);
   }
 
   @Get(":projectId/data-functions")

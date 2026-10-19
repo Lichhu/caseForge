@@ -1166,6 +1166,44 @@ export async function getDatabaseMetadata(projectId: string, id: string) {
     }>(`/api-test/${projectId}/database-connections/${id}/metadata`)
   ).data;
 }
+
+export interface SqlStepPreviewResult {
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  rowCount: number;
+  truncated: boolean;
+  durationMs: number;
+  connectionName: string;
+  /** 连接定位信息（不含密码） */
+  connection: {
+    type: string;
+    host: string;
+    port: number;
+    databaseName: string;
+    username: string;
+    readonly: boolean;
+  };
+  /** 连接当前是否标记只读 */
+  connectionReadonly: boolean;
+  /** 改数据试运行：影响行数（事务内执行后已回滚） */
+  affectedRows?: number;
+  /** 改数据试运行：语句已回滚，数据没变 */
+  rolledBack?: boolean;
+}
+
+/** SQL 步骤试运行：返回列名与前若干行，用来确认字段名 */
+export async function previewSqlStep(
+  projectId: string,
+  payload: { connectionId: string; sql: string; timeoutMs?: number },
+) {
+  return (
+    await http.post<SqlStepPreviewResult>(
+      `/api-test/${projectId}/sql-steps/preview`,
+      payload,
+    )
+  ).data;
+}
+
 export async function listDataFunctions(projectId: string) {
   return (
     await http.get<ApiDataFunctionRow[]>(

@@ -71,8 +71,9 @@ describe("normalizeCasePayload", () => {
     });
 
     expect(result.request.body).toContain("<page>2</page>");
-    expect(result.steps?.[0].isMainRequest).toBe(true);
-    expect(result.steps?.[1].isMainRequest).toBeUndefined();
+    const steps = (result.steps ?? []) as Array<{ isMainRequest?: boolean }>;
+    expect(steps[0]?.isMainRequest).toBe(true);
+    expect(steps[1]?.isMainRequest).toBeUndefined();
   });
 });
 

@@ -49,6 +49,7 @@ function buildService(options: {
     environmentService as never,
     executionSetService as never,
     dataFunctionService as never,
+    {} as never,
   );
   return { service, environmentService };
 }
