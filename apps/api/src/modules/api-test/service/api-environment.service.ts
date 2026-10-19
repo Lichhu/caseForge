@@ -20,6 +20,14 @@ import {
 } from "@api-test/util/secret-crypto.util";
 import { toPublicApiEnvironmentService } from "@common/http/public-response.util";
 
+export interface ApiServiceAddressBinding {
+  environmentId: string;
+  environmentName: string;
+  serviceId: string;
+  serviceName: string;
+  address: string;
+}
+
 @Injectable()
 export class ApiEnvironmentService {
   constructor(
@@ -157,9 +165,46 @@ export class ApiEnvironmentService {
     serviceId: string,
   ): Promise<boolean> {
     const row = await this.serviceRepo.findOne({
-      where: { environmentId, id: serviceId, enabled: true },
+      where: { projectId, environmentId, id: serviceId, enabled: true },
     });
     return Boolean(row?.ignoreSslVerify);
+  }
+
+  /**
+   * 列出项目内可用于“步骤地址 → 环境服务”反查的地址。
+   * 老步骤只保存了地址，执行前需要按地址恢复环境/服务绑定。
+   */
+  async listServiceAddressBindings(
+    projectId: string,
+  ): Promise<ApiServiceAddressBinding[]> {
+    const [environments, services] = await Promise.all([
+      this.envRepo.find({
+        where: { projectId },
+        order: { isDefault: "DESC", createdAt: "ASC" },
+      }),
+      this.serviceRepo.find({
+        where: { projectId },
+        order: { sortOrder: "ASC", createdAt: "ASC" },
+      }),
+    ]);
+    const environmentById = new Map(
+      environments.map((environment) => [environment.id, environment]),
+    );
+    const bindings: ApiServiceAddressBinding[] = [];
+    services.forEach((service) => {
+      const environment = environmentById.get(service.environmentId);
+      if (!environment) return;
+      for (const address of serviceAddressCandidates(service)) {
+        bindings.push({
+          environmentId: service.environmentId,
+          environmentName: environment.name,
+          serviceId: service.id,
+          serviceName: service.name,
+          address: normalizeServiceAddress(address),
+        });
+      }
+    });
+    return bindings;
   }
 
   async createEnvironmentService(
@@ -388,4 +433,32 @@ function resolveServiceRuntimeTarget(service: ApiTestEnvironmentServiceEntity) {
     host: service.host,
     port: service.port,
   };
+}
+
+function normalizeServiceAddress(address: string) {
+  return address.trim().replace(/\/+$/, "").toLowerCase();
+}
+
+function serviceAddressCandidates(
+  service: ApiTestEnvironmentServiceEntity,
+): string[] {
+  const candidates = [
+    service.serverAddress,
+    service.baseUrl,
+    service.host && service.port
+      ? `${service.host}:${service.port}`
+      : undefined,
+  ];
+  if (service.baseUrl && service.pathPrefix?.trim()) {
+    candidates.push(
+      `${service.baseUrl.replace(/\/$/, "")}/${service.pathPrefix.replace(/^\//, "")}`,
+    );
+  }
+  return [
+    ...new Set(
+      candidates
+        .map((value) => value?.trim())
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
 }

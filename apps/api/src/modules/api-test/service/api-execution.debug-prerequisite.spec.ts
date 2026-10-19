@@ -16,6 +16,7 @@ function buildService() {
   const environmentService = {
     getRuntimeEnvironment: jest.fn(),
     getServiceIgnoreSslVerify: jest.fn().mockResolvedValue(false),
+    listServiceAddressBindings: jest.fn().mockResolvedValue([]),
   };
   const executionSetService = {};
   const dataFunctionService = {

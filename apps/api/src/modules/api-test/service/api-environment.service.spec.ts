@@ -166,4 +166,54 @@ describe("ApiEnvironmentService 多租户隔离（回归）", () => {
     );
     expect(result.ignoreSslVerify).toBe(true);
   });
+
+  it("getServiceIgnoreSslVerify 查询按 projectId 隔离", async () => {
+    const { service, serviceRepo } = buildService();
+    await service.getServiceIgnoreSslVerify("project-1", "env-1", "svc-1");
+    expect(serviceRepo.findOne).toHaveBeenCalledWith({
+      where: {
+        projectId: "project-1",
+        environmentId: "env-1",
+        id: "svc-1",
+        enabled: true,
+      },
+    });
+  });
+
+  it("listServiceAddressBindings 只读取当前项目的环境与服务", async () => {
+    const { service, envRepo, serviceRepo } = buildService();
+    envRepo.find.mockResolvedValue([
+      { id: "env-1", name: "dev" },
+      { id: "env-other", name: "other" },
+    ]);
+    serviceRepo.find.mockResolvedValue([
+      {
+        id: "svc-1",
+        environmentId: "env-1",
+        name: "api",
+        serverAddress: "https://example.com/",
+      },
+      {
+        id: "svc-other",
+        environmentId: "env-other",
+        name: "api",
+        serverAddress: "https://example.com/",
+      },
+    ]);
+    const rows = await service.listServiceAddressBindings("project-1");
+    expect(envRepo.find).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { projectId: "project-1" } }),
+    );
+    expect(serviceRepo.find).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { projectId: "project-1" } }),
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      environmentId: "env-1",
+      environmentName: "dev",
+      serviceId: "svc-1",
+      serviceName: "api",
+      address: "https://example.com",
+    });
+  });
 });

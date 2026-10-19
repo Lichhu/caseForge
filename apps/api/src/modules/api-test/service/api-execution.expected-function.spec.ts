@@ -15,6 +15,7 @@ function buildService() {
   const environmentService = {
     getRuntimeEnvironment: jest.fn(),
     getServiceIgnoreSslVerify: jest.fn().mockResolvedValue(false),
+    listServiceAddressBindings: jest.fn().mockResolvedValue([]),
   };
   // 模拟真实解析：${DB_BALANCE(...)} 返回数据库值 42.00
   const resolveDeep = jest.fn(

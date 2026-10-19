@@ -134,6 +134,9 @@ export interface ApiStepTarget {
   name: string;
   address: string;
   headers?: Record<string, string>;
+  /** 步骤绑定的执行环境与服务，执行时用于继承服务级配置（如忽略证书校验） */
+  environmentId?: string;
+  environmentServiceId?: string;
 }
 
 /** 步骤类型：缺省为请求步骤，兼容历史数据 */

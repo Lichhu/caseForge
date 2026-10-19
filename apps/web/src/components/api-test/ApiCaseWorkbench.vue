@@ -417,7 +417,6 @@
                       <a-button type="text" size="small" title="复制" @click="selectStep(index); copyActiveStep()"><CopyOutlined /></a-button>
                       <a-button type="text" size="small" :disabled="isNewCase" title="调试历史" @click="selectStep(index); openDebugHistory()"><HistoryOutlined /></a-button>
                       <a-button type="text" danger size="small" :disabled="form.steps.length === 1" title="删除" @click="removeStep(index)"><DeleteOutlined /></a-button>
-                      <a-button type="text" size="small" title="在此后新增步骤" @click="addStepAfter(index)"><PlusOutlined /></a-button>
                     </div>
                     <a-modal v-if="step.id === expandedStepId" v-model:open="stepEditModalOpen" title="编辑步骤" :width="1080" :footer="null" wrap-class-name="case-step-editor-modal" :z-index="NESTED_OVERLAY_Z_INDEX" @cancel="cancelStepEditor">
                       <template #title>
@@ -454,20 +453,21 @@
                   <div class="case-protocol-field case-protocol-field--target">
                     <span class="case-protocol-label">环境</span>
                     <a-select
-                      v-model:value="apiStore.selectedEnvironmentId"
+                      v-model:value="form.stepTargetEnvironmentId"
                       :options="debugEnvironmentOptions"
                       :get-popup-container="popupContainer"
                       :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }"
                       size="small"
                       placeholder="选择环境"
                       allow-clear
+                      @change="onStepTargetEnvironmentChange"
                     />
                   </div>
                   <div class="case-protocol-field case-protocol-field--target">
                     <span class="case-protocol-label">地址</span>
                     <a-select
-                      v-model:value="debugServiceId"
-                      :options="debugServiceOptions"
+                      v-model:value="form.stepTargetServiceId"
+                      :options="stepTargetServiceOptions"
                       :get-popup-container="popupContainer"
                       :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }"
                       show-search
@@ -475,7 +475,8 @@
                       size="small"
                       placeholder="输入名称或地址筛选"
                       allow-clear
-                      :disabled="!apiStore.selectedEnvironmentId"
+                      :disabled="!form.stepTargetEnvironmentId"
+                      @change="onStepTargetServiceChange"
                     />
                   </div>
                 </div>
@@ -1113,7 +1114,7 @@ import type {
   ApiHttpCaseStep,
 } from '@case-forge/shared';
 import { copyText } from '@/utils/copyText';
-import type { ApiTestCaseRow, DebugRunResult } from '@/api/apiTestClient';
+import type { ApiEnvironmentServiceRow, ApiTestCaseRow, DebugRunResult } from '@/api/apiTestClient';
 import { clearStepDebugRecords, listStepDebugRecords, listAllApiCases, listDataFunctions, listDatabaseConnections, debugRunCase, generateAssertions, getAssertionGenerateStatus, getAssertionGenerateResult, previewSqlStep } from '@/api/apiTestClient';
 import type { ApiDatabaseConnectionRow } from '@/api/apiTestClient';
 import { useApiTestStore } from '@/stores/apiTest';
@@ -1362,8 +1363,7 @@ const debugEnvironmentOptions = computed(() =>
     })),
 );
 
-const debugServiceOptions = computed(() => {
-  const envId = apiStore.selectedEnvironmentId;
+function serviceOptionsForEnvironment(envId: string) {
   if (!envId) return [];
   const expectedTransport = form.protocol === 'socket' ? 'tcp' : form.protocol;
   const services = apiStore.environmentServices[envId] ?? [];
@@ -1378,15 +1378,26 @@ const debugServiceOptions = computed(() => {
         searchText: `${s.name} ${address} ${s.host ?? ''} ${s.port ?? ''} ${transport}`.toLowerCase(),
       };
     });
-});
+}
+
+const debugServiceOptions = computed(() =>
+  serviceOptionsForEnvironment(apiStore.selectedEnvironmentId),
+);
+const stepTargetServiceOptions = computed(() =>
+  serviceOptionsForEnvironment(form.stepTargetEnvironmentId),
+);
+
+function serviceAddress(service: ApiEnvironmentServiceRow | undefined) {
+  return service?.serverAddress?.trim() || service?.baseUrl?.trim() || (service?.host && service.port ? `${service.host}:${service.port}` : '') || '';
+}
 
 const fullRequestAddress = computed(() => {
-  const services = apiStore.environmentServices[apiStore.selectedEnvironmentId] ?? [];
-  const service = services.find((item) => item.id === debugServiceId.value);
+  const services = apiStore.environmentServices[form.stepTargetEnvironmentId] ?? [];
+  const service = services.find((item) => item.id === form.stepTargetServiceId);
   if (form.protocol !== 'http') {
     return service?.serverAddress || (service?.host && service.port ? `${service.host}:${service.port}` : '');
   }
-  const environment = apiStore.environments.find((item) => item.id === apiStore.selectedEnvironmentId);
+  const environment = apiStore.environments.find((item) => item.id === form.stepTargetEnvironmentId);
   let baseUrl = service?.baseUrl?.trim() || service?.serverAddress?.trim() || environment?.baseUrl?.trim() || '';
   if (!baseUrl) return '';
   if (service?.pathPrefix?.trim() && !service.baseUrl?.trim() && !service.serverAddress?.trim()) {
@@ -1463,47 +1474,121 @@ function syncDebugServiceSelection() {
   }
   debugServiceId.value = debugServiceOptions.value[0]?.value ?? '';
 }
-const resolvingStepTarget = ref(false);
-/** 编辑弹窗打开时，环境/地址下拉变化同步回步骤保存用的 target 字段，避免保存时残留旧值 */
-watch([() => apiStore.selectedEnvironmentId, debugServiceId], () => {
-  if (syncingForm.value || resolvingStepTarget.value || !stepEditModalOpen.value) return;
-  const environment = apiStore.environments.find((item) => item.id === apiStore.selectedEnvironmentId);
-  const service = (apiStore.environmentServices[apiStore.selectedEnvironmentId] ?? []).find((item) => item.id === debugServiceId.value);
+function syncStepTargetServiceSelection() {
+  if (!stepEditModalOpen.value) return;
+  if (
+    form.stepTargetServiceId &&
+    stepTargetServiceOptions.value.some((item) => item.value === form.stepTargetServiceId)
+  ) {
+    return;
+  }
+  form.stepTargetServiceId = stepTargetServiceOptions.value[0]?.value ?? '';
+  onStepTargetServiceChange();
+}
+let stepTargetResolveToken = 0;
+
+function onStepTargetServiceChange() {
+  stepTargetResolveToken += 1;
+  const environment = apiStore.environments.find((item) => item.id === form.stepTargetEnvironmentId);
+  const service = (apiStore.environmentServices[form.stepTargetEnvironmentId] ?? [])
+    .find((item) => item.id === form.stepTargetServiceId);
   form.stepTargetName = environment?.name ?? '';
-  form.stepTargetAddress = service?.serverAddress?.trim() || service?.baseUrl?.trim() || (service?.host && service.port ? `${service.host}:${service.port}` : '') || '';
-});
-/** 打开编辑时按步骤已保存的 target 还原环境/地址下拉 */
-async function resolveStepTargetSelection(target?: { name: string; address: string }) {
-  if (!projectId.value || !target?.address) return;
-  const strip = (value: string) => value.trim().replace(/\/$/, '');
-  const targetBase = strip(target.address);
-  resolvingStepTarget.value = true;
-  try {
-    const preferred = apiStore.environments.find((item) => item.name === target.name);
-    const ordered = preferred ? [preferred, ...apiStore.environments.filter((item) => item.id !== preferred.id)] : [...apiStore.environments];
-    for (const environment of ordered) {
-      await apiStore.refreshEnvironmentServices(projectId.value, environment.id);
-      const service = (apiStore.environmentServices[environment.id] ?? []).find((item) => {
-        const address = strip(item.serverAddress || item.baseUrl || (item.host && item.port ? `${item.host}:${item.port}` : ''));
-        return address === targetBase || targetBase.startsWith(`${address}/`);
-      });
-      if (service) {
-        apiStore.selectedEnvironmentId = environment.id;
-        debugServiceId.value = service.id;
-        return;
-      }
-    }
-  } finally {
-    resolvingStepTarget.value = false;
+  form.stepTargetAddress = serviceAddress(service);
+}
+
+async function onStepTargetEnvironmentChange(environmentId?: string) {
+  const changeToken = ++stepTargetResolveToken;
+  form.stepTargetServiceId = '';
+  const environment = apiStore.environments.find((item) => item.id === environmentId);
+  form.stepTargetName = environment?.name ?? '';
+  form.stepTargetAddress = '';
+  if (!environmentId || !projectId.value) return;
+  await apiStore.refreshEnvironmentServices(projectId.value, environmentId);
+  if (
+    changeToken !== stepTargetResolveToken ||
+    !stepEditModalOpen.value ||
+    form.stepTargetEnvironmentId !== environmentId ||
+    form.stepTargetServiceId
+  ) {
+    return;
+  }
+  const firstServiceId = stepTargetServiceOptions.value[0]?.value;
+  if (firstServiceId) {
+    form.stepTargetServiceId = firstServiceId;
+    onStepTargetServiceChange();
   }
 }
+
+function findServiceByAddress(environmentId: string, address: string) {
+  const targetAddress = address.trim().replace(/\/$/, '');
+  return (apiStore.environmentServices[environmentId] ?? []).find((item) => {
+    const serviceTarget = serviceAddress(item).replace(/\/$/, '');
+    return Boolean(serviceTarget) && (
+      serviceTarget === targetAddress || targetAddress.startsWith(`${serviceTarget}/`)
+    );
+  });
+}
+
+/** 打开编辑时优先按步骤保存的环境/服务 id 还原；没有 id 的历史步骤才按地址匹配 */
+async function resolveStepTargetSelection(target?: {
+  name?: string;
+  address?: string;
+  environmentId?: string;
+  environmentServiceId?: string;
+}) {
+  if (!projectId.value || (!target?.address && !target?.environmentId)) return;
+  const resolveToken = ++stepTargetResolveToken;
+  if (!apiStore.environments.length) {
+    await apiStore.refreshEnvironments(projectId.value);
+  }
+  if (resolveToken !== stepTargetResolveToken) return;
+  let environment = apiStore.environments.find((item) => item.id === target.environmentId);
+  if (environment) {
+    await apiStore.refreshEnvironmentServices(projectId.value, environment.id);
+  }
+  if (resolveToken !== stepTargetResolveToken) return;
+  let service = environment && target.environmentServiceId
+    ? (apiStore.environmentServices[environment.id] ?? []).find((item) => item.id === target.environmentServiceId)
+    : undefined;
+  if (!service && environment && target.address) {
+    service = findServiceByAddress(environment.id, target.address);
+  }
+  if (!environment) {
+    const preferred = apiStore.environments.find((item) => item.name === target.name);
+    const ordered = preferred
+      ? [preferred, ...apiStore.environments.filter((item) => item.id !== preferred.id)]
+      : [...apiStore.environments];
+    for (const candidate of ordered) {
+      await apiStore.refreshEnvironmentServices(projectId.value, candidate.id);
+      if (resolveToken !== stepTargetResolveToken) return;
+      if (!target.address) continue;
+      const matched = findServiceByAddress(candidate.id, target.address);
+      if (matched) {
+        environment = candidate;
+        service = matched;
+        break;
+      }
+    }
+  }
+  if (resolveToken !== stepTargetResolveToken) return;
+  form.stepTargetEnvironmentId = environment?.id ?? '';
+  form.stepTargetServiceId = service?.id ?? '';
+  form.stepTargetName = environment?.name ?? target.name ?? '';
+  form.stepTargetAddress = service ? serviceAddress(service) : (target.address ?? '');
+}
 /** 打开编辑时按步骤已保存的 target 还原环境/地址下拉；步骤无 target 时清空下拉，避免把调试栏默认选择误显示为步骤配置 */
-function applyStepTargetToSelection(target?: { name: string; address: string }) {
-  if (target?.address) {
+function applyStepTargetToSelection(target?: {
+  name?: string;
+  address?: string;
+  environmentId?: string;
+  environmentServiceId?: string;
+}) {
+  if (target?.address || target?.environmentId) {
     void resolveStepTargetSelection(target);
   } else {
-    apiStore.selectedEnvironmentId = '';
-    debugServiceId.value = '';
+    stepTargetResolveToken += 1;
+    form.stepTargetEnvironmentId = '';
+    form.stepTargetServiceId = '';
   }
 }
 const editorMainTab = ref<'basic' | 'steps'>('steps');
@@ -1851,6 +1936,8 @@ const form = reactive({
   stepName: '',
   stepTargetName: '',
   stepTargetAddress: '',
+  stepTargetEnvironmentId: '',
+  stepTargetServiceId: '',
   /** 当前编辑的步骤类型：请求步骤 / SQL 步骤 */
   stepKind: 'http' as 'http' | 'db',
   stepDbConnectionId: '',
@@ -2074,7 +2161,14 @@ function currentStepFromForm(): ApiCaseStep {
     ...(isHttpStep(existing) && existing.isMainRequest
       ? { isMainRequest: true }
       : {}),
-    target: targetAddress ? { name: targetName, address: targetAddress } : undefined,
+    target: targetAddress
+      ? {
+          name: targetName,
+          address: targetAddress,
+          environmentId: form.stepTargetEnvironmentId || undefined,
+          environmentServiceId: form.stepTargetServiceId || undefined,
+        }
+      : undefined,
     request: buildDebugRequest(),
     expected: buildExpectedFromRows(form.assertionRows),
     exports: collectExportRows(),
@@ -2107,6 +2201,8 @@ function loadStep(step: ApiCaseStep) {
     /* SQL 步骤没有请求报文，清空请求表单避免误显示上一个步骤的内容 */
     form.stepTargetName = '';
     form.stepTargetAddress = '';
+    form.stepTargetEnvironmentId = '';
+    form.stepTargetServiceId = '';
     applyRequestToForm({ method: 'POST', path: '/' });
     form.assertionRows = [];
     stepDetailTab.value = 'sql';
@@ -2117,6 +2213,8 @@ function loadStep(step: ApiCaseStep) {
   form.stepKind = 'http';
   form.stepTargetName = step.target?.name ?? '';
   form.stepTargetAddress = step.target?.address ?? '';
+  form.stepTargetEnvironmentId = step.target?.environmentId ?? '';
+  form.stepTargetServiceId = step.target?.environmentServiceId ?? '';
   applyRequestToForm(step.request);
   form.assertionRows = assertionsToRows(step.expected?.assertions);
   if (stepDetailTab.value === 'sql') stepDetailTab.value = 'request';
@@ -2169,14 +2267,6 @@ function createBlankStep(name: string, kind: 'http' | 'db' = 'http'): ApiCaseSte
 function addStep(kind: 'http' | 'db' = 'http') { storeActiveStep(); const step = createBlankStep(`步骤 ${form.steps.length + 1}`, kind); form.steps.push(step); activeStepIndex.value = form.steps.length - 1; expandedStepId.value = ''; loadStep(step); }
 function onAddStepMenu(info: { key?: string | number }) { addStep(info?.key === 'db' ? 'db' : 'http'); }
 
-function addStepAfter(index: number, kind: 'http' | 'db' = 'http') {
-  storeActiveStep();
-  const step = createBlankStep(`步骤 ${form.steps.length + 1}`, kind);
-  form.steps.splice(index + 1, 0, step);
-  activeStepIndex.value = index + 1;
-  expandedStepId.value = '';
-  loadStep(step);
-}
 function moveStep(index: number, offset: number) {
   storeActiveStep();
   const activeId = form.steps[activeStepIndex.value].id;
@@ -2527,7 +2617,7 @@ watch(
   async (envId) => {
     if (!envId || !projectId.value) return;
     await apiStore.refreshEnvironmentServices(projectId.value, envId);
-    if (syncingForm.value || resolvingStepTarget.value) return;
+    if (syncingForm.value) return;
     debugServiceId.value = '';
     syncDebugServiceSelection();
   },
@@ -2539,6 +2629,7 @@ watch(
     requestViewMode.value = 'template';
     requestTab.value = form.protocol === 'http' && !httpMethodHasBody(form.httpMethod) ? 'params' : 'body';
     syncDebugServiceSelection();
+    syncStepTargetServiceSelection();
   },
 );
 
@@ -2729,7 +2820,12 @@ async function onBatchSaveRequest() {
         if (batchRequest.method) next.request.method = batchRequest.method;
         if (batchRequest.path?.trim()) next.request.path = batchRequest.path.trim();
         if (batchRequest.encoding) next.request.encoding = batchRequest.encoding;
-        if (serviceAddress) next.target = { name: environment?.name || next.target?.name || '', address: serviceAddress };
+        if (serviceAddress) next.target = {
+          name: environment?.name || next.target?.name || '',
+          address: serviceAddress,
+          environmentId: batchEnvironmentId.value || undefined,
+          environmentServiceId: batchEnvironmentServiceId.value || undefined,
+        };
         updated += 1;
         return next;
       });
@@ -3101,10 +3197,17 @@ async function onDebugRun(showResult = true) {
         request,
         expected: buildExpectedFromRows(form.assertionRows),
         polarity: form.polarity,
-        environmentId: apiStore.selectedEnvironmentId || undefined,
-        target: form.stepTargetAddress.trim() ? { name: form.stepTargetName.trim(), address: form.stepTargetAddress.trim() } : undefined,
+        environmentId: form.stepTargetEnvironmentId || undefined,
+        target: form.stepTargetAddress.trim()
+          ? {
+              name: form.stepTargetName.trim(),
+              address: form.stepTargetAddress.trim(),
+              environmentId: form.stepTargetEnvironmentId || undefined,
+              environmentServiceId: form.stepTargetServiceId || undefined,
+            }
+          : undefined,
         stepId: form.steps[activeStepIndex.value]?.id,
-        environmentServiceId: debugServiceId.value || apiStore.selectedEnvironmentServiceId || undefined,
+        environmentServiceId: form.stepTargetServiceId || undefined,
         encoding: debugEncoding.value,
         caseId: caseIdAtStart,
         prerequisiteSteps: collectDebugPrerequisiteSteps(form.steps, activeStepIndex.value, request),
@@ -3148,10 +3251,15 @@ async function onGenerateAssertions() {
       request,
       expected: buildExpectedFromRows(form.assertionRows),
       polarity: form.polarity,
-      environmentId: apiStore.selectedEnvironmentId || undefined,
-      target: { name: form.stepTargetName.trim(), address: form.stepTargetAddress.trim() },
+      environmentId: form.stepTargetEnvironmentId || undefined,
+      target: {
+        name: form.stepTargetName.trim(),
+        address: form.stepTargetAddress.trim(),
+        environmentId: form.stepTargetEnvironmentId || undefined,
+        environmentServiceId: form.stepTargetServiceId || undefined,
+      },
       stepId: form.steps[activeStepIndex.value]?.id,
-      environmentServiceId: debugServiceId.value || undefined,
+      environmentServiceId: form.stepTargetServiceId || undefined,
       encoding: debugEncoding.value,
       caseId: caseIdAtStart,
       prerequisiteSteps: collectDebugPrerequisiteSteps(form.steps, activeStepIndex.value, request),
@@ -3240,7 +3348,14 @@ async function onBatchGenerateAssertions() {
   const fallbackEnv = apiStore.environments.find((item) => item.id === batchEnvironmentId.value);
   const fallbackService = (apiStore.environmentServices[batchEnvironmentId.value] ?? []).find((item) => item.id === batchEnvironmentServiceId.value);
   const fallbackAddress = fallbackService?.serverAddress?.trim() || fallbackService?.baseUrl?.trim() || (fallbackService?.host && fallbackService.port ? `${fallbackService.host}:${fallbackService.port}` : '');
-  const fallbackTarget = fallbackAddress ? { name: fallbackEnv?.name ?? '', address: fallbackAddress } : null;
+  const fallbackTarget = fallbackAddress
+    ? {
+        name: fallbackEnv?.name ?? '',
+        address: fallbackAddress,
+        environmentId: batchEnvironmentId.value || undefined,
+        environmentServiceId: batchEnvironmentServiceId.value || undefined,
+      }
+    : null;
   const allCases = await listAllApiCases(projectId.value, transactionId.value);
   const selectedSteps = allCases.flatMap((row) => caseStepRows(row).filter((step) => batchSelectedSteps.has(batchStepKey(row.id, step.id))));
   if (!selectedSteps.length) return;
@@ -3271,13 +3386,21 @@ async function onBatchGenerateAssertions() {
         if (!isHttpStep(step)) continue;
         batchAssertionStatuses[stepKey] = 'running';
         try {
-          const target = step.target?.address ? step.target : fallbackTarget;
+          const target = step.target?.address
+            ? {
+                ...step.target,
+                environmentId: step.target.environmentId || fallbackTarget?.environmentId,
+                environmentServiceId: step.target.environmentServiceId || fallbackTarget?.environmentServiceId,
+              }
+            : fallbackTarget;
           if (!target) throw new Error('缺少地址');
           const result = await debugRunCase(projectId.value, transactionId.value, {
             request: step.request,
             expected: step.expected,
             polarity: row.polarity,
             target,
+            environmentId: target.environmentId,
+            environmentServiceId: target.environmentServiceId,
             encoding: row.metadata?.debugEncoding || 'UTF-8',
             prerequisiteSteps: collectDebugPrerequisiteSteps(nextSteps, stepIndex, step.request),
           });
@@ -3295,6 +3418,7 @@ async function onBatchGenerateAssertions() {
           });
           const { assertions } = await waitForAssertionResult(row.id, job.jobId);
           if (!assertions.length) throw new Error('AI 未生成有效断言');
+          step.target = target;
           step.expected = buildExpectedFromRows(assertionsToRows(assertions));
           changed = true;
           batchAssertionStatuses[stepKey] = 'success';
@@ -5025,7 +5149,7 @@ function onBatchDelete() {
 
 .case-step-list-head {
   display: grid;
-  grid-template-columns: 44px minmax(180px, 1.2fr) minmax(120px, 0.8fr) minmax(180px, 1fr) 72px 216px;
+  grid-template-columns: 44px minmax(180px, 1.2fr) minmax(120px, 0.8fr) minmax(180px, 1fr) 72px 186px;
   padding: 8px 10px;
   border: 1px solid #e1e4e9;
   border-radius: 6px 6px 0 0;
@@ -5115,7 +5239,7 @@ function onBatchDelete() {
 
 .case-step-actions {
   display: flex;
-  width: 216px;
+  width: 186px;
   justify-content: flex-end;
   align-items: center;
   gap: 2px;

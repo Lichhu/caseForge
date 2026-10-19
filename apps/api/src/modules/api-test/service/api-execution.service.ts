@@ -10,7 +10,10 @@ import { auditFieldsForCreate } from "@common/audit/request-context";
 import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
 import { ApiTestRunEntity } from "@api-test/entity/api-test-run.entity";
 import { ApiTestRunItemEntity } from "@api-test/entity/api-test-run-item.entity";
-import { ApiEnvironmentService } from "./api-environment.service";
+import {
+  ApiEnvironmentService,
+  type ApiServiceAddressBinding,
+} from "./api-environment.service";
 import { ApiExecutionSetService } from "./api-execution-set.service";
 import {
   buildRuntimeVariables,
@@ -81,19 +84,41 @@ type RuntimeEnvironment = {
   services?: RuntimeService[];
 };
 
+type StepServiceBinding = {
+  environmentId: string;
+  environmentServiceId: string;
+};
+
+type ExecutionRunCache = {
+  ignoreSslVerify: Map<string, Promise<boolean>>;
+  serviceAddressBindings?: Promise<ApiServiceAddressBinding[]>;
+};
+
 /** 开关开启时复用一个跳过证书校验的 undici Agent，避免每次请求重建连接池。 */
 let insecureDispatcher: Dispatcher | undefined;
+
+export function getInsecureDispatcher(): Dispatcher {
+  insecureDispatcher ??= new Agent({
+    connect: { rejectUnauthorized: false },
+  });
+  return insecureDispatcher;
+}
+
 function fetchWithSslOption(
   url: string,
   init: RequestInit,
   ignoreSslVerify?: boolean,
 ): Promise<Response> {
   if (!ignoreSslVerify) return fetch(url, init);
-  insecureDispatcher ??= new Agent({
-    connect: { rejectUnauthorized: false },
-  });
   // Node 内置 fetch 支持 undici 的 dispatcher 选项，lib 类型未声明，此处显式断言
-  return fetch(url, { ...init, dispatcher: insecureDispatcher } as RequestInit);
+  return fetch(url, {
+    ...init,
+    dispatcher: getInsecureDispatcher(),
+  } as RequestInit);
+}
+
+function normalizeStepTargetAddress(address?: string) {
+  return (address ?? "").trim().replace(/\/+$/, "").toLowerCase();
 }
 
 @Injectable()
@@ -144,6 +169,14 @@ export class ApiExecutionService {
     if (!cases.length) {
       throw new BadRequestException("未找到可执行的启用案例");
     }
+    const executionCache: ExecutionRunCache = {
+      ignoreSslVerify: new Map(),
+    };
+    await this.backfillLegacyStepTargets(
+      input.projectId,
+      cases,
+      executionCache,
+    );
     const orderedFlow = Boolean(input.executionSetId || input.transactionId);
     if (orderedFlow) {
       assertCaseDependencyOrder(cases);
@@ -264,6 +297,9 @@ export class ApiExecutionService {
             ...sharedVars,
           },
           encoding: testCase.metadata?.debugEncoding ?? input.encoding,
+          environmentId: input.environmentId,
+          environmentServiceId: input.environmentServiceId,
+          cache: executionCache,
         });
         items.push(item);
         const exports = testCase.metadata?.exports ?? [];
@@ -411,6 +447,9 @@ export class ApiExecutionService {
     env: RuntimeEnvironment;
     vars: Record<string, string>;
     encoding?: string;
+    environmentId?: string;
+    environmentServiceId?: string;
+    cache?: ExecutionRunCache;
   }) {
     const steps = input.testCase.steps;
     const caseContext: DataFunctionContext = {
@@ -442,6 +481,9 @@ export class ApiExecutionService {
     caseContext: DataFunctionContext;
     lockSession: DbStepLockSession;
     lockResources: DbStepLockResource[];
+    environmentId?: string;
+    environmentServiceId?: string;
+    cache?: ExecutionRunCache;
   }) {
     const steps = input.testCase.steps ?? [];
     const vars = { ...input.vars };
@@ -472,6 +514,9 @@ export class ApiExecutionService {
                 vars,
                 caseContext: input.caseContext,
                 encoding: input.encoding,
+                environmentId: input.environmentId,
+                environmentServiceId: input.environmentServiceId,
+                cache: input.cache,
               });
           const extracted: Record<string, string> = {};
           for (const binding of step.exports) {
@@ -543,12 +588,25 @@ export class ApiExecutionService {
     vars: Record<string, string>;
     caseContext: DataFunctionContext;
     encoding?: string;
+    environmentId?: string;
+    environmentServiceId?: string;
+    cache?: ExecutionRunCache;
   }) {
     const stepCase = Object.assign(new ApiTestCaseEntity(), input.testCase, {
       title: `${input.testCase.title} / ${input.step.name}`,
       request: input.step.request,
       expected: input.step.expected,
       metadata: { ...input.testCase.metadata, exports: input.step.exports },
+    });
+    const ignoreSslVerify = await this.resolveStepIgnoreSslVerify({
+      projectId: input.testCase.projectId,
+      step: input.step,
+      environmentId:
+        input.testCase.metadata?.debugEnvironmentId ?? input.environmentId,
+      environmentServiceId:
+        input.testCase.metadata?.debugEnvironmentServiceId ??
+        input.environmentServiceId,
+      cache: input.cache,
     });
     return this.executeSingleStep({
       runId: input.runId,
@@ -557,7 +615,216 @@ export class ApiExecutionService {
       vars: input.vars,
       caseContext: input.caseContext,
       encoding: input.encoding,
+      ignoreSslVerify,
     });
+  }
+
+  /** 步骤执行时按步骤绑定（或案例调试选择）的环境服务继承忽略证书校验开关。 */
+  private async resolveStepIgnoreSslVerify(input: {
+    projectId: string;
+    step: ApiHttpCaseStep;
+    environmentId?: string;
+    environmentServiceId?: string;
+    cache?: ExecutionRunCache;
+  }): Promise<boolean> {
+    const binding = await this.resolveStepServiceBinding({
+      projectId: input.projectId,
+      step: input.step,
+      environmentId: input.environmentId,
+      environmentServiceId: input.environmentServiceId,
+      cache: input.cache,
+    });
+    if (!binding) return false;
+    const cacheKey = `${binding.environmentId}::${binding.environmentServiceId}`;
+    const cached = input.cache?.ignoreSslVerify.get(cacheKey);
+    if (cached) return cached;
+    const lookup = this.environmentService
+      .getServiceIgnoreSslVerify(
+        input.projectId,
+        binding.environmentId,
+        binding.environmentServiceId,
+      )
+      .catch(() => false);
+    input.cache?.ignoreSslVerify.set(cacheKey, lookup);
+    return lookup;
+  }
+
+  /**
+   * 老步骤只保存了地址，没有环境/服务 id。执行前按地址反查一次并回填，
+   * 让执行平台不再依赖案例调试环境的兜底值。
+   */
+  private async backfillLegacyStepTargets(
+    projectId: string,
+    cases: ApiTestCaseEntity[],
+    cache: ExecutionRunCache,
+  ) {
+    const pending = cases.filter((testCase) =>
+      (testCase.steps ?? []).some(
+        (step) =>
+          isHttpStep(step) &&
+          Boolean(step.target?.address?.trim()) &&
+          (!step.target?.environmentId || !step.target?.environmentServiceId),
+      ),
+    );
+    if (!pending.length) return;
+
+    const bindings = await this.loadServiceAddressBindings(projectId, cache);
+    const changedCases: ApiTestCaseEntity[] = [];
+    for (const testCase of pending) {
+      let changed = false;
+      const steps = (testCase.steps ?? []).map((step) => {
+        if (!isHttpStep(step) || !step.target?.address?.trim()) return step;
+        if (step.target.environmentId && step.target.environmentServiceId) {
+          return step;
+        }
+        const binding = this.findServiceBindingByAddress(bindings, {
+          address: step.target.address,
+          name: step.target.name,
+          preferredEnvironmentId:
+            step.target.environmentId ?? testCase.metadata?.debugEnvironmentId,
+          preferredServiceId:
+            step.target.environmentServiceId ??
+            testCase.metadata?.debugEnvironmentServiceId,
+        });
+        if (!binding) return step;
+        changed = true;
+        return {
+          ...step,
+          target: {
+            ...step.target,
+            environmentId: binding.environmentId,
+            environmentServiceId: binding.environmentServiceId,
+          },
+        };
+      });
+      if (changed) {
+        testCase.steps = steps;
+        changedCases.push(testCase);
+      }
+    }
+    if (changedCases.length) {
+      await this.caseRepo.save(changedCases);
+    }
+  }
+
+  private async resolveStepServiceBinding(input: {
+    projectId: string;
+    step: ApiHttpCaseStep;
+    environmentId?: string;
+    environmentServiceId?: string;
+    cache?: ExecutionRunCache;
+  }): Promise<StepServiceBinding | undefined> {
+    const target = input.step.target;
+    if (target?.environmentId && target.environmentServiceId) {
+      return {
+        environmentId: target.environmentId,
+        environmentServiceId: target.environmentServiceId,
+      };
+    }
+    if (target?.address?.trim()) {
+      const bindings = await this.loadServiceAddressBindings(
+        input.projectId,
+        input.cache,
+      );
+      const binding = this.findServiceBindingByAddress(bindings, {
+        address: target.address,
+        name: target.name,
+        preferredEnvironmentId: target.environmentId ?? input.environmentId,
+        preferredServiceId:
+          target.environmentServiceId ?? input.environmentServiceId,
+      });
+      if (binding) return binding;
+    }
+    if (input.environmentId && input.environmentServiceId) {
+      return {
+        environmentId: input.environmentId,
+        environmentServiceId: input.environmentServiceId,
+      };
+    }
+    return undefined;
+  }
+
+  private async loadServiceAddressBindings(
+    projectId: string,
+    cache?: ExecutionRunCache,
+  ): Promise<ApiServiceAddressBinding[]> {
+    if (!cache) {
+      return this.environmentService.listServiceAddressBindings(projectId);
+    }
+    cache.serviceAddressBindings ??=
+      this.environmentService.listServiceAddressBindings(projectId);
+    return cache.serviceAddressBindings;
+  }
+
+  private findServiceBindingByAddress(
+    bindings: ApiServiceAddressBinding[],
+    target: {
+      address: string;
+      name?: string;
+      preferredEnvironmentId?: string;
+      preferredServiceId?: string;
+    },
+  ): StepServiceBinding | undefined {
+    const targetAddress = normalizeStepTargetAddress(target.address);
+    if (!targetAddress) return undefined;
+    let matches = bindings.filter((binding) => {
+      const address = normalizeStepTargetAddress(binding.address);
+      return (
+        address === targetAddress || targetAddress.startsWith(`${address}/`)
+      );
+    });
+    if (!matches.length) return undefined;
+    const preferredEnvironmentMatches = target.preferredEnvironmentId
+      ? matches.filter(
+          (binding) => binding.environmentId === target.preferredEnvironmentId,
+        )
+      : [];
+    if (preferredEnvironmentMatches.length) {
+      matches = preferredEnvironmentMatches;
+    }
+
+    const targetName = target.name?.trim().toLowerCase();
+    const preferred =
+      matches.find(
+        (binding) =>
+          binding.environmentId === target.preferredEnvironmentId &&
+          binding.serviceId === target.preferredServiceId,
+      ) ??
+      matches.find(
+        (binding) =>
+          binding.environmentId === target.preferredEnvironmentId &&
+          targetName &&
+          binding.serviceName.trim().toLowerCase() === targetName,
+      ) ??
+      matches.find(
+        (binding) =>
+          targetName &&
+          binding.environmentName.trim().toLowerCase() === targetName,
+      ) ??
+      matches.find(
+        (binding) =>
+          targetName && binding.serviceName.trim().toLowerCase() === targetName,
+      );
+    if (preferred) {
+      return {
+        environmentId: preferred.environmentId,
+        environmentServiceId: preferred.serviceId,
+      };
+    }
+
+    const unique = new Map(
+      matches.map((binding) => [
+        `${binding.environmentId}::${binding.serviceId}`,
+        binding,
+      ]),
+    );
+    if (unique.size !== 1) return undefined;
+    const [binding] = unique.values();
+    if (!binding) return undefined;
+    return {
+      environmentId: binding.environmentId,
+      environmentServiceId: binding.serviceId,
+    };
   }
 
   /**
@@ -664,7 +931,7 @@ export class ApiExecutionService {
     const ids = [
       ...new Set(
         steps
-          .filter(isDbStep)
+          .filter((step): step is ApiDbCaseStep => isDbStep(step))
           .map((step) => step.db?.connectionId)
           .filter((id): id is string => Boolean(id)),
       ),
@@ -689,6 +956,7 @@ export class ApiExecutionService {
     vars: Record<string, string>;
     encoding?: string;
     caseContext?: DataFunctionContext;
+    ignoreSslVerify?: boolean;
   }) {
     const substituted = substituteDeep(
       input.testCase.request,
@@ -745,6 +1013,7 @@ export class ApiExecutionService {
     vars: Record<string, string>;
     request: ApiCaseRequest;
     encoding?: string;
+    ignoreSslVerify?: boolean;
   }) {
     const service = this.resolveRuntimeService(input.env, "http");
     const baseUrl = this.resolveHttpBaseUrl(input.env, service);
@@ -795,7 +1064,7 @@ export class ApiExecutionService {
             ),
             signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
           },
-          service?.ignoreSslVerify,
+          input.ignoreSslVerify ?? service?.ignoreSslVerify,
         );
       }
       if (!response) throw new Error("请求未执行");
@@ -980,6 +1249,7 @@ export class ApiExecutionService {
     /** 调试前需先执行的前置步骤（按序），提取其共享变量后再替换当前调试报文 */
     prerequisiteSteps?: ApiCaseStep[];
   }): Promise<DebugRunResult> {
+    const cache: ExecutionRunCache = { ignoreSslVerify: new Map() };
     const env = input.target
       ? environmentFromStep({
           id: "debug",
@@ -1014,6 +1284,10 @@ export class ApiExecutionService {
         vars,
         encoding: input.encoding,
         caseContext,
+        environmentId: input.target?.environmentId ?? input.environmentId,
+        environmentServiceId:
+          input.target?.environmentServiceId ?? input.environmentServiceId,
+        cache,
       });
     }
     const substituted = substituteDeep(input.request, vars) as ApiCaseRequest;
@@ -1035,13 +1309,20 @@ export class ApiExecutionService {
     if (
       sslOverride === undefined &&
       input.target &&
-      input.environmentId &&
-      input.environmentServiceId &&
-      (await this.environmentService.getServiceIgnoreSslVerify(
-        input.projectId,
-        input.environmentId,
-        input.environmentServiceId,
-      ))
+      (await this.resolveStepIgnoreSslVerify({
+        projectId: input.projectId,
+        step: {
+          id: "debug",
+          name: "调试",
+          target: input.target,
+          request: input.request,
+          expected: input.expected ?? {},
+          exports: [],
+        },
+        environmentId: input.environmentId,
+        environmentServiceId: input.environmentServiceId,
+        cache,
+      }))
     ) {
       sslOverride = true;
     }
@@ -1078,6 +1359,9 @@ export class ApiExecutionService {
     vars: Record<string, string>;
     encoding?: string;
     caseContext?: DataFunctionContext;
+    environmentId?: string;
+    environmentServiceId?: string;
+    cache?: ExecutionRunCache;
   }) {
     for (const step of input.steps) {
       const result = isDbStep(step)
@@ -1120,6 +1404,9 @@ export class ApiExecutionService {
     vars: Record<string, string>;
     encoding?: string;
     caseContext?: DataFunctionContext;
+    environmentId?: string;
+    environmentServiceId?: string;
+    cache?: ExecutionRunCache;
   }) {
     const { step } = input;
     if (!step.target?.address?.trim()) {
@@ -1135,6 +1422,13 @@ export class ApiExecutionService {
       expected: step.expected ?? {},
       metadata: { exports: step.exports ?? [] },
     });
+    const ignoreSslVerify = await this.resolveStepIgnoreSslVerify({
+      projectId: input.projectId,
+      step,
+      environmentId: input.environmentId,
+      environmentServiceId: input.environmentServiceId,
+      cache: input.cache,
+    });
     return this.executeSingleStep({
       runId: "debug",
       testCase: stepCase,
@@ -1142,6 +1436,7 @@ export class ApiExecutionService {
       vars: input.vars,
       encoding: input.encoding,
       caseContext: input.caseContext,
+      ignoreSslVerify,
     });
   }
 

@@ -854,7 +854,13 @@ export async function debugRunCase(
     expected?: ApiCaseExpected;
     polarity?: "positive" | "negative";
     environmentId?: string;
-    target?: { name: string; address: string; headers?: Record<string, string> };
+    target?: {
+      name: string;
+      address: string;
+      headers?: Record<string, string>;
+      environmentId?: string;
+      environmentServiceId?: string;
+    };
     stepId?: string;
     environmentServiceId?: string;
     caseId?: string;
