@@ -25,6 +25,14 @@
             <template #icon><SyncOutlined /></template>
             服管同步
           </a-button>
+          <a-button
+            :loading="preprodPreviewLoading || preprodSyncing"
+            :disabled="!apiStore.transactions.length"
+            @click="syncToPreproduction"
+          >
+            <template #icon><CloudUploadOutlined /></template>
+            同步准生产
+          </a-button>
           <a-button type="primary" @click="openCreate">
             <template #icon><PlusOutlined /></template>
             新建
@@ -134,6 +142,13 @@
       @synced="selectedRowKeys = []"
     />
 
+    <PreproductionSyncModal
+      v-model:open="preprodPreviewOpen"
+      :preview="preprodPreview"
+      :loading="preprodSyncing"
+      @confirm="handlePreprodConfirm"
+    />
+
     <a-modal
       v-model:open="modalOpen"
       :title="editingId ? '编辑交易码' : '新建'"
@@ -159,7 +174,13 @@
 
 <script setup lang="ts">
 import { computed, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
-import { PlusOutlined, SearchOutlined, SyncOutlined } from '@ant-design/icons-vue';
+import { useRouter } from 'vue-router';
+import {
+  CloudUploadOutlined,
+  PlusOutlined,
+  SearchOutlined,
+  SyncOutlined,
+} from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
 import {
   caseForgePageSizeOptionLabels,
@@ -168,14 +189,27 @@ import {
 } from '@case-forge/shared';
 import { useApiTestStore } from '@/stores/apiTest';
 import ApiTransactionSmpSyncModal from '@/components/api-test/ApiTransactionSmpSyncModal.vue';
+import PreproductionSyncModal from '@/components/api-test/PreproductionSyncModal.vue';
 import type { ApiTransactionRow } from '@/api/apiTestClient';
-import { downloadBase64Report, getReportExport } from '@/api/apiTestClient';
+import {
+  downloadBase64Report,
+  getReportExport,
+  previewPreproductionSync,
+  syncPreproductionCases,
+} from '@/api/apiTestClient';
+import type { PreproductionSyncPreview } from '@case-forge/shared';
 
 const apiStore = useApiTestStore();
+const router = useRouter();
 const modalOpen = ref(false);
 const smpSyncModalOpen = ref(false);
 const saving = ref(false);
 const deleting = ref(false);
+const preprodSyncing = ref(false);
+const preprodPreviewLoading = ref(false);
+const preprodPreviewOpen = ref(false);
+const preprodPreview = ref<PreproductionSyncPreview | null>(null);
+const preprodTransactionIds = ref<string[]>([]);
 const editingId = ref('');
 const keyword = ref('');
 const listPage = ref(1);
@@ -359,6 +393,94 @@ function openCreate() {
 
 function openSmpSync() {
   smpSyncModalOpen.value = true;
+}
+
+async function syncToPreproduction() {
+  const projectId = apiStore.activeProjectId;
+  if (!projectId) {
+    message.warning('请先选择项目');
+    return;
+  }
+  const transactionIds = [...selectedRowKeys.value];
+  preprodPreviewLoading.value = true;
+  try {
+    const preview = await previewPreproductionSync(projectId, transactionIds);
+    if (preview.applicationMissing) {
+      Modal.confirm({
+        title: '请先维护需求归属应用',
+        content:
+          '当前需求未维护所属应用，无法同步准生产。请先到需求管理编辑需求并补充归属应用。',
+        okText: '去需求管理',
+        cancelText: '取消',
+        centered: true,
+        onOk: () =>
+          router.push({
+            path: '/api-test/requirement',
+            query: {
+              status: 'testing',
+              ...(preview.requirement?.id
+                ? {
+                    requirementId: preview.requirement.id,
+                    projectCode: preview.requirement.projectCode,
+                    edit: '1',
+                  }
+                : {}),
+            },
+          }),
+      });
+      return;
+    }
+    if (!transactionIds.length) {
+      message.warning('请至少选择一个交易码');
+      return;
+    }
+    preprodTransactionIds.value = transactionIds;
+    preprodPreview.value = preview;
+    preprodPreviewOpen.value = true;
+  } catch (error) {
+    message.error(
+      error instanceof Error ? error.message : '准生产同步预检失败，请重试',
+    );
+  } finally {
+    preprodPreviewLoading.value = false;
+  }
+}
+
+function handlePreprodConfirm(caseIds: string[]) {
+  void runPreprodSync(caseIds);
+}
+
+async function runPreprodSync(caseIds: string[]) {
+  const projectId = apiStore.activeProjectId;
+  if (!projectId || !caseIds.length || !preprodTransactionIds.value.length)
+    return;
+  preprodSyncing.value = true;
+  try {
+    const result = await syncPreproductionCases(projectId, {
+      transactionIds: preprodTransactionIds.value,
+      caseIds,
+    });
+    const skipped = result.skipped
+      ? `，跳过 ${result.skipped} 条（已存在或不可同步）`
+      : '';
+    if (!result.created && !result.updated) {
+      message.warning(`没有可写入的案例${skipped}`);
+    } else {
+      const restored = result.updated ? `，恢复 ${result.updated} 条` : '';
+      message.success(
+        `同步完成：新增 ${result.created} 条${restored}${skipped}`,
+      );
+    }
+    preprodPreviewOpen.value = false;
+    preprodPreview.value = null;
+    selectedRowKeys.value = [];
+  } catch (error) {
+    message.error(
+      error instanceof Error ? error.message : '同步准生产失败，请重试',
+    );
+  } finally {
+    preprodSyncing.value = false;
+  }
 }
 
 function syncStatusText(status?: string) {

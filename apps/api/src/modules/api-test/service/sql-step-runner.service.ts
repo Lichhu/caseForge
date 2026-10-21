@@ -13,6 +13,7 @@ import {
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
+import { scopedWhere } from "@common/audit/user-scope";
 import {
   detectDbSqlKind,
   resolveDbStepMaxAffectedRows,
@@ -98,7 +99,9 @@ export class SqlStepRunnerService {
 
   async requireConnection(id: string) {
     if (!id) throw new BadRequestException("请先选择数据库连接");
-    const row = await this.connectionRepo.findOne({ where: { id } });
+    const row = await this.connectionRepo.findOne({
+      where: scopedWhere({ id }),
+    });
     if (!row) throw new NotFoundException("数据库连接不存在");
     return row;
   }

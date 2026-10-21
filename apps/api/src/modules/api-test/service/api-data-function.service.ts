@@ -13,6 +13,7 @@ import {
   auditFieldsForCreate,
   auditFieldsForUpdate,
 } from "@common/audit/request-context";
+import { scopedWhere } from "@common/audit/user-scope";
 import { ApiDatabaseConnectionEntity } from "@api-test/entity/api-database-connection.entity";
 import { ApiDataFunctionEntity } from "@api-test/entity/api-data-function.entity";
 import {
@@ -21,6 +22,7 @@ import {
   SaveDatabaseConnectionDto,
 } from "@api-test/dto/save-data-function.dto";
 import { encryptSecrets } from "@api-test/util/secret-crypto.util";
+import { globalLibraryProjectId } from "@api-test/util/global-library.util";
 import {
   createDatabasePool,
   databaseTestSql,
@@ -150,6 +152,7 @@ export class ApiDataFunctionService {
 
   async listConnections(_projectId: string) {
     const rows = await this.connectionRepo.find({
+      where: scopedWhere(),
       order: { updatedAt: "DESC" },
     });
     return this.uniqueByName(rows).map((row) => this.publicConnection(row));
@@ -173,11 +176,21 @@ export class ApiDataFunctionService {
       throw new BadRequestException(
         body.type === "Oracle" ? "请填写服务名" : "请填写数据库名",
       );
+    const name = body.name.trim();
+    const duplicate = await this.connectionRepo.findOne({
+      where: scopedWhere({ name }),
+    });
+    if (duplicate && duplicate.id !== id) {
+      throw new BadRequestException("同名数据库连接已存在");
+    }
     const row = id
       ? await this.requireConnection(id)
-      : this.connectionRepo.create({ projectId, ...auditFieldsForCreate() });
+      : this.connectionRepo.create({
+          projectId: globalLibraryProjectId(),
+          ...auditFieldsForCreate(),
+        });
     Object.assign(row, {
-      name: body.name.trim(),
+      name,
       type: body.type,
       host: body.host.trim(),
       port: body.port,
@@ -244,6 +257,7 @@ export class ApiDataFunctionService {
 
   async listFunctions(projectId: string) {
     const rows = await this.functionRepo.find({
+      where: scopedWhere(),
       order: { updatedAt: "DESC" },
     });
     const publicRows = this.uniqueByName(rows);
@@ -252,7 +266,7 @@ export class ApiDataFunctionService {
       (item) => !names.has(item.name),
     ).map((item) =>
       this.functionRepo.create({
-        projectId,
+        projectId: globalLibraryProjectId(),
         name: item.name,
         params: [],
         type: "template",
@@ -282,13 +296,23 @@ export class ApiDataFunctionService {
     body: SaveDataFunctionDto,
     id?: string,
   ) {
+    const name = body.name.trim().toUpperCase();
+    const duplicate = await this.functionRepo.findOne({
+      where: scopedWhere({ name }),
+    });
+    if (duplicate && duplicate.id !== id) {
+      throw new BadRequestException("同名数据函数已存在");
+    }
     const row = id
       ? await this.requireFunction(id)
-      : this.functionRepo.create({ projectId, ...auditFieldsForCreate() });
+      : this.functionRepo.create({
+          projectId: globalLibraryProjectId(),
+          ...auditFieldsForCreate(),
+        });
     if (id && row.config.builtin)
       throw new BadRequestException("内置函数不可修改");
     Object.assign(row, {
-      name: body.name.trim().toUpperCase(),
+      name,
       params: body.params,
       type: body.type,
       config: body.config,
@@ -318,7 +342,10 @@ export class ApiDataFunctionService {
     context?: DataFunctionContext,
     requestRoot?: unknown,
   ): Promise<unknown> {
-    const rows = await this.functionRepo.find({ order: { updatedAt: "DESC" } });
+    const rows = await this.functionRepo.find({
+      where: scopedWhere(),
+      order: { updatedAt: "DESC" },
+    });
     const functions = this.uniqueByName(rows);
     const root = requestRoot ?? value;
     const walk = async (item: unknown): Promise<unknown> => {
@@ -633,12 +660,16 @@ export class ApiDataFunctionService {
     ];
   }
   private async requireConnection(id: string) {
-    const row = await this.connectionRepo.findOne({ where: { id } });
+    const row = await this.connectionRepo.findOne({
+      where: scopedWhere({ id }),
+    });
     if (!row) throw new NotFoundException("数据库连接不存在");
     return row;
   }
   private async requireFunction(id: string) {
-    const row = await this.functionRepo.findOne({ where: { id } });
+    const row = await this.functionRepo.findOne({
+      where: scopedWhere({ id }),
+    });
     if (!row) throw new NotFoundException("数据函数不存在");
     return row;
   }

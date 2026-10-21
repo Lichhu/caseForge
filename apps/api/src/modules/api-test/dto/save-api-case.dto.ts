@@ -194,6 +194,11 @@ export class RunApiCasesDto {
   @IsArray()
   caseIds!: string[];
 
+  @ApiPropertyOptional({ enum: ["project", "preproduction"] })
+  @IsOptional()
+  @IsIn(["project", "preproduction"])
+  caseSource?: "project" | "preproduction";
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsUUID()

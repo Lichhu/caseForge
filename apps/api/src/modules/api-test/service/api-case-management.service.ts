@@ -1,4 +1,6 @@
 import type {
+  ApiHttpCaseStep,
+  ApiStepTarget,
   ManagedCaseOptions,
   ManagedCaseSelection,
 } from "@case-forge/shared";
@@ -7,27 +9,27 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { InjectRepository } from "@nestjs/typeorm";
-import { InjectDataSource } from "@nestjs/typeorm";
-import { DataSource, Repository } from "typeorm";
+import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
+import { DataSource, In, Repository } from "typeorm";
+import { isHttpStep } from "@case-forge/shared";
 import { TEST_PLATFORM_CONNECTION } from "@common/test-platform";
 import {
   auditFieldsForUpdate,
   RequestContext,
 } from "@common/audit/request-context";
-import { toPublicApiCase } from "@common/http/public-response.util";
+import { toPublicApiEndpoint } from "@common/http/public-response.util";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
-import { ApiTestCaseEntity } from "../entity/api-test-case.entity";
 import { ApiEndpointEntity } from "../entity/api-endpoint.entity";
+import { ApiPreproductionCaseEntity } from "../entity/api-preproduction-case.entity";
 import { ApiTransactionEntity } from "../entity/api-transaction.entity";
 import { ListManagedCasesDto } from "../dto/list-managed-cases.dto";
+import { UpdatePreproductionCaseDto } from "../dto/update-preproduction-case.dto";
+import { UpdatePreproductionStepDto } from "../dto/update-preproduction-step.dto";
 
-// 与生成流程一致：优先比较生成序号；兼容历史日期编码、V+数字编码。
+// 准生产快照把版本字段拆成独立列，优先比较生成序号，兼容日期编码与 V+数字编码。
 export function managedVersion(alias: string) {
-  const field = (name: string) =>
-    `NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(${alias}.metadata, '$.${name}')), 'null'), '')`;
-  const code = field("versionCode");
-  const number = field("generateVersion");
+  const code = `NULLIF(${alias}.versionCode, '')`;
+  const number = `${alias}.generateVersion`;
   return {
     label: `COALESCE(${code}, CONCAT('V', ${number}), '')`,
     number,
@@ -35,16 +37,17 @@ export function managedVersion(alias: string) {
   };
 }
 
-type JoinedCase = ApiTestCaseEntity & {
+type JoinedCase = ApiPreproductionCaseEntity & {
   managementTransaction: ApiTransactionEntity;
   managementProject: CaseProjectEntity;
+  endpoint?: ApiEndpointEntity;
 };
 
 @Injectable()
 export class ApiCaseManagementService {
   constructor(
-    @InjectRepository(ApiTestCaseEntity)
-    private readonly cases: Repository<ApiTestCaseEntity>,
+    @InjectRepository(ApiPreproductionCaseEntity)
+    private readonly cases: Repository<ApiPreproductionCaseEntity>,
     @InjectDataSource(TEST_PLATFORM_CONNECTION)
     private readonly testDb: DataSource,
   ) {}
@@ -94,7 +97,7 @@ export class ApiCaseManagementService {
         "c.managementTransaction",
         ApiTransactionEntity,
         "t",
-        "t.id = e.transactionId AND t.projectId = c.projectId",
+        "t.id = c.transactionId AND t.projectId = c.projectId",
       )
       .innerJoinAndMapOne(
         "c.managementProject",
@@ -116,11 +119,14 @@ export class ApiCaseManagementService {
     if (query.projectId)
       qb.andWhere("c.projectId = :projectId", { projectId: query.projectId });
     if (query.transactionId)
-      qb.andWhere("t.id = :transactionId", {
+      qb.andWhere("c.transactionId = :transactionId", {
         transactionId: query.transactionId,
       });
     if (query.applicationPath) {
-      const escapedPath = query.applicationPath.replace(/[!%_]/g, (char) => `!${char}`);
+      const escapedPath = query.applicationPath.replace(
+        /[!%_]/g,
+        (char) => `!${char}`,
+      );
       qb.andWhere(
         "(c.applicationPath = :applicationPath OR c.applicationPath LIKE :applicationPathPrefix ESCAPE '!')",
         {
@@ -139,10 +145,9 @@ export class ApiCaseManagementService {
       const newer = qb
         .subQuery()
         .select("1")
-        .from(ApiTestCaseEntity, "newer")
-        .innerJoin(ApiEndpointEntity, "ne", "ne.id = newer.endpointId")
+        .from(ApiPreproductionCaseEntity, "newer")
         .where(
-          "newer.projectId = c.projectId AND ne.transactionId = e.transactionId",
+          "newer.projectId = c.projectId AND newer.transactionId = c.transactionId",
         )
         .andWhere("newer.createdBy = :user")
         .andWhere(`${other.label} <> ''`)
@@ -166,11 +171,37 @@ export class ApiCaseManagementService {
   }
 
   private publicRow(row: JoinedCase) {
+    const snapshot = row.snapshot ?? {
+      request: {},
+      expected: {},
+    };
     return {
-      ...toPublicApiCase(row),
-      transactionId: row.managementTransaction.id,
-      transactionCode: row.managementTransaction.code,
+      id: row.id,
+      sourceCaseId: row.id,
+      projectId: row.projectId,
+      endpointId: row.endpointId,
+      title: row.title,
+      caseNo: row.caseNo,
+      description: row.description ?? snapshot.description ?? "",
+      remark: row.remark ?? snapshot.remark,
+      applicationPath: row.applicationPath ?? null,
+      transactionCode: row.transactionCode,
+      owner: row.owner,
+      priority: row.priority,
+      polarity: row.polarity,
+      status: row.status,
+      enabled: Boolean(Number(row.enabled)),
+      preconditions: snapshot.preconditions ?? [],
+      steps: snapshot.steps,
+      request: snapshot.request,
+      expected: snapshot.expected,
+      metadata: snapshot.metadata,
+      createdBy: snapshot.createdBy ?? row.createdBy,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      transactionId: row.transactionId,
       requirementNo: row.managementProject.requirementNo || "—",
+      ...(row.endpoint ? { endpoint: toPublicApiEndpoint(row.endpoint) } : {}),
     };
   }
 
@@ -196,7 +227,7 @@ export class ApiCaseManagementService {
     const rows = await this.filtered(query)
       .select("c.id", "id")
       .addSelect("c.projectId", "projectId")
-      .addSelect("t.id", "transactionId")
+      .addSelect("c.transactionId", "transactionId")
       .addSelect("c.title", "title")
       .addSelect("c.enabled", "enabled")
       .orderBy("c.id", "ASC")
@@ -219,38 +250,165 @@ export class ApiCaseManagementService {
     return ids.map((id) => byId.get(id)!);
   }
 
-  async setApplicationPath(
-    caseId: string,
-    applicationPath: string | null | undefined,
-  ) {
-    const row = await this.base()
-      .andWhere("c.id = :caseId", { caseId })
-      .getOne();
-    if (!row) throw new NotFoundException("案例不存在或无权访问");
-    row.applicationPath = applicationPath?.trim() || null;
-    await this.cases.save({ ...row, ...auditFieldsForUpdate() });
-    return { id: row.id, applicationPath: row.applicationPath };
+  async deleteCases(caseIds: string[]) {
+    const ids = [...new Set(caseIds.map((id) => id.trim()).filter(Boolean))];
+    if (!ids.length || ids.length > 1000) {
+      throw new BadRequestException("一次最多删除 1000 条案例");
+    }
+    const rows = await this.base()
+      .andWhere("c.id IN (:...ids)", { ids })
+      .getMany();
+    if (rows.length !== ids.length) {
+      throw new BadRequestException("部分案例不存在或无权访问，请重新选择");
+    }
+    await this.cases.softDelete({ id: In(ids) });
+    return { deleted: rows.length };
   }
 
-  async setApplicationPathForMany(caseIds: string[], applicationPath: string) {
-    if (!caseIds.length || caseIds.length > 1000)
-      throw new BadRequestException("一次最多批量指定 1000 条案例");
-    const rows = await this.base()
-      .andWhere("c.id IN (:...caseIds)", { caseIds })
-      .getMany();
-    if (rows.length !== caseIds.length)
-      throw new BadRequestException("部分案例不存在或无权访问，请重新选择");
-    const normalizedPath = applicationPath.trim();
-    if (!normalizedPath)
-      throw new BadRequestException("请选择归属应用");
-    await this.cases.save(
-      rows.map((row) => ({
-        ...row,
-        applicationPath: normalizedPath,
-        ...auditFieldsForUpdate(),
-      })),
-    );
-    return { updated: rows.length, applicationPath: normalizedPath };
+  async updateCaseStep(
+    caseId: string,
+    stepId: string,
+    dto: UpdatePreproductionStepDto,
+  ) {
+    const row = (await this.base()
+      .andWhere("c.id = :caseId", { caseId })
+      .getOne()) as JoinedCase | undefined;
+    if (!row) throw new NotFoundException("案例不存在或无权访问");
+
+    const snapshot = structuredClone(row.snapshot);
+    const steps = snapshot.steps?.length
+      ? snapshot.steps
+      : [
+          {
+            id: row.id,
+            name: row.title,
+            isMainRequest: true,
+            request: snapshot.request,
+            expected: snapshot.expected,
+            exports: [],
+          },
+        ];
+    const step = steps.find((item) => item.id === stepId);
+    if (!step) throw new NotFoundException("步骤不存在");
+    if (!isHttpStep(step)) {
+      throw new BadRequestException("仅支持编辑请求步骤");
+    }
+
+    if (dto.name !== undefined) {
+      const name = dto.name.trim();
+      if (!name) throw new BadRequestException("步骤名称不能为空");
+      step.name = name;
+    }
+    if (dto.transport !== undefined) step.request.transport = dto.transport;
+    if (dto.method !== undefined) step.request.method = dto.method;
+    if (dto.path !== undefined) step.request.path = dto.path;
+    if (dto.body !== undefined) step.request.body = dto.body;
+    if (dto.encoding !== undefined) {
+      step.request.encoding = dto.encoding;
+      snapshot.metadata = {
+        ...(snapshot.metadata ?? {}),
+        debugEncoding: dto.encoding,
+      };
+    }
+    if (dto.targetAddress !== undefined) {
+      const address = dto.targetAddress.trim();
+      const addressChanged = (step.target?.address ?? "") !== address;
+      step.target = {
+        ...(step.target ?? {}),
+        name: step.target?.name ?? "",
+        address,
+        ...(addressChanged
+          ? { environmentId: undefined, environmentServiceId: undefined }
+          : {}),
+      };
+    }
+    if (dto.step) {
+      const next = dto.step as Partial<ApiHttpCaseStep>;
+      if (next.name !== undefined) {
+        const name = String(next.name).trim();
+        if (!name) throw new BadRequestException("步骤名称不能为空");
+        step.name = name;
+      }
+      if (next.request && typeof next.request === "object") {
+        step.request = {
+          ...step.request,
+          ...next.request,
+          method: next.request.method ?? step.request.method,
+          path: next.request.path ?? step.request.path,
+        };
+        if (next.request.encoding !== undefined) {
+          snapshot.metadata = {
+            ...(snapshot.metadata ?? {}),
+            debugEncoding: next.request.encoding,
+          };
+        }
+      }
+      if (next.target && typeof next.target === "object") {
+        const previousTarget: ApiStepTarget = step.target ?? {
+          name: "",
+          address: "",
+        };
+        const address = String(next.target.address ?? "").trim();
+        const addressChanged = (previousTarget.address ?? "") !== address;
+        const target: ApiStepTarget = {
+          ...previousTarget,
+          name: String(next.target.name ?? previousTarget.name ?? ""),
+          address,
+        };
+        if (next.target.environmentId !== undefined) {
+          target.environmentId = next.target.environmentId;
+        } else if (addressChanged) {
+          target.environmentId = undefined;
+        }
+        if (next.target.environmentServiceId !== undefined) {
+          target.environmentServiceId = next.target.environmentServiceId;
+        } else if (addressChanged) {
+          target.environmentServiceId = undefined;
+        }
+        step.target = target;
+      }
+      if (next.expected && Array.isArray(next.expected.assertions)) {
+        step.expected = next.expected;
+      }
+      if (Array.isArray(next.exports)) {
+        step.exports = next.exports;
+      }
+    }
+
+    snapshot.steps = steps;
+    if (step.isMainRequest || steps.length === 1) {
+      snapshot.request = step.request;
+      snapshot.expected = step.expected;
+    }
+    row.snapshot = snapshot;
+    await this.cases.save({ ...row, ...auditFieldsForUpdate() });
+    return this.publicRow(row);
+  }
+
+  async updateCaseInfo(caseId: string, dto: UpdatePreproductionCaseDto) {
+    const row = (await this.base()
+      .andWhere("c.id = :caseId", { caseId })
+      .getOne()) as JoinedCase | undefined;
+    if (!row) throw new NotFoundException("案例不存在或无权访问");
+
+    if (dto.title !== undefined) {
+      const title = dto.title.trim();
+      if (!title) throw new BadRequestException("案例名称不能为空");
+      row.title = title;
+    }
+    if (dto.description !== undefined) {
+      const description = dto.description.trim();
+      row.description = description;
+      row.snapshot = { ...row.snapshot, description };
+    }
+    if (dto.remark !== undefined) {
+      const remark = dto.remark.trim();
+      row.remark = remark;
+      row.snapshot = { ...row.snapshot, remark };
+    }
+
+    await this.cases.save({ ...row, ...auditFieldsForUpdate() });
+    return this.publicRow(row);
   }
 
   /** 独立轻量筛选项，不通过拉取所有案例推导选项。 */
@@ -274,6 +432,22 @@ export class ApiCaseManagementService {
     const transactions = await transactionsQuery
       .orderBy("t.code", "ASC")
       .getRawMany();
+    const applicationsQuery = this.base()
+      .select("c.applicationPath", "value")
+      .distinct(true)
+      .andWhere("c.applicationPath IS NOT NULL")
+      .andWhere("TRIM(c.applicationPath) <> ''");
+    if (query.projectId)
+      applicationsQuery.andWhere("p.id = :projectId", {
+        projectId: query.projectId,
+      });
+    if (query.transactionId)
+      applicationsQuery.andWhere("t.id = :transactionId", {
+        transactionId: query.transactionId,
+      });
+    const applications = await applicationsQuery
+      .orderBy("c.applicationPath", "ASC")
+      .getRawMany<{ value: string }>();
     let versions: { value: string }[] = [];
     if (query.transactionId) {
       const qb = this.base()
@@ -298,6 +472,10 @@ export class ApiCaseManagementService {
       transactions: transactions.map((t) => ({
         value: t.value,
         label: `${t.code} · ${t.name}`,
+      })),
+      applications: applications.map((item) => ({
+        value: item.value,
+        label: item.value,
       })),
       versions: versions.map((v) => ({ value: v.value, label: v.value })),
     };

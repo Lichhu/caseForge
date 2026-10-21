@@ -29,7 +29,14 @@ export async function fetchRequirementApplications(): Promise<string[]> {
   return data;
 }
 
-export async function updateRequirement(id: string, payload: Partial<{ projectCode: string; projectName: string }>) {
+export async function updateRequirement(
+  id: string,
+  payload: Partial<{
+    projectCode: string;
+    projectName: string;
+    applicationName: string;
+  }>,
+) {
   const { data } = await http.patch<RequirementPlatformItem>(`/requirement-platform/requirements/${id}`, payload);
   return data;
 }

@@ -1,11 +1,11 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
-import { DataSource, In, Repository } from "typeorm";
+import { DataSource, Repository } from "typeorm";
 import ExcelJS from "exceljs";
 import { join } from "node:path";
 import { TEST_PLATFORM_CONNECTION } from "@common/test-platform";
 import { RequestContext } from "@common/audit/request-context";
-import { ApiTestCaseEntity } from "../entity/api-test-case.entity";
+import { ApiPreproductionCaseEntity } from "../entity/api-preproduction-case.entity";
 import { ApiEndpointEntity } from "../entity/api-endpoint.entity";
 import { ApiTransactionEntity } from "../entity/api-transaction.entity";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
@@ -27,7 +27,7 @@ function jsonText(value: unknown) {
       : JSON.stringify(value, null, 2);
 }
 
-function exportExpectedResult(row: ApiTestCaseEntity) {
+function exportExpectedResult(row: { description?: string | null }) {
   const description = row.description?.trim();
   if (description) return description;
 
@@ -37,48 +37,58 @@ function exportExpectedResult(row: ApiTestCaseEntity) {
 @Injectable()
 export class ApiCaseTemplateService {
   constructor(
-    @InjectRepository(ApiTestCaseEntity)
-    private readonly caseRepo: Repository<ApiTestCaseEntity>,
+    @InjectRepository(ApiPreproductionCaseEntity)
+    private readonly caseRepo: Repository<ApiPreproductionCaseEntity>,
     @InjectDataSource(TEST_PLATFORM_CONNECTION)
     private readonly testDb: DataSource,
-    @InjectDataSource() private readonly db: DataSource,
   ) {}
 
-  async listSystems() {
-    return this.testDb.query(
-      "SELECT system_id AS id, system_name AS name FROM t_pre_system WHERE data_status = 0 ORDER BY system_name",
-    );
-  }
-  async listTreeChildren(parentId: string) {
-    return this.testDb.query(
-      "SELECT id, system_name AS name FROM b_asset_common_system_tree WHERE parent_id = ? AND data_status = 0 ORDER BY system_name",
-      [parentId],
-    );
-  }
   async listDesigners() {
     return this.testDb.query(
       "SELECT user_name AS userName, nick_name AS nickName FROM sys_user WHERE status = '0' AND del_flag = '0' ORDER BY user_id",
     );
   }
 
+  async listSystems() {
+    return this.testDb.query(
+      "SELECT system_id AS id, system_name AS name FROM t_pre_system WHERE data_status = 0 ORDER BY system_name",
+    );
+  }
+
+  async listTreeChildren(parentId: string) {
+    return this.testDb.query(
+      "SELECT id, system_name AS name FROM b_asset_common_system_tree WHERE parent_id = ? AND data_status = 0 ORDER BY system_name",
+      [parentId],
+    );
+  }
+
   async export(input: {
     caseIds: string[];
     designer: string;
+    applicationPath: string;
   }) {
     if (!input.caseIds.length || input.caseIds.length > 1000)
       throw new BadRequestException("一次最多导出 1000 条案例");
+    const applicationPath = input.applicationPath.trim();
+    if (!applicationPath)
+      throw new BadRequestException("请选择归属应用后再导出");
     const user = RequestContext.getUserName();
     const rows = await this.caseRepo
       .createQueryBuilder("c")
       .innerJoinAndSelect("c.endpoint", "e")
       .innerJoinAndSelect("e.apiDoc", "doc")
-      .innerJoinAndSelect(ApiTransactionEntity, "t", "t.id = e.transactionId")
-      .innerJoinAndSelect(
-        ApiEndpointEntity,
-        "endpoint",
-        "endpoint.id = c.endpointId",
+      .innerJoinAndMapOne(
+        "c.exportTransaction",
+        ApiTransactionEntity,
+        "t",
+        "t.id = c.transactionId",
       )
-      .innerJoinAndSelect(CaseProjectEntity, "p", "p.id = c.projectId")
+      .innerJoinAndMapOne(
+        "c.exportProject",
+        CaseProjectEntity,
+        "p",
+        "p.id = c.projectId",
+      )
       .where("c.id IN (:...ids)", { ids: input.caseIds })
       .andWhere(
         "c.createdBy = :user AND t.createdBy = :user AND p.createdBy = :user",
@@ -87,30 +97,6 @@ export class ApiCaseTemplateService {
       .getMany();
     if (rows.length !== input.caseIds.length)
       throw new BadRequestException("部分案例不存在或无权访问");
-    const missingApplications = rows.filter(
-      (row) => !row.applicationPath?.trim(),
-    );
-    if (missingApplications.length)
-      throw new BadRequestException(
-        `有 ${missingApplications.length} 条案例未指定归属应用，请先指定后再导出`,
-      );
-    const txMap = new Map<string, ApiTransactionEntity>();
-    const projectMap = new Map<string, CaseProjectEntity>();
-    for (const id of input.caseIds) {
-      /* preserve caller order below */ void id;
-    }
-    const txRows = await this.db.getRepository(ApiTransactionEntity).findBy({
-      id: In([
-        ...new Set(
-          rows.map((r) => (r.endpoint as ApiEndpointEntity).transactionId!),
-        ),
-      ]),
-    });
-    txRows.forEach((row) => txMap.set(row.id, row));
-    const projects = await this.db
-      .getRepository(CaseProjectEntity)
-      .findBy({ id: In([...new Set(rows.map((r) => r.projectId))]) });
-    projects.forEach((row) => projectMap.set(row.id, row));
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(
       join(__dirname, "../assets/autocase-example.xlsx"),
@@ -127,8 +113,11 @@ export class ApiCaseTemplateService {
         out.height = templateRow.height;
       }
       const endpoint = row.endpoint as ApiEndpointEntity;
-      const tx = txMap.get(endpoint.transactionId || "");
-      const project = projectMap.get(row.projectId);
+      const tx = (
+        row as ApiPreproductionCaseEntity & {
+          exportTransaction?: ApiTransactionEntity;
+        }
+      ).exportTransaction;
       const name = row.title || "";
       // 功能点取接口文档“服务信息”中的服务名称，不使用交易 ID/交易码。
       const doc = (
@@ -147,7 +136,7 @@ export class ApiCaseTemplateService {
       const fields = [
         index + 1,
         `${service} - ${name}`,
-        row.applicationPath!,
+        applicationPath,
         name,
         row.polarity === "negative" ? "反" : "正",
         "准生产",
@@ -162,12 +151,11 @@ export class ApiCaseTemplateService {
         "",
         "",
         "是",
-        `${'api-plaform:'}${row.id}`,
+        `${"api-plaform:"}${row.id}`,
         row.remark || "",
       ];
       fields.forEach((value, col) => (out.getCell(col + 1).value = value));
       out.getCell(9).numFmt = "yyyy-mm-dd";
-      void project;
     });
     for (
       let i = start + rows.length;

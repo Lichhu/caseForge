@@ -13,4 +13,10 @@ export class UpdateRequirementDto {
   @IsString()
   @MaxLength(120)
   projectName?: string;
+
+  @ApiPropertyOptional({ example: "手机银行" })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  applicationName?: string;
 }

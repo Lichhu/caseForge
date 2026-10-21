@@ -71,6 +71,7 @@ export async function applyApiTestSchemaMigrations(runner: Queryable) {
   await ensureApiDataFunctionTables(runner);
   await ensureApiAssertionGenerateJobTable(runner);
   await ensureApiCaseGenerateScenarioTable(runner);
+  await ensureApiPreproductionCaseTable(runner);
   if (!(await tableExists(runner, "api_doc"))) {
     return;
   }
@@ -83,6 +84,42 @@ export async function applyApiTestSchemaMigrations(runner: Queryable) {
   await ensureApiCaseGenerateJobColumns(runner);
   await ensureExecutionPlatformTables(runner);
   await ensureRunnerPlatformColumns(runner);
+}
+
+async function ensureApiPreproductionCaseTable(runner: Queryable) {
+  if (await tableExists(runner, "api_preprod_case")) return;
+  await runner.query(`
+    CREATE TABLE api_preprod_case (
+      id VARCHAR(36) CHARACTER SET utf8 NOT NULL PRIMARY KEY,
+      projectId VARCHAR(36) CHARACTER SET utf8 NOT NULL,
+      transactionId VARCHAR(36) CHARACTER SET utf8 NOT NULL,
+      endpointId VARCHAR(36) CHARACTER SET utf8 NOT NULL,
+      caseNo VARCHAR(64) NULL,
+      title VARCHAR(255) NOT NULL,
+      description TEXT NULL,
+      remark TEXT NULL,
+      applicationPath TEXT NULL,
+      transactionCode VARCHAR(128) NULL,
+      owner VARCHAR(255) NULL,
+      priority VARCHAR(8) NOT NULL DEFAULT 'P1',
+      polarity VARCHAR(16) NOT NULL DEFAULT 'positive',
+      status VARCHAR(16) NOT NULL DEFAULT 'ready',
+      enabled TINYINT(1) NOT NULL DEFAULT 1,
+      versionCode VARCHAR(32) NULL,
+      generateVersion INT NULL,
+      snapshot JSON NOT NULL,
+      sourceUpdatedAt DATETIME(6) NULL,
+      syncedAt DATETIME(6) NULL,
+      syncedBy VARCHAR(255) NULL,
+      createdBy VARCHAR(255) NULL DEFAULT 'system',
+      modifiedBy VARCHAR(255) NULL DEFAULT 'system',
+      createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+      updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+      deleted_at DATETIME(6) NULL,
+      INDEX idx_api_preprod_project_tx (projectId, transactionId),
+      INDEX idx_api_preprod_user_updated (createdBy, updatedAt)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
 }
 
 async function ensureApiStepTables(runner: Queryable) {

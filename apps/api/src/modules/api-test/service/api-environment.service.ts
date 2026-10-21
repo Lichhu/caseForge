@@ -4,7 +4,9 @@ import { Repository } from "typeorm";
 import {
   auditFieldsForCreate,
   auditFieldsForUpdate,
+  RequestContext,
 } from "@common/audit/request-context";
+import { scopedWhere } from "@common/audit/user-scope";
 import { ApiTestEnvironmentEntity } from "@api-test/entity/api-test-environment.entity";
 import { ApiTestEnvironmentServiceEntity } from "@api-test/entity/api-test-environment-service.entity";
 import { SaveApiEnvironmentDto } from "@api-test/dto/save-environment.dto";
@@ -19,6 +21,7 @@ import {
   maskSecret,
 } from "@api-test/util/secret-crypto.util";
 import { toPublicApiEnvironmentService } from "@common/http/public-response.util";
+import { globalLibraryProjectId } from "@api-test/util/global-library.util";
 
 export interface ApiServiceAddressBinding {
   environmentId: string;
@@ -39,6 +42,7 @@ export class ApiEnvironmentService {
 
   async listEnvironments(projectId: string) {
     const rows = await this.envRepo.find({
+      where: scopedWhere(),
       order: { isDefault: "DESC", updatedAt: "DESC" },
     });
     return rows.map((row) => this.toPublic(row));
@@ -49,7 +53,7 @@ export class ApiEnvironmentService {
       await this.clearDefault(projectId);
     }
     const entity = this.envRepo.create({
-      projectId,
+      projectId: globalLibraryProjectId(),
       name: payload.name,
       scope: payload.scope ?? "system",
       baseUrl: (payload.baseUrl ?? "").replace(/\/$/, ""),
@@ -99,6 +103,7 @@ export class ApiEnvironmentService {
   }
 
   async deleteEnvironment(projectId: string, environmentId: string) {
+    await this.requireEnv(projectId, environmentId);
     await this.envRepo.softDelete({ id: environmentId });
     return { ok: true };
   }
@@ -165,7 +170,7 @@ export class ApiEnvironmentService {
     serviceId: string,
   ): Promise<boolean> {
     const row = await this.serviceRepo.findOne({
-      where: { projectId, environmentId, id: serviceId, enabled: true },
+      where: scopedWhere({ environmentId, id: serviceId, enabled: true }),
     });
     return Boolean(row?.ignoreSslVerify);
   }
@@ -175,15 +180,15 @@ export class ApiEnvironmentService {
    * 老步骤只保存了地址，执行前需要按地址恢复环境/服务绑定。
    */
   async listServiceAddressBindings(
-    projectId: string,
+    _projectId: string,
   ): Promise<ApiServiceAddressBinding[]> {
     const [environments, services] = await Promise.all([
       this.envRepo.find({
-        where: { projectId },
+        where: scopedWhere(),
         order: { isDefault: "DESC", createdAt: "ASC" },
       }),
       this.serviceRepo.find({
-        where: { projectId },
+        where: scopedWhere(),
         order: { sortOrder: "ASC", createdAt: "ASC" },
       }),
     ]);
@@ -217,7 +222,7 @@ export class ApiEnvironmentService {
       where: { environmentId },
     });
     const entity = this.serviceRepo.create({
-      projectId,
+      projectId: globalLibraryProjectId(),
       environmentId,
       name: payload.name.trim(),
       jdbcUrl: payload.jdbcUrl?.trim() || undefined,
@@ -319,7 +324,7 @@ export class ApiEnvironmentService {
   ) {
     await this.requireEnv(projectId, environmentId);
     const row = await this.serviceRepo.findOne({
-      where: { environmentId, id: serviceId },
+      where: scopedWhere({ environmentId, id: serviceId }),
     });
     if (!row) {
       throw new NotFoundException("环境服务不存在");
@@ -329,7 +334,7 @@ export class ApiEnvironmentService {
 
   private async requireEnv(projectId: string, environmentId: string) {
     const row = await this.envRepo.findOne({
-      where: { id: environmentId, enabled: true },
+      where: scopedWhere({ id: environmentId, enabled: true }),
     });
     if (!row) {
       throw new NotFoundException("执行环境不存在或已禁用");
@@ -338,12 +343,15 @@ export class ApiEnvironmentService {
   }
 
   private async clearDefault(projectId: string) {
-    await this.envRepo.update({}, { isDefault: false });
+    await this.envRepo.update(
+      { createdBy: RequestContext.getUserName() },
+      { isDefault: false },
+    );
   }
 
   private async hasDefault(projectId: string) {
     const count = await this.envRepo.count({
-      where: { isDefault: true },
+      where: scopedWhere({ isDefault: true }),
     });
     return count > 0;
   }

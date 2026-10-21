@@ -1,30 +1,63 @@
-# 案例管理
+# 准生产管理
 
-入口：项目管理或需求管理下拉菜单 → 案例管理（`/api-test/cases`）。
+入口：项目管理或需求管理下拉菜单 → 准生产管理（`/api-test/preproduction`）。
 
-- 汇总当前用户可访问的接口测试需求、交易及案例；支持需求编号、交易码、案例名称/编号筛选。
-- 只有选择具体交易后才出现版本筛选。默认只看最新版本，按项目和交易分别比较生成版本号，保留该版本全部案例；无版本手工案例保留。选择具体版本会关闭“只看最新版本”。
-- 可跨页勾选或选择全部筛选结果，导出复用现有 Excel 模板。
-- 批量执行前按需求确认执行环境，逐案例执行、生成独立 HTML 报告、上传 MinIO，并向当前用户入队敏行通知。报告发布失败可单独重试，不重复执行案例。
-- 报告 URL 有效期为 7 天。通知入队不代表已送达；实际推送由现有通知队列重试处理。OCU 关闭或接收人为 system 时，界面明确显示未推送。
+## 数据来源与同步
+
+准生产管理的案例不是实时读取项目管理中的 `api_test_case`，而是读取同步快照表 `api_preprod_case`。
+
+同步入口在项目管理 → 交易码列表右上角，位于「服管同步」旁边：
+
+- 先校验当前项目对应需求的 `api_requirement.applicationName`，为空时阻止同步并提示去需求管理维护；
+- 应用校验通过后，必须至少勾选一条交易码；
+- 需求列表编辑已支持维护归属应用，分发人或需求认领人可编辑；
+- 预检返回选中交易在 `runnerCaseIds` 中关联的案例，失效关联只计数并跳过；
+- 弹窗默认勾选全部启用案例，未启用案例展示但不可勾选；
+- 只同步用户在弹窗中勾选的案例，按案例 ID 处理，版本只展示不参与唯一性；
+- 同步时归属应用直接取当前需求的 `applicationName`；
+- 准生产列表不提供手工修改或批量指定归属应用；
+- 已在准生产的案例不可重复同步；如需按源案例内容重建，必须先删除准生产内的该条案例；
+- 同步只新增快照或恢复已删除快照，不覆盖仍在准生产侧使用的案例，也不自动删除其他快照；
+- 准生产管理的执行使用快照内容，不读取项目管理中源案例的最新修改。
+
+预检接口：`POST /api-test/:projectId/transactions/preprod-sync/preview`。
+
+同步接口：`POST /api-test/:projectId/transactions/preprod-sync`。
+
+上线后历史案例不会自动出现在准生产管理，需要在项目管理中执行一次同步。
+
+## 列表能力
+
+- 汇总当前用户可访问的准生产案例；只保留需求编号、交易码、归属应用三个筛选项。
+- 需求与交易联动：选择需求后只展示该需求下的交易码，切换需求会清空交易和归属应用筛选。
+- 归属应用筛选项来自当前筛选范围内已同步案例的归属应用。
+- 列表展示全部已同步案例，不再提供版本、搜索和「只看最新版本」筛选。
+- 列表展示准生产快照创建时间；点击任意一条案例从右侧滑出详情抽屉，通过「基础信息 / 步骤列表」页签切换查看。
+- 单条删除在详情抽屉内操作，批量删除在顶部工具栏操作；删除不会影响项目管理中的源案例，再次同步可重新写入。
+- 跨页勾选使用 ID 缓存；显式全选只返回轻量标识，不加载请求报文、步骤和断言。
+- 导出复用 Excel 模板，一次最多 1000 条；明细接口按每批 100 个 ID 获取。
+
+## 执行与报告
+
+- 批量执行前选择测管平台的版本、应用和轮次。
+- 逐案例执行，每个案例生成独立 HTML 报告。
+- 报告上传测管平台，并调用测管结果接收接口回传结果。
+- 通知入队不代表已送达；实际推送由通知队列重试处理。OCU 关闭或接收人为 system 时，界面显示未推送。
+- 报告发布失败可单独重试，不会重新执行案例。
+- 批量编排在前端，执行期间需要保留页面，非离线后台作业。
 
 ## 配置与边界
 
-复用现有 MinIO、OCU 和通知队列配置，无新增环境变量或数据库字段。部署需保证 MinIO 桶存在并可写，真实用户名通过现有用户上下文传递；要发送通知需启用已有 OCU 配置。
+复用现有测管平台、OCU 和通知队列配置。新增 `api_preprod_case` 表及两个查询索引：
 
-此版批量编排在前端，执行期间需要保留页面，非离线后台作业。报告上传和通知接口没有整体幂等键，极端网络断连后手动重试发布可能重复入队通知。列表已改为数据库筛选与分页：`GET /api-test/case-management/cases` 接受 page/pageSize、projectId、transactionId、versionCode、keyword、latestOnly，返回 rows/count/page/pageSize；单页上限 100。前端不再遍历所有项目/交易拉取全部案例，也不再使用 slice 分页。
+- `idx_api_preprod_project_tx`
+- `idx_api_preprod_user_updated`
 
-筛选项从独立 options 接口获取，搜索有 300ms 防抖、旧响应失效保护。跨页勾选使用 ID 缓存；显式全选调用 selection 接口仅加载标识、标题和启用状态，不加载报文。导出时才通过 details 接口按每批最多 100 个 ID 获取完整明细。超大规模的全选和 Excel 导出仍消耗与选择数量相关的内存，尚未改为后台流式导出。
-
-新增 `idx_api_case_user_deleted_created`、`idx_api_case_project_user_endpoint` 两个索引，纳入现有启动索引补丁流程；无新增字段。部署后应确认索引创建成功，并在真实 MySQL 数据上验证执行计划与耗时。
-
-这里“推送结果”按现有敏行通知实现，不是回写第三方测试平台业务状态。
+部署后应确认表创建成功，并在真实 MySQL 数据上验证同步和列表查询耗时。
 
 ## 验证
 
 - `node apps/web/scripts/test-case-management.cjs`
-- `pnpm --filter @case-forge/api test -- --runInBand api-case-report-delivery.service.spec.ts`
+- `pnpm --filter @case-forge/api test -- --runInBand api-case-management.service.spec.ts api-preproduction-case.service.spec.ts`
 - `pnpm --filter @case-forge/api typecheck`
 - `pnpm --filter @case-forge/web build`
-
-- `pnpm --filter @case-forge/api exec jest --runInBand api-case-management.service.spec.ts`

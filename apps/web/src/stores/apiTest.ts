@@ -117,6 +117,7 @@ const stageKey = (projectId: string, transactionId: string) =>
 const activeProjectKey = "case-forge:api-active-project";
 const activeTransactionKey = (projectId: string) =>
   `case-forge:api-active-transaction:${projectId}`;
+let projectListRequestSequence = 0;
 
 /** 同一交易码 SMP 刷新 in-flight 去重，避免并发重复请求 */
 const smpRefreshInflight = new Map<
@@ -305,9 +306,9 @@ export const useApiTestStore = defineStore("apiTest", {
           requirementStatus: this.projectListRequirementStatus,
         });
 
+      const sequence = ++projectListRequestSequence;
       let result = await fetchPage(this.projectListPage);
-      this.projectListTotal = result.count;
-      this.projectListCaseCount = result.caseCount;
+      if (sequence !== projectListRequestSequence) return;
       const maxPage = Math.max(
         1,
         Math.ceil(result.count / this.projectListPageSize) || 1,
@@ -315,8 +316,10 @@ export const useApiTestStore = defineStore("apiTest", {
       if (this.projectListPage > maxPage) {
         this.projectListPage = maxPage;
         result = await fetchPage(maxPage);
-        this.projectListCaseCount = result.caseCount;
+        if (sequence !== projectListRequestSequence) return;
       }
+      this.projectListTotal = result.count;
+      this.projectListCaseCount = result.caseCount;
       this.projects = result.rows;
     },
     async newProject(payload: {

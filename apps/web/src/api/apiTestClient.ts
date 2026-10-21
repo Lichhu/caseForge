@@ -21,6 +21,8 @@ import type {
   ApiDocGenerationProfile,
   ApiCaseStep,
   ApiStepDebugRecord,
+  PreproductionSyncPreview,
+  PreproductionSyncResult,
 } from "@case-forge/shared";
 
 export interface ApiTransactionRow {
@@ -817,6 +819,7 @@ export async function runApiCases(
   transactionId: string,
   payload: {
     caseIds: string[];
+    caseSource?: "project" | "preproduction";
     environmentId?: string;
     environmentServiceId?: string;
     concurrency?: number;
@@ -1272,7 +1275,14 @@ export async function publishCaseReport(projectId: string, transactionId: string
   )).data;
 }
 
-export type ManagedCaseRow = ApiTestCaseRow & { transactionId: string; requirementNo: string; applicationPath?: string | null };
+export type ManagedCaseRow = ApiTestCaseRow & {
+  transactionId: string;
+  requirementNo: string;
+  applicationPath?: string | null;
+  sourceCaseId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
 export type { ManagedCaseSelection, ManagedCaseOptions, ManagedCaseQuery } from "@case-forge/shared";
 import type { ManagedCaseSelection, ManagedCaseOptions, ManagedCaseQuery } from "@case-forge/shared";
 export async function listManagedCases(params: ManagedCaseQuery) {
@@ -1287,16 +1297,69 @@ export async function selectManagedCases(params: ManagedCaseQuery) {
 export async function getManagedCaseDetails(ids: string[]) {
   return (await http.post<ManagedCaseRow[]>("api-test/case-management/details", { ids })).data;
 }
-export async function setManagedCaseApplication(caseId: string, applicationPath: string | null) {
-  return (await http.patch<{ id: string; applicationPath: string | null }>(
-    `api-test/case-management/cases/${encodeURIComponent(caseId)}/application`,
-    { applicationPath },
+export async function deleteManagedCase(caseId: string) {
+  return (await http.delete<{ deleted: number }>(
+    `api-test/case-management/cases/${encodeURIComponent(caseId)}`,
   )).data;
 }
-export async function batchSetManagedCaseApplication(caseIds: string[], applicationPath: string) {
-  return (await http.patch<{ updated: number; applicationPath: string }>(
-    "api-test/case-management/cases/application",
-    { caseIds, applicationPath },
+
+export async function deleteManagedCases(caseIds: string[]) {
+  return (await http.post<{ deleted: number }>(
+    "api-test/case-management/cases/delete",
+    { caseIds },
+  )).data;
+}
+
+export interface UpdateManagedCaseStepPayload {
+  name?: string;
+  targetAddress?: string;
+  transport?: ApiTransport;
+  method?: string;
+  encoding?: string;
+  path?: string;
+  body?: unknown;
+  /** 完整步骤配置：用于与案例步骤编辑器保持一致的请求、断言与变量提取保存 */
+  step?: ApiCaseStep;
+}
+
+export async function updateManagedCaseStep(
+  caseId: string,
+  stepId: string,
+  payload: UpdateManagedCaseStepPayload,
+) {
+  return (await http.patch<ManagedCaseRow>(
+    `api-test/case-management/cases/${encodeURIComponent(caseId)}/steps/${encodeURIComponent(stepId)}`,
+    payload,
+  )).data;
+}
+
+export async function updateManagedCaseInfo(
+  caseId: string,
+  payload: { title?: string; description?: string; remark?: string },
+) {
+  return (await http.patch<ManagedCaseRow>(
+    `api-test/case-management/cases/${encodeURIComponent(caseId)}`,
+    payload,
+  )).data;
+}
+
+export async function previewPreproductionSync(
+  projectId: string,
+  transactionIds: string[],
+) {
+  return (await http.post<PreproductionSyncPreview>(
+    `api-test/${projectId}/transactions/preprod-sync/preview`,
+    { transactionIds },
+  )).data;
+}
+
+export async function syncPreproductionCases(
+  projectId: string,
+  payload: { transactionIds: string[]; caseIds: string[] },
+) {
+  return (await http.post<PreproductionSyncResult>(
+    `api-test/${projectId}/transactions/preprod-sync`,
+    payload,
   )).data;
 }
 
@@ -1309,11 +1372,22 @@ export async function listExecutionPlans(versionId: string, parentId: string) {
   return (await http.get<ExecutionPlanOption[]>("api-test/case-management/execution-plans", { params: { versionId, parentId } })).data;
 }
 
-export interface CaseApplicationNode { id: string; name: string; isLeaf?: boolean; children?: CaseApplicationNode[]; }
-export async function listCaseApplicationSystems() { return (await http.get<CaseApplicationNode[]>("api-test/case-management/application-systems")).data; }
-export async function listCaseApplicationChildren(parentId: string) { return (await http.get<CaseApplicationNode[]>(`api-test/case-management/application-systems/${encodeURIComponent(parentId)}/children`)).data; }
+export interface CaseApplicationNode {
+  id: string;
+  name: string;
+  isLeaf?: boolean;
+  children?: CaseApplicationNode[];
+}
+export async function listCaseApplicationSystems() {
+  return (await http.get<CaseApplicationNode[]>("api-test/case-management/application-systems")).data;
+}
+export async function listCaseApplicationChildren(parentId: string) {
+  return (await http.get<CaseApplicationNode[]>(
+    `api-test/case-management/application-systems/${encodeURIComponent(parentId)}/children`,
+  )).data;
+}
 export async function listCaseDesigners() { return (await http.get<Array<{ userName: string; nickName: string }>>("api-test/case-management/designers")).data; }
-export async function exportCaseTemplate(payload: { caseIds: string[]; designer: string }) {
+export async function exportCaseTemplate(payload: { caseIds: string[]; designer: string; applicationPath: string }) {
   const response = await http.post("api-test/case-management/export", payload, { responseType: "blob" });
   const fileName = `测试案例_${new Date().toISOString().slice(0, 10)}.xlsx`;
   return { blob: new Blob([response.data], { type: String(response.headers["content-type"] ?? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") }), fileName };

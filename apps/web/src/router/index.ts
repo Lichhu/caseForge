@@ -27,7 +27,13 @@ const router = createRouter({
       component: ApiTestDashboardView,
       meta: { platform: "api-test", title: "智能接口测试平台" },
     },
-    { path: "/api-test/cases", name: "case-management", component: CaseManagementView, meta: { platform: "api-test", title: "案例管理" } },
+    { path: "/api-test/cases", redirect: "/api-test/preproduction" },
+    {
+      path: "/api-test/preproduction",
+      name: "preproduction-management",
+      component: CaseManagementView,
+      meta: { platform: "api-test", title: "准生产管理" },
+    },
     {
       path: "/api-test/requirement",
       name: "requirement-platform",

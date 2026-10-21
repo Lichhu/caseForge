@@ -67,3 +67,12 @@ export class ManagedCaseDetailsDto {
   @IsString({ each: true })
   ids!: string[];
 }
+
+export class DeleteManagedCasesDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(1000)
+  @ArrayUnique()
+  @IsString({ each: true })
+  caseIds!: string[];
+}

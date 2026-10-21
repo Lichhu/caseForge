@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, markRaw, onMounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { Empty, message, Modal } from 'ant-design-vue';
 import {
   CheckCircleOutlined,
@@ -12,6 +12,7 @@ import {
   DeleteOutlined,
   TeamOutlined,
   PlusOutlined,
+  SettingOutlined,
 } from '@ant-design/icons-vue';
 import type { RequirementClaimCandidate, RequirementPlatformItem, RequirementStatus } from '@case-forge/shared';
 import { REQUIREMENT_STATUS_LABELS } from '@case-forge/shared';
@@ -34,8 +35,10 @@ import {
   type RequirementPoolMember,
 } from '@/api/requirementPlatform';
 import { getUserName } from '@/utils/userContext';
+import SystemConfigDrawer from '@/components/api-test/SystemConfigDrawer.vue';
 
 const router = useRouter();
+const route = useRoute();
 const currentUser = getUserName();
 
 const loading = ref(false);
@@ -43,6 +46,7 @@ const rows = ref<RequirementPlatformItem[]>([]);
 const isDispatcher = ref(false);
 const isMember = ref(false);
 const syncing = ref(false);
+const systemConfigOpen = ref(false);
 const createVisible = ref(false);
 const createSubmitting = ref(false);
 const createForm = ref({ projectCode: '', projectName: '', applicationName: undefined as string | undefined });
@@ -50,7 +54,12 @@ const applicationOptions = ref<string[]>([]);
 const applicationLoading = ref(false);
 const editVisible = ref(false);
 const editSubmitting = ref(false);
-const editForm = ref({ id: '', projectCode: '', projectName: '' });
+const editForm = ref({
+  id: '',
+  projectCode: '',
+  projectName: '',
+  applicationName: '',
+});
 const poolVisible = ref(false);
 const poolLoading = ref(false);
 const poolMembers = ref<RequirementPoolMember[]>([]);
@@ -59,10 +68,12 @@ const poolSearch = ref('');
 const poolSelectedUser = ref<string>();
 const poolSaving = ref(false);
 
-const statusFilter = ref<'all' | RequirementStatus>('pending_dispatch');
+const statusFilter = ref<'all' | RequirementStatus>(
+  route.query.status === 'testing' ? 'testing' : 'pending_dispatch',
+);
 const ownerFilter = ref('');
 const ownerOptions = ref<Array<{ userName: string; nickName: string }>>([]);
-const keyword = ref('');
+const keyword = ref(String(route.query.projectCode ?? ''));
 const applicationFilter = ref<string | undefined>();
 const page = ref(1);
 const pageSize = ref(20);
@@ -414,20 +425,30 @@ async function restoreTesting(row: RequirementPlatformItem) {
 }
 
 async function openEdit(row: RequirementPlatformItem) {
-  editForm.value = { id: row.id, projectCode: row.projectCode, projectName: row.projectName };
+  editForm.value = {
+    id: row.id,
+    projectCode: row.projectCode,
+    projectName: row.projectName,
+    applicationName: row.applicationName?.trim() || '',
+  };
   editVisible.value = true;
 }
 
 async function confirmEdit() {
   const code = editForm.value.projectCode.trim();
   const name = editForm.value.projectName.trim();
-  if (!code || !name) {
-    message.warning('需求编号和需求名必填');
+  const applicationName = editForm.value.applicationName.trim();
+  if (!code || !name || !applicationName) {
+    message.warning('需求编号、需求名和归属应用必填');
     return;
   }
   editSubmitting.value = true;
   try {
-    await updateRequirement(editForm.value.id, { projectCode: code, projectName: name });
+    await updateRequirement(editForm.value.id, {
+      projectCode: code,
+      projectName: name,
+      applicationName,
+    });
     editVisible.value = false;
     await loadList();
     message.success('需求已更新');
@@ -484,34 +505,33 @@ async function confirmRefuse() {
 
 /** 管理模块导航 */
 const moduleOptions = [
-  { value: 'project', label: '项目管理' },
   { value: 'requirement', label: '需求管理' },
-  { value: 'case', label: '案例管理' },
+  { value: 'project', label: '项目管理' },
+  { value: 'case', label: '准生产管理' },
 ];
 
 function handleModuleChange(value: string) {
   if (value === 'project') {
     router.push({ path: '/api-test' });
   }
-  if (value === 'case') router.push({ path: '/api-test/cases' });
+  if (value === 'case') router.push({ path: '/api-test/preproduction' });
   // 需求管理即当前页，无需跳转
 }
 
-onMounted(() => {
-  void loadList();
-  void loadApplicationOptions(true);
+onMounted(async () => {
+  if (!getUserName()) return;
+  await loadList();
+  await loadApplicationOptions(true);
+  const requirementId = String(route.query.requirementId ?? '');
+  if (requirementId && route.query.edit === '1') {
+    const row = rows.value.find((item) => item.id === requirementId);
+    if (row) await openEdit(row);
+  }
 });
 </script>
 
 <template>
   <main class="app-frame app-frame--nested">
-    <a-alert
-      v-if="!currentUser"
-      type="warning"
-      show-icon
-      message="当前浏览器没有用户上下文，请通过上游平台入口链接进入。"
-      class="identity-warning"
-    />
     <section class="requirement-workspace">
       <header class="topbar">
         <div>
@@ -525,13 +545,19 @@ onMounted(() => {
           />
           <p>接口测试需求分发与认领 · 数据来源：测管平台（SIT 测试中）+ 服管校验</p>
         </div>
-        <div v-if="isDispatcher" class="topbar-actions action-toolbar action-toolbar--compact">
+        <div class="topbar-actions action-toolbar action-toolbar--compact">
+          <template v-if="isDispatcher">
           <a-button :loading="syncing" @click="handleSync">
             <template #icon><SyncOutlined /></template>
             {{ syncing ? '同步中…' : '同步需求' }}
           </a-button>
           <a-button @click="openCreate"><template #icon><PlusOutlined /></template>手动创建</a-button>
           <a-button @click="openPool"><template #icon><TeamOutlined /></template>人员池</a-button>
+          </template>
+          <a-button @click="systemConfigOpen = true">
+            <template #icon><SettingOutlined /></template>
+            系统配置
+          </a-button>
         </div>
       </header>
 
@@ -700,13 +726,21 @@ onMounted(() => {
               </template>
               <template v-else-if="column.key === 'manage'">
                 <div class="action-cell">
-                  <a-button v-if="isDispatcher" size="small" aria-label="编辑需求" @click="openEdit(record as RequirementPlatformItem)">
+                  <a-button
+                    v-if="isDispatcher || record.claimedBy === currentUser"
+                    size="small"
+                    aria-label="编辑需求"
+                    @click="openEdit(record as RequirementPlatformItem)"
+                  >
                     <EditOutlined />
                   </a-button>
                   <a-button v-if="isDispatcher" size="small" danger aria-label="删除需求" @click="removeRecord(record as RequirementPlatformItem)">
                     <DeleteOutlined />
                   </a-button>
-                  <span v-if="!isDispatcher" class="cell-muted">-</span>
+                  <span
+                    v-if="!isDispatcher && record.claimedBy !== currentUser"
+                    class="cell-muted"
+                  >-</span>
                 </div>
               </template>
             </template>
@@ -736,6 +770,16 @@ onMounted(() => {
       <a-form layout="vertical">
         <a-form-item label="需求编号" required><a-input v-model:value="editForm.projectCode" maxlength="64" /></a-form-item>
         <a-form-item label="需求名" required><a-input v-model:value="editForm.projectName" maxlength="120" /></a-form-item>
+        <a-form-item label="归属应用" required>
+          <a-select
+            v-model:value="editForm.applicationName"
+            show-search
+            allow-clear
+            :loading="applicationLoading"
+            :options="applicationOptions.map((name) => ({ value: name, label: name }))"
+            placeholder="请选择归属应用"
+          />
+        </a-form-item>
       </a-form>
     </a-modal>
 
@@ -817,6 +861,8 @@ onMounted(() => {
         :maxlength="500"
       />
     </a-modal>
+
+    <SystemConfigDrawer v-model:open="systemConfigOpen" />
   </main>
 </template>
 

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable, Optional } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import iconv from "iconv-lite";
 import { Socket } from "node:net";
@@ -8,6 +8,7 @@ import type { Dispatcher } from "undici";
 import { scopedWhere } from "@common/audit/user-scope";
 import { auditFieldsForCreate } from "@common/audit/request-context";
 import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
+import { ApiPreproductionCaseEntity } from "@api-test/entity/api-preproduction-case.entity";
 import { ApiTestRunEntity } from "@api-test/entity/api-test-run.entity";
 import { ApiTestRunItemEntity } from "@api-test/entity/api-test-run-item.entity";
 import {
@@ -134,11 +135,48 @@ export class ApiExecutionService {
     private readonly executionSetService: ApiExecutionSetService,
     private readonly dataFunctionService: ApiDataFunctionService,
     private readonly sqlStepRunner: SqlStepRunnerService,
+    @Optional()
+    @InjectRepository(ApiPreproductionCaseEntity)
+    private readonly preproductionCaseRepo?: Repository<ApiPreproductionCaseEntity>,
   ) {}
+
+  private toExecutableCase(
+    row: ApiPreproductionCaseEntity,
+  ): ApiTestCaseEntity {
+    const snapshot = row.snapshot;
+    return {
+      id: row.id,
+      projectId: row.projectId,
+      endpointId: row.endpointId,
+      title: row.title,
+      caseNo: row.caseNo ?? undefined,
+      description: row.description ?? "",
+      remark: row.remark ?? undefined,
+      applicationPath: row.applicationPath ?? null,
+      transactionCode: row.transactionCode ?? undefined,
+      owner: row.owner ?? undefined,
+      priority: row.priority,
+      polarity: row.polarity,
+      status: row.status,
+      enabled: row.enabled,
+      preconditions: snapshot.preconditions ?? [],
+      request: snapshot.request,
+      expected: snapshot.expected,
+      steps: snapshot.steps,
+      metadata: snapshot.metadata as ApiTestCaseEntity["metadata"],
+      createdBy: row.createdBy,
+      modifiedBy: row.modifiedBy,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      endpoint: row.endpoint,
+      deletedAt: row.deletedAt,
+    } as ApiTestCaseEntity;
+  }
 
   async runCases(input: {
     projectId: string;
     caseIds: string[];
+    caseSource?: "project" | "preproduction";
     environmentId?: string;
     environmentServiceId?: string;
     executionSetId?: string;
@@ -154,14 +192,29 @@ export class ApiExecutionService {
       MAX_CONCURRENCY,
       Math.max(1, input.concurrency ?? DEFAULT_CONCURRENCY),
     );
-    const foundCases = await this.caseRepo.find({
-      where: {
-        ...scopedWhere({ projectId: input.projectId }),
-        id: In(input.caseIds),
-        enabled: true,
-      },
-      relations: ["endpoint"],
-    });
+    const usePreproduction = input.caseSource === "preproduction";
+    if (usePreproduction && !this.preproductionCaseRepo) {
+      throw new BadRequestException("准生产案例存储未配置");
+    }
+    const foundCases = usePreproduction
+      ? (
+          await this.preproductionCaseRepo!.find({
+            where: {
+              ...scopedWhere({ projectId: input.projectId }),
+              id: In(input.caseIds),
+              enabled: true,
+            },
+            relations: ["endpoint"],
+          })
+        ).map((row) => this.toExecutableCase(row))
+      : await this.caseRepo.find({
+          where: {
+            ...scopedWhere({ projectId: input.projectId }),
+            id: In(input.caseIds),
+            enabled: true,
+          },
+          relations: ["endpoint"],
+        });
     const caseMap = new Map(foundCases.map((item) => [item.id, item]));
     const cases = input.caseIds
       .map((id) => caseMap.get(id))
@@ -172,11 +225,13 @@ export class ApiExecutionService {
     const executionCache: ExecutionRunCache = {
       ignoreSslVerify: new Map(),
     };
-    await this.backfillLegacyStepTargets(
-      input.projectId,
-      cases,
-      executionCache,
-    );
+    if (!usePreproduction) {
+      await this.backfillLegacyStepTargets(
+        input.projectId,
+        cases,
+        executionCache,
+      );
+    }
     const orderedFlow = Boolean(input.executionSetId || input.transactionId);
     if (orderedFlow) {
       assertCaseDependencyOrder(cases);

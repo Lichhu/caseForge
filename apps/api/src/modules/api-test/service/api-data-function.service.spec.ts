@@ -61,15 +61,16 @@ describe("ApiDataFunctionService", () => {
     });
   });
 
-  it("loads shared functions without project filtering", async () => {
+  it("loads shared functions scoped by user instead of project", async () => {
     await service.resolveDeep("another-project", "${MSG_ID('00', '3')}");
 
     expect((service as any).functionRepo.find).toHaveBeenLastCalledWith({
+      where: { createdBy: "system" },
       order: { updatedAt: "DESC" },
     });
   });
 
-  it("lists shared database connections without project filtering", async () => {
+  it("lists shared database connections scoped by user instead of project", async () => {
     const connectionRepo = {
       find: jest.fn().mockResolvedValue([
         {
@@ -101,6 +102,7 @@ describe("ApiDataFunctionService", () => {
       ],
     );
     expect(connectionRepo.find).toHaveBeenCalledWith({
+      where: { createdBy: "system" },
       order: { updatedAt: "DESC" },
     });
   });

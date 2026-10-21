@@ -3,7 +3,7 @@ import { plainToInstance } from "class-transformer";
 import { validate } from "class-validator";
 import { RequestContext } from "@common/audit/request-context";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
-import { ApiTestCaseEntity } from "../entity/api-test-case.entity";
+import { ApiPreproductionCaseEntity } from "../entity/api-preproduction-case.entity";
 import { ApiEndpointEntity } from "../entity/api-endpoint.entity";
 import { ApiTransactionEntity } from "../entity/api-transaction.entity";
 import { ApiDocEntity } from "../entity/api-doc.entity";
@@ -19,7 +19,7 @@ class MetadataSource extends DataSource {
   }
 }
 
-describe("managed cases server pagination", () => {
+describe("preproduction cases server pagination", () => {
   let source: MetadataSource;
   let service: ApiCaseManagementService;
   beforeAll(async () => {
@@ -27,7 +27,7 @@ describe("managed cases server pagination", () => {
       type: "mysql",
       database: "test",
       entities: [
-        ApiTestCaseEntity,
+        ApiPreproductionCaseEntity,
         ApiEndpointEntity,
         ApiTransactionEntity,
         ApiDocEntity,
@@ -49,7 +49,7 @@ describe("managed cases server pagination", () => {
     await source.prepare();
     typeShim.mockRestore();
     service = new ApiCaseManagementService(
-      source.getRepository(ApiTestCaseEntity),
+      source.getRepository(ApiPreproductionCaseEntity),
       { query: jest.fn() } as unknown as DataSource,
     );
   });
@@ -95,12 +95,12 @@ describe("managed cases server pagination", () => {
     );
     const sql = qb.getSql();
     expect(qb.getParameters().user).toBe("alice");
-    for (const alias of ["c", "e", "t", "p", "newer", "ne"])
+    for (const alias of ["c", "e", "t", "p", "newer"])
       expect(sql).toContain(`\`${alias}\`.\`deleted_at\` IS NULL`);
     for (const alias of ["c", "t", "p"])
       expect(sql).toContain(`\`${alias}\`.\`createdBy\` = ?`);
     expect(sql).toContain("NOT EXISTS");
-    expect(sql).toContain("`ne`.`transactionId` = `e`.`transactionId`");
+    expect(sql).toContain("`newer`.`transactionId` = `c`.`transactionId`");
   });
   it("applies keyword outside the latest-version subquery, escapes literal wildcards", () => {
     const qb = (service as any).filtered(
@@ -144,7 +144,7 @@ describe("managed cases server pagination", () => {
     expect(fields).toEqual([
       "c.id",
       "c.projectId",
-      "t.id",
+      "c.transactionId",
       "c.title",
       "c.enabled",
     ]);
@@ -155,37 +155,267 @@ describe("managed cases server pagination", () => {
     jest.spyOn(qb, "getMany").mockResolvedValue([]);
     await expect(service.details(["missing"])).rejects.toThrow("无权访问");
   });
-  it("updates all selected cases with one application path after owner validation", async () => {
+  it("soft deletes accessible preproduction cases without touching source cases", async () => {
     const qb = (service as any).base();
     jest.spyOn(service as any, "base").mockReturnValue(qb);
     jest.spyOn(qb, "getMany").mockResolvedValue([{ id: "a" }, { id: "b" }]);
-    const save = jest
-      .spyOn((service as any).cases, "save")
-      .mockImplementation(async (rows) => rows);
+    const softDelete = jest
+      .spyOn((service as any).cases, "softDelete")
+      .mockResolvedValue({ affected: 2 } as any);
 
-    const result = await RequestContext.run("alice", () =>
-      service.setApplicationPathForMany(["a", "b"], "/手机银行/保险"),
-    );
-
-    expect(result).toEqual({ updated: 2, applicationPath: "/手机银行/保险" });
-    expect(qb.getParameters().caseIds).toEqual(["a", "b"]);
-    expect(save).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({ id: "a", applicationPath: "/手机银行/保险" }),
-        expect.objectContaining({ id: "b", applicationPath: "/手机银行/保险" }),
-      ]),
-    );
+    await expect(
+      RequestContext.run("alice", () => service.deleteCases(["a", "b"])),
+    ).resolves.toEqual({ deleted: 2 });
+    expect(softDelete).toHaveBeenCalledTimes(1);
   });
-  it("does not partially update when any selected case is inaccessible", async () => {
+  it("does not delete when any selected preproduction case is inaccessible", async () => {
     const qb = (service as any).base();
     jest.spyOn(service as any, "base").mockReturnValue(qb);
     jest.spyOn(qb, "getMany").mockResolvedValue([{ id: "a" }]);
-    const save = jest.spyOn((service as any).cases, "save");
+    const softDelete = jest.spyOn((service as any).cases, "softDelete");
 
     await expect(
-      service.setApplicationPathForMany(["a", "missing"], "/手机银行"),
+      RequestContext.run("alice", () => service.deleteCases(["a", "missing"])),
     ).rejects.toThrow("无权访问");
-    expect(save).not.toHaveBeenCalled();
+    expect(softDelete).not.toHaveBeenCalled();
+  });
+  it("updates the preproduction step snapshot without touching the source case", async () => {
+    const row = {
+      id: "c1",
+      title: "案例一",
+      snapshot: {
+        request: {
+          method: "GET",
+          path: "/old",
+          transport: "http",
+          encoding: "UTF-8",
+        },
+        expected: {},
+        metadata: { debugEncoding: "UTF-8" },
+        steps: [
+          {
+            id: "s1",
+            name: "步骤一",
+            isMainRequest: true,
+            request: {
+              method: "GET",
+              path: "/old",
+              transport: "http",
+              encoding: "UTF-8",
+            },
+            expected: {},
+            exports: [],
+            target: {
+              name: "旧环境",
+              address: "https://old.example.com",
+              environmentId: "env-old",
+              environmentServiceId: "service-old",
+            },
+          },
+        ],
+      },
+    };
+    const qb = (service as any).base();
+    jest.spyOn(service as any, "base").mockReturnValue(qb);
+    jest.spyOn(qb, "getOne").mockResolvedValue(row);
+    const save = jest
+      .spyOn((service as any).cases, "save")
+      .mockImplementation(async (value) => value);
+    jest.spyOn(service as any, "publicRow").mockReturnValue({ id: "c1" });
+
+    await RequestContext.run("alice", () =>
+      service.updateCaseStep("c1", "s1", {
+        name: "新步骤",
+        targetAddress: "https://new.example.com",
+        transport: "tcp",
+        method: "PATCH",
+        encoding: "GBK",
+        path: "/new",
+        body: { value: 1 },
+      }),
+    );
+
+    const saved = save.mock.calls[0][0] as any;
+    expect(saved.snapshot.steps[0].target.address).toBe(
+      "https://new.example.com",
+    );
+    expect(saved.snapshot.steps[0].target.environmentId).toBeUndefined();
+    expect(saved.snapshot.steps[0].name).toBe("新步骤");
+    expect(saved.snapshot.steps[0].request).toMatchObject({
+      transport: "tcp",
+      method: "PATCH",
+      path: "/new",
+      encoding: "GBK",
+      body: { value: 1 },
+    });
+    expect(saved.snapshot.request).toMatchObject({
+      transport: "tcp",
+      method: "PATCH",
+      path: "/new",
+    });
+    expect(saved.snapshot.metadata.debugEncoding).toBe("GBK");
+  });
+
+  it("updates the full preproduction request step from the shared step editor", async () => {
+    const row = {
+      id: "c1",
+      title: "案例一",
+      snapshot: {
+        request: { method: "GET", path: "/old", transport: "http" },
+        expected: {},
+        metadata: {},
+        steps: [
+          {
+            id: "s1",
+            name: "步骤一",
+            isMainRequest: true,
+            request: {
+              method: "GET",
+              path: "/old",
+              transport: "http",
+              encoding: "UTF-8",
+            },
+            expected: {},
+            exports: [],
+            target: {
+              name: "旧环境",
+              address: "https://old.example.com",
+              environmentId: "env-old",
+              environmentServiceId: "service-old",
+            },
+          },
+        ],
+      },
+    };
+    const qb = (service as any).base();
+    jest.spyOn(service as any, "base").mockReturnValue(qb);
+    jest.spyOn(qb, "getOne").mockResolvedValue(row);
+    const save = jest
+      .spyOn((service as any).cases, "save")
+      .mockImplementation(async (value) => value);
+    jest.spyOn(service as any, "publicRow").mockReturnValue({ id: "c1" });
+
+    await RequestContext.run("alice", () =>
+      service.updateCaseStep("c1", "s1", {
+        step: {
+          ...row.snapshot.steps[0],
+          name: "新步骤",
+          target: {
+            name: "新环境",
+            address: "https://new.example.com",
+            environmentId: "env-new",
+            environmentServiceId: "service-new",
+          },
+          request: {
+            method: "POST",
+            path: "/new",
+            transport: "http",
+            encoding: "GBK",
+            contentType: "application/json",
+            query: { page: "1" },
+            headers: { token: "abc" },
+            body: { id: 1 },
+            bodyText: '{"id":1}',
+          },
+          expected: {
+            assertions: [
+              {
+                type: "status",
+                operator: "eq",
+                expression: "",
+                expected: "200",
+              },
+            ],
+          },
+          exports: [
+            {
+              name: "token",
+              source: "header",
+              expression: "token",
+              required: true,
+            },
+          ],
+        },
+      }),
+    );
+
+    const saved = save.mock.calls[0][0] as any;
+    expect(saved.snapshot.steps[0]).toMatchObject({
+      name: "新步骤",
+      target: {
+        name: "新环境",
+        address: "https://new.example.com",
+        environmentId: "env-new",
+        environmentServiceId: "service-new",
+      },
+      request: {
+        method: "POST",
+        path: "/new",
+        transport: "http",
+        encoding: "GBK",
+        contentType: "application/json",
+        query: { page: "1" },
+        headers: { token: "abc" },
+        body: { id: 1 },
+        bodyText: '{"id":1}',
+      },
+      exports: [
+        {
+          name: "token",
+          source: "header",
+          expression: "token",
+          required: true,
+        },
+      ],
+    });
+    expect(saved.snapshot.steps[0].expected.assertions).toHaveLength(1);
+    expect(saved.snapshot.request).toMatchObject({
+      method: "POST",
+      path: "/new",
+    });
+    expect(saved.snapshot.expected.assertions).toHaveLength(1);
+    expect(saved.snapshot.metadata.debugEncoding).toBe("GBK");
+  });
+
+  it("updates preproduction case title, description and remark only in the snapshot", async () => {
+    const row = {
+      id: "c1",
+      title: "旧名称",
+      description: "旧描述",
+      remark: "旧备注",
+      snapshot: {
+        description: "旧描述",
+        remark: "旧备注",
+        request: {},
+        expected: {},
+      },
+    };
+    const qb = (service as any).base();
+    jest.spyOn(service as any, "base").mockReturnValue(qb);
+    jest.spyOn(qb, "getOne").mockResolvedValue(row);
+    const save = jest
+      .spyOn((service as any).cases, "save")
+      .mockImplementation(async (value) => value);
+    jest.spyOn(service as any, "publicRow").mockReturnValue({ id: "c1" });
+
+    await RequestContext.run("alice", () =>
+      service.updateCaseInfo("c1", {
+        title: "新名称",
+        description: "新描述",
+        remark: "新备注",
+      }),
+    );
+
+    const saved = save.mock.calls[0][0] as any;
+    expect(saved).toMatchObject({
+      title: "新名称",
+      description: "新描述",
+      remark: "新备注",
+    });
+    expect(saved.snapshot).toMatchObject({
+      description: "新描述",
+      remark: "新备注",
+    });
   });
   it("validates page bounds, sizes, boolean false and export batch limits", async () => {
     expect(

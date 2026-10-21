@@ -50,34 +50,6 @@
           <template #icon><SaveOutlined /></template>
           保存
         </a-button>
-        <a-dropdown v-model:open="moreMenuOpen" trigger="click">
-          <a-button>
-            更多
-            <DownOutlined
-              :class="['dropdown-trigger-chevron', { 'is-open': moreMenuOpen }]"
-            />
-          </a-button>
-          <template #overlay>
-            <a-menu @click="onMoreMenuClick">
-              <a-menu-item key="data-functions">
-                <CodeOutlined />
-                函数库
-              </a-menu-item>
-              <a-menu-item key="database-connections">
-                <CodeOutlined />
-                数据库
-              </a-menu-item>
-              <a-menu-item key="step-library">
-                <UnorderedListOutlined />
-                步骤库
-              </a-menu-item>
-              <a-menu-item key="environments">
-                <SettingOutlined />
-                环境库
-              </a-menu-item>
-            </a-menu>
-          </template>
-        </a-dropdown>
       </div>
     </div>
 

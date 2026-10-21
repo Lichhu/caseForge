@@ -77,7 +77,14 @@ export class RequirementPlatformService {
   /**
    * 需求列表：人员池成员和分发人可见全量，其他用户不可见
    */
-  async list(options: { page: number; size: number; status?: string; keyword?: string; owner?: string; application?: string }): Promise<{
+  async list(options: {
+    page: number;
+    size: number;
+    status?: string;
+    keyword?: string;
+    owner?: string;
+    application?: string;
+  }): Promise<{
     rows: PublicRequirement[];
     count: number;
     isDispatcher: boolean;
@@ -89,7 +96,7 @@ export class RequirementPlatformService {
   }> {
     const userName = getScopedUserName();
     const isDispatcher = await this.isDispatcher(userName);
-    const isMember = await this.isPoolMember(userName) && !isDispatcher;
+    const isMember = (await this.isPoolMember(userName)) && !isDispatcher;
     if (!isDispatcher && !isMember) {
       throw new ForbiddenException("仅人员池成员和分发人可查看需求数据");
     }
@@ -97,13 +104,18 @@ export class RequirementPlatformService {
     const size = Math.min(100, Math.max(1, Math.floor(options.size || 20)));
     const query = this.requirementRepo.createQueryBuilder("requirement");
     if (options.status && options.status !== "all") {
-      query.andWhere("requirement.status = :status", { status: options.status });
+      query.andWhere("requirement.status = :status", {
+        status: options.status,
+      });
     }
     const keyword = options.keyword?.trim();
     if (keyword) {
-      query.andWhere("(requirement.projectCode LIKE :keyword OR requirement.projectName LIKE :keyword)", {
-        keyword: `%${keyword}%`,
-      });
+      query.andWhere(
+        "(requirement.projectCode LIKE :keyword OR requirement.projectName LIKE :keyword)",
+        {
+          keyword: `%${keyword}%`,
+        },
+      );
     }
     const owner = options.owner?.trim();
     if (owner) {
@@ -130,32 +142,54 @@ export class RequirementPlatformService {
           { application, projectCodes },
         );
       } else {
-        query.andWhere("requirement.applicationName = :application", { application });
+        query.andWhere("requirement.applicationName = :application", {
+          application,
+        });
       }
     }
-    query.orderBy("requirement.createdAt", "DESC").skip((page - 1) * size).take(size);
+    query
+      .orderBy("requirement.createdAt", "DESC")
+      .skip((page - 1) * size)
+      .take(size);
     const [rows, count] = await query.getManyAndCount();
     const sourceProjects = rows.length
       ? await this.sourceProjectRepo.find({
-          where: { projectCode: In(rows.map((row) => row.projectCode)), dataStatus: 0 },
+          where: {
+            projectCode: In(rows.map((row) => row.projectCode)),
+            dataStatus: 0,
+          },
           select: ["projectCode", "applicationName"],
         })
       : [];
     const applicationNameByCode = new Map(
-      sourceProjects.map((project) => [project.projectCode, project.applicationName?.trim() || null]),
+      sourceProjects.map((project) => [
+        project.projectCode,
+        project.applicationName?.trim() || null,
+      ]),
     );
     const members = await this.memberRepo.find({ order: { createdAt: "ASC" } });
-    const dispatchers = await this.dispatcherRepo.find({ order: { createdAt: "ASC" } });
-    const users = await this.sysUserRepo.find({ where: { status: "0", delFlag: "0" } });
-    const nameByUser = new Map(users.map((user) => [user.userName, user.nickName]));
-    const ownerUserNames = [...new Set([
-      ...members.map((member) => member.userName),
-      ...dispatchers.map((dispatcher) => dispatcher.userName),
-    ])];
+    const dispatchers = await this.dispatcherRepo.find({
+      order: { createdAt: "ASC" },
+    });
+    const users = await this.sysUserRepo.find({
+      where: { status: "0", delFlag: "0" },
+    });
+    const nameByUser = new Map(
+      users.map((user) => [user.userName, user.nickName]),
+    );
+    const ownerUserNames = [
+      ...new Set([
+        ...members.map((member) => member.userName),
+        ...dispatchers.map((dispatcher) => dispatcher.userName),
+      ]),
+    ];
     return {
       rows: rows.map((row) => ({
         ...this.toPublic(row),
-        applicationName: row.applicationName?.trim() || applicationNameByCode.get(row.projectCode) || null,
+        applicationName:
+          row.applicationName?.trim() ||
+          applicationNameByCode.get(row.projectCode) ||
+          null,
       })),
       count,
       isDispatcher,
@@ -210,13 +244,15 @@ export class RequirementPlatformService {
         return requirementRepo.findOneByOrFail({ id: deletedRow.id });
       });
     } else {
-      row = await this.requirementRepo.save(this.requirementRepo.create({
-        projectCode,
-        projectName,
-        applicationName,
-        createdBy: userName,
-        status: "pending_dispatch",
-      }));
+      row = await this.requirementRepo.save(
+        this.requirementRepo.create({
+          projectCode,
+          projectName,
+          applicationName,
+          createdBy: userName,
+          status: "pending_dispatch",
+        }),
+      );
     }
     return this.toPublic(row);
   }
@@ -230,19 +266,29 @@ export class RequirementPlatformService {
     return rows.map((row) => row.systemName.trim()).filter(Boolean);
   }
 
-  async update(id: string, dto: UpdateRequirementDto): Promise<PublicRequirement> {
+  async update(
+    id: string,
+    dto: UpdateRequirementDto,
+  ): Promise<PublicRequirement> {
     const row = await this.findRequirement(id);
     await this.assertRequirementEditor(row);
     if (dto.projectCode !== undefined) {
       const code = dto.projectCode.trim();
       if (!code) throw new BadRequestException("需求编号必填");
-      await this.assertCodeAvailable(code, id);
+      await this.assertCodeAvailable(code, id, row.claimedProjectId ?? undefined);
       row.projectCode = code;
     }
     if (dto.projectName !== undefined) {
       const name = dto.projectName.trim();
       if (!name) throw new BadRequestException("需求名必填");
       row.projectName = name;
+    }
+    if (dto.applicationName !== undefined) {
+      const applicationName = dto.applicationName.trim();
+      if (!applicationName) {
+        throw new BadRequestException("归属应用必填");
+      }
+      row.applicationName = applicationName;
     }
     await this.requirementRepo.save(row);
     if (row.claimedProjectId) {
@@ -284,13 +330,23 @@ export class RequirementPlatformService {
     await this.assertDispatcher();
     const userName = dto.userName.trim();
     if (!userName) throw new BadRequestException("分发人账号必填");
-    const user = await this.sysUserRepo.findOne({ where: { userName, status: "0", delFlag: "0" } });
+    const user = await this.sysUserRepo.findOne({
+      where: { userName, status: "0", delFlag: "0" },
+    });
     if (!user) throw new BadRequestException("用户不存在或已停用");
     const existing = await this.dispatcherRepo.findOne({ where: { userName } });
     if (existing) return existing;
-    const member = await this.memberRepo.findOne({ where: { userName }, withDeleted: true });
+    const member = await this.memberRepo.findOne({
+      where: { userName },
+      withDeleted: true,
+    });
     if (member?.deletedAt) await this.memberRepo.restore(member.id);
-    return this.dispatcherRepo.save(this.dispatcherRepo.create({ userName, remark: dto.remark?.trim() || null }));
+    return this.dispatcherRepo.save(
+      this.dispatcherRepo.create({
+        userName,
+        remark: dto.remark?.trim() || null,
+      }),
+    );
   }
 
   async removeDispatcher(id: string) {
@@ -308,7 +364,11 @@ export class RequirementPlatformService {
     if (status === "completed" && row.status !== "testing") {
       throw new BadRequestException("仅测试中的需求可以标记为已完成");
     }
-    if (status === "testing" && row.status !== "returned" && row.status !== "completed") {
+    if (
+      status === "testing" &&
+      row.status !== "returned" &&
+      row.status !== "completed"
+    ) {
       throw new BadRequestException("仅已打回的需求可以恢复为测试中");
     }
     row.status = status;
@@ -319,7 +379,9 @@ export class RequirementPlatformService {
   }
 
   async assertProjectOperational(projectId: string) {
-    const requirement = await this.requirementRepo.findOne({ where: { claimedProjectId: projectId } });
+    const requirement = await this.requirementRepo.findOne({
+      where: { claimedProjectId: projectId },
+    });
     if (!requirement) return;
     await this.assertRequirementEditor(requirement);
     if (requirement.status !== "testing") {
@@ -328,10 +390,14 @@ export class RequirementPlatformService {
   }
 
   async refreshReturnedRequirements() {
-    const completed = await this.requirementRepo.find({ where: { status: "completed" } });
+    const completed = await this.requirementRepo.find({
+      where: { status: "completed" },
+    });
     for (const row of completed) {
       if (!row.claimedProjectId) continue;
-      const source = await this.sourceProjectRepo.findOne({ where: { projectCode: row.projectCode, dataStatus: 0 } });
+      const source = await this.sourceProjectRepo.findOne({
+        where: { projectCode: row.projectCode, dataStatus: 0 },
+      });
       if (!source) continue;
       row.sourceUpdatedAt = new Date();
       if (source.demandStatus?.trim().toLowerCase() === "sit移交") {
@@ -355,21 +421,31 @@ export class RequirementPlatformService {
     throw new ForbiddenException("仅需求归属人或分发人可操作");
   }
 
-  private async assertCodeAvailable(projectCode: string, excludeId?: string) {
-    const duplicate = await this.requirementRepo.findOne({ where: { projectCode } });
-    if (duplicate && duplicate.id !== excludeId) throw new BadRequestException(`需求编号 ${projectCode} 已存在`);
+  private async assertCodeAvailable(
+    projectCode: string,
+    excludeRequirementId?: string,
+    excludeProjectId?: string,
+  ) {
+    const duplicate = await this.requirementRepo.findOne({
+      where: { projectCode },
+    });
+    if (duplicate && duplicate.id !== excludeRequirementId)
+      throw new BadRequestException(`需求编号 ${projectCode} 已存在`);
     const project = await this.projectRepo
       .createQueryBuilder("project")
       .where("project.platform = :platform", { platform: "api-test" })
       .andWhere("project.requirementNo = :projectCode", { projectCode })
       .andWhere("project.deleted_at IS NULL")
       .getOne();
-    if (project && project.id !== excludeId) throw new BadRequestException(`需求编号 ${projectCode} 已存在接口项目`);
+    if (project && project.id !== excludeProjectId)
+      throw new BadRequestException(`需求编号 ${projectCode} 已存在接口项目`);
   }
 
   private async isPoolMember(userName: string) {
-    return (await this.dispatcherRepo.exists({ where: { userName } })) ||
-      this.memberRepo.exists({ where: { userName } });
+    return (
+      (await this.dispatcherRepo.exists({ where: { userName } })) ||
+      this.memberRepo.exists({ where: { userName } })
+    );
   }
 
   /** 手动同步（仅分发人）：源库筛选 + 服管校验 + 增量入库 */
@@ -384,65 +460,105 @@ export class RequirementPlatformService {
   > {
     await this.assertDispatcher();
     const pool = await this.memberRepo.find({ select: ["userName"] });
-    const dispatchers = await this.dispatcherRepo.find({ select: ["userName"] });
-    const accounts = [...new Set([...pool, ...dispatchers].map((row) => row.userName))];
-    const users = accounts.length ? await this.sysUserRepo.find({
-      where: { status: "0", delFlag: "0" },
-      order: { id: "ASC" },
-    }) : [];
-    return users.filter((user) => accounts.includes(user.userName)).map((user) => ({
-      userName: user.userName,
-      nickName: user.nickName,
-    }));
+    const dispatchers = await this.dispatcherRepo.find({
+      select: ["userName"],
+    });
+    const accounts = [
+      ...new Set([...pool, ...dispatchers].map((row) => row.userName)),
+    ];
+    const users = accounts.length
+      ? await this.sysUserRepo.find({
+          where: { status: "0", delFlag: "0" },
+          order: { id: "ASC" },
+        })
+      : [];
+    return users
+      .filter((user) => accounts.includes(user.userName))
+      .map((user) => ({
+        userName: user.userName,
+        nickName: user.nickName,
+      }));
   }
 
   async addPoolMember(dto: UpdateDispatcherDto) {
     await this.assertDispatcher();
     const userName = dto.userName.trim();
-    const user = await this.sysUserRepo.findOne({ where: { userName, status: "0", delFlag: "0" } });
+    const user = await this.sysUserRepo.findOne({
+      where: { userName, status: "0", delFlag: "0" },
+    });
     if (!user) throw new BadRequestException("用户不存在或已停用");
     const existing = await this.memberRepo.findOne({ where: { userName } });
     if (existing) return existing;
-    const deleted = await this.memberRepo.findOne({ where: { userName }, withDeleted: true });
+    const deleted = await this.memberRepo.findOne({
+      where: { userName },
+      withDeleted: true,
+    });
     if (deleted?.deletedAt) {
       await this.memberRepo.restore(deleted.id);
       return this.memberRepo.findOneByOrFail({ id: deleted.id });
     }
-    return this.memberRepo.save(this.memberRepo.create({ userName, remark: dto.remark?.trim() || null }));
+    return this.memberRepo.save(
+      this.memberRepo.create({ userName, remark: dto.remark?.trim() || null }),
+    );
   }
 
   async listPoolMembers() {
     await this.assertDispatcher();
     const members = await this.memberRepo.find({ order: { createdAt: "ASC" } });
-    const dispatchers = await this.dispatcherRepo.find({ order: { createdAt: "ASC" } });
-    const rows = [...members, ...dispatchers.map((row) => ({
-      id: `dispatcher:${row.id}`,
-      userName: row.userName,
-      remark: row.remark,
-      createdAt: row.createdAt,
-      isDispatcher: true,
-    }))];
-    const users = await this.sysUserRepo.find({ where: { status: "0", delFlag: "0" } });
-    const nameByUser = new Map(users.map((user) => [user.userName, user.nickName]));
-    return rows.map((row) => ({ ...row, nickName: nameByUser.get(row.userName) ?? row.userName }));
+    const dispatchers = await this.dispatcherRepo.find({
+      order: { createdAt: "ASC" },
+    });
+    const rows = [
+      ...members,
+      ...dispatchers.map((row) => ({
+        id: `dispatcher:${row.id}`,
+        userName: row.userName,
+        remark: row.remark,
+        createdAt: row.createdAt,
+        isDispatcher: true,
+      })),
+    ];
+    const users = await this.sysUserRepo.find({
+      where: { status: "0", delFlag: "0" },
+    });
+    const nameByUser = new Map(
+      users.map((user) => [user.userName, user.nickName]),
+    );
+    return rows.map((row) => ({
+      ...row,
+      nickName: nameByUser.get(row.userName) ?? row.userName,
+    }));
   }
 
   async searchPoolCandidates(keyword = "") {
     await this.assertDispatcher();
     const input = keyword.trim();
-    const query = this.sysUserRepo.createQueryBuilder("user")
-      .where("user.status = :status AND user.delFlag = :delFlag", { status: "0", delFlag: "0" });
+    const query = this.sysUserRepo
+      .createQueryBuilder("user")
+      .where("user.status = :status AND user.delFlag = :delFlag", {
+        status: "0",
+        delFlag: "0",
+      });
     if (input) {
-      query.andWhere("(user.userName LIKE :keyword OR user.nickName LIKE :keyword)", { keyword: `%${input}%` });
+      query.andWhere(
+        "(user.userName LIKE :keyword OR user.nickName LIKE :keyword)",
+        { keyword: `%${input}%` },
+      );
     }
     const users = await query.orderBy("user.nickName", "ASC").getMany();
     const pool = await this.memberRepo.find({ select: ["userName"] });
-    const dispatchers = await this.dispatcherRepo.find({ select: ["userName"] });
-    const existing = new Set([...pool, ...dispatchers].map((row) => row.userName));
-    return users.filter((user) => !existing.has(user.userName)).map((user) => ({
-      userName: user.userName,
-      nickName: user.nickName,
-    }));
+    const dispatchers = await this.dispatcherRepo.find({
+      select: ["userName"],
+    });
+    const existing = new Set(
+      [...pool, ...dispatchers].map((row) => row.userName),
+    );
+    return users
+      .filter((user) => !existing.has(user.userName))
+      .map((user) => ({
+        userName: user.userName,
+        nickName: user.nickName,
+      }));
   }
 
   async removePoolMember(id: string) {
@@ -485,13 +601,19 @@ export class RequirementPlatformService {
   async claim(id: string): Promise<PublicRequirement> {
     const userName = getScopedUserName();
     const requirement = await this.findRequirement(id);
-    if (requirement.status !== "pending_claim" && requirement.status !== "pending_dispatch") {
+    if (
+      requirement.status !== "pending_claim" &&
+      requirement.status !== "pending_dispatch"
+    ) {
       throw new BadRequestException("需求当前状态不可认领");
     }
     if (!(await this.isPoolMember(userName))) {
       throw new ForbiddenException("仅人员池成员可以认领需求");
     }
-    if (requirement.status === "pending_claim" && requirement.dispatchedTo !== userName) {
+    if (
+      requirement.status === "pending_claim" &&
+      requirement.dispatchedTo !== userName
+    ) {
       throw new ForbiddenException("该需求未分发给你，无法认领");
     }
 

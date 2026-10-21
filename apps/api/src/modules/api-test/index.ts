@@ -5,6 +5,7 @@ import { ApiCaseReportDeliveryService } from "./service/api-case-report-delivery
 import { Module } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
+import { ApiRequirementEntity } from "@requirement-platform/entity/api-requirement.entity";
 import { MinioStorageModule } from "@minio/index";
 import { AiWorkflowModule } from "@common/ai-workflow";
 import { ApiTestController } from "./controller/api-test.controller";
@@ -14,6 +15,7 @@ import { ApiAssertionGenerateJobEntity } from "./entity/api-assertion-generate-j
 import { ApiDocEntity } from "./entity/api-doc.entity";
 import { ApiEndpointEntity } from "./entity/api-endpoint.entity";
 import { ApiTestCaseEntity } from "./entity/api-test-case.entity";
+import { ApiPreproductionCaseEntity } from "./entity/api-preproduction-case.entity";
 import { ApiTestEnvironmentEntity } from "./entity/api-test-environment.entity";
 import { ApiTestEnvironmentServiceEntity } from "./entity/api-test-environment-service.entity";
 import { ApiTestExecutionSetEntity } from "./entity/api-test-execution-set.entity";
@@ -37,6 +39,7 @@ import { ApiExecutionService } from "./service/api-execution.service";
 import { ApiReportService } from "./service/api-report.service";
 import { SmpClientService } from "./service/smp-client.service";
 import { SmpSyncService } from "./service/smp-sync.service";
+import { ApiPreproductionCaseService } from "./service/api-preproduction-case.service";
 import { ApiDataFunctionService } from "./service/api-data-function.service";
 import { SqlStepRunnerService } from "./service/sql-step-runner.service";
 import { ApiStepLibraryService } from "./service/api-step-library.service";
@@ -50,6 +53,7 @@ import { ApiStepLibraryService } from "./service/api-step-library.service";
       ApiDocEntity,
       ApiEndpointEntity,
       ApiTestCaseEntity,
+      ApiPreproductionCaseEntity,
       ApiTestEnvironmentEntity,
       ApiTestEnvironmentServiceEntity,
       ApiTestExecutionSetEntity,
@@ -63,6 +67,7 @@ import { ApiStepLibraryService } from "./service/api-step-library.service";
       ApiStepDebugRecordEntity,
       ApiReportExportEntity,
       CaseProjectEntity,
+      ApiRequirementEntity,
     ]),
     NotifyModule,
     MinioStorageModule,
@@ -84,6 +89,7 @@ import { ApiStepLibraryService } from "./service/api-step-library.service";
     ApiTransactionService,
     SmpClientService,
     SmpSyncService,
+    ApiPreproductionCaseService,
     ApiDataFunctionService,
     ApiStepLibraryService,
     SqlStepRunnerService,
@@ -98,6 +104,7 @@ import { ApiStepLibraryService } from "./service/api-step-library.service";
     ApiTransactionService,
     SmpClientService,
     SmpSyncService,
+    ApiPreproductionCaseService,
     ApiDataFunctionService,
   ],
 })

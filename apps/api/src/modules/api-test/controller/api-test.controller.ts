@@ -1,14 +1,13 @@
-import {
-  BatchSetManagedCaseApplicationDto,
-  ExportApiCaseTemplateDto,
-  SetManagedCaseApplicationDto,
-} from "../dto/api-case-template.dto";
+import { ExportApiCaseTemplateDto } from "../dto/api-case-template.dto";
 import { ApiCaseTemplateService } from "../service/api-case-template.service";
 import { ApiCaseManagementService } from "../service/api-case-management.service";
 import {
+  DeleteManagedCasesDto,
   ListManagedCasesDto,
   ManagedCaseDetailsDto,
 } from "../dto/list-managed-cases.dto";
+import { UpdatePreproductionStepDto } from "../dto/update-preproduction-step.dto";
+import { UpdatePreproductionCaseDto } from "../dto/update-preproduction-case.dto";
 import { PublishCaseReportDto } from "@api-test/dto/publish-case-report.dto";
 import { ApiCaseReportDeliveryService } from "@api-test/service/api-case-report-delivery.service";
 import {
@@ -56,6 +55,11 @@ import {
 } from "@api-test/dto/save-api-case.dto";
 import { ApiExecutionSetService } from "@api-test/service/api-execution-set.service";
 import { SmpSyncService } from "@api-test/service/smp-sync.service";
+import { ApiPreproductionCaseService } from "@api-test/service/api-preproduction-case.service";
+import {
+  PreviewPreproductionSyncDto,
+  SyncPreproductionCasesDto,
+} from "@api-test/dto/sync-preproduction-cases.dto";
 import {
   ReplaceExecutionSetCasesDto,
   ReplaceRunnerCasesDto,
@@ -106,6 +110,7 @@ export class ApiTestController {
     private readonly apiReportService: ApiReportService,
     private readonly apiTransactionService: ApiTransactionService,
     private readonly smpSyncService: SmpSyncService,
+    private readonly preproductionCaseService: ApiPreproductionCaseService,
     private readonly minio: MinioStorageService,
     private readonly aiWorkflow: AiWorkflowService,
     private readonly assertionGenerateQueueService: ApiAssertionGenerateQueueService,
@@ -121,24 +126,6 @@ export class ApiTestController {
   @Get("case-management/cases")
   listManagedCases(@Query() query: ListManagedCasesDto) {
     return this.caseManagement.list(query);
-  }
-
-  @Patch("case-management/cases/:caseId/application")
-  setManagedCaseApplication(
-    @Param("caseId") caseId: string,
-    @Body() body: SetManagedCaseApplicationDto,
-  ) {
-    return this.caseManagement.setApplicationPath(caseId, body.applicationPath);
-  }
-
-  @Patch("case-management/cases/application")
-  batchSetManagedCaseApplication(
-    @Body() body: BatchSetManagedCaseApplicationDto,
-  ) {
-    return this.caseManagement.setApplicationPathForMany(
-      body.caseIds,
-      body.applicationPath,
-    );
   }
 
   @Get("case-management/options")
@@ -167,6 +154,37 @@ export class ApiTestController {
   @Post("case-management/details")
   managedCaseDetails(@Body() body: ManagedCaseDetailsDto) {
     return this.caseManagement.details(body.ids);
+  }
+
+  @Delete("case-management/cases/:caseId")
+  @ApiOperation({ summary: "删除单条准生产案例" })
+  deleteManagedCase(@Param("caseId") caseId: string) {
+    return this.caseManagement.deleteCases([caseId]);
+  }
+
+  @Post("case-management/cases/delete")
+  @ApiOperation({ summary: "批量删除准生产案例" })
+  deleteManagedCases(@Body() body: DeleteManagedCasesDto) {
+    return this.caseManagement.deleteCases(body.caseIds);
+  }
+
+  @Patch("case-management/cases/:caseId/steps/:stepId")
+  @ApiOperation({ summary: "更新准生产案例步骤配置" })
+  updateManagedCaseStep(
+    @Param("caseId") caseId: string,
+    @Param("stepId") stepId: string,
+    @Body() body: UpdatePreproductionStepDto,
+  ) {
+    return this.caseManagement.updateCaseStep(caseId, stepId, body);
+  }
+
+  @Patch("case-management/cases/:caseId")
+  @ApiOperation({ summary: "更新准生产案例基础信息" })
+  updateManagedCaseInfo(
+    @Param("caseId") caseId: string,
+    @Body() body: UpdatePreproductionCaseDto,
+  ) {
+    return this.caseManagement.updateCaseInfo(caseId, body);
   }
 
   @Get("case-management/application-systems")
@@ -400,6 +418,31 @@ export class ApiTestController {
     @Body() body: SmpSyncTransactionsDto,
   ) {
     return this.smpSyncService.syncTransactions(projectId, body.items);
+  }
+
+  @Post(":projectId/transactions/preprod-sync/preview")
+  @ApiOperation({ summary: "预检准生产同步的关联案例" })
+  previewPreproductionSync(
+    @Param("projectId") projectId: string,
+    @Body() body: PreviewPreproductionSyncDto,
+  ) {
+    return this.preproductionCaseService.preview(
+      projectId,
+      body.transactionIds ?? [],
+    );
+  }
+
+  @Post(":projectId/transactions/preprod-sync")
+  @ApiOperation({ summary: "同步项目案例到准生产管理" })
+  syncPreproductionCases(
+    @Param("projectId") projectId: string,
+    @Body() body: SyncPreproductionCasesDto,
+  ) {
+    return this.preproductionCaseService.syncSelectedCases(
+      projectId,
+      body.transactionIds,
+      body.caseIds,
+    );
   }
 
   @Post(":projectId/transactions/:transactionId/smp-refresh")
@@ -1117,6 +1160,7 @@ export class ApiTestController {
     return this.apiExecutionService.runCases({
       projectId,
       caseIds: body.caseIds,
+      caseSource: body.caseSource,
       environmentId: body.environmentId,
       environmentServiceId: body.environmentServiceId,
       transactionId,

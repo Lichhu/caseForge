@@ -1,45 +1,87 @@
 <template>
-  <a-modal v-model:open="open" title="数据库连接" width="1040px" :footer="null" :z-index="IMMERSIVE_OVERLAY_Z_INDEX">
+  <LibraryPanelShell
+    v-model:open="open"
+    title="数据库连接"
+    width="min(1200px, 82vw)"
+    :z-index="IMMERSIVE_OVERLAY_Z_INDEX"
+    body-padding="20px 28px 24px"
+    :embedded="embedded"
+  >
     <div class="db-connection-layout">
-      <aside class="db-connection-list">
-        <div class="db-connection-list-head"><strong>连接</strong><a-button type="primary" size="small" @click="createConnection"><PlusOutlined /> 新建</a-button></div>
-        <button v-for="item in connections" :key="item.id" type="button" :class="{ active: item.id === activeId }" @click="selectConnection(item.id)">
-          <DatabaseOutlined /><span><strong>{{ item.name }}</strong><small>{{ item.type }} · {{ item.host }}:{{ item.port }}</small></span>
-        </button>
-      </aside>
+      <LibrarySidebar title="数据库" :count="filteredConnections.length" @create="createConnection">
+        <template #tools>
+          <LibrarySearch v-model="connectionKeyword" placeholder="搜索连接名称或主机 IP" />
+        </template>
+        <LibraryListItem
+          v-for="item in filteredConnections"
+          :key="item.id"
+          :name="item.name"
+          :meta="`${item.type} · ${item.host}:${item.port}`"
+          :active="item.id === activeId"
+          icon-tone="blue"
+          @select="selectConnection(item.id)"
+        >
+          <template #icon><DatabaseOutlined /></template>
+        </LibraryListItem>
+        <LibraryEmptyState
+          v-if="!filteredConnections.length"
+          :text="connectionKeyword?.trim() ? '无匹配连接' : '暂无连接'"
+        />
+      </LibrarySidebar>
       <section class="db-connection-editor">
-        <a-form layout="vertical">
-          <div class="db-connection-grid">
-            <a-form-item label="连接名称" required><a-input v-model:value="form.name" /></a-form-item>
-            <a-form-item label="数据库类型" required><a-select v-model:value="form.type" :options="typeOptions" /></a-form-item>
-            <a-form-item label="主机" required><a-input v-model:value="form.host" /></a-form-item>
-            <a-form-item label="端口" required><a-input-number v-model:value="form.port" :min="1" :max="65535" style="width: 100%" /></a-form-item>
-            <a-form-item :label="databaseLabel" :required="databaseRequired"><a-input v-model:value="form.database" /></a-form-item>
-            <a-form-item label="用户名" required><a-input v-model:value="form.username" /></a-form-item>
-            <a-form-item label="密码" required><a-input-password v-model:value="form.password" /></a-form-item>
-            <a-form-item label="只读连接"><a-switch v-model:checked="form.readonly" /></a-form-item>
-          </div>
-        </a-form>
-        <div class="db-connection-footer">
-          <a-button danger :disabled="!activeId" @click="removeConnection"><DeleteOutlined /> 删除</a-button>
-          <a-space><a-button :loading="testing" @click="testConnection"><ApiOutlined /> 测试连接</a-button><a-button type="primary" @click="saveConnection">保存</a-button></a-space>
+        <div class="db-connection-body">
+          <a-form layout="vertical">
+            <div class="db-connection-grid">
+              <a-form-item label="连接名称" required><a-input v-model:value="form.name" /></a-form-item>
+              <a-form-item label="数据库类型" required><a-select v-model:value="form.type" :options="typeOptions" /></a-form-item>
+              <a-form-item label="主机" required><a-input v-model:value="form.host" /></a-form-item>
+              <a-form-item label="端口" required><a-input-number v-model:value="form.port" :min="1" :max="65535" style="width: 100%" /></a-form-item>
+              <a-form-item :label="databaseLabel" :required="databaseRequired"><a-input v-model:value="form.database" /></a-form-item>
+              <a-form-item label="用户名" required><a-input v-model:value="form.username" /></a-form-item>
+              <a-form-item label="密码" required><a-input-password v-model:value="form.password" /></a-form-item>
+              <a-form-item label="只读连接"><a-switch v-model:checked="form.readonly" /></a-form-item>
+            </div>
+          </a-form>
         </div>
+        <LibraryEditorFooter>
+          <template #start>
+            <a-button danger :disabled="!activeId" @click="removeConnection"><DeleteOutlined /> 删除</a-button>
+          </template>
+          <template #end>
+            <a-button :loading="testing" @click="testConnection"><ApiOutlined /> 测试连接</a-button>
+            <a-button type="primary" @click="saveConnection">保存</a-button>
+          </template>
+        </LibraryEditorFooter>
       </section>
     </div>
-  </a-modal>
+  </LibraryPanelShell>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue';
-import { ApiOutlined, DatabaseOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons-vue';
+import { ApiOutlined, DatabaseOutlined, DeleteOutlined } from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
 import { IMMERSIVE_OVERLAY_Z_INDEX, NESTED_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import { createDatabaseConnection, deleteDatabaseConnection, listDatabaseConnections, testDatabaseConnection, updateDatabaseConnection } from '@/api/apiTestClient';
+import LibraryEditorFooter from './LibraryEditorFooter.vue';
+import LibraryEmptyState from './LibraryEmptyState.vue';
+import LibraryListItem from './LibraryListItem.vue';
+import LibraryPanelShell from './LibraryPanelShell.vue';
+import LibrarySearch from './LibrarySearch.vue';
+import LibrarySidebar from './LibrarySidebar.vue';
 
 interface DatabaseConnectionDraft { id: string; name: string; type: string; host: string; port: number; database: string; username: string; password: string; readonly: boolean }
-const props = defineProps<{ projectId: string }>();
+const props = defineProps<{ projectId: string; embedded?: boolean }>();
 const open = defineModel<boolean>('open', { required: true });
 const connections = ref<DatabaseConnectionDraft[]>([]);
+const connectionKeyword = ref('');
+const filteredConnections = computed(() => {
+  const keyword = (connectionKeyword.value ?? '').trim().toLowerCase();
+  if (!keyword) return connections.value;
+  return connections.value.filter((item) =>
+    [item.name, item.host].some((value) => value?.toLowerCase().includes(keyword)),
+  );
+});
 const activeId = ref('');
 const form = reactive<DatabaseConnectionDraft>({ id: '', name: '', type: 'MySQL', host: '', port: 3306, database: '', username: '', password: '', readonly: true });
 const testing = ref(false);
@@ -63,7 +105,7 @@ watch(() => form.type, (type, previous) => {
   if (!type || type === previous) return;
   form.port = defaultPorts[type] ?? form.port;
 });
-watch(open, (value) => { if (value) void loadConnections(); });
+watch(open, (value) => { if (value) void loadConnections(); }, { immediate: true });
 
 async function loadConnections() { connections.value = (await listDatabaseConnections(props.projectId)).map((item) => ({ ...item, database: item.databaseName, password: '' })); const current = connections.value.find((item) => item.id === activeId.value) ?? connections.value[0]; if (current) selectConnection(current.id); else createConnection(); }
 
@@ -97,16 +139,10 @@ async function testConnection() { if (!activeId.value) return message.warning('�
 </script>
 
 <style scoped>
-.db-connection-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); height: min(520px, calc(100vh - 140px)); min-height: 0; border: 1px solid var(--cf-border, #e4e7ec); border-radius: 8px; overflow: hidden; }
-.db-connection-list { display: flex; flex-direction: column; min-height: 0; padding: 10px; overflow-y: auto; border-right: 1px solid var(--cf-border, #e4e7ec); background: var(--cf-surface-soft, #f8f9fb); }
-.db-connection-list-head { position: sticky; top: -10px; z-index: 1; flex-shrink: 0; margin: -10px -10px 0; padding: 10px; background: var(--cf-surface-soft, #f8f9fb); }
-.db-connection-list-head, .db-connection-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.db-connection-list > button { display: grid; grid-template-columns: 24px 1fr; gap: 8px; width: 100%; margin-top: 6px; padding: 9px; border: 1px solid transparent; border-radius: 6px; background: transparent; text-align: left; cursor: pointer; }
-.db-connection-list > button.active { border-color: var(--cf-brand-border, #e7b8c0); background: var(--cf-brand-soft, #fff5f6); }
-.db-connection-list strong, .db-connection-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.db-connection-list small { margin-top: 2px; color: var(--cf-text-secondary, #667085); }
-.db-connection-editor { display: flex; flex-direction: column; min-height: 0; padding: 16px 18px; overflow-y: auto; }
-.db-connection-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
-.db-connection-footer { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--cf-border, #e4e7ec); }
+.db-connection-layout { display: grid; grid-template-columns: 252px minmax(0, 1fr); gap: 20px; height: calc(100vh - 120px); min-height: 540px; }
+.db-connection-editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid var(--cf-border, #e4e7ec); border-radius: 12px; background: var(--cf-surface, #fff); overflow: hidden; }
+.db-connection-body { flex: 1; min-height: 0; padding: 24px 28px; overflow-y: auto; }
+.db-connection-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
+.db-connection-grid :deep(.ant-form-item) { margin-bottom: 22px; }
 @media (max-width: 700px) { .db-connection-layout, .db-connection-grid { grid-template-columns: 1fr; } }
 </style>

@@ -1,45 +1,36 @@
 <template>
-  <a-modal
+  <LibraryPanelShell
     v-model:open="open"
-    width="1120px"
-    :footer="null"
+    title="函数库"
+    width="min(1240px, 84vw)"
     :z-index="IMMERSIVE_OVERLAY_Z_INDEX"
-    wrap-class-name="data-function-modal-wrap"
-    class="data-function-modal"
-    :closable="true"
+    body-padding="20px 28px 24px"
+    :embedded="embedded"
   >
-    <template #title>函数库</template>
-
     <div class="data-function-layout">
-      <aside class="data-function-sidebar">
-        <div class="data-function-sidebar-head">
-          <strong class="data-function-sidebar-label">函数 <span class="data-function-sidebar-count">{{ functions.length }}</span></strong>
-          <a-button type="primary" size="small" @click="createFunction">
-            <template #icon><PlusOutlined /></template>
-            新建
-          </a-button>
-        </div>
-
-        <div class="data-function-list">
-          <button
-            v-for="item in functions"
-            :key="item.id"
-            type="button"
-            class="data-function-item"
-            :class="{ active: item.id === activeId }"
-            @click="selectFunction(item.id)"
-          >
-            <span class="data-function-item-icon" :class="`type-${item.type}`">
-              <CodeOutlined v-if="item.type === 'template'" />
-              <DatabaseOutlined v-else />
-            </span>
-            <span class="data-function-item-main">
-              <strong>{{ item.name || '未命名函数' }}</strong>
-              <small>{{ typeLabel(item.type) }}</small>
-            </span>
-          </button>
-        </div>
-      </aside>
+      <LibrarySidebar title="函数" :count="filteredFunctions.length" @create="createFunction">
+        <template #tools>
+          <LibrarySearch v-model="functionKeyword" placeholder="搜索函数名称或简介" />
+        </template>
+        <LibraryListItem
+          v-for="item in filteredFunctions"
+          :key="item.id"
+          :name="item.name || '未命名函数'"
+          :meta="typeLabel(item.type)"
+          :active="item.id === activeId"
+          :icon-tone="item.type === 'template' ? 'brand' : 'blue'"
+          @select="selectFunction(item.id)"
+        >
+          <template #icon>
+            <CodeOutlined v-if="item.type === 'template'" />
+            <DatabaseOutlined v-else />
+          </template>
+        </LibraryListItem>
+        <LibraryEmptyState
+          v-if="!filteredFunctions.length"
+          :text="functionKeyword?.trim() ? '无匹配函数' : '暂无函数'"
+        />
+      </LibrarySidebar>
 
       <section class="data-function-editor">
         <div class="data-function-meta" :class="{ 'builtin-locked': isBuiltin }">
@@ -73,7 +64,7 @@
             <div class="parameter-rows">
               <div v-for="(name, index) in parameterNames" :key="index" class="parameter-row">
                 <span class="parameter-index">{{ index + 1 }}</span>
-                <a-input :value="name" size="small" placeholder="参数名" @input="renameParameter(index, $event)" />
+                <a-input :value="name" placeholder="参数名" @input="renameParameter(index, $event)" />
                 <div class="parameter-actions">
                   <a-button type="text" size="small" :disabled="index === 0" title="上移" @click="moveParameter(index, -1)"><ArrowUpOutlined /></a-button>
                   <a-button type="text" size="small" :disabled="index === parameterNames.length - 1" title="下移" @click="moveParameter(index, 1)"><ArrowDownOutlined /></a-button>
@@ -82,7 +73,7 @@
                   <a-button type="text" size="small" danger title="删除" @click="removeParameter(index)"><DeleteOutlined /></a-button>
                 </div>
               </div>
-              <a-button type="dashed" size="small" block @click="addParameter"><PlusOutlined /> 添加参数</a-button>
+              <a-button type="dashed" block @click="addParameter"><PlusOutlined /> 添加参数</a-button>
             </div>
           </div>
         </div>
@@ -108,14 +99,14 @@
                     @click="selectedPartId = part.id"
                   >
                     <span class="formula-index">{{ index + 1 }}</span>
-                    <a-select v-if="index" v-model:value="part.operator" :options="operatorOptions" size="small" />
+                    <a-select v-if="index" v-model:value="part.operator" :options="operatorOptions" />
                     <span v-else class="formula-result-start">结果</span>
-                    <a-select v-model:value="part.kind" size="small" :options="partTypeOptions" />
-                    <a-input v-if="part.kind === 'text' || part.kind === 'number'" v-model:value="part.value" size="small" :placeholder="part.kind === 'number' ? '数字' : '固定文本'" />
-                    <a-select v-else-if="part.kind === 'param'" v-model:value="part.value" size="small" :options="parameterOptions" placeholder="选择参数" />
-                    <a-select v-else-if="part.kind === 'time'" v-model:value="part.value" size="small" :options="formulaTimeOptions" />
-                    <a-select v-else-if="part.kind === 'context'" v-model:value="part.value" size="small" :options="formulaContextOptions" />
-                    <a-input-number v-else-if="part.kind === 'random'" v-model:value="part.length" size="small" :min="1" :max="32" addon-after="位" style="width: 100%" />
+                    <a-select v-model:value="part.kind" :options="partTypeOptions" />
+                    <a-input v-if="part.kind === 'text' || part.kind === 'number'" v-model:value="part.value" :placeholder="part.kind === 'number' ? '数字' : '固定文本'" />
+                    <a-select v-else-if="part.kind === 'param'" v-model:value="part.value" :options="parameterOptions" placeholder="选择参数" />
+                    <a-select v-else-if="part.kind === 'time'" v-model:value="part.value" :options="formulaTimeOptions" />
+                    <a-select v-else-if="part.kind === 'context'" v-model:value="part.value" :options="formulaContextOptions" />
+                    <a-input-number v-else-if="part.kind === 'random'" v-model:value="part.length" :min="1" :max="32" addon-after="位" style="width: 100%" />
                     <span v-else class="formula-auto">自动生成 UUID v4</span>
                     <div class="formula-actions">
                       <a-button type="text" size="small" :disabled="index === 0" title="上移" @click.stop="movePart(index, -1)"><ArrowUpOutlined /></a-button>
@@ -126,7 +117,7 @@
                     </div>
                   </div>
                 </div>
-                <a-button type="dashed" block size="small" @click="addPart"><PlusOutlined /> 添加一行</a-button>
+                <a-button type="dashed" block @click="addPart"><PlusOutlined /> 添加一行</a-button>
               </section>
               <a-form-item v-else :extra="scriptHint">
                 <template #label>
@@ -167,7 +158,7 @@
               class="data-function-preview-param"
             >
               <span>{{ name }}</span>
-              <a-input v-model:value="previewParams[name]" :placeholder="`输入 ${name}`" size="small" />
+              <a-input v-model:value="previewParams[name]" :placeholder="`输入 ${name}`" />
             </label>
           </div>
           <div v-else class="data-function-no-params">此函数无需输入参数</div>
@@ -180,19 +171,20 @@
         </section>
         </div>
 
-        <footer class="data-function-footer">
-          <a-button danger :disabled="!activeId || isBuiltin" @click="removeFunction">
-            <template #icon><DeleteOutlined /></template>
-            删除函数
-          </a-button>
-          <a-space :size="8">
-            <a-button @click="open = false">取消</a-button>
-            <a-button type="primary" :disabled="isBuiltin" @click="saveFunction">保存函数</a-button>
-          </a-space>
-        </footer>
+        <LibraryEditorFooter>
+          <template #start>
+            <a-button danger :disabled="!activeId || isBuiltin" @click="removeFunction">
+              <template #icon><DeleteOutlined /></template>
+              删除
+            </a-button>
+          </template>
+          <template #end>
+            <a-button type="primary" :disabled="isBuiltin" @click="saveFunction">保存</a-button>
+          </template>
+        </LibraryEditorFooter>
       </section>
     </div>
-  </a-modal>
+  </LibraryPanelShell>
   <a-modal v-model:open="aiScriptOpen" title="AI 生成函数" :confirm-loading="generatingScript" @ok="generateScript">
     <a-form layout="vertical">
       <a-form-item label="生成要求" extra="说明每个参数如何处理，并给出期望结果或示例">
@@ -219,6 +211,12 @@ import {
 import { message, Modal } from 'ant-design-vue';
 import { IMMERSIVE_OVERLAY_Z_INDEX, NESTED_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import { createDataFunction, deleteDataFunction, generateDataFunctionScript, getDatabaseMetadata, listDataFunctions, listDatabaseConnections, previewDataFunction, updateDataFunction } from '@/api/apiTestClient';
+import LibraryEditorFooter from './LibraryEditorFooter.vue';
+import LibraryEmptyState from './LibraryEmptyState.vue';
+import LibraryListItem from './LibraryListItem.vue';
+import LibraryPanelShell from './LibraryPanelShell.vue';
+import LibrarySearch from './LibrarySearch.vue';
+import LibrarySidebar from './LibrarySidebar.vue';
 
 type FunctionType = 'template' | 'sql';
 
@@ -262,15 +260,23 @@ interface SqlCondition {
 }
 
 const open = defineModel<boolean>('open', { required: true });
-const props = defineProps<{ projectId: string }>();
+const props = defineProps<{ projectId: string; embedded?: boolean }>();
 const functions = ref<DataFunctionDraft[]>([]);
+const functionKeyword = ref('');
+const filteredFunctions = computed(() => {
+  const keyword = (functionKeyword.value ?? '').trim().toLowerCase();
+  if (!keyword) return functions.value;
+  return functions.value.filter((item) =>
+    [item.name, item.description].some((value) => value?.toLowerCase().includes(keyword)),
+  );
+});
 const activeId = ref('');
 const form = reactive<DataFunctionDraft>(makeFunction());
 const previewParams = reactive<Record<string, string>>({ base: '0003' });
 const previewResult = ref('');
 const previewError = ref('');
 const previewing = ref(false);
-const previewExpanded = ref(false);
+const previewExpanded = ref(true);
 const aiScriptOpen = ref(false);
 const generatingScript = ref(false);
 const scriptRequirement = ref('');
@@ -351,7 +357,7 @@ const usageExpression = computed(() => {
 const previewValues = computed(() => parameterNames.value.map((name) => previewParams[name] ?? ''));
 const isBuiltin = computed(() => Boolean((functions.value.find((item) => item.id === activeId.value) as any)?.builtin));
 
-watch(open, (value) => { if (value) void loadAll(); });
+watch(open, (value) => { if (value) void loadAll(); }, { immediate: true });
 watch(() => form.connection, () => { if (form.type === 'sql') void loadSqlMetadata(); });
 watch(() => form.templateMode, (mode, previous) => {
   if (mode === 'builder') return;
@@ -697,123 +703,10 @@ function randomDigits(length: number) {
 <style scoped>
 .data-function-layout {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
-  gap: 10px;
-  height: min(680px, calc(100vh - 140px));
-  min-height: 0;
-}
-
-/* ===== 左侧列表 ===== */
-.data-function-sidebar {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  border: 1px solid var(--cf-border, #e4e7ec);
-  border-radius: 10px;
-  background: var(--cf-surface-soft, #f8f9fb);
-  overflow: hidden;
-}
-
-.data-function-sidebar-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px;
-}
-
-.data-function-sidebar-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--cf-text, #1d2939);
-}
-
-.data-function-sidebar-count {
-  font-size: 12px;
-  color: var(--cf-text-muted, #98a2b3);
-}
-
-.data-function-list {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 4px;
-  min-height: 0;
-  padding: 8px;
-  overflow-y: auto;
-}
-
-.data-function-item {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
-  width: 100%;
-  padding: 7px 8px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
-  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.data-function-item:hover {
-  background: rgb(255 255 255 / 72%);
-  border-color: var(--cf-border, #e4e7ec);
-}
-
-.data-function-item.active {
-  background: var(--cf-surface, #fff);
-  border-color: var(--cf-brand-border, #e7b8c0);
-  box-shadow: 0 1px 3px rgb(182 15 45 / 8%);
-}
-
-.data-function-item-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  font-size: 14px;
-}
-
-.data-function-item-icon.type-template {
-  background: var(--cf-brand-soft, #fff5f6);
-  color: var(--cf-brand, #b60f2d);
-}
-
-.data-function-item-icon.type-sql {
-  background: #eff6ff;
-  color: #2563eb;
-}
-
-
-.data-function-item-main {
-  min-width: 0;
-}
-
-.data-function-item-main strong,
-.data-function-item-main small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.data-function-item-main strong {
-  font-size: 13px;
-  color: var(--cf-text, #1d2939);
-}
-
-.data-function-item-main small {
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--cf-text-muted, #98a2b3);
+  grid-template-columns: 252px minmax(0, 1fr);
+  gap: 20px;
+  height: calc(100vh - 120px);
+  min-height: 540px;
 }
 
 /* ===== 右侧编辑区 ===== */
@@ -823,7 +716,7 @@ function randomDigits(length: number) {
   min-width: 0;
   min-height: 0;
   border: 1px solid var(--cf-border, #e4e7ec);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--cf-surface, #fff);
   overflow: hidden;
 }
@@ -831,8 +724,8 @@ function randomDigits(length: number) {
 .data-function-meta {
   display: grid;
   grid-template-columns: minmax(200px, 1.1fr) 210px minmax(240px, 1fr);
-  gap: 12px;
-  padding: 14px 16px;
+  gap: 16px 18px;
+  padding: 20px 22px;
   border-bottom: 1px solid var(--cf-border, #e4e7ec);
   background: var(--cf-surface-soft, #f8f9fb);
 }
@@ -842,7 +735,7 @@ function randomDigits(length: number) {
 
 .data-function-field {
   display: grid;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -853,8 +746,8 @@ function randomDigits(length: number) {
 }
 .data-function-params-field { grid-column: 1 / -1; }
 .data-function-desc-field { grid-column: 1 / -1; }
-.parameter-rows { display: grid; gap: 4px; max-height: 156px; overflow-y: auto; }
-.parameter-row { display: grid; grid-template-columns: 28px minmax(180px, 1fr) 170px; gap: 8px; align-items: center; min-height: 36px; padding: 3px 6px; border: 1px solid var(--cf-border, #e4e7ec); border-radius: 6px; background: var(--cf-surface, #fff); }
+.parameter-rows { display: grid; gap: 8px; max-height: 188px; overflow-y: auto; }
+.parameter-row { display: grid; grid-template-columns: 30px minmax(180px, 1fr) 174px; gap: 10px; align-items: center; min-height: 44px; padding: 7px 10px; border: 1px solid var(--cf-border, #e4e7ec); border-radius: 8px; background: var(--cf-surface, #fff); }
 .parameter-index { color: var(--cf-text-muted, #98a2b3); text-align: center; }
 .parameter-actions { display: flex; justify-content: flex-end; }
 .parameter-actions :deep(.ant-btn) { width: 30px; padding-inline: 0; color: var(--cf-text-secondary, #667085); opacity: 0; transition: opacity .15s ease; }
@@ -873,12 +766,12 @@ function randomDigits(length: number) {
 .data-function-body {
   flex: 1;
   min-height: 0;
-  padding: 4px 20px 0;
+  padding: 20px 24px 24px;
   overflow-y: auto;
 }
 
 .data-function-form {
-  margin-top: 8px;
+  margin-top: 0;
 }
 
 .data-function-form :deep(.ant-form-item-label > label) {
@@ -890,7 +783,7 @@ function randomDigits(length: number) {
 .data-function-basic-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 16px;
 }
 
 
@@ -902,19 +795,23 @@ function randomDigits(length: number) {
 .script-editor:focus { border-color: var(--cf-brand, #b60f2d); box-shadow: 0 0 0 2px rgb(182 15 45 / 10%); }
 .script-editor-label { display: flex; align-items: center; justify-content: space-between; width: 100%; }
 .data-function-result.error code { color: #fda29b; }
-.template-mode { margin-bottom: 12px; }
+.template-mode { margin-bottom: 18px; }
 .builtin-locked { pointer-events: none; opacity: .72; }
 .builtin-locked .data-function-call { pointer-events: auto; }
 
 /* ===== 公式构建器 ===== */
 .formula-panel,
 .config-panel {
-  margin-bottom: 4px;
+  margin-bottom: 8px;
+}
+
+.formula-panel-head {
+  margin-bottom: 12px;
 }
 
 .formula-panel-head strong {
   display: block;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--cf-text, #1d2939);
 }
 
@@ -928,28 +825,28 @@ function randomDigits(length: number) {
 .formula-table-head,
 .formula-row {
   display: grid;
-  grid-template-columns: 32px 90px 130px minmax(180px, 1fr) 170px;
-  gap: 8px;
+  grid-template-columns: 36px 96px 136px minmax(180px, 1fr) 174px;
+  gap: 10px;
   align-items: center;
 }
 
 .formula-table-head {
-  padding: 5px 8px;
+  padding: 9px 12px;
   color: var(--cf-text-muted, #98a2b3);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .formula-rows {
   display: grid;
-  max-height: 260px;
+  max-height: 320px;
   overflow-y: auto;
   border: 1px solid var(--cf-border, #e4e7ec);
   border-radius: 8px;
 }
 
 .formula-row {
-  min-height: 40px;
-  padding: 5px 8px;
+  min-height: 48px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--cf-border, #e4e7ec);
   background: var(--cf-surface, #fff);
   transition: background .15s ease, box-shadow .15s ease;
@@ -967,8 +864,8 @@ function randomDigits(length: number) {
 
 /* ===== 试运行 ===== */
 .data-function-preview-card {
-  margin: 12px 0 0;
-  padding: 14px 16px;
+  margin: 20px 0 0;
+  padding: 16px 18px;
   border: 1px solid var(--cf-border, #e4e7ec);
   border-radius: 10px;
   background: linear-gradient(180deg, #fafbfc 0%, #fff 100%);
@@ -990,7 +887,7 @@ function randomDigits(length: number) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--cf-text, #1d2939);
 }
 
@@ -1004,13 +901,13 @@ function randomDigits(length: number) {
 .data-function-preview-params {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 10px;
-  margin-bottom: 12px;
+  gap: 14px;
+  margin-bottom: 16px;
 }
 
 .data-function-preview-param {
   display: grid;
-  gap: 4px;
+  gap: 6px;
 }
 
 .data-function-preview-param > span {
@@ -1020,15 +917,15 @@ function randomDigits(length: number) {
 }
 
 .data-function-no-params {
-  margin-bottom: 12px;
+  margin-bottom: 16px;
   font-size: 12px;
   color: var(--cf-text-muted, #98a2b3);
 }
 
 .data-function-result {
   display: grid;
-  gap: 6px;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: 14px 16px;
   border-radius: 8px;
   background: #111827;
 }
@@ -1057,17 +954,6 @@ function randomDigits(length: number) {
   color: #9ca3af;
 }
 
-.data-function-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: auto;
-  padding: 14px 20px;
-  border-top: 1px solid var(--cf-border, #e4e7ec);
-  background: #fafbfc;
-}
-
 @media (max-width: 900px) {
   .data-function-basic-grid,
   .data-function-meta { grid-template-columns: 1fr 1fr; }
@@ -1077,27 +963,5 @@ function randomDigits(length: number) {
   .data-function-layout {
     grid-template-columns: 1fr;
   }
-}
-</style>
-
-<style>
-.data-function-modal-wrap .ant-modal-content {
-  padding: 0;
-  overflow: hidden;
-}
-
-.data-function-modal-wrap .ant-modal-header {
-  margin-bottom: 0;
-  padding: 18px 22px 14px;
-  border-bottom: 1px solid var(--cf-border, #e4e7ec);
-}
-
-.data-function-modal-wrap .ant-modal-body {
-  padding: 16px 18px 18px;
-}
-
-.data-function-modal-wrap .ant-modal-close {
-  top: 16px;
-  inset-inline-end: 16px;
 }
 </style>

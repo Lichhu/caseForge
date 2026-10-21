@@ -1,79 +1,68 @@
 <template>
-  <a-modal
+  <LibraryPanelShell
     v-model:open="open"
     title="环境库"
-    width="1280px"
-    :footer="null"
+    width="min(1320px, 86vw)"
     :z-index="IMMERSIVE_OVERLAY_Z_INDEX"
     destroy-on-close
-    class="env-maintain-modal"
+    body-padding="20px 28px 24px"
+    :embedded="embedded"
   >
     <div class="env-maintain-layout">
       <!-- 左侧：环境列表 -->
-      <aside class="env-sidebar">
-        <div class="env-sidebar-head">
-          <span class="env-sidebar-title">
-            <AppstoreOutlined />
-            环境配置
-          </span>
-          <a-button size="small" type="primary" @click="openEnvCreate">
-            <template #icon><PlusOutlined /></template>
-            新增
-          </a-button>
-        </div>
-        <div class="env-sidebar-body">
-          <div class="env-search-box">
-            <a-input
-              v-model:value="envSearchKeyword"
-              size="small"
-              placeholder="搜索环境名称…"
-              allow-clear
-            >
-              <template #prefix>
-                <SearchOutlined class="env-search-icon" />
-              </template>
-            </a-input>
-          </div>
-          <section
-            v-for="group in envGroups"
-            :key="group.scope"
-            class="env-scope-group"
-            :class="{ collapsed: collapsedScopes.has(group.scope) }"
+      <LibrarySidebar
+        title="环境"
+        :count="filteredEnvCount"
+        @create="openEnvCreate"
+      >
+        <template #tools>
+          <LibrarySearch v-model="envSearchKeyword" placeholder="搜索环境 / 服务名 / 地址" />
+        </template>
+
+        <section
+          v-for="group in visibleEnvGroups"
+          :key="group.scope"
+          class="env-scope-group"
+          :class="{ collapsed: collapsedScopes.has(group.scope) }"
+        >
+          <button
+            type="button"
+            class="env-scope-header"
+            @click="toggleScope(group.scope)"
           >
-            <button
-              type="button"
-              class="env-scope-header"
-              @click="toggleScope(group.scope)"
+            <span class="env-scope-toggle">
+              <RightOutlined v-if="collapsedScopes.has(group.scope)" />
+              <DownOutlined v-else />
+            </span>
+            <span class="env-scope-dot" :class="`scope-${group.scope}`" />
+            <span class="env-scope-label">{{ group.label }}</span>
+            <span class="env-scope-count">{{ group.items.length }}</span>
+          </button>
+          <div v-show="isEnvSearching || !collapsedScopes.has(group.scope)" class="env-scope-list">
+            <LibraryListItem
+              v-for="env in group.items"
+              :key="env.id"
+              :name="env.name"
+              :meta="API_ENVIRONMENT_SCOPE_LABEL[env.scope ?? 'system']"
+              :active="env.id === activeEnvId"
+              @select="selectEnv(env.id)"
             >
-              <span class="env-scope-toggle">
-                <RightOutlined v-if="collapsedScopes.has(group.scope)" />
-                <DownOutlined v-else />
-              </span>
-              <span class="env-scope-dot" :class="`scope-${group.scope}`" />
-              <span class="env-scope-label">{{ group.label }}</span>
-              <span class="env-scope-count">{{ group.items.length }}</span>
-            </button>
-            <div v-show="!collapsedScopes.has(group.scope)" class="env-scope-list">
-              <button
-                v-for="env in group.items"
-                :key="env.id"
-                type="button"
-                class="env-card"
-                :class="{ active: env.id === activeEnvId }"
-                :title="env.name"
-                @click="selectEnv(env.id)"
-              >
-                <span class="env-card-name">{{ env.name }}</span>
-                <a-tag v-if="env.isDefault" class="env-default-tag" :bordered="false">默认</a-tag>
-              </button>
-              <div v-if="!group.items.length" class="env-scope-empty">
-                <InboxOutlined />
-                <span>{{ envSearchKeyword ? '无匹配环境' : '暂无环境' }}</span>
-              </div>
-            </div>
-          </section>
-        </div>
-      </aside>
+              <template #icon><GlobalOutlined /></template>
+              <template v-if="env.isDefault" #trailing>
+                <a-tag class="env-default-tag" :bordered="false">默认</a-tag>
+              </template>
+            </LibraryListItem>
+            <LibraryEmptyState
+              v-if="!group.items.length"
+              text="暂无环境"
+            />
+          </div>
+        </section>
+        <LibraryEmptyState
+          v-if="isEnvSearching && !filteredEnvCount"
+          text="无匹配环境"
+        />
+      </LibrarySidebar>
 
       <!-- 右侧：服务配置 -->
       <section v-if="activeEnvId" class="env-detail">
@@ -82,16 +71,6 @@
             <span class="env-detail-name" :title="activeEnvName">{{ activeEnvName }}</span>
             <a-tag v-if="activeEnvScope" class="env-scope-badge" :bordered="false">{{ activeEnvScopeLabel }}</a-tag>
           </div>
-          <a-space :size="6">
-            <a-button size="small" @click="openEnvEdit">
-              <template #icon><EditOutlined /></template>
-              编辑
-            </a-button>
-            <a-button size="small" danger @click="removeEnv">
-              <template #icon><DeleteOutlined /></template>
-              删除
-            </a-button>
-          </a-space>
         </div>
 
         <div class="env-table-wrapper">
@@ -217,6 +196,21 @@
             </template>
           </a-table>
         </div>
+
+        <LibraryEditorFooter>
+          <template #start>
+            <a-button danger @click="removeEnv">
+              <template #icon><DeleteOutlined /></template>
+              删除
+            </a-button>
+          </template>
+          <template #end>
+            <a-button type="primary" @click="openEnvEdit">
+              <template #icon><EditOutlined /></template>
+              编辑
+            </a-button>
+          </template>
+        </LibraryEditorFooter>
       </section>
 
       <!-- 右侧空状态 -->
@@ -227,7 +221,7 @@
         </div>
       </section>
     </div>
-  </a-modal>
+  </LibraryPanelShell>
 
   <a-modal
     v-model:open="envModalOpen"
@@ -297,10 +291,10 @@ import {
   DeleteOutlined,
   DownOutlined,
   EditOutlined,
+  GlobalOutlined,
   InboxOutlined,
   PlusOutlined,
   RightOutlined,
-  SearchOutlined,
   VerticalAlignTopOutlined,
 } from '@ant-design/icons-vue';
 import { Modal } from 'ant-design-vue';
@@ -316,15 +310,27 @@ import {
   NESTED_OVERLAY_Z_INDEX,
 } from '@/constants/overlay-z-index';
 import { useApiTestStore } from '@/stores/apiTest';
+import { GLOBAL_LIBRARY_PROJECT_ID } from '@/constants/library';
+import LibraryEditorFooter from './LibraryEditorFooter.vue';
+import LibraryEmptyState from './LibraryEmptyState.vue';
+import LibraryListItem from './LibraryListItem.vue';
+import LibraryPanelShell from './LibraryPanelShell.vue';
+import LibrarySearch from './LibrarySearch.vue';
+import LibrarySidebar from './LibrarySidebar.vue';
 
 const open = defineModel<boolean>('open', { default: false });
+const props = defineProps<{ projectId?: string; embedded?: boolean }>();
 const apiStore = useApiTestStore();
+const libraryProjectId = computed(
+  () => props.projectId || apiStore.activeProjectId || GLOBAL_LIBRARY_PROJECT_ID,
+);
 const activeEnvId = ref('');
 const envModalOpen = ref(false);
 const envEditingId = ref('');
 const serviceModalOpen = ref(false);
 const serviceEditingId = ref('');
 const envSearchKeyword = ref('');
+const isEnvSearching = computed(() => (envSearchKeyword.value ?? '').trim().length > 0);
 const collapsedScopes = reactive(
   new Set<ApiEnvironmentScope>(API_ENVIRONMENT_SCOPES),
 );
@@ -359,6 +365,7 @@ const serviceColumns = [
 const services = computed(
   () => apiStore.environmentServices[activeEnvId.value] ?? [],
 );
+const serviceIndexRequests = new Map<string, Promise<void>>();
 
 const activeEnvName = computed(() => {
   const env = apiStore.environments.find((item) => item.id === activeEnvId.value);
@@ -375,17 +382,28 @@ const activeEnvScopeLabel = computed(() =>
 );
 
 const envGroups = computed(() => {
-  const keyword = envSearchKeyword.value.trim().toLowerCase();
+  const keyword = (envSearchKeyword.value ?? '').trim().toLowerCase();
   return API_ENVIRONMENT_SCOPES.map((scope) => ({
     scope,
     label: API_ENVIRONMENT_SCOPE_LABEL[scope],
     items: apiStore.environments.filter((env) => {
       if ((env.scope ?? 'system') !== scope) return false;
       if (!keyword) return true;
-      return env.name.toLowerCase().includes(keyword);
+      if ((env.name ?? '').toLowerCase().includes(keyword)) return true;
+      return (apiStore.environmentServices[env.id] ?? []).some((service) =>
+        [service.name, service.serverAddress].some((value) => value?.toLowerCase().includes(keyword)),
+      );
     }),
   }));
 });
+const filteredEnvCount = computed(() =>
+  envGroups.value.reduce((total, group) => total + group.items.length, 0),
+);
+const visibleEnvGroups = computed(() =>
+  isEnvSearching.value
+    ? envGroups.value.filter((group) => group.items.length)
+    : envGroups.value,
+);
 
 function toggleScope(scope: ApiEnvironmentScope) {
   if (collapsedScopes.has(scope)) {
@@ -402,8 +420,26 @@ function revealActiveEnvScope(environmentId: string) {
   }
 }
 
+async function ensureEnvironmentServiceIndex() {
+  const projectId = libraryProjectId.value;
+  if (!projectId) return;
+  const requests: Promise<void>[] = [];
+  for (const env of apiStore.environments) {
+    if (env.id in apiStore.environmentServices || serviceIndexRequests.has(env.id)) continue;
+    const request = apiStore
+      .refreshEnvironmentServices(projectId, env.id)
+      .catch(() => {})
+      .finally(() => {
+        serviceIndexRequests.delete(env.id);
+      });
+    serviceIndexRequests.set(env.id, request);
+    requests.push(request);
+  }
+  await Promise.all(requests);
+}
+
 async function bootstrapEnvMaintainModal() {
-  const projectId = apiStore.activeProjectId;
+  const projectId = libraryProjectId.value;
   if (!projectId) return;
   await apiStore.refreshEnvironments(projectId);
   const envStillValid =
@@ -419,18 +455,22 @@ async function bootstrapEnvMaintainModal() {
     await apiStore.refreshEnvironmentServices(projectId, activeEnvId.value);
     revealActiveEnvScope(activeEnvId.value);
   }
+  void ensureEnvironmentServiceIndex();
 }
 
 watch(open, (isOpen) => {
   if (isOpen) {
     void bootstrapEnvMaintainModal();
   }
+}, { immediate: true });
+watch(envSearchKeyword, (value) => {
+  if (value.trim()) void ensureEnvironmentServiceIndex();
 });
 
 async function selectEnv(environmentId: string) {
   activeEnvId.value = environmentId;
   revealActiveEnvScope(environmentId);
-  const projectId = apiStore.activeProjectId;
+  const projectId = libraryProjectId.value;
   if (projectId) {
     await apiStore.refreshEnvironmentServices(projectId, environmentId);
   }
@@ -453,7 +493,7 @@ function openEnvEdit() {
 }
 
 async function saveEnv() {
-  const projectId = apiStore.activeProjectId;
+  const projectId = libraryProjectId.value;
   if (!projectId || !envForm.name.trim()) return;
   await apiStore.saveEnvironment(
     projectId,
@@ -470,10 +510,11 @@ async function saveEnv() {
   if (activeEnvId.value) {
     await apiStore.refreshEnvironmentServices(projectId, activeEnvId.value);
   }
+  void ensureEnvironmentServiceIndex();
 }
 
 function removeEnv() {
-  const projectId = apiStore.activeProjectId;
+  const projectId = libraryProjectId.value;
   if (!projectId || !activeEnvId.value) return;
   Modal.confirm({
     title: '删除环境？',
@@ -509,7 +550,7 @@ function openServiceEdit(row: ApiEnvironmentServiceRow) {
 }
 
 async function saveService() {
-  const projectId = apiStore.activeProjectId;
+  const projectId = libraryProjectId.value;
   if (!projectId || !activeEnvId.value || !serviceForm.name.trim()) return;
   if (!serviceForm.serverAddress.trim()) return;
   const payload = {
@@ -528,13 +569,13 @@ async function saveService() {
 }
 
 async function removeService(serviceId: string) {
-  const projectId = apiStore.activeProjectId;
+  const projectId = libraryProjectId.value;
   if (!projectId || !activeEnvId.value) return;
   await apiStore.removeEnvironmentService(projectId, activeEnvId.value, serviceId);
 }
 
 async function moveService(serviceId: string, direction: 'up' | 'down' | 'top') {
-  const projectId = apiStore.activeProjectId;
+  const projectId = libraryProjectId.value;
   if (!projectId || !activeEnvId.value) return;
   await apiStore.reorderEnvironmentService(
     projectId,
@@ -549,67 +590,20 @@ async function moveService(serviceId: string, direction: 'up' | 'down' | 'top') 
 /* ===== 布局 ===== */
 .env-maintain-layout {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 252px minmax(0, 1fr);
   gap: 20px;
-  min-height: 460px;
-}
-
-/* ===== 左侧侧边栏 ===== */
-.env-sidebar {
-  display: flex;
-  flex-direction: column;
-  background: #fafbfc;
-  border: 1px solid var(--cf-border, #e4e7ec);
-  border-radius: 10px;
-  overflow: hidden;
-}
-.env-sidebar-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--cf-border, #e4e7ec);
-  background: var(--cf-surface, #fff);
-}
-.env-sidebar-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--cf-text, #1d2939);
-}
-.env-sidebar-title :deep(.anticon) {
-  font-size: 15px;
-  color: var(--cf-text-secondary, #667085);
-}
-.env-sidebar-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 10px 12px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-/* ===== 搜索框 ===== */
-.env-search-box {
-  margin-bottom: 2px;
-}
-.env-search-box :deep(.ant-input-affix-wrapper-sm) {
-  border-radius: 8px;
-  background: var(--cf-surface, #fff);
-}
-.env-search-icon {
-  color: var(--cf-text-muted, #98a2b3);
-  font-size: 13px;
+  height: calc(100vh - 120px);
+  min-height: 540px;
 }
 
 /* ===== 环境分组 ===== */
 .env-scope-group {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
+}
+.env-scope-group + .env-scope-group {
+  margin-top: 8px;
 }
 .env-scope-header {
   display: flex;
@@ -671,44 +665,7 @@ async function moveService(serviceId: string, direction: 'up' | 'down' | 'top') 
 .env-scope-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-/* ===== 环境卡片 ===== */
-.env-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--cf-border, #e4e7ec);
-  border-left: 3px solid transparent;
-  border-radius: 8px;
-  background: var(--cf-surface, #fff);
-  cursor: pointer;
-  text-align: left;
-  transition: all 0.18s ease;
-  font-size: 13px;
-}
-.env-card:hover {
-  border-color: var(--cf-brand-border, #e7b8c0);
-  background: var(--cf-brand-soft, #fff5f6);
-}
-.env-card.active {
-  border-left-color: var(--cf-brand, #b60f2d);
-  border-color: var(--cf-brand-border, #e7b8c0);
-  background: var(--cf-brand-soft, #fff5f6);
-  font-weight: 600;
-}
-.env-card-name {
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  line-height: 1.4;
-  word-break: break-all;
-  color: var(--cf-text, #1d2939);
+  gap: 4px;
 }
 .env-default-tag {
   font-size: 11px;
@@ -719,35 +676,22 @@ async function moveService(serviceId: string, direction: 'up' | 'down' | 'top') 
   color: #2563eb;
 }
 
-/* ===== 空环境提示 ===== */
-.env-scope-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 16px 0;
-  font-size: 12px;
-  color: var(--cf-text-muted, #98a2b3);
-}
-.env-scope-empty :deep(.anticon) {
-  font-size: 22px;
-  opacity: 0.4;
-}
-
 /* ===== 右侧详情区 ===== */
 .env-detail {
   display: flex;
   flex-direction: column;
   background: var(--cf-surface, #fff);
   border: 1px solid var(--cf-border, #e4e7ec);
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
 }
 .env-detail-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 20px;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 18px 24px;
   border-bottom: 1px solid var(--cf-border, #e4e7ec);
 }
 .env-detail-title {
@@ -771,11 +715,10 @@ async function moveService(serviceId: string, direction: 'up' | 'down' | 'top') 
   background: #f0f1f3;
   color: var(--cf-text-secondary, #667085);
 }
-
 /* ===== 表格容器 ===== */
 .env-table-wrapper {
   flex: 1;
-  padding: 16px 20px;
+  padding: 20px 24px 24px;
   overflow: auto;
 }
 .env-service-table :deep(.ant-table) {
@@ -783,12 +726,16 @@ async function moveService(serviceId: string, direction: 'up' | 'down' | 'top') 
   overflow: hidden;
 }
 .env-service-table :deep(.ant-table-thead > tr > th) {
+  padding-top: 14px;
+  padding-bottom: 14px;
   background: #f7f8fa;
   font-size: 12px;
   font-weight: 600;
   color: var(--cf-text-body, #344054);
 }
 .env-service-table :deep(.ant-table-tbody > tr > td) {
+  padding-top: 14px;
+  padding-bottom: 14px;
   font-size: 13px;
 }
 .env-service-table :deep(.ant-table-tbody > tr:hover > td) {

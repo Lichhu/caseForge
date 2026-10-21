@@ -80,6 +80,7 @@ import RequirementEditor from '@/components/RequirementEditor.vue';
 import StructDocList from '@/components/StructDocList.vue';
 import { useImmersiveWorkspace } from '@/composables/useImmersiveWorkspace';
 import { useCaseForgeStore, type WorkspaceStage } from '@/stores/caseForge';
+import { getUserName } from '@/utils/userContext';
 
 const store = useCaseForgeStore();
 const constraintBuilderRef = ref<InstanceType<typeof ConstraintBuilder> | null>(null);
@@ -135,7 +136,9 @@ function cleanProjectTitle(title: string) {
 }
 
 onMounted(() => {
-  void store.bootstrap();
+  if (getUserName()) {
+    void store.bootstrap();
+  }
   bindImmersiveListeners(handleKeydown);
 });
 

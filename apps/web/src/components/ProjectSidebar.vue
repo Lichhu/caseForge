@@ -326,16 +326,16 @@ const isApiPlatform = computed(() => props.platform === 'api-test');
 
 /** 管理模块导航 */
 const moduleOptions = [
-  { value: 'project', label: '项目管理' },
   { value: 'requirement', label: '需求管理' },
-  { value: 'case', label: '案例管理' },
+  { value: 'project', label: '项目管理' },
+  { value: 'case', label: '准生产管理' },
 ];
 
 function handleModuleChange(value: string) {
   if (value === 'requirement') {
     router.push({ path: '/api-test/requirement' });
   }
-  if (value === 'case') router.push({ path: '/api-test/cases' });
+  if (value === 'case') router.push({ path: '/api-test/preproduction' });
   // 项目管理即当前侧栏列表，无需跳转
 }
 const projectList = computed(() =>
@@ -343,7 +343,11 @@ const projectList = computed(() =>
 );
 const keyword = ref('');
 const selectedMonth = ref('');
-const requirementStatus = ref('testing');
+const requirementStatus = ref(
+  isApiPlatform.value
+    ? apiStore.projectListRequirementStatus || 'testing'
+    : 'testing',
+);
 
 /** 需求状态筛选 Tab（结构改版：由下拉改为顶部 Tab） */
 const statusTabs = [
@@ -491,6 +495,9 @@ watch(keyword, (value) => {
 onMounted(() => {
   keyword.value = isApiPlatform.value ? apiStore.projectListKeyword : caseStore.projectListKeyword;
   selectedMonth.value = isApiPlatform.value ? apiStore.projectListMonth : caseStore.projectListMonth;
+  if (isApiPlatform.value) {
+    requirementStatus.value = apiStore.projectListRequirementStatus || 'testing';
+  }
   skipKeywordWatch.value = false;
 });
 
@@ -505,6 +512,15 @@ watch(
   () => {
     const existingIds = new Set(projectList.value.map((project) => project.id));
     selectedProjectIds.value = selectedProjectIds.value.filter((projectId) => existingIds.has(projectId));
+  },
+);
+
+watch(
+  () => apiStore.projectListRequirementStatus,
+  (value) => {
+    if (isApiPlatform.value && value) {
+      requirementStatus.value = value;
+    }
   },
 );
 
@@ -853,7 +869,7 @@ function projectMeta(project: { runCount: number; requirementNo?: string | null 
   color: var(--cf-brand);
 }
 
-/* 与需求管理、案例管理保持一致的标题式模块导航。 */
+/* 与需求管理、准生产管理保持一致的标题式模块导航。 */
 .project-section-title {
   padding: 2px 2px 4px;
 }
