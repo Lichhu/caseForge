@@ -12,6 +12,8 @@ describe("ApiCaseReportDeliveryService", () => {
   let reports: { exportReport: jest.Mock };
   let notify: { enqueue: jest.Mock };
   let config: { get: jest.Mock };
+  let testDb: { query: jest.Mock };
+  let smp: { uploadFile: jest.Mock; receiveAutoResult: jest.Mock };
   let service: ApiCaseReportDeliveryService;
   beforeEach(() => {
     execution = { getRunDetail: jest.fn().mockResolvedValue(run) };
@@ -22,13 +24,33 @@ describe("ApiCaseReportDeliveryService", () => {
     };
     notify = { enqueue: jest.fn().mockResolvedValue({}) };
     config = { get: jest.fn().mockReturnValue({ enabled: true }) };
+    testDb = {
+      query: jest.fn(async (sql: string) => {
+        if (sql.includes("FROM t_pre_version")) {
+          return [{ versionTime: "2026-10-27 00:00:00" }];
+        }
+        if (sql.includes("pid = 0")) {
+          return [{ name: "手机银行" }];
+        }
+        if (sql.includes("round_num AS roundNum")) {
+          return [{ roundNum: 1 }];
+        }
+        return [];
+      }),
+    };
+    smp = {
+      uploadFile: jest.fn().mockResolvedValue({
+        fileUrl: "https://smp.example/report.html",
+      }),
+      receiveAutoResult: jest.fn().mockResolvedValue({}),
+    };
     service = new ApiCaseReportDeliveryService(
       execution as never,
       reports as never,
       notify as never,
       config as never,
-      { query: jest.fn() } as never,
-      { uploadFile: jest.fn(), receiveAutoResult: jest.fn() } as never,
+      testDb as never,
+      smp as never,
     );
   });
   it("uploads one report and queues a notification for the current user", async () => {

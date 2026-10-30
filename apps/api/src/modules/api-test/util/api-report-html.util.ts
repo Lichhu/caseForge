@@ -76,6 +76,7 @@ export function extractReportSteps(
 
 interface HtmlRunDetail {
   id: string;
+  versionCode?: string | null;
   totalCount: number;
   passedCount: number;
   failedCount: number;
@@ -88,6 +89,128 @@ interface HtmlRunDetail {
 
 const PASS_COLOR = "green";
 const FAIL_COLOR = "#c9061f";
+const REPORT_STYLES = `
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #f0f1f3;
+      color: #21252b;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    a { color: inherit; text-decoration: none; }
+    .outline {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 20px 24px 4px;
+      background: #fff;
+    }
+    .outline h3 { margin: 0 0 8px; font-size: 15px; }
+    .outline ul { margin: 0; padding-left: 22px; }
+    .outline li { margin: 2px 0; font-size: 13px; }
+    .main {
+      max-width: 1080px;
+      margin: 0 auto 32px;
+      background: #fff;
+    }
+    .top-bar { height: 4px; background: #ae0a29; }
+    .banner {
+      display: flex;
+      align-items: center;
+      gap: 4%;
+      padding: 12px 24px;
+      border-bottom: 1px solid #eaecf0;
+    }
+    .banner .title { font-weight: bold; font-size: 15px; }
+    .banner .confidential { margin-left: auto; font-weight: bolder; font-size: 15px; }
+    .banner .date { font-size: 13px; color: #475467; }
+    .report-head { padding: 16px 24px 0; }
+    .report-head .project { font-size: 20px; color: #246a97; font-weight: bold; }
+    .report-head .set-name { font-size: 12px; font-weight: bold; margin-top: 4px; }
+    .summary { padding: 10px 24px 20px; }
+    .summary table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .summary th, .summary td {
+      padding: 8px 10px;
+      border: 1px solid #e3e3e3;
+      text-align: center;
+    }
+    .summary th { background: #f8f8f9; color: #6d7585; }
+    .bannerinfo {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin: 0 24px;
+      padding: 8px 16px;
+      color: #fff;
+      font-weight: bold;
+    }
+    .bannerinfo .fail-count {
+      position: absolute;
+      right: 30px;
+      text-decoration: underline;
+      text-underline-offset: 4px;
+    }
+    .cases { padding: 20px 4px 8px; }
+    .testcase { margin: 0 20px 30px; border: 1px solid gray; }
+    .testcase-tr {
+      display: flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 4px 6px;
+      font-size: 13px;
+      border-bottom: 1px solid #ececec;
+    }
+    .testcase-tr > div { padding: 0 4px; word-break: break-all; }
+    .testcase-head {
+      background-color: #f8f8f9;
+      color: #6d7585;
+      font-weight: bolder;
+    }
+    .assertion-tr { color: #6d7585; }
+    .testcase-detail { border-top: 1px solid #dcdcdc; }
+    .step-bar {
+      display: flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 4px 10px;
+      font-size: 14px;
+      background-color: #e3e3e3;
+      color: #000;
+      font-weight: bolder;
+    }
+    .step-bar--url { text-decoration: underline; }
+    .payload {
+      width: 100%;
+      margin: 0;
+      padding: 10px;
+      color: #212121;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+    .run-section { padding-top: 8px; }
+    .run-heading {
+      margin: 20px 24px 12px;
+      padding: 14px 16px;
+      border-left: 4px solid #ae0a29;
+      background: #f8f9fb;
+    }
+    .run-heading strong { display: block; color: #1d2939; font-size: 17px; }
+    .run-heading span { display: block; margin-top: 4px; color: #667085; font-size: 12px; }
+    .run-heading .mono { color: #475467; }
+    @media print {
+      body { background: #fff; }
+      .testcase { break-inside: avoid; }
+      .run-section + .run-section { break-before: page; }
+    }
+`;
 
 function escapeHtml(value: unknown) {
   return String(value ?? "")
@@ -230,7 +353,7 @@ function buildCaseHeaderRow(
 }
 
 /** 请求 / 响应体区块（多步骤案例按步骤分块展示） */
-function buildPayloadSection(item: HtmlRunItem) {
+function buildPayloadSection(item: HtmlRunItem, meta?: ReportCaseMeta) {
   const steps = extractReportSteps(item.requestSnapshot);
   if (!steps.length) {
     const requestBody = prettyPayload(item.requestSnapshot?.body);
@@ -250,6 +373,10 @@ function buildPayloadSection(item: HtmlRunItem) {
     sections.push(
       `<pre class="payload"><code>${escapeHtml(responseBody || "（无响应体）")}</code></pre>`,
     );
+    // 单步骤案例：断言检查在此处渲染一次，避免与外层重复
+    if (item.assertions?.length) {
+      sections.push(buildAssertionSection(item.assertions, meta));
+    }
     return sections.join("\n");
   }
   return steps
@@ -298,7 +425,7 @@ function buildPayloadSection(item: HtmlRunItem) {
         `<pre class="payload"><code>${escapeHtml(prettyPayload(step.response?.body) || "（无响应体）")}</code></pre>`,
       );
       if (step.assertions?.length) {
-        sections.push(buildAssertionSection(step.assertions, undefined));
+        sections.push(buildAssertionSection(step.assertions, meta));
       }
       return sections.join("\n");
     })
@@ -371,8 +498,7 @@ export function buildApiReportHtml(
   <div class="testcase" id="case-${idx + 1}">
     ${buildCaseHeaderRow(idx + 1, item, meta)}
     <div class="testcase-detail">
-      ${buildPayloadSection(item)}
-      ${buildAssertionSection(item.assertions, meta)}
+      ${buildPayloadSection(item, meta)}
     </div>
   </div>`;
     })
@@ -385,116 +511,7 @@ export function buildApiReportHtml(
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>接口质量测试报告 - ${escapeHtml(setName)}</title>
   <style>
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: #f0f1f3;
-      color: #21252b;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-      font-size: 14px;
-      line-height: 1.5;
-    }
-    a { color: inherit; text-decoration: none; }
-    .outline {
-      max-width: 1080px;
-      margin: 0 auto;
-      padding: 20px 24px 4px;
-      background: #fff;
-    }
-    .outline h3 { margin: 0 0 8px; font-size: 15px; }
-    .outline ul { margin: 0; padding-left: 22px; }
-    .outline li { margin: 2px 0; font-size: 13px; }
-    .main {
-      max-width: 1080px;
-      margin: 0 auto 32px;
-      background: #fff;
-    }
-    .top-bar { height: 4px; background: #ae0a29; }
-    .banner {
-      display: flex;
-      align-items: center;
-      gap: 4%;
-      padding: 12px 24px;
-      border-bottom: 1px solid #eaecf0;
-    }
-    .banner .title { font-weight: bold; font-size: 15px; }
-    .banner .confidential { margin-left: auto; font-weight: bolder; font-size: 15px; }
-    .banner .date { font-size: 13px; color: #475467; }
-    .report-head { padding: 16px 24px 0; }
-    .report-head .project { font-size: 20px; color: #246a97; font-weight: bold; }
-    .report-head .set-name { font-size: 12px; font-weight: bold; margin-top: 4px; }
-    .summary { padding: 10px 24px 20px; }
-    .summary table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .summary th, .summary td {
-      padding: 8px 10px;
-      border: 1px solid #e3e3e3;
-      text-align: center;
-    }
-    .summary th { background: #f8f8f9; color: #6d7585; }
-    .bannerinfo {
-      position: relative;
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      margin: 0 24px;
-      padding: 8px 16px;
-      color: #fff;
-      font-weight: bold;
-      background-color: ${allPassed ? "green" : FAIL_COLOR};
-    }
-    .bannerinfo .fail-count {
-      position: absolute;
-      right: 30px;
-      text-decoration: underline;
-      text-underline-offset: 4px;
-    }
-    .cases { padding: 20px 4px 8px; }
-    .testcase { margin: 0 20px 30px; border: 1px solid gray; }
-    .testcase-tr {
-      display: flex;
-      align-items: center;
-      min-height: 34px;
-      padding: 4px 6px;
-      font-size: 13px;
-      border-bottom: 1px solid #ececec;
-    }
-    .testcase-tr > div { padding: 0 4px; word-break: break-all; }
-    .testcase-head {
-      background-color: #f8f8f9;
-      color: #6d7585;
-      font-weight: bolder;
-    }
-    .assertion-tr { color: #6d7585; }
-    .testcase-detail { border-top: 1px solid #dcdcdc; }
-    .step-bar {
-      display: flex;
-      align-items: center;
-      min-height: 30px;
-      padding: 4px 10px;
-      font-size: 14px;
-      background-color: #e3e3e3;
-      color: #000;
-      font-weight: bolder;
-    }
-    .step-bar--url { text-decoration: underline; }
-    .payload {
-      width: 100%;
-      margin: 0;
-      padding: 10px;
-      color: #212121;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12px;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-    .mono {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12px;
-    }
-    @media print {
-      body { background: #fff; }
-      .testcase { break-inside: avoid; }
-    }
+${REPORT_STYLES}
   </style>
 </head>
 <body>
@@ -543,7 +560,7 @@ ${outline}
         </tbody>
       </table>
     </div>
-    <div class="bannerinfo">
+    <div class="bannerinfo" style="background-color: ${allPassed ? "green" : FAIL_COLOR};">
       <span>执行结果</span>
       <span>${allPassed ? "通过" : "失败"}</span>
       <span class="fail-count">失败案例数：${failedCount}</span>
@@ -551,6 +568,150 @@ ${outline}
     <div class="cases">
 ${caseBlocks}
     </div>
+  </div>
+</body>
+</html>`;
+}
+
+export interface ApiRequirementReportSection {
+  transactionCode: string;
+  transactionName: string;
+  run: HtmlRunDetail;
+  context?: Partial<ApiReportContext>;
+}
+
+/** 需求级报告：交易码 + 执行历史 ID 用于区分每一段执行结果 */
+export function buildApiRequirementReportHtml(
+  sections: ApiRequirementReportSection[],
+  reportCode: string,
+) {
+  const totalCases = sections.reduce(
+    (sum, section) => sum + section.run.totalCount,
+    0,
+  );
+  const totalPassed = sections.reduce(
+    (sum, section) => sum + section.run.passedCount,
+    0,
+  );
+  const overallPassRate =
+    totalCases > 0 ? ((totalPassed / totalCases) * 100).toFixed(2) : "0.00";
+
+  const outline = sections
+    .flatMap((section, sectionIndex) =>
+      section.run.items.map(
+        (item, caseIndex) =>
+          `<li style="color:${resultColor(item.status)};"><a href="#run-${sectionIndex + 1}-case-${caseIndex + 1}">${escapeHtml(section.transactionCode)} · ${escapeHtml(item.caseTitle)}</a></li>`,
+      ),
+    )
+    .join("\n");
+
+  const overviewRows = sections
+    .map((section) => {
+      const { run, context } = section;
+      const passRate =
+        run.totalCount > 0
+          ? ((run.passedCount / run.totalCount) * 100).toFixed(2)
+          : "0.00";
+      return `
+          <tr>
+            <td class="mono">${escapeHtml(section.transactionCode)}</td>
+            <td>${escapeHtml(section.transactionName || "—")}</td>
+            <td class="mono">${escapeHtml(run.id)}</td>
+            <td>${escapeHtml(context?.envName || "—")}</td>
+            <td>${run.totalCount}</td>
+            <td>${run.passedCount}</td>
+            <td>${run.failedCount + run.errorCount}</td>
+            <td>${passRate}%</td>
+            <td>${escapeHtml(formatDateTime(run.createdAt))}</td>
+          </tr>`;
+    })
+    .join("");
+
+  const sectionBlocks = sections
+    .map((section, sectionIndex) => {
+      const { run, context } = section;
+      const caseMeta = context?.caseMeta ?? {};
+      const failedCount = run.failedCount + run.errorCount;
+      const allPassed = failedCount === 0 && run.totalCount > 0;
+      const caseBlocks = run.items
+        .map((item, caseIndex) => {
+          const meta = caseMeta[item.caseId];
+          return `
+  <div class="testcase" id="run-${sectionIndex + 1}-case-${caseIndex + 1}">
+    ${buildCaseHeaderRow(caseIndex + 1, item, meta)}
+    <div class="testcase-detail">
+      ${buildPayloadSection(item, meta)}
+    </div>
+  </div>`;
+        })
+        .join("\n");
+      return `
+    <section class="run-section" id="run-${sectionIndex + 1}">
+      <div class="run-heading">
+        <strong>${escapeHtml(section.transactionCode)} · ${escapeHtml(section.transactionName || "未命名交易")}</strong>
+        <span>执行历史 ID：<span class="mono">${escapeHtml(run.id)}</span></span>
+        <span>执行版本：${escapeHtml(run.versionCode || run.id.slice(0, 8).toUpperCase())} · 共 ${run.totalCount} 条案例 · 通过率 ${run.totalCount > 0 ? ((run.passedCount / run.totalCount) * 100).toFixed(2) : "0.00"}%</span>
+      </div>
+      <div class="bannerinfo" style="background-color: ${allPassed ? "green" : FAIL_COLOR};">
+        <span>执行结果</span>
+        <span>${allPassed ? "通过" : "失败"}</span>
+        <span class="fail-count">失败案例数：${failedCount}</span>
+      </div>
+      <div class="cases">
+${caseBlocks}
+      </div>
+    </section>`;
+    })
+    .join("\n");
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>接口质量测试报告 - ${escapeHtml(reportCode)}</title>
+  <style>
+${REPORT_STYLES}
+  </style>
+</head>
+<body>
+  <div class="outline">
+    <h3>案例大纲</h3>
+    <ul>
+${outline}
+    </ul>
+  </div>
+  <div class="main">
+    <div class="top-bar"></div>
+    <div class="banner">
+      <span class="title">接口质量测试报告</span>
+      <span class="confidential">Confidential</span>
+      <span class="date">${escapeHtml(formatBannerDate(new Date()))}</span>
+    </div>
+    <div class="report-head">
+      <div class="project">${escapeHtml(reportCode)}</div>
+      <div class="set-name">共 ${sections.length} 项交易执行记录 · 总案例数 ${totalCases} · 总通过率 ${overallPassRate}%</div>
+    </div>
+    <div class="summary">
+      <table>
+        <thead>
+          <tr>
+            <th>交易码</th>
+            <th>交易名称</th>
+            <th>执行历史 ID</th>
+            <th>测试环境</th>
+            <th>案例数</th>
+            <th>通过</th>
+            <th>未通过</th>
+            <th>通过率</th>
+            <th>执行时间</th>
+          </tr>
+        </thead>
+        <tbody>${overviewRows}
+        </tbody>
+      </table>
+    </div>
+${sectionBlocks}
   </div>
 </body>
 </html>`;

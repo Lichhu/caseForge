@@ -147,6 +147,7 @@ describe("preproduction cases server pagination", () => {
       "c.transactionId",
       "c.title",
       "c.enabled",
+      "c.applicationPath",
     ]);
   });
   it("rejects incomplete or inaccessible export selection", async () => {
@@ -416,6 +417,97 @@ describe("preproduction cases server pagination", () => {
       description: "新描述",
       remark: "新备注",
     });
+  });
+
+  it("deletes a preproduction step and promotes the next HTTP step as main", async () => {
+    const row = {
+      id: "c1",
+      title: "案例一",
+      snapshot: {
+        request: { method: "GET", path: "/old", transport: "http" },
+        expected: { assertions: [] },
+        metadata: {},
+        steps: [
+          {
+            id: "s1",
+            name: "主请求",
+            isMainRequest: true,
+            request: { method: "GET", path: "/old", transport: "http" },
+            expected: { assertions: [] },
+            exports: [],
+          },
+          {
+            id: "s2",
+            kind: "db",
+            name: "查询数据",
+            db: {
+              connectionId: "db-1",
+              mode: "query",
+              sql: "select 1",
+            },
+            exports: [],
+          },
+          {
+            id: "s3",
+            name: "后续请求",
+            request: { method: "POST", path: "/next", transport: "http" },
+            expected: { assertions: [] },
+            exports: [],
+          },
+        ],
+      },
+    };
+    const qb = (service as any).base();
+    jest.spyOn(service as any, "base").mockReturnValue(qb);
+    jest.spyOn(qb, "getOne").mockResolvedValue(row);
+    const save = jest
+      .spyOn((service as any).cases, "save")
+      .mockImplementation(async (value) => value);
+    jest.spyOn(service as any, "publicRow").mockReturnValue({ id: "c1" });
+
+    await RequestContext.run("alice", () => service.deleteCaseStep("c1", "s1"));
+
+    const saved = save.mock.calls[0][0] as any;
+    expect(saved.snapshot.steps.map((step: { id: string }) => step.id)).toEqual(
+      ["s2", "s3"],
+    );
+    expect(saved.snapshot.steps[1]).toMatchObject({
+      id: "s3",
+      isMainRequest: true,
+    });
+    expect(saved.snapshot.request).toMatchObject({
+      method: "POST",
+      path: "/next",
+    });
+  });
+
+  it("rejects deleting the last preproduction step", async () => {
+    const row = {
+      id: "c1",
+      snapshot: {
+        request: { method: "GET", path: "/only", transport: "http" },
+        expected: { assertions: [] },
+        steps: [
+          {
+            id: "s1",
+            name: "唯一请求",
+            isMainRequest: true,
+            request: { method: "GET", path: "/only", transport: "http" },
+            expected: { assertions: [] },
+            exports: [],
+          },
+        ],
+      },
+    };
+    const qb = (service as any).base();
+    jest.spyOn(service as any, "base").mockReturnValue(qb);
+    jest.spyOn(qb, "getOne").mockResolvedValue(row);
+    const save = jest.spyOn((service as any).cases, "save");
+
+    await expect(
+      RequestContext.run("alice", () => service.deleteCaseStep("c1", "s1")),
+    ).rejects.toThrow("至少需要保留一个步骤");
+    expect(save).not.toHaveBeenCalled();
   });
   it("validates page bounds, sizes, boolean false and export batch limits", async () => {
     expect(

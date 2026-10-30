@@ -230,6 +230,7 @@ export class ApiCaseManagementService {
       .addSelect("c.transactionId", "transactionId")
       .addSelect("c.title", "title")
       .addSelect("c.enabled", "enabled")
+      .addSelect("c.applicationPath", "applicationPath")
       .orderBy("c.id", "ASC")
       .getRawMany();
     return rows.map((row) => ({
@@ -380,6 +381,48 @@ export class ApiCaseManagementService {
       snapshot.request = step.request;
       snapshot.expected = step.expected;
     }
+    row.snapshot = snapshot;
+    await this.cases.save({ ...row, ...auditFieldsForUpdate() });
+    return this.publicRow(row);
+  }
+
+  async deleteCaseStep(caseId: string, stepId: string) {
+    const row = (await this.base()
+      .andWhere("c.id = :caseId", { caseId })
+      .getOne()) as JoinedCase | undefined;
+    if (!row) throw new NotFoundException("案例不存在或无权访问");
+
+    const snapshot = structuredClone(row.snapshot);
+    const steps = snapshot.steps ?? [];
+    if (!steps.length) {
+      throw new BadRequestException("单步骤案例无法删除唯一请求步骤");
+    }
+    if (steps.length <= 1) {
+      throw new BadRequestException("案例至少需要保留一个步骤");
+    }
+    const index = steps.findIndex((step) => step.id === stepId);
+    if (index < 0) throw new NotFoundException("步骤不存在");
+
+    const [removed] = steps.splice(index, 1);
+    const remainingHttpSteps = steps.filter(isHttpStep);
+    if (isHttpStep(removed) && removed.isMainRequest && remainingHttpSteps[0]) {
+      remainingHttpSteps[0].isMainRequest = true;
+    }
+    const mainStep =
+      remainingHttpSteps.find((step) => step.isMainRequest) ??
+      remainingHttpSteps[0];
+    for (const step of remainingHttpSteps) {
+      step.isMainRequest = step.id === mainStep?.id;
+    }
+    if (mainStep) {
+      snapshot.request = mainStep.request;
+      snapshot.expected = mainStep.expected;
+    } else {
+      snapshot.request = { method: "POST", path: "", transport: "http" };
+      snapshot.expected = { assertions: [] };
+    }
+
+    snapshot.steps = steps;
     row.snapshot = snapshot;
     await this.cases.save({ ...row, ...auditFieldsForUpdate() });
     return this.publicRow(row);

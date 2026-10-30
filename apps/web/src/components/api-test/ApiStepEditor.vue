@@ -453,6 +453,7 @@ import type {
   ApiCaseRequest,
   ApiCaseStep,
   ApiCaseExport,
+  ApiDebugRecordScope,
   ApiHttpCaseStep,
   ApiTransport,
 } from "@case-forge/shared";
@@ -509,6 +510,10 @@ const props = withDefaults(
     step: ApiCaseStep | null;
     projectId?: string;
     transactionId?: string;
+    /** 传案例 ID 后，单步调试结果会写入该案例的步骤调试记录 */
+    caseId?: string;
+    /** 调试记录所属入口，默认需求接口测试平台 */
+    caseSource?: ApiDebugRecordScope;
     sharedVariables?: StepVariableOption[];
     saving?: boolean;
     showDelete?: boolean;
@@ -518,6 +523,8 @@ const props = withDefaults(
   {
     projectId: "",
     transactionId: "",
+    caseId: "",
+    caseSource: "project",
     sharedVariables: () => [],
     saving: false,
     showDelete: false,
@@ -529,6 +536,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   save: [payload: { name: string; step: ApiHttpCaseStep }];
   delete: [];
+  debugged: [result: DebugRunResponse];
 }>();
 
 const apiStore = useApiTestStore();
@@ -594,7 +602,8 @@ const debugging = ref(false);
 const assertionDebugRunning = ref(false);
 const generatingAssertions = ref(false);
 const assertionError = ref("");
-const debugResult = ref<Awaited<ReturnType<typeof debugRunCase>> | null>(null);
+type DebugRunResponse = Awaited<ReturnType<typeof debugRunCase>>;
+const debugResult = ref<DebugRunResponse | null>(null);
 const debugResultOpen = ref(false);
 
 const environmentOptions = computed(() =>
@@ -1108,14 +1117,19 @@ async function runDebug() {
     return null;
   }
   try {
-    return await debugRunCase(props.projectId, props.transactionId, {
+    const result = await debugRunCase(props.projectId, props.transactionId, {
       request,
       expected: buildExpectedFromRows(editor.assertionRows),
       target: targetPayload(),
       environmentId: editor.environmentId || undefined,
       environmentServiceId: editor.serviceId || undefined,
       encoding: editor.encoding,
+      caseId: props.caseId || undefined,
+      caseSource: props.caseId ? props.caseSource : undefined,
+      stepId: props.caseId && props.step ? props.step.id : undefined,
     });
+    emit("debugged", result);
+    return result;
   } catch (error) {
     message.error(error instanceof Error ? error.message : "调试失败");
     return null;

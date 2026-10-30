@@ -30,6 +30,7 @@ export class SchemaPatchService implements OnModuleInit {
     await this.ensureApiRequirementOverdueNotifiedColumn();
     await this.ensureApiRequirementWorkflowColumns();
     await this.ensureApiRequirementApplicationNameColumn();
+    await this.ensureApiRequirementVersionNameColumn();
     await this.backfillLegacyApiRequirements();
     await this.migrateLegacyRequirementStatusToTesting();
     await this.ensureNotifyMessageTable();
@@ -413,6 +414,21 @@ export class SchemaPatchService implements OnModuleInit {
       "ALTER TABLE api_requirement ADD COLUMN applicationName VARCHAR(255) NULL COMMENT '所属应用名称' AFTER projectName",
     );
     this.logger.log("api_requirement.applicationName 列已补齐");
+  }
+
+  private async ensureApiRequirementVersionNameColumn() {
+    const tables: Array<Record<string, string>> = await this.dataSource.query(
+      "SHOW TABLES LIKE 'api_requirement'",
+    );
+    if (!tables.length) return;
+    const rows: Array<{ Field: string }> = await this.dataSource.query(
+      "SHOW COLUMNS FROM api_requirement LIKE 'versionName'",
+    );
+    if (rows.length) return;
+    await this.dataSource.query(
+      "ALTER TABLE api_requirement ADD COLUMN versionName VARCHAR(255) NULL COMMENT '需求版本' AFTER applicationName",
+    );
+    this.logger.log("api_requirement.versionName 列已补齐");
   }
 
   private async backfillLegacyApiRequirements() {

@@ -9,6 +9,7 @@ import {
 import { UpdatePreproductionStepDto } from "../dto/update-preproduction-step.dto";
 import { UpdatePreproductionCaseDto } from "../dto/update-preproduction-case.dto";
 import { PublishCaseReportDto } from "@api-test/dto/publish-case-report.dto";
+import { ExportRequirementReportDto } from "@api-test/dto/export-requirement-report.dto";
 import { ApiCaseReportDeliveryService } from "@api-test/service/api-case-report-delivery.service";
 import {
   BadRequestException,
@@ -56,6 +57,7 @@ import {
 import { ApiExecutionSetService } from "@api-test/service/api-execution-set.service";
 import { SmpSyncService } from "@api-test/service/smp-sync.service";
 import { ApiPreproductionCaseService } from "@api-test/service/api-preproduction-case.service";
+import { ApiPreproductionRunService } from "@api-test/service/api-preproduction-run.service";
 import {
   PreviewPreproductionSyncDto,
   SyncPreproductionCasesDto,
@@ -74,17 +76,24 @@ import { BatchDeleteTransactionsDto } from "@api-test/dto/batch-delete-transacti
 import { SmpSyncTransactionsDto } from "@api-test/dto/smp-sync-transactions.dto";
 import { ListApiCasesDto } from "@api-test/dto/list-api-cases.dto";
 import { ListApiExecutionSetsDto } from "@api-test/dto/list-api-execution-sets.dto";
+import { ListPreproductionRunSetsDto } from "@api-test/dto/list-preproduction-run-sets.dto";
 import { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
 import { ApiAssertionGenerateQueueService } from "@api-test/service/api-assertion-generate-queue.service";
 import { ApiDataFunctionService } from "@api-test/service/api-data-function.service";
 import { ApiStepLibraryService } from "@api-test/service/api-step-library.service";
-import type { ApiCaseStep } from "@case-forge/shared";
+import type {
+  ApiCaseStep,
+  ApiDebugRecordScope,
+  ApiStepDebugRecord,
+} from "@case-forge/shared";
+import { detectDbSqlKind } from "@case-forge/shared";
 import { ApiStepDebugRecordEntity } from "@api-test/entity/api-step-debug-record.entity";
 import {
   RequestContext,
   auditFieldsForCreate,
 } from "@common/audit/request-context";
 import {
+  DebugSqlStepDto,
   GenerateDataFunctionScriptDto,
   PreviewDataFunctionDto,
   PreviewSqlStepDto,
@@ -94,6 +103,37 @@ import {
 import { SqlStepRunnerService } from "@api-test/service/sql-step-runner.service";
 
 const UPLOAD_EXTENSIONS = ["xls", "xlsx"];
+
+function redactDebugHeaders(headers: Record<string, string>) {
+  return Object.fromEntries(
+    Object.entries(headers).map(([key, value]) => [
+      key,
+      /authorization|token|secret|cookie|api[-_]?key/i.test(key)
+        ? "****"
+        : value,
+    ]),
+  );
+}
+
+function debugRequestSnapshot(request: Record<string, unknown>) {
+  const snapshot = { ...request };
+  if (
+    snapshot.headers &&
+    typeof snapshot.headers === "object" &&
+    !Array.isArray(snapshot.headers)
+  ) {
+    snapshot.headers = redactDebugHeaders(
+      snapshot.headers as Record<string, string>,
+    );
+  }
+  return snapshot;
+}
+
+function normalizeDebugRecordScope(scope?: string): ApiDebugRecordScope {
+  if (!scope) return "project";
+  if (scope === "project" || scope === "preproduction") return scope;
+  throw new BadRequestException("无效的调试记录来源");
+}
 
 @ApiTags("api-test")
 @Controller("api-test")
@@ -111,6 +151,7 @@ export class ApiTestController {
     private readonly apiTransactionService: ApiTransactionService,
     private readonly smpSyncService: SmpSyncService,
     private readonly preproductionCaseService: ApiPreproductionCaseService,
+    private readonly preproductionRunService: ApiPreproductionRunService,
     private readonly minio: MinioStorageService,
     private readonly aiWorkflow: AiWorkflowService,
     private readonly assertionGenerateQueueService: ApiAssertionGenerateQueueService,
@@ -178,6 +219,15 @@ export class ApiTestController {
     return this.caseManagement.updateCaseStep(caseId, stepId, body);
   }
 
+  @Delete("case-management/cases/:caseId/steps/:stepId")
+  @ApiOperation({ summary: "删除准生产案例步骤" })
+  deleteManagedCaseStep(
+    @Param("caseId") caseId: string,
+    @Param("stepId") stepId: string,
+  ) {
+    return this.caseManagement.deleteCaseStep(caseId, stepId);
+  }
+
   @Patch("case-management/cases/:caseId")
   @ApiOperation({ summary: "更新准生产案例基础信息" })
   updateManagedCaseInfo(
@@ -185,6 +235,151 @@ export class ApiTestController {
     @Body() body: UpdatePreproductionCaseDto,
   ) {
     return this.caseManagement.updateCaseInfo(caseId, body);
+  }
+
+  @Post("case-management/run-records/latest")
+  latestPreproductionRunRecords(@Body() body: { caseIds: string[] }) {
+    return this.preproductionRunService.latestByCaseIds(body.caseIds ?? []);
+  }
+
+  @Post(":projectId/preproduction/run-sets")
+  createPreproductionRunSet(
+    @Param("projectId") _projectId: string,
+    @Body()
+    body: {
+      name?: string;
+      versionId?: string;
+      versionLabel?: string;
+      applicationId?: string;
+      applicationLabel?: string;
+      roundId?: string;
+      roundLabel?: string;
+      totalCount?: number;
+    },
+  ) {
+    if (!body.versionId) {
+      throw new BadRequestException("请选择执行版本");
+    }
+    return this.preproductionRunService.createRunSet({
+      versionId: body.versionId,
+      versionLabel: body.versionLabel?.trim() || body.versionId,
+      applicationId: body.applicationId || null,
+      applicationLabel: body.applicationLabel?.trim() || null,
+      roundId: body.roundId || null,
+      roundLabel: body.roundLabel?.trim() || null,
+      name: body.name,
+      totalCount: body.totalCount,
+    });
+  }
+
+  @Post(":projectId/preproduction/run-sets/:runSetId/cases")
+  attachPreproductionRunSetCases(
+    @Param("projectId") _projectId: string,
+    @Param("runSetId") runSetId: string,
+    @Body() body: { caseIds?: string[] },
+  ) {
+    return this.preproductionRunService.attachCases(
+      runSetId,
+      body.caseIds ?? [],
+    );
+  }
+
+  @Get(":projectId/preproduction/run-sets/:runSetId/cases")
+  listPreproductionRunSetCases(
+    @Param("projectId") _projectId: string,
+    @Param("runSetId") runSetId: string,
+  ) {
+    return this.preproductionRunService.listRunSetCases(runSetId);
+  }
+
+  @Delete(":projectId/preproduction/run-sets/:runSetId/cases/:caseId")
+  detachPreproductionRunSetCase(
+    @Param("projectId") _projectId: string,
+    @Param("runSetId") runSetId: string,
+    @Param("caseId") caseId: string,
+  ) {
+    return this.preproductionRunService.detachCase(runSetId, caseId);
+  }
+
+  @Delete(":projectId/preproduction/run-sets/:runSetId")
+  @ApiOperation({ summary: "删除执行推送集" })
+  deletePreproductionRunSet(
+    @Param("projectId") _projectId: string,
+    @Param("runSetId") runSetId: string,
+  ) {
+    return this.preproductionRunService.deleteRunSet(runSetId);
+  }
+
+  @Get(":projectId/preproduction/run-sets")
+  listPreproductionRunSets(
+    @Param("projectId") _projectId: string,
+    @Query() query: ListPreproductionRunSetsDto,
+  ) {
+    return this.preproductionRunService.listRunSets(query);
+  }
+
+  @Get(":projectId/preproduction/run-sets/:runSetId/records")
+  listPreproductionRunSetRecords(
+    @Param("projectId") _projectId: string,
+    @Param("runSetId") runSetId: string,
+  ) {
+    return this.preproductionRunService.listRunSetRecords(runSetId);
+  }
+
+  @Post(":projectId/preproduction/run-sets/:runSetId/finish")
+  finishPreproductionRunSet(
+    @Param("projectId") _projectId: string,
+    @Param("runSetId") runSetId: string,
+  ) {
+    return this.preproductionRunService.finishRunSet(runSetId);
+  }
+
+  @Get(":projectId/preproduction/cases/:caseId/run-records")
+  listPreproductionRunRecords(
+    @Param("projectId") projectId: string,
+    @Param("caseId") caseId: string,
+  ) {
+    return this.preproductionRunService.listCaseRecords(projectId, caseId);
+  }
+
+  @Post(":projectId/preproduction/cases/:caseId/run-push")
+  runPreproductionCaseAndPush(
+    @Param("projectId") projectId: string,
+    @Param("caseId") caseId: string,
+    @Body()
+    body: {
+      versionId?: string;
+      applicationId?: string;
+      roundId?: string;
+      runSetId?: string;
+    },
+  ) {
+    if (
+      !body.versionId ||
+      !body.applicationId ||
+      !body.roundId ||
+      !body.runSetId
+    ) {
+      throw new BadRequestException("请选择版本、应用和轮次");
+    }
+    return this.preproductionRunService.runCaseAndPush(
+      projectId,
+      caseId,
+      {
+        versionId: body.versionId,
+        applicationId: body.applicationId,
+        roundId: body.roundId,
+      },
+      body.runSetId,
+    );
+  }
+
+  @Post(":projectId/preproduction/run-records/:recordId/retry-push")
+  retryPreproductionRunPush(
+    @Param("projectId") projectId: string,
+    @Param("recordId") recordId: string,
+  ) {
+    return this.preproductionRunService.retryPush(projectId, recordId);
   }
 
   @Get("case-management/application-systems")
@@ -287,6 +482,128 @@ export class ApiTestController {
   @Post(":projectId/sql-steps/preview")
   previewSqlStep(@Body() body: PreviewSqlStepDto) {
     return this.sqlStepRunner.preview(body);
+  }
+
+  /** SQL 单步调试：使用只读/回滚试运行，并按需写入步骤调试记录。 */
+  @Post(":projectId/sql-steps/debug")
+  @ApiOperation({ summary: "调试执行 SQL 步骤" })
+  async debugSqlStep(
+    @Param("projectId") projectId: string,
+    @Body() body: DebugSqlStepDto,
+  ) {
+    const startedAt = Date.now();
+    const caseSource = normalizeDebugRecordScope(body.caseSource);
+    try {
+      const result = await this.sqlStepRunner.preview({
+        connectionId: body.connectionId,
+        sql: body.sql,
+        timeoutMs: body.timeoutMs,
+      });
+      if (body.caseId && body.stepId) {
+        await this.saveSqlStepDebugRecord({
+          projectId,
+          caseId: body.caseId,
+          stepId: body.stepId,
+          caseSource,
+          connectionId: body.connectionId,
+          sql: body.sql,
+          result,
+        });
+      }
+      return result;
+    } catch (error) {
+      if (body.caseId && body.stepId) {
+        await this.saveSqlStepDebugRecord({
+          projectId,
+          caseId: body.caseId,
+          stepId: body.stepId,
+          caseSource,
+          connectionId: body.connectionId,
+          sql: body.sql,
+          error: error instanceof Error ? error.message : "SQL 执行失败",
+          durationMs: Date.now() - startedAt,
+        });
+      }
+      throw error;
+    }
+  }
+
+  private async saveSqlStepDebugRecord(input: {
+    projectId: string;
+    caseId: string;
+    stepId: string;
+    caseSource: ApiDebugRecordScope;
+    connectionId: string;
+    sql: string;
+    result?: Awaited<ReturnType<SqlStepRunnerService["preview"]>>;
+    error?: string;
+    durationMs?: number;
+  }) {
+    const responseBody = input.result
+      ? {
+          columns: input.result.columns,
+          rows: input.result.rows,
+          rowCount: input.result.rowCount,
+          truncated: input.result.truncated,
+          connectionName: input.result.connectionName,
+          connection: input.result.connection,
+          connectionReadonly: input.result.connectionReadonly,
+          affectedRows: input.result.affectedRows,
+          rolledBack: input.result.rolledBack,
+        }
+      : null;
+    const statusCode = input.result ? 200 : 0;
+    const record: ApiStepDebugRecord = {
+      id: crypto.randomUUID(),
+      stepId: input.stepId,
+      request: {
+        kind: "db",
+        connectionId: input.connectionId,
+        connectionName: input.result?.connectionName ?? null,
+        mode: detectDbSqlKind(input.sql) === "execute" ? "execute" : "query",
+        sql: input.sql,
+      },
+      response: {
+        statusCode,
+        headers: {},
+        body: responseBody,
+        error: input.error,
+      },
+      extracted: {},
+      target: null,
+      statusCode,
+      headers: {},
+      body: responseBody,
+      bodySize: Buffer.byteLength(JSON.stringify(responseBody ?? "")),
+      durationMs: input.result?.durationMs ?? input.durationMs ?? 0,
+      error: input.error,
+      assertions: [],
+      executedAt: new Date().toISOString(),
+    };
+    await this.stepDebugRepo.save(
+      this.stepDebugRepo.create({
+        projectId: input.projectId,
+        caseId: input.caseId,
+        caseSource: input.caseSource,
+        stepId: input.stepId,
+        record,
+        ...auditFieldsForCreate(),
+      }),
+    );
+    const rows = await this.stepDebugRepo.find({
+      where: {
+        projectId: input.projectId,
+        caseSource: input.caseSource,
+        caseId: input.caseId,
+        stepId: input.stepId,
+        createdBy: RequestContext.getUserName(),
+      },
+      order: { createdAt: "DESC" },
+      skip: 30,
+      take: 1000,
+    });
+    if (rows.length)
+      await this.stepDebugRepo.softDelete(rows.map((row) => row.id));
   }
 
   @Get(":projectId/data-functions")
@@ -936,7 +1253,7 @@ export class ApiTestController {
   }
 
   @Post(":projectId/transactions/:transactionId/cases/debug-run")
-  @ApiOperation({ summary: "调试执行单案例（不保存执行记录）" })
+  @ApiOperation({ summary: "调试执行单案例（保存独立步骤调试记录）" })
   async debugRunCase(
     @Param("projectId") projectId: string,
     @Body()
@@ -955,6 +1272,7 @@ export class ApiTestController {
       stepId?: string;
       environmentServiceId?: string;
       caseId?: string;
+      caseSource?: ApiDebugRecordScope;
       encoding?: string;
       ignoreSslVerify?: boolean;
       prerequisiteSteps?: Array<Record<string, unknown>>;
@@ -962,6 +1280,7 @@ export class ApiTestController {
   ) {
     if (!body.target?.address && !body.environmentId)
       throw new BadRequestException("请指定环境地址");
+    const caseSource = normalizeDebugRecordScope(body.caseSource);
     const result = await this.apiExecutionService.debugRun({
       projectId,
       request: body.request as any,
@@ -976,30 +1295,39 @@ export class ApiTestController {
       prerequisiteSteps: body.prerequisiteSteps as any,
     });
     if (body.caseId) {
-      await this.apiCaseService.persistLastDebugRun(projectId, body.caseId, {
-        statusCode: result.statusCode,
-        headers: result.headers,
-        body: result.body,
-        bodySize: result.bodySize,
-        durationMs: result.durationMs,
-        error: result.error,
-        assertions: result.assertions,
-        executedAt: new Date().toISOString(),
-      });
+      if (caseSource === "project") {
+        await this.apiCaseService.persistLastDebugRun(projectId, body.caseId, {
+          statusCode: result.statusCode,
+          headers: redactDebugHeaders(result.headers),
+          body: result.body,
+          bodySize: result.bodySize,
+          durationMs: result.durationMs,
+          error: result.error,
+          assertions: result.assertions,
+          executedAt: new Date().toISOString(),
+        });
+      }
       if (body.stepId) {
         const { request: resolvedRequest, ...restResult } = result;
         const record = {
           id: crypto.randomUUID(),
           stepId: body.stepId,
-          request: (resolvedRequest ?? body.request) as Record<string, unknown>,
+          request: debugRequestSnapshot(
+            (resolvedRequest ?? body.request) as Record<string, unknown>,
+          ),
           response: {
             statusCode: result.statusCode,
-            headers: result.headers,
+            headers: redactDebugHeaders(result.headers),
             body: result.body,
             error: result.error,
           },
           extracted: {},
-          target: body.target ?? null,
+          target: body.target
+            ? {
+                name: body.target.name,
+                address: body.target.address,
+              }
+            : null,
           ...restResult,
           executedAt: new Date().toISOString(),
         };
@@ -1007,6 +1335,7 @@ export class ApiTestController {
           this.stepDebugRepo.create({
             projectId,
             caseId: body.caseId,
+            caseSource,
             stepId: body.stepId,
             record,
             ...auditFieldsForCreate(),
@@ -1014,6 +1343,8 @@ export class ApiTestController {
         );
         const rows = await this.stepDebugRepo.find({
           where: {
+            projectId,
+            caseSource,
             caseId: body.caseId,
             stepId: body.stepId,
             createdBy: RequestContext.getUserName(),
@@ -1034,10 +1365,13 @@ export class ApiTestController {
     @Param("projectId") projectId: string,
     @Param("caseId") caseId: string,
     @Param("stepId") stepId: string,
+    @Query("caseSource") caseSource?: string,
   ) {
+    const normalizedScope = normalizeDebugRecordScope(caseSource);
     return this.stepDebugRepo.find({
       where: {
         projectId,
+        caseSource: normalizedScope,
         caseId,
         stepId,
         createdBy: RequestContext.getUserName(),
@@ -1052,9 +1386,12 @@ export class ApiTestController {
     @Param("projectId") projectId: string,
     @Param("caseId") caseId: string,
     @Param("stepId") stepId: string,
+    @Query("caseSource") caseSource?: string,
   ) {
+    const normalizedScope = normalizeDebugRecordScope(caseSource);
     return this.stepDebugRepo.softDelete({
       projectId,
+      caseSource: normalizedScope,
       caseId,
       stepId,
       createdBy: RequestContext.getUserName(),
@@ -1171,6 +1508,17 @@ export class ApiTestController {
     });
   }
 
+  @Get(":projectId/transactions/:transactionId/runs")
+  listTransactionRuns(
+    @Param("projectId") projectId: string,
+    @Param("transactionId") transactionId: string,
+  ) {
+    return this.apiExecutionService.listRunsByTransaction(
+      projectId,
+      transactionId,
+    );
+  }
+
   @Get(":projectId/runs")
   listRuns(@Param("projectId") projectId: string) {
     return this.apiExecutionService.listRuns(projectId);
@@ -1242,6 +1590,50 @@ export class ApiTestController {
     res.setHeader(
       "Content-Disposition",
       `attachment; filename="${result.fileName}"`,
+    );
+    res.send(result.buffer);
+  }
+
+  @Post(":projectId/requirement-reports/export")
+  async exportRequirementReport(
+    @Param("projectId") projectId: string,
+    @Body() body: ExportRequirementReportDto,
+    @Res() res: Response,
+  ) {
+    const result = await this.apiReportService.exportRequirementReport(
+      projectId,
+      body.format,
+      body.selections,
+    );
+    try {
+      const transactionSelections = [
+        ...new Map(
+          result.selections.map((selection) => [
+            selection.transactionId,
+            selection,
+          ]),
+        ).values(),
+      ];
+      await Promise.all(
+        transactionSelections.map((selection) =>
+          this.apiReportService.recordExport({
+            projectId,
+            transactionId: selection.transactionId,
+            format: body.format,
+            runId: selection.runId,
+            fileName: result.fileName,
+            contentType: result.contentType,
+            buffer: result.buffer,
+          }),
+        ),
+      );
+    } catch {
+      /* 历史记录失败不影响导出 */
+    }
+    res.setHeader("Content-Type", result.contentType);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="requirement-test-report.${body.format}"; filename*=UTF-8''${encodeURIComponent(result.fileName)}`,
     );
     res.send(result.buffer);
   }

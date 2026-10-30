@@ -400,6 +400,9 @@ export interface CaseLastDebugRun {
   executedAt?: string;
 }
 
+/** 调试记录所属业务入口，两个入口的记录互相隔离。 */
+export type ApiDebugRecordScope = "project" | "preproduction";
+
 export interface ApiStepDebugRecord extends CaseLastDebugRun {
   id: string;
   stepId: string;

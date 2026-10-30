@@ -45,6 +45,12 @@ async function migrateApiRequirementStatus(queryable: {
   if (!allColumns.some((column) => column.Field === "createdBy")) {
     await queryable.query("ALTER TABLE api_requirement ADD COLUMN createdBy VARCHAR(255) NULL DEFAULT 'system' AFTER projectName");
   }
+  if (!allColumns.some((column) => column.Field === "applicationName")) {
+    await queryable.query("ALTER TABLE api_requirement ADD COLUMN applicationName VARCHAR(255) NULL COMMENT '所属应用名称' AFTER projectName");
+  }
+  if (!allColumns.some((column) => column.Field === "versionName")) {
+    await queryable.query("ALTER TABLE api_requirement ADD COLUMN versionName VARCHAR(255) NULL COMMENT '需求版本' AFTER applicationName");
+  }
   const type = columns[0]?.Type ?? "";
   if (!type.startsWith("enum(")) return;
 

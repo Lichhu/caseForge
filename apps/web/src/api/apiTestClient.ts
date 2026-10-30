@@ -11,6 +11,7 @@ import type {
   ApiCasePriority,
   ApiCaseRequest,
   ApiCaseStatus,
+  ApiDebugRecordScope,
   ApiEndpointPayload,
   ApiMessageFormat,
   ApiMessageFraming,
@@ -23,6 +24,10 @@ import type {
   ApiStepDebugRecord,
   PreproductionSyncPreview,
   PreproductionSyncResult,
+  ApiPreproductionRunRecord,
+  ApiPreproductionRunSet,
+  ApiPreproductionRunSetListResult,
+  ApiPreproductionRunSetCase,
 } from "@case-forge/shared";
 
 export interface ApiTransactionRow {
@@ -528,17 +533,54 @@ export async function generateApiCases(
   return data;
 }
 
-export interface ApiStepLibraryRow { id: string; name: string; step: ApiCaseStep; updatedAt: string }
-export async function listStepLibrary() { return (await http.get<ApiStepLibraryRow[]>("api-test/step-library")).data; }
-export async function saveStepLibrary(payload: { name: string; step: ApiCaseStep }, id?: string) {
-  return (await (id ? http.patch<ApiStepLibraryRow>(`api-test/step-library/${id}`, payload) : http.post<ApiStepLibraryRow>("api-test/step-library", payload))).data;
+export interface ApiStepLibraryRow {
+  id: string;
+  name: string;
+  step: ApiCaseStep;
+  updatedAt: string;
 }
-export async function deleteStepLibrary(id: string) { return (await http.delete(`api-test/step-library/${id}`)).data; }
-export async function listStepDebugRecords(projectId: string, caseId: string, stepId: string) {
-  return (await http.get<Array<{ id: string; createdAt: string; record: ApiStepDebugRecord }>>(`api-test/${projectId}/cases/${caseId}/steps/${stepId}/debug-records`)).data;
+export async function listStepLibrary() {
+  return (await http.get<ApiStepLibraryRow[]>("api-test/step-library")).data;
 }
-export async function clearStepDebugRecords(projectId: string, caseId: string, stepId: string) {
-  return (await http.delete(`api-test/${projectId}/cases/${caseId}/steps/${stepId}/debug-records`)).data;
+export async function saveStepLibrary(
+  payload: { name: string; step: ApiCaseStep },
+  id?: string,
+) {
+  return (
+    await (id
+      ? http.patch<ApiStepLibraryRow>(`api-test/step-library/${id}`, payload)
+      : http.post<ApiStepLibraryRow>("api-test/step-library", payload))
+  ).data;
+}
+export async function deleteStepLibrary(id: string) {
+  return (await http.delete(`api-test/step-library/${id}`)).data;
+}
+export async function listStepDebugRecords(
+  projectId: string,
+  caseId: string,
+  stepId: string,
+  caseSource: ApiDebugRecordScope = "project",
+) {
+  return (
+    await http.get<
+      Array<{ id: string; createdAt: string; record: ApiStepDebugRecord }>
+    >(`api-test/${projectId}/cases/${caseId}/steps/${stepId}/debug-records`, {
+      params: { caseSource },
+    })
+  ).data;
+}
+export async function clearStepDebugRecords(
+  projectId: string,
+  caseId: string,
+  stepId: string,
+  caseSource: ApiDebugRecordScope = "project",
+) {
+  return (
+    await http.delete(
+      `api-test/${projectId}/cases/${caseId}/steps/${stepId}/debug-records`,
+      { params: { caseSource } },
+    )
+  ).data;
 }
 
 export interface DocReadinessEndpointResult {
@@ -867,6 +909,7 @@ export async function debugRunCase(
     stepId?: string;
     environmentServiceId?: string;
     caseId?: string;
+    caseSource?: ApiDebugRecordScope;
     encoding?: string;
     ignoreSslVerify?: boolean;
     /** 调试前先执行的前置步骤（按序），提取其共享变量后再替换当前调试报文 */
@@ -955,6 +998,16 @@ export async function cancelAssertionGenerate(
 export async function listApiRuns(projectId: string) {
   const { data } = await http.get<ApiRunDetail[]>(
     `/api-test/${projectId}/runs`,
+  );
+  return data;
+}
+
+export async function listApiTransactionRuns(
+  projectId: string,
+  transactionId: string,
+) {
+  const { data } = await http.get<ApiRunDetail[]>(
+    `${transactionBase(projectId, transactionId)}/runs`,
   );
   return data;
 }
@@ -1052,6 +1105,34 @@ export async function exportApiReport(
   return { blob, fileName };
 }
 
+export interface RequirementReportSelection {
+  transactionId: string;
+  runId: string;
+}
+
+export async function exportRequirementReport(
+  projectId: string,
+  selections: RequirementReportSelection[],
+  format: "xlsx" | "pdf" | "html",
+) {
+  const response = await http.post(
+    `/api-test/${projectId}/requirement-reports/export`,
+    { selections, format },
+    { responseType: "blob" },
+  );
+  const contentType = String(response.headers["content-type"] ?? "");
+  const blob = new Blob([response.data], {
+    type: contentType || undefined,
+  });
+  await assertExportBlobFormat(blob, format);
+  const headerDisposition = response.headers["content-disposition"];
+  const fileName =
+    parseContentDispositionFileName(
+      typeof headerDisposition === "string" ? headerDisposition : undefined,
+    ) ?? `requirement-test-report.${format}`;
+  return { blob, fileName };
+}
+
 export function downloadBlob(blob: Blob, fileName: string) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -1072,15 +1153,34 @@ export interface ApiReportExportRow {
   createdAt: string;
 }
 
-export async function listReportExports(projectId: string, transactionId: string) {
-  return (await http.get<ApiReportExportRow[]>(`${transactionBase(projectId, transactionId)}/report-exports`)).data;
+export async function listReportExports(
+  projectId: string,
+  transactionId: string,
+) {
+  return (
+    await http.get<ApiReportExportRow[]>(
+      `${transactionBase(projectId, transactionId)}/report-exports`,
+    )
+  ).data;
 }
 
-export async function getReportExport(projectId: string, transactionId: string, id: string) {
-  return (await http.get<ApiReportExportRow & { contentBase64: string }>(`${transactionBase(projectId, transactionId)}/report-exports/${id}`)).data;
+export async function getReportExport(
+  projectId: string,
+  transactionId: string,
+  id: string,
+) {
+  return (
+    await http.get<ApiReportExportRow & { contentBase64: string }>(
+      `${transactionBase(projectId, transactionId)}/report-exports/${id}`,
+    )
+  ).data;
 }
 
-export function downloadBase64Report(row: { contentBase64: string; contentType: string; fileName: string }) {
+export function downloadBase64Report(row: {
+  contentBase64: string;
+  contentType: string;
+  fileName: string;
+}) {
   const binary = atob(row.contentBase64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
@@ -1213,6 +1313,26 @@ export async function previewSqlStep(
   ).data;
 }
 
+/** SQL 单步调试：试运行 SQL，并按需保存准生产案例步骤调试记录 */
+export async function debugManagedSqlStep(
+  projectId: string,
+  payload: {
+    connectionId: string;
+    sql: string;
+    timeoutMs?: number;
+    caseId?: string;
+    stepId?: string;
+    caseSource?: ApiDebugRecordScope;
+  },
+) {
+  return (
+    await http.post<SqlStepPreviewResult>(
+      `/api-test/${projectId}/sql-steps/debug`,
+      payload,
+    )
+  ).data;
+}
+
 export async function listDataFunctions(projectId: string) {
   return (
     await http.get<ApiDataFunctionRow[]>(
@@ -1259,7 +1379,11 @@ export async function previewDataFunction(
 }
 export async function generateDataFunctionScript(
   projectId: string,
-  payload: { language: "javascript" | "python"; params: string[]; requirement: string },
+  payload: {
+    language: "javascript" | "python";
+    params: string[];
+    requirement: string;
+  },
 ) {
   return (
     await http.post<{ script: string }>(
@@ -1269,10 +1393,23 @@ export async function generateDataFunctionScript(
   ).data;
 }
 
-export async function publishCaseReport(projectId: string, transactionId: string, runId: string, selection: { versionId: string; applicationId: string; roundId: string }) {
-  return (await http.post<{ runId: string; fileName: string; reportUrl: string; notificationStatus: "queued" | "disabled" }>(
-    `${transactionBase(projectId, transactionId)}/reports/publish-case`, { runId, ...selection },
-  )).data;
+export async function publishCaseReport(
+  projectId: string,
+  transactionId: string,
+  runId: string,
+  selection: { versionId: string; applicationId: string; roundId: string },
+) {
+  return (
+    await http.post<{
+      runId: string;
+      fileName: string;
+      reportUrl: string;
+      notificationStatus: "queued" | "disabled";
+    }>(`${transactionBase(projectId, transactionId)}/reports/publish-case`, {
+      runId,
+      ...selection,
+    })
+  ).data;
 }
 
 export type ManagedCaseRow = ApiTestCaseRow & {
@@ -1283,31 +1420,63 @@ export type ManagedCaseRow = ApiTestCaseRow & {
   createdAt?: string;
   updatedAt?: string;
 };
-export type { ManagedCaseSelection, ManagedCaseOptions, ManagedCaseQuery } from "@case-forge/shared";
-import type { ManagedCaseSelection, ManagedCaseOptions, ManagedCaseQuery } from "@case-forge/shared";
+export type {
+  ManagedCaseSelection,
+  ManagedCaseOptions,
+  ManagedCaseQuery,
+} from "@case-forge/shared";
+import type {
+  ManagedCaseSelection,
+  ManagedCaseOptions,
+  ManagedCaseQuery,
+} from "@case-forge/shared";
 export async function listManagedCases(params: ManagedCaseQuery) {
-  return (await http.get<{ rows: ManagedCaseRow[]; count: number; page: number; pageSize: number }>("api-test/case-management/cases", { params })).data;
+  return (
+    await http.get<{
+      rows: ManagedCaseRow[];
+      count: number;
+      page: number;
+      pageSize: number;
+    }>("api-test/case-management/cases", { params })
+  ).data;
 }
 export async function getManagedCaseOptions(params: ManagedCaseQuery) {
-  return (await http.get<ManagedCaseOptions>("api-test/case-management/options", { params })).data;
+  return (
+    await http.get<ManagedCaseOptions>("api-test/case-management/options", {
+      params,
+    })
+  ).data;
 }
 export async function selectManagedCases(params: ManagedCaseQuery) {
-  return (await http.get<ManagedCaseSelection[]>("api-test/case-management/selection", { params })).data;
+  return (
+    await http.get<ManagedCaseSelection[]>(
+      "api-test/case-management/selection",
+      { params },
+    )
+  ).data;
 }
 export async function getManagedCaseDetails(ids: string[]) {
-  return (await http.post<ManagedCaseRow[]>("api-test/case-management/details", { ids })).data;
+  return (
+    await http.post<ManagedCaseRow[]>("api-test/case-management/details", {
+      ids,
+    })
+  ).data;
 }
 export async function deleteManagedCase(caseId: string) {
-  return (await http.delete<{ deleted: number }>(
-    `api-test/case-management/cases/${encodeURIComponent(caseId)}`,
-  )).data;
+  return (
+    await http.delete<{ deleted: number }>(
+      `api-test/case-management/cases/${encodeURIComponent(caseId)}`,
+    )
+  ).data;
 }
 
 export async function deleteManagedCases(caseIds: string[]) {
-  return (await http.post<{ deleted: number }>(
-    "api-test/case-management/cases/delete",
-    { caseIds },
-  )).data;
+  return (
+    await http.post<{ deleted: number }>(
+      "api-test/case-management/cases/delete",
+      { caseIds },
+    )
+  ).data;
 }
 
 export interface UpdateManagedCaseStepPayload {
@@ -1327,49 +1496,235 @@ export async function updateManagedCaseStep(
   stepId: string,
   payload: UpdateManagedCaseStepPayload,
 ) {
-  return (await http.patch<ManagedCaseRow>(
-    `api-test/case-management/cases/${encodeURIComponent(caseId)}/steps/${encodeURIComponent(stepId)}`,
-    payload,
-  )).data;
+  return (
+    await http.patch<ManagedCaseRow>(
+      `api-test/case-management/cases/${encodeURIComponent(caseId)}/steps/${encodeURIComponent(stepId)}`,
+      payload,
+    )
+  ).data;
+}
+
+export async function deleteManagedCaseStep(caseId: string, stepId: string) {
+  return (
+    await http.delete<ManagedCaseRow>(
+      `api-test/case-management/cases/${encodeURIComponent(caseId)}/steps/${encodeURIComponent(stepId)}`,
+    )
+  ).data;
 }
 
 export async function updateManagedCaseInfo(
   caseId: string,
   payload: { title?: string; description?: string; remark?: string },
 ) {
-  return (await http.patch<ManagedCaseRow>(
-    `api-test/case-management/cases/${encodeURIComponent(caseId)}`,
-    payload,
-  )).data;
+  return (
+    await http.patch<ManagedCaseRow>(
+      `api-test/case-management/cases/${encodeURIComponent(caseId)}`,
+      payload,
+    )
+  ).data;
+}
+
+export async function listLatestPreproductionRunRecords(caseIds: string[]) {
+  return (
+    await http.post<ApiPreproductionRunRecord[]>(
+      "api-test/case-management/run-records/latest",
+      { caseIds },
+    )
+  ).data;
+}
+
+export async function listPreproductionRunRecords(
+  projectId: string,
+  caseId: string,
+) {
+  return (
+    await http.get<ApiPreproductionRunRecord[]>(
+      `api-test/${projectId}/preproduction/cases/${caseId}/run-records`,
+    )
+  ).data;
+}
+
+export async function runPreproductionCaseAndPush(
+  projectId: string,
+  caseId: string,
+  selection: {
+    versionId: string;
+    applicationId: string;
+    roundId: string;
+    runSetId: string;
+  },
+) {
+  return (
+    await http.post<ApiPreproductionRunRecord>(
+      `api-test/${projectId}/preproduction/cases/${caseId}/run-push`,
+      selection,
+    )
+  ).data;
+}
+
+export async function createPreproductionRunSet(
+  projectId: string,
+  payload: {
+    name?: string;
+    versionId: string;
+    versionLabel: string;
+    applicationId?: string | null;
+    applicationLabel?: string | null;
+    roundId?: string | null;
+    roundLabel?: string | null;
+    totalCount?: number;
+  },
+) {
+  return (
+    await http.post<ApiPreproductionRunSet>(
+      `api-test/${projectId}/preproduction/run-sets`,
+      payload,
+    )
+  ).data;
+}
+
+export async function attachPreproductionRunSetCases(
+  projectId: string,
+  runSetId: string,
+  caseIds: string[],
+) {
+  return (
+    await http.post<ApiPreproductionRunSetCase[]>(
+      `api-test/${projectId}/preproduction/run-sets/${runSetId}/cases`,
+      { caseIds },
+    )
+  ).data;
+}
+
+export async function listPreproductionRunSetCases(
+  projectId: string,
+  runSetId: string,
+) {
+  return (
+    await http.get<ApiPreproductionRunSetCase[]>(
+      `api-test/${projectId}/preproduction/run-sets/${runSetId}/cases`,
+    )
+  ).data;
+}
+
+export async function detachPreproductionRunSetCase(
+  projectId: string,
+  runSetId: string,
+  caseId: string,
+) {
+  return (
+    await http.delete<ApiPreproductionRunSetCase[]>(
+      `api-test/${projectId}/preproduction/run-sets/${runSetId}/cases/${encodeURIComponent(caseId)}`,
+    )
+  ).data;
+}
+
+export async function deletePreproductionRunSet(
+  projectId: string,
+  runSetId: string,
+) {
+  return (
+    await http.delete<{ ok: boolean }>(
+      `api-test/${projectId}/preproduction/run-sets/${runSetId}`,
+    )
+  ).data;
+}
+
+export async function listPreproductionRunSets(
+  projectId: string,
+  params?: { page?: number; size?: number; keyword?: string },
+) {
+  return (
+    await http.get<ApiPreproductionRunSetListResult>(
+      `api-test/${projectId}/preproduction/run-sets`,
+      { params },
+    )
+  ).data;
+}
+
+export async function listPreproductionRunSetRecords(
+  projectId: string,
+  runSetId: string,
+) {
+  return (
+    await http.get<ApiPreproductionRunRecord[]>(
+      `api-test/${projectId}/preproduction/run-sets/${runSetId}/records`,
+    )
+  ).data;
+}
+
+export async function finishPreproductionRunSet(
+  projectId: string,
+  runSetId: string,
+) {
+  return (
+    await http.post<ApiPreproductionRunSet>(
+      `api-test/${projectId}/preproduction/run-sets/${runSetId}/finish`,
+    )
+  ).data;
+}
+
+export async function retryPreproductionRunPush(
+  projectId: string,
+  recordId: string,
+) {
+  return (
+    await http.post<ApiPreproductionRunRecord>(
+      `api-test/${projectId}/preproduction/run-records/${recordId}/retry-push`,
+    )
+  ).data;
 }
 
 export async function previewPreproductionSync(
   projectId: string,
   transactionIds: string[],
 ) {
-  return (await http.post<PreproductionSyncPreview>(
-    `api-test/${projectId}/transactions/preprod-sync/preview`,
-    { transactionIds },
-  )).data;
+  return (
+    await http.post<PreproductionSyncPreview>(
+      `api-test/${projectId}/transactions/preprod-sync/preview`,
+      { transactionIds },
+    )
+  ).data;
 }
 
 export async function syncPreproductionCases(
   projectId: string,
   payload: { transactionIds: string[]; caseIds: string[] },
 ) {
-  return (await http.post<PreproductionSyncResult>(
-    `api-test/${projectId}/transactions/preprod-sync`,
-    payload,
-  )).data;
+  return (
+    await http.post<PreproductionSyncResult>(
+      `api-test/${projectId}/transactions/preprod-sync`,
+      payload,
+    )
+  ).data;
 }
 
-export interface ExecutionVersionOption { id: string; name: string; versionTime: string; }
-export interface ExecutionPlanOption { id: string; pid: string; versionId: string; name: string; roundNum: number | string | null; }
+export interface ExecutionVersionOption {
+  id: string;
+  name: string;
+  versionTime: string;
+}
+export interface ExecutionPlanOption {
+  id: string;
+  pid: string;
+  versionId: string;
+  name: string;
+  roundNum: number | string | null;
+}
 export async function listExecutionVersions() {
-  return (await http.get<ExecutionVersionOption[]>("api-test/case-management/execution-versions")).data;
+  return (
+    await http.get<ExecutionVersionOption[]>(
+      "api-test/case-management/execution-versions",
+    )
+  ).data;
 }
 export async function listExecutionPlans(versionId: string, parentId: string) {
-  return (await http.get<ExecutionPlanOption[]>("api-test/case-management/execution-plans", { params: { versionId, parentId } })).data;
+  return (
+    await http.get<ExecutionPlanOption[]>(
+      "api-test/case-management/execution-plans",
+      { params: { versionId, parentId } },
+    )
+  ).data;
 }
 
 export interface CaseApplicationNode {
@@ -1379,16 +1734,41 @@ export interface CaseApplicationNode {
   children?: CaseApplicationNode[];
 }
 export async function listCaseApplicationSystems() {
-  return (await http.get<CaseApplicationNode[]>("api-test/case-management/application-systems")).data;
+  return (
+    await http.get<CaseApplicationNode[]>(
+      "api-test/case-management/application-systems",
+    )
+  ).data;
 }
 export async function listCaseApplicationChildren(parentId: string) {
-  return (await http.get<CaseApplicationNode[]>(
-    `api-test/case-management/application-systems/${encodeURIComponent(parentId)}/children`,
-  )).data;
+  return (
+    await http.get<CaseApplicationNode[]>(
+      `api-test/case-management/application-systems/${encodeURIComponent(parentId)}/children`,
+    )
+  ).data;
 }
-export async function listCaseDesigners() { return (await http.get<Array<{ userName: string; nickName: string }>>("api-test/case-management/designers")).data; }
-export async function exportCaseTemplate(payload: { caseIds: string[]; designer: string; applicationPath: string }) {
-  const response = await http.post("api-test/case-management/export", payload, { responseType: "blob" });
+export async function listCaseDesigners() {
+  return (
+    await http.get<Array<{ userName: string; nickName: string }>>(
+      "api-test/case-management/designers",
+    )
+  ).data;
+}
+export async function exportCaseTemplate(payload: {
+  caseIds: string[];
+  designer: string;
+}) {
+  const response = await http.post("api-test/case-management/export", payload, {
+    responseType: "blob",
+  });
   const fileName = `测试案例_${new Date().toISOString().slice(0, 10)}.xlsx`;
-  return { blob: new Blob([response.data], { type: String(response.headers["content-type"] ?? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") }), fileName };
+  return {
+    blob: new Blob([response.data], {
+      type: String(
+        response.headers["content-type"] ??
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      ),
+    }),
+    fileName,
+  };
 }

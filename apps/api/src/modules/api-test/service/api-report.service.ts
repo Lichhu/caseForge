@@ -13,6 +13,7 @@ import {
 } from "@common/pdf/pdf-cjk-font.util";
 import {
   buildApiReportHtml,
+  buildApiRequirementReportHtml,
   extractReportSteps,
   type ApiReportContext,
   type ReportAssertionMeta,
@@ -30,6 +31,7 @@ import { ApiExecutionService } from "./api-execution.service";
 function sanitizeExportFileToken(value: string) {
   return value
     .trim()
+    .replace(/[\u0000-\u001F\u007F]/g, "_")
     .replace(/[\\/:*?"<>|]/g, "_")
     .replace(/\s+/g, "_");
 }
@@ -55,7 +57,33 @@ function buildExportFileName(
   return `api-test-run-${runId}.${ext}`;
 }
 
+function buildRequirementExportFileName(
+  requirementNo: string,
+  records: Array<{ transactionCode: string; runId: string }>,
+  format: "xlsx" | "pdf" | "html",
+) {
+  const ext = format === "xlsx" ? "xlsx" : format;
+  const req = sanitizeExportFileToken(requirementNo);
+  if (records.length === 1) {
+    const transactionCode = sanitizeExportFileToken(
+      records[0].transactionCode,
+    );
+    const runId = sanitizeExportFileToken(records[0].runId);
+    return `${req ? `${req}_` : ""}${transactionCode}_${runId}.${ext}`;
+  }
+  return `${req ? `${req}_` : ""}需求测试报告_${records.length}项.${ext}`;
+}
+
 type RunDetail = Awaited<ReturnType<ApiExecutionService["getRunDetail"]>>;
+type RequirementReportSelection = {
+  transactionId: string;
+  runId: string;
+};
+type RequirementReportEntry = {
+  transaction: ApiTransactionEntity;
+  run: RunDetail;
+  context: Partial<ApiReportContext>;
+};
 
 @Injectable()
 export class ApiReportService {
@@ -230,6 +258,123 @@ export class ApiReportService {
     throw new BadRequestException(`不支持的导出格式: ${format}`);
   }
 
+  async exportRequirementReport(
+    projectId: string,
+    format: "xlsx" | "pdf" | "html",
+    selections: RequirementReportSelection[],
+  ): Promise<{
+    buffer: Buffer;
+    fileName: string;
+    contentType: string;
+    selections: RequirementReportSelection[];
+  }> {
+    const uniqueSelections = [
+      ...new Map(
+        selections.map((selection) => [
+          `${selection.transactionId}:${selection.runId}`,
+          selection,
+        ]),
+      ).values(),
+    ];
+    if (!uniqueSelections.length) {
+      throw new BadRequestException("请至少选择一条执行历史");
+    }
+
+    const project = await this.projectRepo.findOne({
+      where: { id: projectId },
+      select: ["id", "title", "requirementNo"],
+    });
+    const entries: RequirementReportEntry[] = [];
+    for (const selection of uniqueSelections) {
+      const transaction = await this.transactionRepo.findOne({
+        where: { id: selection.transactionId, projectId },
+      });
+      if (!transaction) {
+        throw new BadRequestException("所选交易码不存在或不属于当前需求");
+      }
+
+      let run = await this.executionService.getRunDetail(
+        projectId,
+        selection.runId,
+      );
+      if (run.transactionId && run.transactionId !== selection.transactionId) {
+        throw new BadRequestException(
+          `执行历史 ${selection.runId} 不属于交易码 ${transaction.code}`,
+        );
+      }
+      if (!run.transactionId) {
+        run = await this.filterRunByTransaction(
+          projectId,
+          selection.transactionId,
+          run,
+        );
+      }
+      if (!run.items.length) {
+        throw new BadRequestException(
+          `执行历史 ${selection.runId} 中没有交易码 ${transaction.code} 的执行案例`,
+        );
+      }
+      entries.push({
+        transaction,
+        run,
+        context: await this.buildReportContext(run, transaction),
+      });
+    }
+
+    const requirementNo =
+      entries[0].transaction.reqCode?.trim() ||
+      project?.requirementNo?.trim() ||
+      project?.title?.trim() ||
+      projectId;
+    const fileName = buildRequirementExportFileName(
+      requirementNo,
+      entries.map((entry) => ({
+        transactionCode: entry.transaction.code,
+        runId: entry.run.id,
+      })),
+      format,
+    );
+    const normalizedSelections = entries.map((entry) => ({
+      transactionId: entry.transaction.id,
+      runId: entry.run.id,
+    }));
+
+    if (format === "xlsx") {
+      return {
+        buffer: await this.toRequirementExcel(entries),
+        fileName,
+        contentType:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        selections: normalizedSelections,
+      };
+    }
+    if (format === "html") {
+      return {
+        buffer: Buffer.from(
+          buildApiRequirementReportHtml(
+            entries.map((entry) => ({
+              transactionCode: entry.transaction.code,
+              transactionName: entry.transaction.name,
+              run: entry.run,
+              context: entry.context,
+            })),
+            requirementNo,
+          ),
+          "utf-8",
+        ),
+        fileName,
+        contentType: "text/html; charset=utf-8",
+        selections: normalizedSelections,
+      };
+    }
+    return {
+      buffer: await this.toRequirementPdf(entries, requirementNo),
+      fileName,
+      contentType: "application/pdf",
+      selections: normalizedSelections,
+    };
+  }
+
   private async resolveExportFileName(
     projectId: string,
     transactionId: string | undefined,
@@ -288,6 +433,7 @@ export class ApiReportService {
     const errorCount = items.filter((item) => item.status === "error").length;
     return {
       ...run,
+      transactionId,
       items,
       totalCount: items.length,
       passedCount,
@@ -298,6 +444,7 @@ export class ApiReportService {
 
   private async buildReportContext(
     run: RunDetail,
+    selectedTransaction?: ApiTransactionEntity,
   ): Promise<Partial<ApiReportContext>> {
     const [env, transaction, project] = await Promise.all([
       run.environmentId
@@ -306,7 +453,9 @@ export class ApiReportService {
             select: ["id", "name"],
           })
         : null,
-      run.transactionId
+      selectedTransaction
+        ? Promise.resolve(selectedTransaction)
+        : run.transactionId
         ? this.transactionRepo.findOne({
             where: { id: run.transactionId },
             select: ["id", "code", "name"],
@@ -440,6 +589,101 @@ export class ApiReportService {
     return Buffer.from(buffer);
   }
 
+  private async toRequirementExcel(entries: RequirementReportEntry[]) {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "CaseForge";
+    const summary = workbook.addWorksheet("汇总");
+    summary.columns = [
+      { header: "交易码", key: "transactionCode", width: 22 },
+      { header: "交易名称", key: "transactionName", width: 28 },
+      { header: "执行历史 ID", key: "runId", width: 40 },
+      { header: "执行版本", key: "versionCode", width: 20 },
+      { header: "测试环境", key: "environment", width: 22 },
+      { header: "案例数", key: "total", width: 10 },
+      { header: "通过", key: "passed", width: 10 },
+      { header: "失败", key: "failed", width: 10 },
+      { header: "错误", key: "error", width: 10 },
+      { header: "通过率", key: "passRate", width: 12 },
+      { header: "执行时间", key: "createdAt", width: 22 },
+    ];
+    summary.getRow(1).font = { bold: true };
+    for (const entry of entries) {
+      summary.addRow({
+        transactionCode: entry.transaction.code,
+        transactionName: entry.transaction.name,
+        runId: entry.run.id,
+        versionCode: entry.run.versionCode ?? "",
+        environment: entry.context.envName ?? "",
+        total: entry.run.totalCount,
+        passed: entry.run.passedCount,
+        failed: entry.run.failedCount,
+        error: entry.run.errorCount,
+        passRate:
+          entry.run.totalCount > 0
+            ? `${((entry.run.passedCount / entry.run.totalCount) * 100).toFixed(2)}%`
+            : "0.00%",
+        createdAt: entry.run.createdAt?.toISOString() ?? "",
+      });
+    }
+
+    const sheet = workbook.addWorksheet("执行案例");
+    sheet.columns = [
+      { header: "交易码", key: "transactionCode", width: 22 },
+      { header: "执行历史 ID", key: "runId", width: 40 },
+      { header: "案例", key: "title", width: 28 },
+      { header: "步骤", key: "step", width: 24 },
+      { header: "状态", key: "status", width: 12 },
+      { header: "耗时(ms)", key: "duration", width: 12 },
+      { header: "URL", key: "url", width: 40 },
+      { header: "HTTP", key: "http", width: 8 },
+      { header: "断言摘要", key: "assertions", width: 48 },
+    ];
+    sheet.getRow(1).font = { bold: true };
+    for (const entry of entries) {
+      for (const item of entry.run.items) {
+        const steps = extractReportSteps(item.requestSnapshot);
+        if (steps.length) {
+          for (const [index, step] of steps.entries()) {
+            const stepAssertions = step.assertions ?? [];
+            const failedAssertions = stepAssertions.filter((a) => !a.passed);
+            sheet.addRow({
+              transactionCode: entry.transaction.code,
+              runId: entry.run.id,
+              title: item.caseTitle,
+              step: `步骤${index + 1}：${step.stepName ?? "未命名步骤"}`,
+              status: formatRunItemStatus(step.status ?? item.status),
+              duration: step.durationMs ?? "",
+              url: String(step.request?.url ?? ""),
+              http: step.response?.status ?? "",
+              assertions: failedAssertions.length
+                ? failedAssertions.map((a) => a.name).join("; ")
+                : stepAssertions.length
+                  ? "全部通过"
+                  : "—",
+            });
+          }
+          continue;
+        }
+        const failedAssertions = item.assertions.filter((a) => !a.passed);
+        sheet.addRow({
+          transactionCode: entry.transaction.code,
+          runId: entry.run.id,
+          title: item.caseTitle,
+          step: "—",
+          status: formatRunItemStatus(item.status),
+          duration: item.durationMs,
+          url: String(item.requestSnapshot.url ?? ""),
+          http: item.responseSnapshot?.status ?? "",
+          assertions: failedAssertions.length
+            ? failedAssertions.map((a) => a.name).join("; ")
+            : "全部通过",
+        });
+      }
+    }
+    const buffer = await workbook.xlsx.writeBuffer();
+    return Buffer.from(buffer);
+  }
+
   private async toPdf(run: RunDetail) {
     return new Promise<Buffer>((resolve, reject) => {
       const doc = new PDFDocument({ margin: 48, size: "A4" });
@@ -518,6 +762,149 @@ export class ApiReportService {
         }
         doc.fontSize(10).fillColor("#101828");
         doc.moveDown(0.4);
+      }
+
+      doc.end();
+    });
+  }
+
+  private async toRequirementPdf(
+    entries: RequirementReportEntry[],
+    reportCode: string,
+  ) {
+    return new Promise<Buffer>((resolve, reject) => {
+      const doc = new PDFDocument({ margin: 48, size: "A4" });
+      const chunks: Buffer[] = [];
+      doc.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+
+      try {
+        applyPdfCjkFont(doc);
+      } catch (error) {
+        reject(error);
+        return;
+      }
+
+      const pageWidth =
+        doc.page.width - doc.page.margins.left - doc.page.margins.right;
+      const totalCases = entries.reduce(
+        (sum, entry) => sum + entry.run.totalCount,
+        0,
+      );
+      const totalPassed = entries.reduce(
+        (sum, entry) => sum + entry.run.passedCount,
+        0,
+      );
+
+      doc.fontSize(20).text("接口质量测试报告", { align: "center" });
+      doc.moveDown(0.8);
+      doc.fontSize(12).fillColor("#475467");
+      doc.text(reportCode, { align: "center" });
+      doc.moveDown(0.5);
+      doc.text(
+        `共 ${entries.length} 项交易执行记录 · ${totalCases} 条案例 · 总通过率 ${
+          totalCases > 0
+            ? ((totalPassed / totalCases) * 100).toFixed(2)
+            : "0.00"
+        }%`,
+        { align: "center" },
+      );
+      doc.moveDown(1.2);
+
+      for (const entry of entries) {
+        const passRate =
+          entry.run.totalCount > 0
+            ? ((entry.run.passedCount / entry.run.totalCount) * 100).toFixed(1)
+            : "0";
+        doc
+          .fillColor("#101828")
+          .fontSize(13)
+          .text(
+            `${entry.transaction.code} · ${entry.transaction.name}  ${passRate}%`,
+          );
+        doc
+          .fillColor("#667085")
+          .fontSize(9)
+          .text(
+            `执行历史 ID：${entry.run.id}  版本：${entry.run.versionCode ?? "—"}  环境：${entry.context.envName ?? "—"}`,
+          );
+        doc.moveDown(0.5);
+      }
+
+      for (const entry of entries) {
+        doc.addPage();
+        applyPdfCjkFont(doc);
+        const passRate =
+          entry.run.totalCount > 0
+            ? ((entry.run.passedCount / entry.run.totalCount) * 100).toFixed(1)
+            : "0";
+        doc.fillColor("#101828").fontSize(17).text(entry.transaction.code);
+        doc
+          .fillColor("#475467")
+          .fontSize(10)
+          .text(entry.transaction.name || "未命名交易");
+        doc
+          .fontSize(9)
+          .text(`执行历史 ID：${entry.run.id}`, { width: pageWidth });
+        doc.text(
+          `执行版本：${entry.run.versionCode ?? "—"}  环境：${entry.context.envName ?? "—"}`,
+          { width: pageWidth },
+        );
+        doc.moveDown(0.8);
+        this.drawPdfSummaryCards(doc, pageWidth, entry.run, passRate);
+        doc.moveDown(1.2);
+        this.drawPdfStatusBars(doc, pageWidth, entry.run);
+        doc.moveDown(1.2);
+        doc
+          .fillColor("#101828")
+          .fontSize(13)
+          .text("执行案例", { underline: true });
+        doc.moveDown(0.6);
+        doc.fontSize(10);
+
+        for (const item of entry.run.items) {
+          if (doc.y > doc.page.height - doc.page.margins.bottom - 80) {
+            doc.addPage();
+            applyPdfCjkFont(doc);
+            doc.fontSize(10);
+          }
+          const statusLabel = formatRunItemStatus(item.status);
+          const statusColor =
+            item.status === "passed"
+              ? "#16a34a"
+              : item.status === "failed"
+                ? "#dc2626"
+                : "#d97706";
+          doc
+            .fillColor("#101828")
+            .text(`• ${item.caseTitle}`, { continued: true });
+          doc
+            .fillColor(statusColor)
+            .text(`  [${statusLabel}]  ${item.durationMs}ms`);
+          doc
+            .fillColor("#667085")
+            .fontSize(9)
+            .text(`  请求：${String(item.requestSnapshot.url ?? "—")}`);
+          const steps = extractReportSteps(item.requestSnapshot);
+          for (const [index, step] of steps.entries()) {
+            doc.text(
+              `  步骤${index + 1}：${step.stepName ?? "未命名步骤"} ［${formatRunItemStatus(step.status ?? item.status)}］ ${step.durationMs ?? 0}ms — ${String(step.request?.url ?? "")}`,
+            );
+          }
+          if (item.status !== "passed") {
+            const failed = item.assertions.filter(
+              (assertion) => !assertion.passed,
+            );
+            for (const assertion of failed.slice(0, 3)) {
+              doc.text(
+                `  - ${assertion.name}：期望 ${JSON.stringify(assertion.expected)}，实际 ${JSON.stringify(assertion.actual)}`,
+              );
+            }
+          }
+          doc.fontSize(10).fillColor("#101828");
+          doc.moveDown(0.4);
+        }
       }
 
       doc.end();

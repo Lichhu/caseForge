@@ -4,6 +4,7 @@
 import type {
   RequirementClaimCandidate,
   RequirementPlatformItem,
+  RequirementProgressDetail,
   RequirementSyncResult,
 } from "@case-forge/shared";
 import { http } from "./client";
@@ -19,13 +20,22 @@ export interface RequirementPlatformListResponse {
   size: number;
 }
 
-export async function createRequirement(payload: { projectCode: string; projectName: string; applicationName: string }) {
-  const { data } = await http.post<RequirementPlatformItem>("/requirement-platform/requirements", payload);
+export async function createRequirement(payload: {
+  projectCode: string;
+  projectName: string;
+  applicationName: string;
+}) {
+  const { data } = await http.post<RequirementPlatformItem>(
+    "/requirement-platform/requirements",
+    payload,
+  );
   return data;
 }
 
 export async function fetchRequirementApplications(): Promise<string[]> {
-  const { data } = await http.get<string[]>("/requirement-platform/applications");
+  const { data } = await http.get<string[]>(
+    "/requirement-platform/applications",
+  );
   return data;
 }
 
@@ -37,12 +47,17 @@ export async function updateRequirement(
     applicationName: string;
   }>,
 ) {
-  const { data } = await http.patch<RequirementPlatformItem>(`/requirement-platform/requirements/${id}`, payload);
+  const { data } = await http.patch<RequirementPlatformItem>(
+    `/requirement-platform/requirements/${id}`,
+    payload,
+  );
   return data;
 }
 
 export async function deleteRequirement(id: string) {
-  const { data } = await http.delete<{ id: string; deleted: boolean }>(`/requirement-platform/requirements/${id}`);
+  const { data } = await http.delete<{ id: string; deleted: boolean }>(
+    `/requirement-platform/requirements/${id}`,
+  );
   return data;
 }
 
@@ -55,17 +70,28 @@ export interface RequirementPoolMember {
 }
 
 export async function fetchPoolMembers(): Promise<RequirementPoolMember[]> {
-  const { data } = await http.get<RequirementPoolMember[]>("/requirement-platform/members");
+  const { data } = await http.get<RequirementPoolMember[]>(
+    "/requirement-platform/members",
+  );
   return data;
 }
 
-export async function searchPoolCandidates(keyword: string): Promise<Array<{ userName: string; nickName: string }>> {
-  const { data } = await http.get<Array<{ userName: string; nickName: string }>>("/requirement-platform/members/candidates", { params: { keyword } });
+export async function searchPoolCandidates(
+  keyword: string,
+): Promise<Array<{ userName: string; nickName: string }>> {
+  const { data } = await http.get<
+    Array<{ userName: string; nickName: string }>
+  >("/requirement-platform/members/candidates", { params: { keyword } });
   return data;
 }
 
-export async function addPoolMember(userName: string): Promise<RequirementPoolMember> {
-  const { data } = await http.post<RequirementPoolMember>("/requirement-platform/members", { userName });
+export async function addPoolMember(
+  userName: string,
+): Promise<RequirementPoolMember> {
+  const { data } = await http.post<RequirementPoolMember>(
+    "/requirement-platform/members",
+    { userName },
+  );
   return data;
 }
 
@@ -73,16 +99,39 @@ export async function removePoolMember(id: string): Promise<void> {
   await http.delete(`/requirement-platform/members/${id}`);
 }
 
-export async function setRequirementStatus(id: string, status: "testing" | "completed") {
-  const { data } = await http.patch<RequirementPlatformItem>(`/requirement-platform/requirements/${id}/status`, { status });
+export async function setRequirementStatus(
+  id: string,
+  status: "testing" | "completed",
+) {
+  const { data } = await http.patch<RequirementPlatformItem>(
+    `/requirement-platform/requirements/${id}/status`,
+    { status },
+  );
   return data;
 }
 
 /** 需求平台列表（分发人全量，普通用户仅与自己相关的） */
-export async function fetchRequirementList(params: { page: number; size: number; status: string; keyword: string; owner?: string; application?: string }): Promise<RequirementPlatformListResponse> {
+export async function fetchRequirementList(params: {
+  page: number;
+  size: number;
+  status: string;
+  keyword: string;
+  owner?: string;
+  application?: string;
+}): Promise<RequirementPlatformListResponse> {
   const { data } = await http.get<RequirementPlatformListResponse>(
     "/requirement-platform/requirements",
     { params },
+  );
+  return data;
+}
+
+/** 分发人只读查看需求完成情况（需求 → 交易 → 案例 → 步骤 → 执行结果） */
+export async function fetchRequirementProgress(
+  id: string,
+): Promise<RequirementProgressDetail> {
+  const { data } = await http.get<RequirementProgressDetail>(
+    `/requirement-platform/requirements/${id}/progress`,
   );
   return data;
 }

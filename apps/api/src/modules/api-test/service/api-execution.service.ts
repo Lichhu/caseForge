@@ -357,7 +357,11 @@ export class ApiExecutionService {
           cache: executionCache,
         });
         items.push(item);
-        const exports = testCase.metadata?.exports ?? [];
+        // 多步骤案例的提取已在各自步骤完成后处理；metadata.exports 是主步骤
+        // 导出字段的兼容副本，不能再用步骤汇总快照重复提取并覆盖案例状态。
+        const exports = testCase.steps?.length
+          ? []
+          : (testCase.metadata?.exports ?? []);
         for (const binding of exports) {
           const value = extractExportValue(
             binding,
@@ -451,6 +455,15 @@ export class ApiExecutionService {
         projectId,
         ...(executionSetId ? { executionSetId } : {}),
       }),
+      order: { createdAt: "DESC" },
+      take: 50,
+    });
+    return runs.map((run) => toPublicApiRun(run));
+  }
+
+  async listRunsByTransaction(projectId: string, transactionId: string) {
+    const runs = await this.runRepo.find({
+      where: scopedWhere({ projectId, transactionId }),
       order: { createdAt: "DESC" },
       take: 50,
     });

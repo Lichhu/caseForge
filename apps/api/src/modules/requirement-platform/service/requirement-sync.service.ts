@@ -131,7 +131,15 @@ export class RequirementSyncService implements OnModuleInit, OnModuleDestroy {
       let skipped = 0;
       for (const project of candidates) {
         const projectCode = project.projectCode!.trim();
+        const versionName = project.versionName?.trim() || null;
         if (existingCodes.has(projectCode)) {
+          await this.requirementRepo.update(
+            { projectCode },
+            {
+              versionName,
+              sourceUpdatedAt: new Date(),
+            },
+          );
           continue;
         }
         if (!(await this.passSmpCheck(projectCode))) {
@@ -143,6 +151,7 @@ export class RequirementSyncService implements OnModuleInit, OnModuleDestroy {
             this.requirementRepo.create({
               projectCode,
               projectName: project.projectName?.trim() || projectCode,
+              versionName,
               status: "pending_dispatch",
               sourceUpdatedAt: new Date(),
             }),

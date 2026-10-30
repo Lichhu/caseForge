@@ -58,6 +58,15 @@ export class PreviewSqlStepDto {
   @IsOptional() @IsInt() @Min(1000) @Max(60000) timeoutMs?: number;
 }
 
+/** SQL 单步调试：试运行并可选写入案例步骤调试记录。 */
+export class DebugSqlStepDto extends PreviewSqlStepDto {
+  @IsOptional() @IsString() @MaxLength(36) caseId?: string;
+  @IsOptional() @IsString() @MaxLength(36) stepId?: string;
+  @IsOptional()
+  @IsIn(["project", "preproduction"])
+  caseSource?: "project" | "preproduction";
+}
+
 export class GenerateDataFunctionScriptDto {
   @IsIn(["javascript", "python"]) language: "javascript" | "python";
   @IsArray() @IsString({ each: true }) params: string[];

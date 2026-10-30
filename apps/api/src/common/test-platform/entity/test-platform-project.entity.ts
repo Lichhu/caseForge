@@ -17,6 +17,9 @@ export class TestPlatformProjectEntity {
   @Column({ name: "application_name", type: "varchar", length: 255, nullable: true })
   applicationName?: string | null;
 
+  @Column({ name: "version_name", type: "varchar", length: 255, nullable: true })
+  versionName?: string | null;
+
   @Column({
     name: "demand_status",
     type: "varchar",

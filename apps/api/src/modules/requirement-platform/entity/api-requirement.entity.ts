@@ -45,6 +45,10 @@ export class ApiRequirementEntity extends SoftDeletableEntity {
   @Column({ type: "varchar", length: 255, nullable: true })
   applicationName?: string | null;
 
+  /** 需求版本（源库 b_project.version_name） */
+  @Column({ type: "varchar", length: 255, nullable: true })
+  versionName?: string | null;
+
   @Column({ type: "varchar", nullable: true, default: "system" })
   createdBy?: string | null;
 

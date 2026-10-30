@@ -2,6 +2,33 @@ import { RequestContext } from "@common/audit/request-context";
 import { RequirementPlatformService } from "./requirement-platform.service";
 
 describe("RequirementPlatformService", () => {
+  it("exposes the synced requirement version", () => {
+    const service = new RequirementPlatformService(
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    expect(
+      (service as any).toPublic({
+        id: "r1",
+        projectCode: "XQ-1",
+        projectName: "需求一",
+        versionName: "V1.1",
+        status: "pending_dispatch",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    ).toMatchObject({ versionName: "V1.1" });
+  });
+
   it("allows editing a requirement without treating its claimed project as a duplicate", async () => {
     const row = {
       id: "r1",

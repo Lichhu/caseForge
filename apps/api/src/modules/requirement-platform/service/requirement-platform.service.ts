@@ -35,6 +35,7 @@ export interface PublicRequirement {
   projectCode: string;
   projectName: string;
   applicationName?: string | null;
+  versionName?: string | null;
   status: ApiRequirementStatus;
   dispatchedTo?: string | null;
   dispatchedToName?: string | null;
@@ -158,13 +159,16 @@ export class RequirementPlatformService {
             projectCode: In(rows.map((row) => row.projectCode)),
             dataStatus: 0,
           },
-          select: ["projectCode", "applicationName"],
+          select: ["projectCode", "applicationName", "versionName"],
         })
       : [];
-    const applicationNameByCode = new Map(
+    const sourceByCode = new Map(
       sourceProjects.map((project) => [
         project.projectCode,
-        project.applicationName?.trim() || null,
+        {
+          applicationName: project.applicationName?.trim() || null,
+          versionName: project.versionName?.trim() || null,
+        },
       ]),
     );
     const members = await this.memberRepo.find({ order: { createdAt: "ASC" } });
@@ -188,7 +192,11 @@ export class RequirementPlatformService {
         ...this.toPublic(row),
         applicationName:
           row.applicationName?.trim() ||
-          applicationNameByCode.get(row.projectCode) ||
+          sourceByCode.get(row.projectCode)?.applicationName ||
+          null,
+        versionName:
+          row.versionName?.trim() ||
+          sourceByCode.get(row.projectCode)?.versionName ||
           null,
       })),
       count,
@@ -743,6 +751,7 @@ export class RequirementPlatformService {
       projectCode: row.projectCode,
       projectName: row.projectName,
       applicationName: row.applicationName,
+      versionName: row.versionName,
       status: row.status,
       dispatchedTo: row.dispatchedTo,
       dispatchedToName: row.dispatchedToName,

@@ -1,102 +1,137 @@
 <template>
-  <aside class="project-sidebar">
-    <div class="project-section-title">
-      <a-select
-        v-if="isApiPlatform"
-        class="module-select"
-        value="project"
-        :bordered="false"
-        :options="moduleOptions"
-        aria-label="管理模块"
-        @change="handleModuleChange"
-      />
-      <h2 v-else class="project-section-heading">项目管理</h2>
-      <p class="module-description">以需求为维度管理接口测试项目</p>
+  <aside
+    class="project-sidebar"
+    :class="{
+      'is-collapsed': sidebarCollapsed,
+      'is-api-platform': isApiPlatform,
+      'is-resizing': sidebarResizing,
+      'is-revealing': sidebarRevealing,
+    }"
+    :style="sidebarStyle"
+  >
+    <div v-if="sidebarCollapsed" class="project-sidebar-projects">
+      <a-popover
+        v-for="project in projectList"
+        :key="project.id"
+        trigger="hover"
+        placement="right"
+        :overlay-style="{ width: '270px' }"
+        :mouse-enter-delay="0.05"
+        :mouse-leave-delay="0.15"
+      >
+        <button
+          type="button"
+          class="project-sidebar-shortcut"
+          :class="{ active: project.id === activeProjectId }"
+          :title="cleanProjectTitle(project.title)"
+          :aria-label="`切换到需求：${cleanProjectTitle(project.title)}`"
+          @click="selectQuickProject(project.id)"
+        >
+          {{ projectShortcutLabel(project) }}
+        </button>
+        <template #content>
+          <div class="project-shortcut-info">
+            <strong>{{ cleanProjectTitle(project.title) }}</strong>
+            <span>{{ project.requirementNo || "无需求编号" }}</span>
+            <span v-if="project.applicationName">
+              归属应用：{{ project.applicationName }}
+            </span>
+            <span>{{ project.caseCount }} 条案例</span>
+          </div>
+        </template>
+      </a-popover>
     </div>
-
-    <div class="project-action-row action-toolbar action-toolbar--block">
-      <a-button v-if="!isApiPlatform" type="primary" block @click="onNewProject">
+    <div
+      v-if="!isApiPlatform && !deleteMode"
+      class="project-action-row action-toolbar action-toolbar--block"
+    >
+      <a-button type="primary" block @click="onNewProject">
         <template #icon><PlusOutlined /></template>
         新建项目
       </a-button>
-      <a-button v-if="!isApiPlatform" @click="toggleDeleteMode">
-        {{ deleteMode ? '退出' : '删除' }}
+      <a-button @click="toggleDeleteMode">
+        批量删除
       </a-button>
     </div>
 
-    <div class="project-filter-row">
-      <a-input
-        v-model:value="keyword"
-        class="project-search"
-        allow-clear
-        :placeholder="isApiPlatform ? '搜索需求编号 / 需求名 / 交易码' : '搜索需求编号或需求名称'"
-      >
-        <template #prefix><SearchOutlined /></template>
-      </a-input>
-      <div class="filter-icon-wrap">
-        <button
-          type="button"
-          class="filter-icon-btn"
-          :class="{ active: Boolean(selectedMonth) }"
-          aria-label="筛选年月"
+    <div class="project-filter-panel">
+      <div class="project-filter-row">
+        <a-input
+          v-model:value="keyword"
+          class="project-search"
+          allow-clear
+          :placeholder="isApiPlatform ? '搜索需求编号 / 需求名 / 交易码' : '搜索需求编号或需求名称'"
         >
-          <CalendarOutlined />
+          <template #prefix><SearchOutlined /></template>
+        </a-input>
+        <div class="filter-icon-wrap">
+          <button
+            type="button"
+            class="filter-icon-btn"
+            :class="{ active: Boolean(selectedMonth) }"
+            aria-label="筛选年月"
+          >
+            <CalendarOutlined />
+          </button>
+          <!-- 透明日期选择器覆盖图标按钮：点击直接弹年月面板 -->
+          <a-date-picker
+            v-model:value="selectedMonth"
+            class="filter-picker-overlay"
+            picker="month"
+            value-format="YYYY-MM"
+            popup-class-name="project-month-popup"
+            input-read-only
+            placeholder="筛选年月"
+            @change="handleMonthChange"
+          />
+        </div>
+      </div>
+
+      <div v-if="isApiPlatform" class="project-status-tabs" role="tablist" aria-label="需求状态筛选">
+        <button
+          v-for="tab in statusTabs"
+          :key="tab.value"
+          type="button"
+          role="tab"
+          class="project-status-tab"
+          :class="{ active: requirementStatus === tab.value }"
+          :aria-selected="requirementStatus === tab.value"
+          @click="handleRequirementStatusChange(tab.value)"
+        >
+          {{ tab.label }}
         </button>
-        <!-- 透明日期选择器覆盖图标按钮：点击直接弹年月面板 -->
-        <a-date-picker
-          v-model:value="selectedMonth"
-          class="filter-picker-overlay"
-          picker="month"
-          value-format="YYYY-MM"
-          popup-class-name="project-month-popup"
-          input-read-only
-          placeholder="筛选年月"
-          @change="handleMonthChange"
-        />
+      </div>
+
+      <div v-if="selectedMonth" class="project-month-chip">
+        <span>{{ selectedMonth }} · {{ monthCaseCount }} 条案例</span>
+        <button type="button" aria-label="清除年月筛选" @click="clearMonthFilter">
+          <CloseOutlined />
+        </button>
       </div>
     </div>
 
-    <div v-if="isApiPlatform" class="project-status-tabs" role="tablist" aria-label="需求状态筛选">
-      <button
-        v-for="tab in statusTabs"
-        :key="tab.value"
-        type="button"
-        role="tab"
-        class="project-status-tab"
-        :class="{ active: requirementStatus === tab.value }"
-        :aria-selected="requirementStatus === tab.value"
-        @click="handleRequirementStatusChange(tab.value)"
-      >
-        {{ tab.label }}
-      </button>
-    </div>
-
-    <div v-if="selectedMonth" class="project-month-chip">
-      <span>{{ selectedMonth }} · {{ monthCaseCount }} 条案例</span>
-      <button type="button" aria-label="清除年月筛选" @click="clearMonthFilter">
-        <CloseOutlined />
-      </button>
-    </div>
-
     <div v-if="deleteMode" class="project-batch-bar action-toolbar action-toolbar--compact">
-      <a-checkbox
-        :checked="allFilteredSelected"
-        :indeterminate="selectionIndeterminate"
-        :disabled="!projectList.length"
-        @change="toggleSelectAll"
-      >
-        全选
-      </a-checkbox>
-      <span>已选 {{ selectedProjectIds.length }} 项</span>
-      <a-button
-        size="small"
-        danger
-        :disabled="!selectedProjectIds.length"
-        :loading="deleting"
-        @click="deleteSelectedProjects([...selectedProjectIds])"
-      >
-        删除
-      </a-button>
+      <div class="project-batch-summary">
+        <a-checkbox
+          :checked="allFilteredSelected"
+          :indeterminate="selectionIndeterminate"
+          :disabled="!projectList.length"
+          aria-label="全选当前页项目"
+          @change="toggleSelectAll"
+        />
+      </div>
+      <div class="project-batch-actions">
+        <a-button size="small" @click="toggleDeleteMode">退出</a-button>
+        <a-button
+          size="small"
+          danger
+          :disabled="!selectedProjectIds.length"
+          :loading="deleting"
+          @click="deleteSelectedProjects([...selectedProjectIds])"
+        >
+          删除
+        </a-button>
+      </div>
     </div>
 
     <div class="project-list-shell">
@@ -126,27 +161,27 @@
               @change="toggleProjectSelection(project.id, $event)"
             />
             <div class="project-main">
-              <!-- 标题用纯 CSS 单行省略 + 外层 Tooltip：a-typography-text 的 -->
-              <!-- :ellipsis="{ tooltip }" 会禁用 CSS 省略并走 ResizeObserver+rAF -->
-              <!-- JS 测量，临界条数下滚动条变化会引发测量-重排振荡（列表抖动） -->
-              <div class="project-title-row">
-                <a-tooltip :title="cleanProjectTitle(project.title)">
-                  <span class="project-title">{{ cleanProjectTitle(project.title) }}</span>
-                </a-tooltip>
-                <span v-if="isApiPlatform && project.applicationName" class="project-application-name">
-                  {{ project.applicationName }}
-                </span>
+              <div v-if="isApiPlatform" class="project-card-kicker">
+                <span class="project-code">{{ project.requirementNo || "需求编号待补充" }}</span>
                 <span
-                  v-if="isApiPlatform && project.requirementStatus"
+                  v-if="project.requirementStatus"
                   class="project-status-badge"
                   :class="`status-${project.requirementStatus}`"
                 >
                   {{ requirementStatusLabel(project.requirementStatus) }}
                 </span>
               </div>
+              <a-tooltip :title="cleanProjectTitle(project.title)">
+                <span class="project-title">{{ cleanProjectTitle(project.title) }}</span>
+              </a-tooltip>
               <div class="project-meta-row">
-                <span v-if="project.requirementNo" class="project-requirement-no">{{ project.requirementNo }}</span>
-                <span class="project-case-badge">{{ project.caseCount }} 案例</span>
+                <span v-if="!isApiPlatform && project.requirementNo" class="project-requirement-no">
+                  {{ project.requirementNo }}
+                </span>
+                <span v-if="isApiPlatform && project.applicationName" class="project-application-name">
+                  {{ project.applicationName }}
+                </span>
+                <span class="project-case-badge">{{ project.caseCount }} 个案例</span>
               </div>
               <div v-if="isApiPlatform && project.requirementCreatedAt" class="project-time-row">
                 <span class="project-time">创建于 {{ formatProjectTime(project.requirementCreatedAt) }}</span>
@@ -291,12 +326,23 @@
         </a-form-item>
       </a-form>
     </a-modal>
+    <div
+      class="project-sidebar-resizer"
+      role="separator"
+      aria-orientation="vertical"
+      :aria-label="`调整${sidebarModuleLabel}侧栏宽度`"
+      :aria-valuemin="40"
+      :aria-valuemax="SIDEBAR_MAX_WIDTH"
+      :aria-valuenow="sidebarCollapsed ? 40 : sidebarWidth"
+      tabindex="0"
+      @pointerdown="startSidebarResize"
+      @keydown="handleSidebarResizeKeydown"
+    />
   </aside>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
 import {
   CalendarOutlined,
   CloseOutlined,
@@ -321,23 +367,171 @@ const props = withDefaults(
 
 const caseStore = useCaseForgeStore();
 const apiStore = useApiTestStore();
-const router = useRouter();
 const isApiPlatform = computed(() => props.platform === 'api-test');
+const sidebarModuleLabel = computed(() =>
+  isApiPlatform.value ? '需求接口测试' : '项目管理',
+);
+const SIDEBAR_DEFAULT_WIDTH = 292;
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 420;
+const SIDEBAR_COLLAPSE_THRESHOLD = 250;
+const SIDEBAR_EXPAND_DRAG_DISTANCE = 12;
+const SIDEBAR_REVEAL_DELAY = 160;
+const sidebarStorageKey = computed(
+  () => `case-forge:${props.platform}-sidebar-collapsed`,
+);
+const sidebarWidthStorageKey = computed(
+  () => `case-forge:${props.platform}-sidebar-width`,
+);
+const sidebarCollapsed = ref(
+  localStorage.getItem(sidebarStorageKey.value) === '1',
+);
+const savedSidebarWidthValue = localStorage.getItem(
+  sidebarWidthStorageKey.value,
+);
+const savedSidebarWidth = Number(savedSidebarWidthValue);
+const sidebarWidth = ref(
+  savedSidebarWidthValue !== null && Number.isFinite(savedSidebarWidth)
+    ? Math.min(
+        SIDEBAR_MAX_WIDTH,
+        Math.max(SIDEBAR_MIN_WIDTH, savedSidebarWidth),
+      )
+    : SIDEBAR_DEFAULT_WIDTH,
+);
+const sidebarResizing = ref(false);
+const sidebarRevealing = ref(false);
+const isMobileViewport = ref(
+  typeof window !== 'undefined' && window.innerWidth <= 820,
+);
+const sidebarStyle = computed(() =>
+  isMobileViewport.value
+    ? {}
+    : { width: sidebarCollapsed.value ? '40px' : `${sidebarWidth.value}px` },
+);
 
-/** 管理模块导航 */
-const moduleOptions = [
-  { value: 'requirement', label: '需求管理' },
-  { value: 'project', label: '项目管理' },
-  { value: 'case', label: '准生产管理' },
-];
+let sidebarRefreshFrame: number | undefined;
+watch([sidebarCollapsed, sidebarWidth], ([collapsed, width]) => {
+  localStorage.setItem(sidebarStorageKey.value, collapsed ? '1' : '0');
+  localStorage.setItem(sidebarWidthStorageKey.value, String(width));
+  if (sidebarRefreshFrame != null) return;
+  sidebarRefreshFrame = window.requestAnimationFrame(() => {
+    sidebarRefreshFrame = undefined;
+    window.dispatchEvent(new Event('resize'));
+  });
+});
 
-function handleModuleChange(value: string) {
-  if (value === 'requirement') {
-    router.push({ path: '/api-test/requirement' });
-  }
-  if (value === 'case') router.push({ path: '/api-test/preproduction' });
-  // 项目管理即当前侧栏列表，无需跳转
+let stopSidebarResize: (() => void) | null = null;
+let sidebarRevealTimer: number | undefined;
+
+function revealSidebarContent() {
+  sidebarRevealing.value = true;
+  if (sidebarRevealTimer != null) window.clearTimeout(sidebarRevealTimer);
+  sidebarRevealTimer = window.setTimeout(() => {
+    sidebarRevealTimer = undefined;
+    sidebarRevealing.value = false;
+  }, SIDEBAR_REVEAL_DELAY);
 }
+
+function maxSidebarWidth() {
+  return Math.min(
+    SIDEBAR_MAX_WIDTH,
+    Math.max(SIDEBAR_MIN_WIDTH, window.innerWidth - 360),
+  );
+}
+
+function startSidebarResize(event: PointerEvent) {
+  if (event.button !== 0 || isMobileViewport.value) return;
+  event.preventDefault();
+  stopSidebarResize?.();
+  sidebarResizing.value = true;
+  document.body.classList.add("project-sidebar-resizing");
+  const sidebar = (event.currentTarget as HTMLElement).closest(
+    ".project-sidebar",
+  ) as HTMLElement;
+  const sidebarLeft = sidebar.getBoundingClientRect().left;
+  const startedCollapsed = sidebarCollapsed.value;
+  const dragStartX = event.clientX;
+  let expandedDuringDrag = !startedCollapsed;
+
+  const onMove = (moveEvent: PointerEvent) => {
+    if (
+      startedCollapsed &&
+      !expandedDuringDrag &&
+      moveEvent.clientX - dragStartX < SIDEBAR_EXPAND_DRAG_DISTANCE
+    ) {
+      return;
+    }
+    if (startedCollapsed && !expandedDuringDrag) {
+      expandedDuringDrag = true;
+      revealSidebarContent();
+      sidebarCollapsed.value = false;
+      sidebarWidth.value = Math.min(maxSidebarWidth(), sidebarWidth.value);
+      return;
+    }
+    sidebarCollapsed.value = false;
+    const desiredWidth = moveEvent.clientX - sidebarLeft;
+    sidebarWidth.value = Math.min(
+      maxSidebarWidth(),
+      Math.max(SIDEBAR_MIN_WIDTH, desiredWidth),
+    );
+  };
+  const finish = () => {
+    if (
+      !startedCollapsed &&
+      sidebarWidth.value < SIDEBAR_COLLAPSE_THRESHOLD
+    ) {
+      if (sidebarRevealTimer != null) window.clearTimeout(sidebarRevealTimer);
+      sidebarRevealTimer = undefined;
+      sidebarRevealing.value = false;
+      sidebarCollapsed.value = true;
+    } else if (!sidebarCollapsed.value) {
+      sidebarWidth.value = Math.max(SIDEBAR_MIN_WIDTH, sidebarWidth.value);
+    }
+    sidebarResizing.value = false;
+    document.body.classList.remove("project-sidebar-resizing");
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", finish);
+    window.removeEventListener("pointercancel", finish);
+    stopSidebarResize = null;
+  };
+  stopSidebarResize = finish;
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", finish, { once: true });
+  window.addEventListener("pointercancel", finish, { once: true });
+}
+
+function handleSidebarResizeKeydown(event: KeyboardEvent) {
+  if (event.key === "Home") {
+    event.preventDefault();
+    if (sidebarRevealTimer != null) window.clearTimeout(sidebarRevealTimer);
+    sidebarRevealTimer = undefined;
+    sidebarRevealing.value = false;
+    sidebarCollapsed.value = true;
+    return;
+  }
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  event.preventDefault();
+  if (event.key === "ArrowRight") {
+    if (sidebarCollapsed.value) {
+      revealSidebarContent();
+      sidebarCollapsed.value = false;
+      sidebarWidth.value = SIDEBAR_MIN_WIDTH;
+      return;
+    }
+    sidebarWidth.value = Math.min(
+      maxSidebarWidth(),
+      sidebarWidth.value + 16,
+    );
+    return;
+  }
+  const nextWidth = sidebarWidth.value - 16;
+  if (nextWidth < SIDEBAR_COLLAPSE_THRESHOLD) {
+    sidebarCollapsed.value = true;
+    return;
+  }
+  sidebarWidth.value = Math.max(SIDEBAR_MIN_WIDTH, nextWidth);
+}
+
 const projectList = computed(() =>
   isApiPlatform.value ? apiStore.projects : caseStore.projects,
 );
@@ -492,6 +686,13 @@ watch(keyword, (value) => {
   }, 300);
 });
 
+function updateSidebarViewportMode() {
+  isMobileViewport.value = window.innerWidth <= 820;
+  if (!isMobileViewport.value) {
+    sidebarWidth.value = Math.min(maxSidebarWidth(), sidebarWidth.value);
+  }
+}
+
 onMounted(() => {
   keyword.value = isApiPlatform.value ? apiStore.projectListKeyword : caseStore.projectListKeyword;
   selectedMonth.value = isApiPlatform.value ? apiStore.projectListMonth : caseStore.projectListMonth;
@@ -499,9 +700,19 @@ onMounted(() => {
     requirementStatus.value = apiStore.projectListRequirementStatus || 'testing';
   }
   skipKeywordWatch.value = false;
+  updateSidebarViewportMode();
+  window.addEventListener('resize', updateSidebarViewportMode);
 });
 
 onBeforeUnmount(() => {
+  stopSidebarResize?.();
+  if (sidebarRevealTimer != null) {
+    window.clearTimeout(sidebarRevealTimer);
+  }
+  if (sidebarRefreshFrame != null) {
+    window.cancelAnimationFrame(sidebarRefreshFrame);
+  }
+  window.removeEventListener('resize', updateSidebarViewportMode);
   if (searchTimer) {
     window.clearTimeout(searchTimer);
   }
@@ -600,6 +811,20 @@ function handleProjectClick(projectId: string) {
     return;
   }
   void caseStore.selectProject(projectId);
+}
+
+function selectQuickProject(projectId: string) {
+  deleteMode.value = false;
+  handleProjectClick(projectId);
+}
+
+function projectShortcutLabel(project: ProjectListItem) {
+  const requirementNo = project.requirementNo?.trim();
+  if (requirementNo) {
+    const parts = requirementNo.split("-").filter(Boolean);
+    return parts[1] || parts[parts.length - 1]?.slice(-2) || "需";
+  }
+  return cleanProjectTitle(project.title).slice(0, 1).toUpperCase() || "需";
 }
 
 function toggleProjectSelection(projectId: string, event: { target: { checked: boolean } }) {
@@ -869,45 +1094,125 @@ function projectMeta(project: { runCount: number; requirementNo?: string | null 
   color: var(--cf-brand);
 }
 
-/* 与需求管理、准生产管理保持一致的标题式模块导航。 */
-.project-section-title {
-  padding: 2px 2px 4px;
+.project-sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  width: 7px;
+  cursor: col-resize;
+  outline: none;
+  touch-action: none;
 }
-.module-description {
-  margin: 3px 0 0;
+
+.project-sidebar-resizer::after {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+  content: "";
+  transition: background-color 0.15s ease;
+}
+
+.project-sidebar-resizer:hover::after,
+.project-sidebar-resizer:focus-visible::after,
+.project-sidebar.is-resizing .project-sidebar-resizer::after {
+  background: var(--cf-brand);
+}
+
+.project-sidebar.is-collapsed {
+  width: 40px;
+  padding: 8px 4px;
+  gap: 8px;
+}
+
+.project-sidebar.is-collapsed
+  > :not(.project-sidebar-resizer):not(.project-sidebar-projects) {
+  display: none;
+}
+
+.project-sidebar-projects {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-height: 0;
+  padding: 2px 0 4px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.project-sidebar-projects::-webkit-scrollbar {
+  display: none;
+}
+
+.project-sidebar-shortcut {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid #e4e7ec;
+  border-radius: 7px;
+  background: #fff;
+  color: #475467;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.project-sidebar-shortcut:hover {
+  border-color: #f1b8c3;
+  background: #fff7f8;
+  color: var(--cf-brand);
+}
+
+.project-sidebar-shortcut.active {
+  border-color: var(--cf-brand);
+  background: var(--cf-brand);
+  color: #fff;
+}
+
+.project-shortcut-info {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
   color: #667085;
-  font-size: 13px;
-}
-/* 避免全局 .project-section-title span 样式改变下拉内部对齐。 */
-.module-select :deep(.ant-select-selector span) {
-  margin-top: 0;
+  font-size: 12px;
 }
 
-.module-select {
-  width: 160px;
-  margin-left: -8px;
-}
-
-.module-select :deep(.ant-select-selector) {
-  padding-inline: 8px !important;
-  border-radius: 6px;
-  transition: background-color 0.12s ease;
-}
-
-.module-select :deep(.ant-select-selector:hover) {
-  background: #f5f6f8;
-}
-
-.module-select :deep(.ant-select-selection-item) {
+.project-shortcut-info strong {
+  overflow: hidden;
   color: #1d2939;
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 1.25;
+  font-size: 14px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.project-shortcut-info em {
+  margin-top: 2px;
+  color: var(--cf-brand);
+  font-style: normal;
 }
 
 .project-list :deep(.ant-spin-nested-loading),
 .project-list :deep(.ant-spin-container) {
   display: flex;
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 6px;
   min-height: 0;
@@ -996,5 +1301,362 @@ function projectMeta(project: { runCount: number; requirementNo?: string | null 
   line-height: 24px;
   text-align: center;
   user-select: none;
+}
+
+/* ===== 侧栏 2026 UI refresh ===== */
+.project-sidebar {
+  gap: 10px;
+  padding: 14px 12px 12px;
+  overflow: visible;
+}
+
+.project-sidebar.is-resizing {
+  will-change: width;
+  transition:
+    width 110ms ease-out,
+    padding 110ms ease-out,
+    gap 110ms ease-out;
+}
+
+.project-sidebar.is-revealing
+  > :not(.project-sidebar-resizer) {
+  visibility: hidden;
+}
+
+:global(body.project-sidebar-resizing) {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.project-action-row {
+  grid-template-columns: minmax(0, 1fr) 84px;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.project-action-row :deep(.ant-btn) {
+  height: 34px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.project-filter-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid #eaecf0;
+  border-radius: 10px;
+  background: #f8f9fb;
+}
+
+.project-filter-row {
+  gap: 7px;
+}
+
+.project-filter-row .project-search {
+  height: 34px;
+  border-color: #dfe3e8;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.project-search input {
+  font-size: 12px;
+}
+
+.filter-icon-wrap,
+.filter-icon-btn {
+  width: 34px;
+  height: 34px;
+}
+
+.filter-icon-btn {
+  border-color: #dfe3e8;
+  border-radius: 8px;
+}
+
+.project-status-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  background: #eef0f3;
+}
+
+.project-status-tab {
+  min-width: 0;
+  padding: 5px 2px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #667085;
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.project-status-tab:hover {
+  background: rgb(255 255 255 / 65%);
+}
+
+.project-status-tab.active {
+  border: 0;
+  background: #fff;
+  color: var(--cf-brand);
+  box-shadow: 0 1px 3px rgb(16 24 40 / 12%);
+}
+
+.project-month-chip {
+  margin: 0;
+  padding: 5px 7px;
+  border-style: solid;
+  border-color: #e4e7ec;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.project-batch-bar {
+  min-height: 36px;
+  border-radius: 8px;
+  background: #f8f9fb;
+}
+
+.project-list-shell {
+  margin-top: 0;
+  padding: 8px 8px 0;
+  border: 1px solid #eaecf0;
+  border-radius: 12px;
+  background: #f8f9fb;
+  overflow: hidden;
+}
+
+.project-list {
+  width: 100%;
+  gap: 8px;
+  padding: 0 0 8px;
+  scrollbar-gutter: auto;
+  scrollbar-width: none;
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.project-list::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.project-item {
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: start;
+  gap: 6px;
+  box-sizing: border-box;
+  padding: 10px 9px;
+  border: 1px solid #eaecf0;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: none;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+.project-item.batch {
+  grid-template-columns: 20px minmax(0, 1fr) 28px;
+}
+
+.project-batch-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.project-batch-bar {
+  flex-wrap: wrap;
+}
+
+.project-batch-summary {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-width: 0;
+}
+
+.project-batch-actions :deep(.ant-btn) {
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.project-item:hover:not(.active) {
+  border-color: #d0d5dd;
+  background: #fff;
+  box-shadow: 0 4px 12px rgb(16 24 40 / 6%);
+}
+
+.project-item.active {
+  border-color: #e7b8c0;
+  background: #fff;
+  color: #1d2939;
+  box-shadow:
+    0 0 0 1px rgb(182 15 45 / 10%),
+    0 6px 16px rgb(182 15 45 / 8%);
+}
+
+.project-main {
+  gap: 4px;
+  min-height: 0;
+}
+
+.project-card-kicker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.project-code {
+  overflow: hidden;
+  min-width: 0;
+  color: #98a2b3;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-status-badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 17px;
+}
+
+.project-title-row .project-title,
+.project-title {
+  display: -webkit-box;
+  width: 100%;
+  overflow: hidden;
+  color: #1d2939 !important;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  text-wrap: pretty;
+  white-space: normal;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.project-item.active .project-title {
+  color: #8f0b20 !important;
+}
+
+.project-meta-row {
+  gap: 5px;
+  margin-top: 1px;
+}
+
+.project-application-name,
+.project-case-badge {
+  max-width: 100%;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #f2f4f7;
+  color: #667085;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 17px;
+  white-space: nowrap;
+}
+
+.project-application-name {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+.project-case-badge {
+  flex-shrink: 0;
+  background: #fff5f6;
+  color: #a30d27;
+}
+
+.project-time-row {
+  margin-top: 1px;
+}
+
+.project-time {
+  font-size: 10px;
+}
+
+.project-complete-btn {
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.project-item.is-completed {
+  opacity: 0.78;
+}
+
+.project-edit,
+.project-delete {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+}
+
+.project-item.batch .project-delete:not(:disabled) {
+  background: #fff1f3;
+  color: var(--cf-brand);
+}
+
+.project-list-pagination {
+  margin-top: 0;
+  padding: 8px 2px 7px;
+  border-top-color: #e4e7ec;
+}
+
+.project-page-total {
+  color: #98a2b3;
+}
+
+.project-page-nav {
+  border-color: #dfe3e8;
+  border-radius: 6px;
+}
+
+.project-page-indicator {
+  color: #667085;
+  font-size: 11px;
+}
+
+.project-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  min-height: 160px;
+}
+
+@media (max-width: 820px) {
+  .project-sidebar-resizer {
+    display: none;
+  }
 }
 </style>

@@ -1,7 +1,16 @@
 /**
  * @file 需求平台 HTTP 接口：需求列表、同步、分发、认领、拒绝、候选人查询
  */
-import { Body, Controller, Get, Post, Param, Patch, Delete, Query } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Param,
+  Patch,
+  Delete,
+  Query,
+} from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { DispatchRequirementDto } from "../dto/dispatch-requirement.dto";
 import { RefuseRequirementDto } from "../dto/refuse-requirement.dto";
@@ -9,11 +18,15 @@ import { RequirementPlatformService } from "../service/requirement-platform.serv
 import { CreateRequirementDto } from "../dto/create-requirement.dto";
 import { UpdateRequirementDto } from "../dto/update-requirement.dto";
 import { UpdateDispatcherDto } from "../dto/update-dispatcher.dto";
+import { RequirementProgressService } from "../service/requirement-progress.service";
 
 @ApiTags("requirement-platform")
 @Controller("requirement-platform")
 export class RequirementPlatformController {
-  constructor(private readonly platformService: RequirementPlatformService) {}
+  constructor(
+    private readonly platformService: RequirementPlatformService,
+    private readonly progressService: RequirementProgressService,
+  ) {}
 
   /** 需求列表（分发人全量；普通用户仅与自己相关的） */
   @Get("requirements")
@@ -26,7 +39,21 @@ export class RequirementPlatformController {
     @Query("owner") owner = "",
     @Query("application") application = "",
   ) {
-    return this.platformService.list({ page: Number(page), size: Number(size), status, keyword, owner, application });
+    return this.platformService.list({
+      page: Number(page),
+      size: Number(size),
+      status,
+      keyword,
+      owner,
+      application,
+    });
+  }
+
+  /** 分发人查看测试中/已完成/已打回需求的完成情况 */
+  @Get("requirements/:id/progress")
+  @ApiOperation({ summary: "需求完成情况（仅分发人）" })
+  async progress(@Param("id") id: string) {
+    return this.progressService.getByRequirementId(id);
   }
 
   @Post("requirements")
@@ -55,7 +82,10 @@ export class RequirementPlatformController {
 
   @Patch("requirements/:id/status")
   @ApiOperation({ summary: "更新需求测试状态" })
-  async setStatus(@Param("id") id: string, @Body("status") status: "testing" | "completed") {
+  async setStatus(
+    @Param("id") id: string,
+    @Body("status") status: "testing" | "completed",
+  ) {
     return this.platformService.setStatus(id, status);
   }
 

@@ -1,21 +1,21 @@
 /** 需求平台：需求分发/认领状态 */
 export const REQUIREMENT_STATUSES = [
-  'pending_dispatch',
-  'pending_claim',
-  'testing',
-  'completed',
-  'returned',
+  "pending_dispatch",
+  "pending_claim",
+  "testing",
+  "completed",
+  "returned",
 ] as const;
 
 export type RequirementStatus = (typeof REQUIREMENT_STATUSES)[number];
 
 /** 需求状态中文标签 */
 export const REQUIREMENT_STATUS_LABELS: Record<RequirementStatus, string> = {
-  pending_dispatch: '待分发',
-  pending_claim: '待受理',
-  testing: '测试中',
-  completed: '已完成',
-  returned: '已打回',
+  pending_dispatch: "待分发",
+  pending_claim: "待受理",
+  testing: "测试中",
+  completed: "已完成",
+  returned: "已打回",
 };
 
 /** 需求平台列表条目 */
@@ -27,6 +27,8 @@ export interface RequirementPlatformItem {
   projectName: string;
   /** 所属应用（源库 b_project.application_name） */
   applicationName?: string | null;
+  /** 需求版本（源库 b_project.version_name） */
+  versionName?: string | null;
   status: RequirementStatus;
   /** 被分发人（认领候选人账号） */
   dispatchedTo?: string | null;
@@ -61,6 +63,100 @@ export interface RequirementPlatformListResult {
   isMember?: boolean;
   /** 是否正在同步 */
   syncing: boolean;
+}
+
+/** 需求完成情况中可查看的状态（分发人只读查看） */
+export const REQUIREMENT_PROGRESS_STATUSES = [
+  "testing",
+  "completed",
+  "returned",
+] as const;
+
+export type RequirementProgressStatus =
+  (typeof REQUIREMENT_PROGRESS_STATUSES)[number];
+
+export type RequirementExecutionStatus =
+  | "running"
+  | "passed"
+  | "failed"
+  | "error"
+  | "skipped";
+
+export type RequirementExecutionSource = "api-test" | "preproduction";
+
+export type RequirementPushStatus = "pending" | "success" | "failed";
+
+/** 案例步骤的只读摘要，不返回请求头、报文等可能包含凭证的内容。 */
+export interface RequirementProgressStep {
+  id: string;
+  name: string;
+  kind: "http" | "db";
+  summary: string;
+  /** 步骤在当前案例最近一次执行中的结果；无执行记录时为空 */
+  executionStatus?: RequirementExecutionStatus | null;
+  durationMs?: number | null;
+  error?: string | null;
+}
+
+/** 案例最近一次执行情况。 */
+export interface RequirementCaseExecution {
+  source: RequirementExecutionSource;
+  status: RequirementExecutionStatus;
+  runId?: string | null;
+  createdAt: string;
+  finishedAt?: string | null;
+  durationMs?: number | null;
+  error?: string | null;
+  pushStatus?: RequirementPushStatus | null;
+  pushError?: string | null;
+  reportUrl?: string | null;
+}
+
+export interface RequirementProgressCase {
+  id: string;
+  caseNo?: string | null;
+  title: string;
+  priority: string;
+  polarity: "positive" | "negative";
+  enabled: boolean;
+  stepCount: number;
+  steps: RequirementProgressStep[];
+  latestExecution?: RequirementCaseExecution | null;
+}
+
+export interface RequirementProgressTransaction {
+  id: string;
+  code: string;
+  name: string;
+  syncStatus?: string | null;
+  createdAt: string;
+  caseCount: number;
+  executedCaseCount: number;
+  passedCount: number;
+  failedCount: number;
+  errorCount: number;
+  cases: RequirementProgressCase[];
+}
+
+export interface RequirementProgressSummary {
+  transactionCount: number;
+  caseCount: number;
+  stepCount: number;
+  executedCaseCount: number;
+  passedCount: number;
+  failedCount: number;
+  errorCount: number;
+  pushSuccessCount: number;
+  pushFailedCount: number;
+}
+
+/** 分发人查看的需求完成情况（需求 → 交易 → 案例 → 步骤 → 执行结果）。 */
+export interface RequirementProgressDetail {
+  requirement: RequirementPlatformItem;
+  projectId?: string | null;
+  summary: RequirementProgressSummary;
+  transactions: RequirementProgressTransaction[];
+  refreshedAt: string;
 }
 
 /** 认领候选人（源库 sys_user） */

@@ -16,6 +16,12 @@ import { ApiRequirementMemberEntity } from "./entity/api-requirement-member.enti
 import { RequirementPlatformService } from "./service/requirement-platform.service";
 import { RequirementSyncService } from "./service/requirement-sync.service";
 import { RequirementNotifyService } from "./service/requirement-notify.service";
+import { RequirementProgressService } from "./service/requirement-progress.service";
+import { ApiPreproductionRunRecordEntity } from "@api-test/entity/api-preproduction-run-record.entity";
+import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
+import { ApiTestRunEntity } from "@api-test/entity/api-test-run.entity";
+import { ApiTestRunItemEntity } from "@api-test/entity/api-test-run-item.entity";
+import { ApiTransactionEntity } from "@api-test/entity/api-transaction.entity";
 
 @Module({
   imports: [
@@ -24,8 +30,16 @@ import { RequirementNotifyService } from "./service/requirement-notify.service";
       ApiRequirementDispatcherEntity,
       ApiRequirementMemberEntity,
       CaseProjectEntity,
+      ApiPreproductionRunRecordEntity,
+      ApiTestCaseEntity,
+      ApiTestRunEntity,
+      ApiTestRunItemEntity,
+      ApiTransactionEntity,
     ]),
-    TypeOrmModule.forFeature([TestPlatformProjectEntity], TEST_PLATFORM_CONNECTION),
+    TypeOrmModule.forFeature(
+      [TestPlatformProjectEntity],
+      TEST_PLATFORM_CONNECTION,
+    ),
     TestPlatformModule,
     forwardRef(() => ApiTestModule),
     NotifyModule,
@@ -35,6 +49,7 @@ import { RequirementNotifyService } from "./service/requirement-notify.service";
     RequirementPlatformService,
     RequirementSyncService,
     RequirementNotifyService,
+    RequirementProgressService,
   ],
   exports: [RequirementPlatformService, RequirementSyncService],
 })

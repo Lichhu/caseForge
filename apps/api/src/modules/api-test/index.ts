@@ -16,6 +16,9 @@ import { ApiDocEntity } from "./entity/api-doc.entity";
 import { ApiEndpointEntity } from "./entity/api-endpoint.entity";
 import { ApiTestCaseEntity } from "./entity/api-test-case.entity";
 import { ApiPreproductionCaseEntity } from "./entity/api-preproduction-case.entity";
+import { ApiPreproductionRunRecordEntity } from "./entity/api-preproduction-run-record.entity";
+import { ApiPreproductionRunSetCaseEntity } from "./entity/api-preproduction-run-set-case.entity";
+import { ApiPreproductionRunSetEntity } from "./entity/api-preproduction-run-set.entity";
 import { ApiTestEnvironmentEntity } from "./entity/api-test-environment.entity";
 import { ApiTestEnvironmentServiceEntity } from "./entity/api-test-environment-service.entity";
 import { ApiTestExecutionSetEntity } from "./entity/api-test-execution-set.entity";
@@ -40,6 +43,7 @@ import { ApiReportService } from "./service/api-report.service";
 import { SmpClientService } from "./service/smp-client.service";
 import { SmpSyncService } from "./service/smp-sync.service";
 import { ApiPreproductionCaseService } from "./service/api-preproduction-case.service";
+import { ApiPreproductionRunService } from "./service/api-preproduction-run.service";
 import { ApiDataFunctionService } from "./service/api-data-function.service";
 import { SqlStepRunnerService } from "./service/sql-step-runner.service";
 import { ApiStepLibraryService } from "./service/api-step-library.service";
@@ -54,6 +58,9 @@ import { ApiStepLibraryService } from "./service/api-step-library.service";
       ApiEndpointEntity,
       ApiTestCaseEntity,
       ApiPreproductionCaseEntity,
+      ApiPreproductionRunRecordEntity,
+      ApiPreproductionRunSetEntity,
+      ApiPreproductionRunSetCaseEntity,
       ApiTestEnvironmentEntity,
       ApiTestEnvironmentServiceEntity,
       ApiTestExecutionSetEntity,
@@ -90,6 +97,7 @@ import { ApiStepLibraryService } from "./service/api-step-library.service";
     SmpClientService,
     SmpSyncService,
     ApiPreproductionCaseService,
+    ApiPreproductionRunService,
     ApiDataFunctionService,
     ApiStepLibraryService,
     SqlStepRunnerService,
@@ -105,6 +113,7 @@ import { ApiStepLibraryService } from "./service/api-step-library.service";
     SmpClientService,
     SmpSyncService,
     ApiPreproductionCaseService,
+    ApiPreproductionRunService,
     ApiDataFunctionService,
   ],
 })

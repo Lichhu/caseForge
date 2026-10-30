@@ -157,7 +157,6 @@
                   @keyup="rememberExampleCursor"
                   @input="onExampleMessageInput"
                   @blur="onExampleMessageBlur"
-                  @paste="onExampleMessagePaste"
                 />
               </div>
             </div>
@@ -753,7 +752,6 @@ import { copyStepToClipboard } from '@/utils/stepClipboard.util';
 import { dataFunctionFieldOptions } from '@/utils/sqlSelectColumns.util';
 
 const tableScrollRef = ref<HTMLElement | null>(null);
-const EXAMPLE_MESSAGE_MIN_HEIGHT_PX = 160;
 const DOC_TABLE_PAGE_SIZE = 100;
 const apiStore = useApiTestStore();
 const popupContainer = () => document.body;
@@ -1192,7 +1190,6 @@ function toggleSection(title: string) {
     collapsedSections.delete(title);
     void nextTick(() => {
       resizeAllDocCellInputs();
-      resizeExampleMessageInput();
     });
   } else {
     collapsedSections.add(title);
@@ -1233,7 +1230,6 @@ onActivated(() => {
   if (pid && tid) {
     void apiStore.syncCaseGenerateLoading(pid, tid);
   }
-  resizeExampleMessageInput();
 });
 
 onDeactivated(() => {
@@ -1266,14 +1262,9 @@ function loadFromText(text: string) {
   }
   syncingFromStore.value = false;
   resizeAllDocCellInputs();
-  resizeExampleMessageInput();
 }
 
-function onExampleMessageInput(event: Event) {
-  const el = event.target;
-  if (el instanceof HTMLTextAreaElement && el.classList.contains('example-message-input')) {
-    autoResizeExampleTextarea(el);
-  }
+function onExampleMessageInput() {
   syncExampleMessageToText();
   scheduleAutoSave();
 }
@@ -1322,7 +1313,6 @@ function insertFunctionExpression() {
   functionInsertOpen.value = false;
   syncExampleMessageToText();
   scheduleAutoSave();
-  resizeExampleMessageInput();
   void nextTick(() => {
     const input = resolveExampleMessageInput();
     const cursor = functionInsertRange.start + expression.length;
@@ -1335,7 +1325,6 @@ function onExampleExpandModalOk() {
   syncExampleMessageToText();
   void flushAutoSave({ notify: true });
   exampleExpandModalOpen.value = false;
-  resizeExampleMessageInput();
 }
 
 function detectExampleMessageFormat(text: string): 'json' | 'xml' | 'text' {
@@ -1365,43 +1354,15 @@ function beautifyExampleMessage() {
     syncExampleMessageToText();
     void flushAutoSave();
     message.success('示例报文已美化');
-    resizeExampleMessageInput();
   } catch {
     message.error('报文格式不正确，无法美化');
   }
-}
-
-function onExampleMessagePaste(event: Event) {
-  const el = event.target;
-  if (!(el instanceof HTMLTextAreaElement)) return;
-  void nextTick(() => {
-    void nextTick(() => {
-      autoResizeExampleTextarea(el);
-    });
-  });
 }
 
 function resolveExampleMessageInput(): HTMLTextAreaElement | null {
   return (
     tableScrollRef.value?.querySelector('textarea.example-message-input') ?? null
   );
-}
-
-function autoResizeExampleTextarea(el: HTMLTextAreaElement) {
-  el.style.height = '0px';
-  const nextHeight = Math.max(EXAMPLE_MESSAGE_MIN_HEIGHT_PX, el.scrollHeight);
-  el.style.height = `${nextHeight}px`;
-}
-
-function resizeExampleMessageInput() {
-  void nextTick(() => {
-    void nextTick(() => {
-      const el = resolveExampleMessageInput();
-      if (el) {
-        autoResizeExampleTextarea(el);
-      }
-    });
-  });
 }
 
 function syncExampleMessageToText() {
@@ -1485,7 +1446,6 @@ watch(
 
 watch(exampleMessage, (value) => {
   generationProfile.exampleMessage = value;
-  resizeExampleMessageInput();
 });
 
 watch(() => apiStore.apiDoc?.generationProfile, (next) => {
@@ -2716,6 +2676,7 @@ async function onSave() {
   box-sizing: border-box;
   display: block;
   width: 100%;
+  height: clamp(220px, 42vh, 520px);
   min-height: 160px;
   padding: 10px;
   border: none;
@@ -2725,9 +2686,9 @@ async function onSave() {
   font-size: 13px;
   line-height: 1.5;
   overflow-x: auto;
-  overflow-y: hidden;
-  resize: none;
-  field-sizing: content;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  resize: vertical;
 }
 
 .example-message-input:focus {

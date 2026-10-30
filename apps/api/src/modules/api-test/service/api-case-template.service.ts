@@ -34,6 +34,14 @@ function exportExpectedResult(row: { description?: string | null }) {
   return "接口响应结果符合预期";
 }
 
+function exportApplicationPath(applicationPath?: string | null) {
+  const normalized = applicationPath
+    ?.trim()
+    .replace(/^\/+|\/+$/g, "")
+    .replace(/\/+/g, "/");
+  return normalized ? `/${normalized}/接口案例` : null;
+}
+
 @Injectable()
 export class ApiCaseTemplateService {
   constructor(
@@ -65,13 +73,9 @@ export class ApiCaseTemplateService {
   async export(input: {
     caseIds: string[];
     designer: string;
-    applicationPath: string;
   }) {
     if (!input.caseIds.length || input.caseIds.length > 1000)
       throw new BadRequestException("一次最多导出 1000 条案例");
-    const applicationPath = input.applicationPath.trim();
-    if (!applicationPath)
-      throw new BadRequestException("请选择归属应用后再导出");
     const user = RequestContext.getUserName();
     const rows = await this.caseRepo
       .createQueryBuilder("c")
@@ -97,6 +101,14 @@ export class ApiCaseTemplateService {
       .getMany();
     if (rows.length !== input.caseIds.length)
       throw new BadRequestException("部分案例不存在或无权访问");
+    const missingApplication = rows.find(
+      (row) => !exportApplicationPath(row.applicationPath),
+    );
+    if (missingApplication) {
+      throw new BadRequestException(
+        `案例「${missingApplication.caseNo || missingApplication.title || missingApplication.id}」未维护归属应用，无法导出`,
+      );
+    }
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(
       join(__dirname, "../assets/autocase-example.xlsx"),
@@ -119,6 +131,7 @@ export class ApiCaseTemplateService {
         }
       ).exportTransaction;
       const name = row.title || "";
+      const applicationPath = exportApplicationPath(row.applicationPath)!;
       // 功能点取接口文档“服务信息”中的服务名称，不使用交易 ID/交易码。
       const doc = (
         endpoint as ApiEndpointEntity & {

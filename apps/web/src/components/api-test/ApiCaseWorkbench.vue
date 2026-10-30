@@ -659,11 +659,11 @@
                       <a-button
                         size="small"
                         :loading="dbStepPreviewRunning"
-                        :title="currentDbStepMode === 'execute' ? '试运行会在事务里执行这条 update 并回滚，报告影响行数，数据不会改动' : '试运行这条查询，确认返回的字段名'"
+                        :title="currentDbStepMode === 'execute' ? '调试会在事务里执行这条 update 并回滚，结果写入调试记录，数据不会改动' : '调试执行查询，结果写入调试记录'"
                         @click="runDbStepPreview"
                       >
                         <template #icon><ThunderboltOutlined /></template>
-                        试运行
+                        调试 SQL
                       </a-button>
                       <a-tag :color="currentDbStepMode === 'execute' ? 'red' : 'blue'">{{ dbStepModeLabel(currentDbStepMode) }}</a-tag>
                     </div>
@@ -808,8 +808,14 @@
                 </div>
               </div>
                       <div class="case-step-modal-footer">
-                        <a-button :loading="debugRunning" :disabled="form.stepKind === 'db' || !form.stepTargetAddress.trim()" @click="onDebugRun()"><ThunderboltOutlined />调试</a-button>
-                        <span class="case-step-modal-footer-hint">{{ form.stepKind === 'db' ? 'SQL 步骤暂不支持单步调试，保存后执行整个案例即可验证' : '' }}</span>
+                        <a-button
+                          :loading="debugRunning || dbStepPreviewRunning"
+                          :disabled="form.stepKind === 'db' ? Boolean(dbStepSqlIssue) : !form.stepTargetAddress.trim()"
+                          @click="form.stepKind === 'db' ? runDbStepPreview() : onDebugRun()"
+                        >
+                          <ThunderboltOutlined />调试
+                        </a-button>
+                        <span class="case-step-modal-footer-hint">{{ form.stepKind === 'db' ? 'SQL 调试会写入步骤历史；改数据 SQL 在事务中执行后回滚，不会落库' : '' }}</span>
                         <a-button @click="cancelStepEditor">取消</a-button>
                         <a-button type="primary" @click="confirmStepEditor">确认</a-button>
                       </div>
@@ -869,7 +875,9 @@
             <a-tag :color="debugRecordConnected(row) ? 'success' : 'error'" class="debug-history-status">{{ debugRecordConnected(row) ? '成功' : '失败' }}</a-tag>
             <span class="debug-history-time">{{ formatDebugTime(row.createdAt) }}</span>
             <span class="debug-history-metric">{{ row.record.durationMs }} ms</span>
-            <span v-if="row.record.statusCode" class="debug-history-metric">HTTP {{ row.record.statusCode }}</span>
+            <span v-if="row.record.statusCode" class="debug-history-metric">
+              {{ debugRecordProtocol(row) === 'HTTP' ? `${debugRecordProtocol(row)} ${row.record.statusCode}` : debugRecordProtocol(row) }}
+            </span>
             <a-button type="link" size="small" class="debug-history-view" @click="openDebugRecordDetail(row)">查看</a-button>
           </div>
           <div v-if="row.record.error" class="debug-history-row-error">{{ row.record.error }}</div>
@@ -878,7 +886,11 @@
     </a-modal>
     <a-modal v-model:open="debugRecordDetailOpen" title="调试记录详情" :width="860" :footer="null" :z-index="NESTED_OVERLAY_Z_INDEX + 20">
       <div v-if="debugRecordDetail" class="debug-record-detail">
-        <div v-if="debugRecordDetail.record.target?.address" class="debug-record-detail-target">
+        <div v-if="debugRecordProtocol(debugRecordDetail) === 'SQL'" class="debug-record-detail-target">
+          <span>数据库</span><strong>{{ debugRecordDatabaseLabel(debugRecordDetail) }}</strong>
+          <span>模式</span><strong>{{ debugRecordModeLabel(debugRecordDetail) }}</strong>
+        </div>
+        <div v-else-if="debugRecordDetail.record.target?.address" class="debug-record-detail-target">
           <span>环境</span><strong>{{ debugRecordDetail.record.target.name || '—' }}</strong>
           <span>地址</span><strong>{{ debugRecordDetail.record.target.address }}</strong>
         </div>
@@ -924,7 +936,7 @@
 
     <a-modal
       v-model:open="dbStepPreviewOpen"
-      title="SQL 试运行"
+      title="SQL 调试结果"
       :width="960"
       :z-index="NESTED_OVERLAY_Z_INDEX + 30"
       :footer="null"
@@ -964,7 +976,7 @@
           </template>
         </a-table>
       </div>
-      <a-empty v-else description="没有试运行结果" />
+      <a-empty v-else description="没有调试结果" />
     </a-modal>
 
     <a-modal v-model:open="debugExportOpen" title="手动添加" :z-index="NESTED_OVERLAY_Z_INDEX + 10" ok-text="添加" @ok="confirmDebugExport">
@@ -1115,7 +1127,7 @@ import type {
 } from '@case-forge/shared';
 import { copyText } from '@/utils/copyText';
 import type { ApiEnvironmentServiceRow, ApiTestCaseRow, DebugRunResult } from '@/api/apiTestClient';
-import { clearStepDebugRecords, listStepDebugRecords, listAllApiCases, listDataFunctions, listDatabaseConnections, debugRunCase, generateAssertions, getAssertionGenerateStatus, getAssertionGenerateResult, previewSqlStep } from '@/api/apiTestClient';
+import { clearStepDebugRecords, listStepDebugRecords, listAllApiCases, listDataFunctions, listDatabaseConnections, debugRunCase, debugManagedSqlStep, generateAssertions, getAssertionGenerateStatus, getAssertionGenerateResult } from '@/api/apiTestClient';
 import type { ApiDatabaseConnectionRow } from '@/api/apiTestClient';
 import { useApiTestStore } from '@/stores/apiTest';
 import { randomUuid } from '@/utils/randomUuid';
@@ -1955,6 +1967,21 @@ const debugHistoryOpen = ref(false);
 const debugHistory = ref<Awaited<ReturnType<typeof listStepDebugRecords>>>([]);
 type DebugHistoryRow = Awaited<ReturnType<typeof listStepDebugRecords>>[number];
 function debugRecordConnected(row: DebugHistoryRow) { return !row.record.error && row.record.statusCode > 0; }
+function debugRecordProtocol(row: DebugHistoryRow) {
+  const request = row.record.request as { kind?: string } | null;
+  return request?.kind === 'db' ? 'SQL' : 'HTTP';
+}
+function debugRecordDatabaseLabel(row: DebugHistoryRow) {
+  const request = row.record.request as {
+    connectionName?: string | null;
+    connectionId?: string;
+  } | null;
+  return request?.connectionName || request?.connectionId || '—';
+}
+function debugRecordModeLabel(row: DebugHistoryRow) {
+  const request = row.record.request as { mode?: string } | null;
+  return request?.mode === 'execute' ? '改数据（事务回滚）' : '查询';
+}
 function formatDebugTime(value: string) { const date = new Date(value); if (Number.isNaN(date.getTime())) return '—'; const pad = (part: number) => String(part).padStart(2, '0'); return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`; }
 const debugRecordDetailOpen = ref(false);
 const debugRecordDetail = ref<DebugHistoryRow | null>(null);
@@ -2045,10 +2072,10 @@ function currentDbStepIssue() {
 const dbStepColumnOptions = computed(() =>
   parseSqlSelectColumns(form.stepDbSql).map((value) => ({ value })),
 );
-/** SQL 试运行结果：字段名 + 前若干行，用来确认变量提取的字段 */
+/** SQL 调试结果：字段名 + 前若干行，用来确认变量提取的字段 */
 const dbStepPreviewOpen = ref(false);
 const dbStepPreviewRunning = ref(false);
-const dbStepPreview = ref<Awaited<ReturnType<typeof previewSqlStep>> | null>(null);
+const dbStepPreview = ref<Awaited<ReturnType<typeof debugManagedSqlStep>> | null>(null);
 const dbStepPreviewColumns = computed(() =>
   (dbStepPreview.value?.columns ?? []).map((column) => ({
     title: column,
@@ -2057,7 +2084,7 @@ const dbStepPreviewColumns = computed(() =>
     ellipsis: true,
   })),
 );
-/** 试运行弹窗里顺带显示打到哪个库，不用回数据库连接去查 */
+/** 调试结果弹窗里顺带显示打到哪个库，不用回数据库连接去查 */
 const previewConnectionAddress = computed(() => {
   const connection = dbStepPreview.value?.connection;
   if (!connection) return '';
@@ -2079,19 +2106,22 @@ async function runDbStepPreview() {
   if (issue) return message.warning(issue);
   dbStepPreviewRunning.value = true;
   try {
-    dbStepPreview.value = await previewSqlStep(projectId.value, {
+    dbStepPreview.value = await debugManagedSqlStep(projectId.value, {
       connectionId: form.stepDbConnectionId,
       sql: form.stepDbSql,
       timeoutMs: form.stepDbTimeoutMs,
+      caseId: isNewCase.value ? undefined : apiStore.activeCaseId || undefined,
+      stepId: form.steps[activeStepIndex.value]?.id,
+      caseSource: 'project',
     });
     dbStepPreviewOpen.value = true;
   } catch (error) {
-    message.error((error as Error)?.message || '试运行失败');
+    message.error((error as Error)?.message || 'SQL 调试失败');
   } finally {
     dbStepPreviewRunning.value = false;
   }
 }
-/** 把试运行看到的字段直接加成变量提取行 */
+/** 把调试看到的字段直接加成变量提取行 */
 function extractPreviewColumn(column: string) {
   if (form.exports.some((item) => item.source === 'row' && item.expression.trim() === column))
     return message.info(`字段 ${column} 已经提取过了`);
@@ -2278,8 +2308,8 @@ function moveStep(index: number, offset: number) {
 function removeStep(index: number) { if (form.steps.length === 1) return; const removedId = form.steps[index].id; form.steps.splice(index, 1); clearStepParallel(form.steps[0]); activeStepIndex.value = Math.min(index, form.steps.length - 1); if (expandedStepId.value === removedId) expandedStepId.value = ''; loadStep(form.steps[activeStepIndex.value]); }
 function copyActiveStep() { storeActiveStep(); copyStepToClipboard(form.steps[activeStepIndex.value]); message.success('步骤已复制'); }
 function pasteStep() { const step = readStepFromClipboard(); if (!step) return message.warning('没有可粘贴的步骤'); storeActiveStep(); const pasted = cloneJson(step); pasted.id = randomUuid(); clearStepParallel(pasted); form.steps.push(pasted); activeStepIndex.value = form.steps.length - 1; expandedStepId.value = ''; loadStep(form.steps[activeStepIndex.value]); message.success('步骤已粘贴'); }
-async function openDebugHistory() { if (!projectId.value || !apiStore.activeCaseId) return; debugHistory.value = await listStepDebugRecords(projectId.value, apiStore.activeCaseId, form.steps[activeStepIndex.value].id); debugHistoryOpen.value = true; }
-async function clearDebugHistory() { if (!projectId.value || !apiStore.activeCaseId) return; await clearStepDebugRecords(projectId.value, apiStore.activeCaseId, form.steps[activeStepIndex.value].id); debugHistory.value = []; }
+async function openDebugHistory() { if (!projectId.value || !apiStore.activeCaseId) return; debugHistory.value = await listStepDebugRecords(projectId.value, apiStore.activeCaseId, form.steps[activeStepIndex.value].id, 'project'); debugHistoryOpen.value = true; }
+async function clearDebugHistory() { if (!projectId.value || !apiStore.activeCaseId) return; await clearStepDebugRecords(projectId.value, apiStore.activeCaseId, form.steps[activeStepIndex.value].id, 'project'); debugHistory.value = []; }
 
 const sharedVariableInsertOpen = ref(false);
 const sharedVariableName = ref('');
@@ -3210,6 +3240,7 @@ async function onDebugRun(showResult = true) {
         environmentServiceId: form.stepTargetServiceId || undefined,
         encoding: debugEncoding.value,
         caseId: caseIdAtStart,
+        caseSource: 'project',
         prerequisiteSteps: collectDebugPrerequisiteSteps(form.steps, activeStepIndex.value, request),
       },
     );
@@ -3262,6 +3293,7 @@ async function onGenerateAssertions() {
       environmentServiceId: form.stepTargetServiceId || undefined,
       encoding: debugEncoding.value,
       caseId: caseIdAtStart,
+      caseSource: 'project',
       prerequisiteSteps: collectDebugPrerequisiteSteps(form.steps, activeStepIndex.value, request),
     });
     const responseIssue = getDebugResponseIssue(result);

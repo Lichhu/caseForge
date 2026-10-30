@@ -78,6 +78,7 @@
                 :columns="linkedCaseColumns"
                 :pagination="false"
                 :expanded-row-keys="linkedExpandedKeys"
+                :custom-row="linkedCaseRow"
                 @expand="onLinkedExpand"
               >
                 <template #bodyCell="{ column, record }">
@@ -114,7 +115,7 @@
                         type="text"
                         :disabled="linkedSetCases[0]?.id === record.id"
                         title="上移"
-                        @click="moveLinkedCase(record.id, -1)"
+                        @click.stop="moveLinkedCase(record.id, -1)"
                       >
                         <ArrowUpOutlined />
                       </a-button>
@@ -123,7 +124,7 @@
                         type="text"
                         :disabled="linkedSetCases[linkedSetCases.length - 1]?.id === record.id"
                         title="下移"
-                        @click="moveLinkedCase(record.id, 1)"
+                        @click.stop="moveLinkedCase(record.id, 1)"
                       >
                         <ArrowDownOutlined />
                       </a-button>
@@ -132,7 +133,7 @@
                           size="small"
                           type="text"
                           danger
-                          @click="removeLinkedCase(record.id)"
+                          @click.stop="removeLinkedCase(record.id)"
                         >
                           <DeleteOutlined />
                         </a-button>
@@ -648,6 +649,27 @@ function runItemSteps(record: { requestSnapshot?: unknown }): RunStepSnapshot[] 
 
 function onLinkedExpand(expanded: boolean, record: { id: string }) {
   linkedExpandedKeys.value = expanded ? [record.id] : [];
+}
+
+function toggleLinkedCaseExpand(recordId: string) {
+  linkedExpandedKeys.value = linkedExpandedKeys.value.includes(recordId) ? [] : [recordId];
+}
+
+function linkedCaseRow(record: { id: string }) {
+  return {
+    class: 'exec-linked-clickable-row',
+    onClick: (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.closest(
+          '.ant-table-row-expand-icon, .exec-linked-actions-cell, .ant-btn',
+        )
+      ) {
+        return;
+      }
+      toggleLinkedCaseExpand(record.id);
+    },
+  };
 }
 
 function stepTargetLabel(step: ApiCaseStep) {
@@ -1288,6 +1310,12 @@ function onExpand(expanded: boolean, record: { id: string }) {
 }
 .exec-linked-table :deep(.ant-table-tbody > tr:hover > td) {
   background: #fafbfc;
+}
+.exec-linked-table :deep(.exec-linked-clickable-row) {
+  cursor: pointer;
+}
+.exec-linked-table :deep(.exec-linked-clickable-row .exec-linked-actions-cell) {
+  cursor: default;
 }
 .linked-case-title {
   font-weight: 500;

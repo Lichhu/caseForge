@@ -21,6 +21,10 @@
           >
             删除选中 ({{ selectedRowKeys.length }})
           </a-button>
+          <a-button @click="openRequirementReportExport">
+            <template #icon><ExportOutlined /></template>
+            导出报告
+          </a-button>
           <a-button @click="openSmpSync">
             <template #icon><SyncOutlined /></template>
             服管同步
@@ -149,6 +153,14 @@
       @confirm="handlePreprodConfirm"
     />
 
+    <ApiRequirementReportModal
+      v-model:open="requirementReportOpen"
+      :project-id="apiStore.activeProjectId"
+      :transactions="requirementReportTransactions"
+      :exporting="requirementReportExporting"
+      @export="handleRequirementReportExport"
+    />
+
     <a-modal
       v-model:open="modalOpen"
       :title="editingId ? '编辑交易码' : '新建'"
@@ -177,6 +189,7 @@ import { computed, onActivated, onDeactivated, onMounted, onUnmounted, reactive,
 import { useRouter } from 'vue-router';
 import {
   CloudUploadOutlined,
+  ExportOutlined,
   PlusOutlined,
   SearchOutlined,
   SyncOutlined,
@@ -190,9 +203,15 @@ import {
 import { useApiTestStore } from '@/stores/apiTest';
 import ApiTransactionSmpSyncModal from '@/components/api-test/ApiTransactionSmpSyncModal.vue';
 import PreproductionSyncModal from '@/components/api-test/PreproductionSyncModal.vue';
-import type { ApiTransactionRow } from '@/api/apiTestClient';
+import ApiRequirementReportModal from '@/components/api-test/ApiRequirementReportModal.vue';
+import type {
+  ApiTransactionRow,
+  RequirementReportSelection,
+} from '@/api/apiTestClient';
 import {
   downloadBase64Report,
+  downloadBlob,
+  exportRequirementReport,
   getReportExport,
   previewPreproductionSync,
   syncPreproductionCases,
@@ -210,6 +229,9 @@ const preprodPreviewLoading = ref(false);
 const preprodPreviewOpen = ref(false);
 const preprodPreview = ref<PreproductionSyncPreview | null>(null);
 const preprodTransactionIds = ref<string[]>([]);
+const requirementReportOpen = ref(false);
+const requirementReportExporting = ref(false);
+const requirementReportTransactions = ref<ApiTransactionRow[]>([]);
 const editingId = ref('');
 const keyword = ref('');
 const listPage = ref(1);
@@ -361,6 +383,7 @@ function formatDateTime(value: string) {
 
 const rowSelection = computed(() => ({
   selectedRowKeys: selectedRowKeys.value,
+  preserveSelectedRowKeys: true,
   onChange: (keys: string[]) => {
     selectedRowKeys.value = keys;
   },
@@ -393,6 +416,48 @@ function openCreate() {
 
 function openSmpSync() {
   smpSyncModalOpen.value = true;
+}
+
+function openRequirementReportExport() {
+  if (!apiStore.activeProjectId) {
+    message.warning('请先选择需求');
+    return;
+  }
+  if (!selectedRowKeys.value.length) {
+    message.warning('请先勾选需要导出报告的交易码');
+    return;
+  }
+  const selectedIds = new Set(selectedRowKeys.value);
+  requirementReportTransactions.value = apiStore.transactions.filter((item) =>
+    selectedIds.has(item.id),
+  );
+  requirementReportOpen.value = true;
+}
+
+async function handleRequirementReportExport(payload: {
+  selections: RequirementReportSelection[];
+}) {
+  const projectId = apiStore.activeProjectId;
+  if (!projectId) return;
+  requirementReportExporting.value = true;
+  try {
+    const { blob, fileName } = await exportRequirementReport(
+      projectId,
+      payload.selections,
+      'html',
+    );
+    downloadBlob(blob, fileName);
+    message.success(`需求测试 HTML 报告已导出（${payload.selections.length} 条执行历史）`);
+    requirementReportOpen.value = false;
+    selectedRowKeys.value = [];
+    await apiStore.refreshTransactions(projectId);
+  } catch (error) {
+    message.error(
+      error instanceof Error ? error.message : '需求测试报告导出失败，请重试',
+    );
+  } finally {
+    requirementReportExporting.value = false;
+  }
 }
 
 async function syncToPreproduction() {
