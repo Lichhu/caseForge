@@ -6,6 +6,7 @@ import { Module } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { ApiRequirementEntity } from "@requirement-platform/entity/api-requirement.entity";
+import { ApiRequirementDispatcherEntity } from "@requirement-platform/entity/api-requirement-dispatcher.entity";
 import { MinioStorageModule } from "@minio/index";
 import { AiWorkflowModule } from "@common/ai-workflow";
 import { ApiTestController } from "./controller/api-test.controller";
@@ -41,6 +42,7 @@ import { ApiExecutionSetService } from "./service/api-execution-set.service";
 import { ApiEnvironmentService } from "./service/api-environment.service";
 import { ApiExecutionService } from "./service/api-execution.service";
 import { ApiReportService } from "./service/api-report.service";
+import { ApiTestLibraryAccessService } from "./service/api-test-library-access.service";
 import { SmpClientService } from "./service/smp-client.service";
 import { SmpSyncService } from "./service/smp-sync.service";
 import { ApiPreproductionCaseService } from "./service/api-preproduction-case.service";
@@ -78,6 +80,7 @@ import { ScenarioModule } from "@scenario/index";
       ApiTestReportConfigEntity,
       CaseProjectEntity,
       ApiRequirementEntity,
+      ApiRequirementDispatcherEntity,
     ]),
     NotifyModule,
     MinioStorageModule,
@@ -97,6 +100,7 @@ import { ScenarioModule } from "@scenario/index";
     ApiEnvironmentService,
     ApiExecutionService,
     ApiReportService,
+    ApiTestLibraryAccessService,
     ApiTransactionService,
     SmpClientService,
     SmpSyncService,
@@ -113,6 +117,7 @@ import { ScenarioModule } from "@scenario/index";
     ApiEnvironmentService,
     ApiExecutionService,
     ApiReportService,
+    ApiTestLibraryAccessService,
     ApiTransactionService,
     SmpClientService,
     SmpSyncService,

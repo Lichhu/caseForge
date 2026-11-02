@@ -31,7 +31,10 @@
       <section class="db-connection-editor">
         <div class="db-connection-body">
           <a-form layout="vertical">
-            <div class="db-connection-grid">
+            <div
+              class="db-connection-grid"
+              :class="{ 'permission-locked': Boolean(activeId) && !canManageActive }"
+            >
               <a-form-item label="连接名称" required><a-input v-model:value="form.name" /></a-form-item>
               <a-form-item label="数据库类型" required><a-select v-model:value="form.type" :options="typeOptions" /></a-form-item>
               <a-form-item label="主机" required><a-input v-model:value="form.host" /></a-form-item>
@@ -45,11 +48,11 @@
         </div>
         <LibraryEditorFooter>
           <template #start>
-            <a-button danger :disabled="!activeId" @click="removeConnection"><DeleteOutlined /> 删除</a-button>
+            <a-button danger :disabled="!activeId || !canManageActive" @click="removeConnection"><DeleteOutlined /> 删除</a-button>
           </template>
           <template #end>
             <a-button :loading="testing" @click="testConnection"><ApiOutlined /> 测试连接</a-button>
-            <a-button type="primary" @click="saveConnection">保存</a-button>
+            <a-button type="primary" :disabled="Boolean(activeId) && !canManageActive" @click="saveConnection">保存</a-button>
           </template>
         </LibraryEditorFooter>
       </section>
@@ -70,7 +73,7 @@ import LibraryPanelShell from './LibraryPanelShell.vue';
 import LibrarySearch from './LibrarySearch.vue';
 import LibrarySidebar from './LibrarySidebar.vue';
 
-interface DatabaseConnectionDraft { id: string; name: string; type: string; host: string; port: number; database: string; username: string; password: string; readonly: boolean }
+interface DatabaseConnectionDraft { id: string; name: string; type: string; host: string; port: number; database: string; username: string; password: string; readonly: boolean; canManage?: boolean }
 const props = defineProps<{ projectId: string; embedded?: boolean }>();
 const open = defineModel<boolean>('open', { required: true });
 const connections = ref<DatabaseConnectionDraft[]>([]);
@@ -85,6 +88,11 @@ const filteredConnections = computed(() => {
 const activeId = ref('');
 const form = reactive<DatabaseConnectionDraft>({ id: '', name: '', type: 'MySQL', host: '', port: 3306, database: '', username: '', password: '', readonly: true });
 const testing = ref(false);
+const canManageActive = computed(
+  () =>
+    !activeId.value ||
+    Boolean(connections.value.find((item) => item.id === activeId.value)?.canManage),
+);
 const databaseTypes = [
   ['MySQL', 'MySQL', 3306],
   ['MariaDB', 'MariaDB', 3306],
@@ -112,13 +120,14 @@ async function loadConnections() { connections.value = (await listDatabaseConnec
 function selectConnection(id: string) { const item = connections.value.find((row) => row.id === id); if (item) { activeId.value = id; Object.assign(form, item); } }
 function createConnection() { activeId.value = ''; Object.assign(form, { id: '', name: '', type: 'MySQL', host: '', port: 3306, database: '', username: '', password: '', readonly: true }); }
 async function saveConnection() {
+  if (!canManageActive.value) return;
   if (!form.name.trim() || !form.host.trim() || !form.username.trim() || (databaseRequired.value && !form.database.trim())) return message.warning('请完整填写连接信息');
   const payload = { name: form.name, type: form.type, host: form.host, port: form.port, databaseName: form.database, username: form.username, password: form.password || undefined, readonly: form.readonly };
   const saved = activeId.value ? await updateDatabaseConnection(props.projectId, activeId.value, payload) : await createDatabaseConnection(props.projectId, payload);
   activeId.value = saved.id; await loadConnections(); message.success('已保存');
 }
 function removeConnection() {
-  if (!activeId.value) return;
+  if (!activeId.value || !canManageActive.value) return;
   Modal.confirm({
     title: '删除数据库连接？',
     content: `确定删除连接「${form.name}」？删除后无法恢复。`,
@@ -143,6 +152,7 @@ async function testConnection() { if (!activeId.value) return message.warning('�
 .db-connection-editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid var(--cf-border, #e4e7ec); border-radius: 12px; background: var(--cf-surface, #fff); overflow: hidden; }
 .db-connection-body { flex: 1; min-height: 0; padding: 24px 28px; overflow-y: auto; }
 .db-connection-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
+.db-connection-grid.permission-locked { pointer-events: none; opacity: .72; }
 .db-connection-grid :deep(.ant-form-item) { margin-bottom: 22px; }
 @media (max-width: 700px) { .db-connection-layout, .db-connection-grid { grid-template-columns: 1fr; } }
 </style>

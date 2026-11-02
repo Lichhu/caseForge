@@ -22,9 +22,18 @@ describe("ApiDataFunctionService", () => {
       description: "",
     },
   ];
+  const access = {
+    isDispatcher: jest.fn().mockResolvedValue(false),
+    canManage: jest.fn(
+      (createdBy: string | null | undefined, isDispatcher: boolean) =>
+        isDispatcher || (createdBy || "system") === "system",
+    ),
+    assertCanManage: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new ApiDataFunctionService(
     {} as never,
     { find: jest.fn().mockResolvedValue(functions) } as never,
+    access as never,
   );
 
   it("resolves function calls in nested request data", async () => {
@@ -52,6 +61,7 @@ describe("ApiDataFunctionService", () => {
           },
         ]),
       } as never,
+      access as never,
     );
 
     await expect(
@@ -61,16 +71,15 @@ describe("ApiDataFunctionService", () => {
     });
   });
 
-  it("loads shared functions scoped by user instead of project", async () => {
+  it("loads globally shared functions instead of project-scoped functions", async () => {
     await service.resolveDeep("another-project", "${MSG_ID('00', '3')}");
 
     expect((service as any).functionRepo.find).toHaveBeenLastCalledWith({
-      where: { createdBy: "system" },
       order: { updatedAt: "DESC" },
     });
   });
 
-  it("lists shared database connections scoped by user instead of project", async () => {
+  it("lists globally shared database connections", async () => {
     const connectionRepo = {
       find: jest.fn().mockResolvedValue([
         {
@@ -90,6 +99,7 @@ describe("ApiDataFunctionService", () => {
     const sharedService = new ApiDataFunctionService(
       connectionRepo as never,
       {} as never,
+      access as never,
     );
 
     await expect(sharedService.listConnections("any-project")).resolves.toEqual(
@@ -102,7 +112,6 @@ describe("ApiDataFunctionService", () => {
       ],
     );
     expect(connectionRepo.find).toHaveBeenCalledWith({
-      where: { createdBy: "system" },
       order: { updatedAt: "DESC" },
     });
   });
@@ -113,6 +122,7 @@ describe("ApiDataFunctionService", () => {
         findOne: jest.fn().mockResolvedValue({ id: "db", type: "MySQL" }),
       } as never,
       {} as never,
+      access as never,
     );
     jest
       .spyOn(connectionService as any, "pool")
@@ -129,6 +139,7 @@ describe("ApiDataFunctionService", () => {
     const connectionService = new ApiDataFunctionService(
       {} as never,
       {} as never,
+      access as never,
     );
 
     await expect(
@@ -147,6 +158,7 @@ describe("ApiDataFunctionService", () => {
     const connectionService = new ApiDataFunctionService(
       connectionRepo as never,
       {} as never,
+      access as never,
     );
 
     await expect(
@@ -212,6 +224,7 @@ describe("ApiDataFunctionService", () => {
     const sqlService = new ApiDataFunctionService(
       { findOne: jest.fn().mockResolvedValue({ id: "db" }) } as never,
       {} as never,
+      access as never,
     );
     jest.spyOn(sqlService as any, "pool").mockResolvedValue(pool);
 
@@ -237,6 +250,7 @@ describe("ApiDataFunctionService", () => {
     const sqlService = new ApiDataFunctionService(
       { findOne: jest.fn().mockResolvedValue({ id: "db" }) } as never,
       {} as never,
+      access as never,
     );
     jest.spyOn(sqlService as any, "pool").mockResolvedValue(pool);
 
@@ -267,6 +281,7 @@ describe("ApiDataFunctionService", () => {
       {
         find: jest.fn().mockResolvedValue([{ ...functions[0], name: "ROW" }]),
       } as never,
+      access as never,
     );
     jest
       .spyOn(objectService as any, "evaluate")
@@ -353,6 +368,7 @@ describe("ApiDataFunctionService", () => {
           },
         ]),
       } as never,
+      access as never,
     );
 
     await expect(
@@ -387,6 +403,7 @@ describe("ApiDataFunctionService", () => {
           },
         ]),
       } as never,
+      access as never,
     );
 
     await expect(

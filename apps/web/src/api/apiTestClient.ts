@@ -189,6 +189,7 @@ export interface ApiEnvironmentRow {
   hasToken: boolean;
   isDefault: boolean;
   enabled: boolean;
+  canManage?: boolean;
 }
 
 export interface ApiRunItemRow {
@@ -230,6 +231,7 @@ export interface ApiEnvironmentServiceRow {
   sortOrder: number;
   ignoreSslVerify?: boolean;
   enabled: boolean;
+  canManage?: boolean;
 }
 
 export interface ApiRunDetail {
@@ -566,6 +568,7 @@ export interface ApiStepLibraryRow {
   name: string;
   step: ApiCaseStep;
   updatedAt: string;
+  canManage?: boolean;
 }
 export async function listStepLibrary() {
   return (await http.get<ApiStepLibraryRow[]>("api-test/step-library")).data;
@@ -1231,6 +1234,7 @@ export interface ApiDatabaseConnectionRow {
   username: string;
   readonly: boolean;
   hasPassword: boolean;
+  canManage?: boolean;
 }
 export interface ApiDatabaseConnectionPayload {
   name: string;
@@ -1249,6 +1253,7 @@ export interface ApiDataFunctionRow {
   type: "template" | "sql";
   description: string;
   config: Record<string, any> & { builtin?: boolean };
+  canManage?: boolean;
 }
 export interface ApiDataFunctionPayload {
   name: string;

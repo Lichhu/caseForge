@@ -13,7 +13,6 @@ import {
   auditFieldsForCreate,
   auditFieldsForUpdate,
 } from "@common/audit/request-context";
-import { scopedWhere } from "@common/audit/user-scope";
 import { ApiDatabaseConnectionEntity } from "@api-test/entity/api-database-connection.entity";
 import { ApiDataFunctionEntity } from "@api-test/entity/api-data-function.entity";
 import {
@@ -23,6 +22,7 @@ import {
 } from "@api-test/dto/save-data-function.dto";
 import { encryptSecrets } from "@api-test/util/secret-crypto.util";
 import { globalLibraryProjectId } from "@api-test/util/global-library.util";
+import { ApiTestLibraryAccessService } from "./api-test-library-access.service";
 import {
   createDatabasePool,
   databaseTestSql,
@@ -148,14 +148,20 @@ export class ApiDataFunctionService {
     private readonly connectionRepo: Repository<ApiDatabaseConnectionEntity>,
     @InjectRepository(ApiDataFunctionEntity)
     private readonly functionRepo: Repository<ApiDataFunctionEntity>,
+    private readonly access: ApiTestLibraryAccessService,
   ) {}
 
   async listConnections(_projectId: string) {
-    const rows = await this.connectionRepo.find({
-      where: scopedWhere(),
-      order: { updatedAt: "DESC" },
-    });
-    return this.uniqueByName(rows).map((row) => this.publicConnection(row));
+    const [rows, isDispatcher] = await Promise.all([
+      this.connectionRepo.find({ order: { updatedAt: "DESC" } }),
+      this.access.isDispatcher(),
+    ]);
+    return this.uniqueByName(rows).map((row) =>
+      this.publicConnection(
+        row,
+        this.access.canManage(row.createdBy, isDispatcher),
+      ),
+    );
   }
   async saveConnection(
     projectId: string,
@@ -177,9 +183,7 @@ export class ApiDataFunctionService {
         body.type === "Oracle" ? "请填写服务名" : "请填写数据库名",
       );
     const name = body.name.trim();
-    const duplicate = await this.connectionRepo.findOne({
-      where: scopedWhere({ name }),
-    });
+    const duplicate = await this.connectionRepo.findOne({ where: { name } });
     if (duplicate && duplicate.id !== id) {
       throw new BadRequestException("同名数据库连接已存在");
     }
@@ -189,6 +193,7 @@ export class ApiDataFunctionService {
           projectId: globalLibraryProjectId(),
           ...auditFieldsForCreate(),
         });
+    if (id) await this.access.assertCanManage(row.createdBy, "数据库连接");
     Object.assign(row, {
       name,
       type: body.type,
@@ -201,10 +206,11 @@ export class ApiDataFunctionService {
     });
     if (body.password)
       row.passwordEncrypted = encryptSecrets({ password: body.password });
-    return this.publicConnection(await this.connectionRepo.save(row));
+    return this.publicConnection(await this.connectionRepo.save(row), true);
   }
   async deleteConnection(projectId: string, id: string) {
-    await this.requireConnection(id);
+    const row = await this.requireConnection(id);
+    await this.access.assertCanManage(row.createdBy, "数据库连接");
     await this.connectionRepo.softDelete({ id });
     return { ok: true };
   }
@@ -256,10 +262,10 @@ export class ApiDataFunctionService {
   }
 
   async listFunctions(projectId: string) {
-    const rows = await this.functionRepo.find({
-      where: scopedWhere(),
-      order: { updatedAt: "DESC" },
-    });
+    const [rows, isDispatcher] = await Promise.all([
+      this.functionRepo.find({ order: { updatedAt: "DESC" } }),
+      this.access.isDispatcher(),
+    ]);
     const publicRows = this.uniqueByName(rows);
     const names = new Set(publicRows.map((row) => row.name));
     const missing = BUILTIN_FUNCTIONS.filter(
@@ -287,9 +293,10 @@ export class ApiDataFunctionService {
     );
     for (const row of stale) row.description = builtinDesc.get(row.name) ?? "";
     if (stale.length) await this.functionRepo.save(stale);
-    return missing.length
+    const allRows = missing.length
       ? [...publicRows, ...(await this.functionRepo.save(missing))]
       : publicRows;
+    return allRows.map((row) => this.publicFunction(row, isDispatcher));
   }
   async saveFunction(
     projectId: string,
@@ -297,9 +304,7 @@ export class ApiDataFunctionService {
     id?: string,
   ) {
     const name = body.name.trim().toUpperCase();
-    const duplicate = await this.functionRepo.findOne({
-      where: scopedWhere({ name }),
-    });
+    const duplicate = await this.functionRepo.findOne({ where: { name } });
     if (duplicate && duplicate.id !== id) {
       throw new BadRequestException("同名数据函数已存在");
     }
@@ -311,6 +316,7 @@ export class ApiDataFunctionService {
         });
     if (id && row.config.builtin)
       throw new BadRequestException("内置函数不可修改");
+    if (id) await this.access.assertCanManage(row.createdBy, "数据函数");
     Object.assign(row, {
       name,
       params: body.params,
@@ -319,11 +325,12 @@ export class ApiDataFunctionService {
       description: body.description ?? "",
       ...(id ? auditFieldsForUpdate() : {}),
     });
-    return this.functionRepo.save(row);
+    return this.publicFunction(await this.functionRepo.save(row), true);
   }
   async deleteFunction(projectId: string, id: string) {
     const row = await this.requireFunction(id);
     if (row.config.builtin) throw new BadRequestException("内置函数不可删除");
+    await this.access.assertCanManage(row.createdBy, "数据函数");
     await this.functionRepo.softDelete({ id });
     return { ok: true };
   }
@@ -343,7 +350,6 @@ export class ApiDataFunctionService {
     requestRoot?: unknown,
   ): Promise<unknown> {
     const rows = await this.functionRepo.find({
-      where: scopedWhere(),
       order: { updatedAt: "DESC" },
     });
     const functions = this.uniqueByName(rows);
@@ -644,9 +650,22 @@ export class ApiDataFunctionService {
   private testSql(type: string) {
     return databaseTestSql(type);
   }
-  private publicConnection(row: ApiDatabaseConnectionEntity) {
+  private publicConnection(
+    row: ApiDatabaseConnectionEntity,
+    canManage: boolean,
+  ) {
     const { passwordEncrypted, ...publicRow } = row;
-    return { ...publicRow, hasPassword: Boolean(passwordEncrypted) };
+    return {
+      ...publicRow,
+      hasPassword: Boolean(passwordEncrypted),
+      canManage,
+    };
+  }
+  private publicFunction(row: ApiDataFunctionEntity, canManage: boolean) {
+    return {
+      ...row,
+      canManage: canManage && !(row.config as { builtin?: boolean }).builtin,
+    };
   }
   private uniqueByName<T extends { name: string }>(rows: T[]) {
     return [
@@ -660,16 +679,12 @@ export class ApiDataFunctionService {
     ];
   }
   private async requireConnection(id: string) {
-    const row = await this.connectionRepo.findOne({
-      where: scopedWhere({ id }),
-    });
+    const row = await this.connectionRepo.findOne({ where: { id } });
     if (!row) throw new NotFoundException("数据库连接不存在");
     return row;
   }
   private async requireFunction(id: string) {
-    const row = await this.functionRepo.findOne({
-      where: scopedWhere({ id }),
-    });
+    const row = await this.functionRepo.findOne({ where: { id } });
     if (!row) throw new NotFoundException("数据函数不存在");
     return row;
   }

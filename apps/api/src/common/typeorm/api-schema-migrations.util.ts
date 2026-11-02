@@ -110,6 +110,7 @@ export async function applyApiTestSchemaMigrations(runner: Queryable) {
   await ensureApiCaseGenerateJobColumns(runner);
   await ensureExecutionPlatformTables(runner);
   await ensureRunnerPlatformColumns(runner);
+  await normalizeGlobalEnvironmentDefaults(runner);
 }
 
 async function ensureApiTestReportConfigTable(runner: Queryable) {
@@ -130,6 +131,24 @@ async function ensureApiTestReportConfigTable(runner: Queryable) {
     VALUES
       ('reviewer_name', '常万恒', '项目类接口测试报告审核人'),
       ('approver_name', '陈志斌', '项目类接口测试报告批准人')
+  `);
+}
+
+async function normalizeGlobalEnvironmentDefaults(runner: Queryable) {
+  if (!(await tableExists(runner, "api_test_environment"))) return;
+  await runner.query(`
+    UPDATE api_test_environment
+    SET isDefault = 0
+    WHERE isDefault = 1
+      AND id <> (
+        SELECT id FROM (
+          SELECT id
+          FROM api_test_environment
+          WHERE isDefault = 1 AND deleted_at IS NULL
+          ORDER BY updatedAt DESC, createdAt DESC
+          LIMIT 1
+        ) keep_default
+      )
   `);
 }
 

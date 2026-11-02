@@ -6,25 +6,30 @@ import {
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { isDbStep, type ApiCaseStep } from "@case-forge/shared";
-import { RequestContext } from "@common/audit/request-context";
 import {
   auditFieldsForCreate,
   auditFieldsForUpdate,
 } from "@common/audit/request-context";
 import { ApiStepLibraryEntity } from "../entity/api-step-library.entity";
+import { ApiTestLibraryAccessService } from "./api-test-library-access.service";
 
 @Injectable()
 export class ApiStepLibraryService {
   constructor(
     @InjectRepository(ApiStepLibraryEntity)
     private readonly repo: Repository<ApiStepLibraryEntity>,
+    private readonly access: ApiTestLibraryAccessService,
   ) {}
 
-  list() {
-    return this.repo.find({
-      where: { createdBy: RequestContext.getUserName() },
-      order: { updatedAt: "DESC" },
-    });
+  async list() {
+    const [rows, isDispatcher] = await Promise.all([
+      this.repo.find({ order: { updatedAt: "DESC" } }),
+      this.access.isDispatcher(),
+    ]);
+    return rows.map((row) => ({
+      ...row,
+      canManage: this.access.canManage(row.createdBy, isDispatcher),
+    }));
   }
 
   async save(input: { name: string; step: ApiCaseStep }, id?: string) {
@@ -45,20 +50,20 @@ export class ApiStepLibraryService {
         }),
       );
     const row = await this.repo.findOne({
-      where: { id, createdBy: RequestContext.getUserName() },
+      where: { id },
     });
     if (!row) throw new NotFoundException("步骤不存在");
+    await this.access.assertCanManage(row.createdBy, "步骤");
     row.name = input.name.trim();
     row.step = input.step;
     return this.repo.save({ ...row, ...auditFieldsForUpdate() });
   }
 
   async remove(id: string) {
-    const result = await this.repo.softDelete({
-      id,
-      createdBy: RequestContext.getUserName(),
-    });
-    if (!result.affected) throw new NotFoundException("步骤不存在");
+    const row = await this.repo.findOne({ where: { id } });
+    if (!row) throw new NotFoundException("步骤不存在");
+    await this.access.assertCanManage(row.createdBy, "步骤");
+    await this.repo.softDelete({ id });
     return { deleted: true };
   }
 }

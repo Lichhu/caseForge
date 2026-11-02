@@ -33,7 +33,7 @@
       </LibrarySidebar>
 
       <section class="data-function-editor">
-        <div class="data-function-meta" :class="{ 'builtin-locked': isBuiltin }">
+        <div class="data-function-meta" :class="{ 'builtin-locked': !canManageCurrent }">
           <label class="data-function-field">
             <span class="data-function-field-label">函数名称</span>
             <a-input
@@ -79,7 +79,7 @@
         </div>
 
         <div class="data-function-body">
-          <a-form layout="vertical" class="data-function-form" :class="{ 'builtin-locked': isBuiltin }">
+          <a-form layout="vertical" class="data-function-form" :class="{ 'builtin-locked': !canManageCurrent }">
             <template v-if="form.type === 'template'">
               <a-segmented v-model:value="form.templateMode" :options="templateModeOptions" block class="template-mode" />
               <section v-if="form.templateMode === 'builder'" class="formula-panel">
@@ -173,13 +173,13 @@
 
         <LibraryEditorFooter>
           <template #start>
-            <a-button danger :disabled="!activeId || isBuiltin" @click="removeFunction">
+            <a-button danger :disabled="!activeId || !canManageCurrent" @click="removeFunction">
               <template #icon><DeleteOutlined /></template>
               删除
             </a-button>
           </template>
           <template #end>
-            <a-button type="primary" :disabled="isBuiltin" @click="saveFunction">保存</a-button>
+            <a-button type="primary" :disabled="!canManageCurrent" @click="saveFunction">保存</a-button>
           </template>
         </LibraryEditorFooter>
       </section>
@@ -238,6 +238,7 @@ interface DataFunctionDraft {
   sqlConditions: SqlCondition[];
   description: string;
   builtin?: boolean;
+  canManage: boolean;
 }
 
 type FormulaOperator = 'concat' | 'add' | 'subtract' | 'multiply' | 'divide';
@@ -356,6 +357,11 @@ const usageExpression = computed(() => {
 });
 const previewValues = computed(() => parameterNames.value.map((name) => previewParams[name] ?? ''));
 const isBuiltin = computed(() => Boolean((functions.value.find((item) => item.id === activeId.value) as any)?.builtin));
+const canManageCurrent = computed(() => {
+  if (isBuiltin.value) return false;
+  if (!activeId.value) return true;
+  return Boolean(functions.value.find((item) => item.id === activeId.value)?.canManage);
+});
 
 watch(open, (value) => { if (value) void loadAll(); }, { immediate: true });
 watch(() => form.connection, () => { if (form.type === 'sql') void loadSqlMetadata(); });
@@ -374,7 +380,7 @@ async function loadAll() {
 
 function fromApi(row: any): DataFunctionDraft {
   const config = row.config ?? {};
-  return { id: row.id, name: row.name, params: (row.params ?? []).join(','), type: row.type, parts: config.parts ?? [], template: config.template ?? '', templateMode: config.mode ?? 'builder', javascriptScript: config.javascriptScript ?? (config.mode === 'javascript' ? config.script : ''), pythonScript: config.pythonScript ?? (config.mode === 'python' ? config.script : ''), connection: config.connectionId ?? '', sql: config.sql ?? '', extract: config.returnField ?? '', sqlTable: config.table ?? '', sqlReturnFields: config.returnFields ?? (config.returnField ? [config.returnField] : []), sqlConditions: config.conditions ?? [], description: row.description ?? '', builtin: Boolean(config.builtin) };
+  return { id: row.id, name: row.name, params: (row.params ?? []).join(','), type: row.type, parts: config.parts ?? [], template: config.template ?? '', templateMode: config.mode ?? 'builder', javascriptScript: config.javascriptScript ?? (config.mode === 'javascript' ? config.script : ''), pythonScript: config.pythonScript ?? (config.mode === 'python' ? config.script : ''), connection: config.connectionId ?? '', sql: config.sql ?? '', extract: config.returnField ?? '', sqlTable: config.table ?? '', sqlReturnFields: config.returnFields ?? (config.returnField ? [config.returnField] : []), sqlConditions: config.conditions ?? [], description: row.description ?? '', builtin: Boolean(config.builtin), canManage: Boolean(row.canManage) };
 }
 
 async function loadSqlMetadata() {
@@ -408,6 +414,7 @@ function makeFunction(patch: Partial<DataFunctionDraft> = {}): DataFunctionDraft
     sqlReturnFields: [],
     sqlConditions: [],
     description: '',
+    canManage: true,
     ...patch,
   };
 }
@@ -597,6 +604,7 @@ function movePart(index: number, offset: -1 | 1) {
 }
 
 async function saveFunction() {
+  if (!canManageCurrent.value) return;
   form.name = form.name.trim().toUpperCase();
   if (!form.name) {
     message.warning('请输入函数名称');
@@ -616,7 +624,7 @@ async function saveFunction() {
 }
 
 function removeFunction() {
-  if (!activeId.value) return;
+  if (!activeId.value || !canManageCurrent.value) return;
   Modal.confirm({
     title: '删除函数？',
     content: `确定删除函数「${form.name}」？删除后无法恢复。`,

@@ -16,19 +16,32 @@ function createRepoMock() {
 function buildService() {
   const envRepo = createRepoMock();
   const serviceRepo = createRepoMock();
+  const access = {
+    isDispatcher: jest.fn().mockResolvedValue(false),
+    canManage: jest.fn(
+      (createdBy: string | null | undefined, isDispatcher: boolean) =>
+        isDispatcher || createdBy === "alice",
+    ),
+    assertCanManage: jest.fn(async (createdBy: string | null | undefined) => {
+      if (createdBy !== "alice") throw new Error("无权限");
+    }),
+  };
   const service = new ApiEnvironmentService(
     envRepo as never,
     serviceRepo as never,
+    access as never,
   );
-  return { service, envRepo, serviceRepo };
+  return { service, envRepo, serviceRepo, access };
 }
 
-describe("ApiEnvironmentService 用户级全局库", () => {
-  it("lists environments scoped by the current user", async () => {
+describe("ApiEnvironmentService 全局库", () => {
+  it("lists all shared environments", async () => {
     const { service, envRepo } = buildService();
     await RequestContext.run("alice", () => service.listEnvironments("p1"));
     expect(envRepo.find).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { createdBy: "alice" } }),
+      expect.objectContaining({
+        order: { isDefault: "DESC", updatedAt: "DESC" },
+      }),
     );
   });
 
@@ -43,12 +56,12 @@ describe("ApiEnvironmentService 用户级全局库", () => {
       service.deleteEnvironment("p1", "env-1"),
     );
     expect(envRepo.findOne).toHaveBeenCalledWith({
-      where: { id: "env-1", enabled: true, createdBy: "alice" },
+      where: { id: "env-1", enabled: true },
     });
     expect(envRepo.softDelete).toHaveBeenCalledWith({ id: "env-1" });
   });
 
-  it("clears only the current user's default environment", async () => {
+  it("clears the shared default environment", async () => {
     const { service, envRepo } = buildService();
     envRepo.findOne.mockResolvedValue({
       id: "env-1",
@@ -69,17 +82,16 @@ describe("ApiEnvironmentService 用户级全局库", () => {
       (call: unknown[]) =>
         (call[1] as { isDefault?: boolean })?.isDefault === false,
     );
-    expect(clearCall?.[0]).toEqual({ createdBy: "alice" });
+    expect(clearCall?.[0]).toEqual({ isDefault: true });
   });
 
-  it("looks up environment service SSL settings within the current user", async () => {
+  it("looks up environment service SSL settings in the shared library", async () => {
     const { service, serviceRepo } = buildService();
     await RequestContext.run("alice", () =>
       service.getServiceIgnoreSslVerify("p1", "env-1", "svc-1"),
     );
     expect(serviceRepo.findOne).toHaveBeenCalledWith({
       where: {
-        createdBy: "alice",
         environmentId: "env-1",
         id: "svc-1",
         enabled: true,
@@ -87,7 +99,7 @@ describe("ApiEnvironmentService 用户级全局库", () => {
     });
   });
 
-  it("builds address bindings from the current user's global environments", async () => {
+  it("builds address bindings from shared environments", async () => {
     const { service, envRepo, serviceRepo } = buildService();
     envRepo.find.mockResolvedValue([{ id: "env-1", name: "dev" }]);
     serviceRepo.find.mockResolvedValue([
@@ -102,10 +114,14 @@ describe("ApiEnvironmentService 用户级全局库", () => {
       service.listServiceAddressBindings("p1"),
     );
     expect(envRepo.find).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { createdBy: "alice" } }),
+      expect.objectContaining({
+        order: { isDefault: "DESC", createdAt: "ASC" },
+      }),
     );
     expect(serviceRepo.find).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { createdBy: "alice" } }),
+      expect.objectContaining({
+        order: { sortOrder: "ASC", createdAt: "ASC" },
+      }),
     );
     expect(rows[0]).toMatchObject({
       environmentId: "env-1",
@@ -151,6 +167,7 @@ describe("ApiEnvironmentService 用户级全局库", () => {
 
     serviceRepo.findOne.mockResolvedValue({
       id: "svc-1",
+      createdBy: "alice",
       environmentId: "env-1",
       name: "svc",
       sortOrder: 0,

@@ -113,6 +113,7 @@
                     type="link"
                     class="service-name-link"
                     title="编辑服务"
+                    :disabled="!record.canManage"
                     @click="openServiceEdit(record)"
                   >
                     {{ record.name }}
@@ -127,6 +128,7 @@
                   <button
                     type="button"
                     class="service-editable-cell"
+                    :disabled="!record.canManage"
                     @click="openServiceEdit(record)"
                   >
                     {{ record.serverAddress }}
@@ -150,6 +152,7 @@
                     type="text"
                     size="small"
                     title="编辑"
+                    :disabled="!record.canManage"
                     @click="openServiceEdit(record)"
                   >
                     <EditOutlined />
@@ -158,7 +161,7 @@
                     type="text"
                     size="small"
                     title="置顶"
-                    :disabled="index === 0"
+                    :disabled="index === 0 || !record.canManage"
                     @click="moveService(record.id, 'top')"
                   >
                     <VerticalAlignTopOutlined />
@@ -167,7 +170,7 @@
                     type="text"
                     size="small"
                     title="上移"
-                    :disabled="index === 0"
+                    :disabled="index === 0 || !record.canManage"
                     @click="moveService(record.id, 'up')"
                   >
                     <ArrowUpOutlined />
@@ -176,7 +179,7 @@
                     type="text"
                     size="small"
                     title="下移"
-                    :disabled="index === services.length - 1"
+                    :disabled="index === services.length - 1 || !record.canManage"
                     @click="moveService(record.id, 'down')"
                   >
                     <ArrowDownOutlined />
@@ -187,6 +190,7 @@
                     danger
                     size="small"
                     title="删除"
+                    :disabled="!record.canManage"
                     @click="removeService(record.id)"
                   >
                     <DeleteOutlined />
@@ -199,13 +203,13 @@
 
         <LibraryEditorFooter>
           <template #start>
-            <a-button danger @click="removeEnv">
+            <a-button danger :disabled="!activeEnvCanManage" @click="removeEnv">
               <template #icon><DeleteOutlined /></template>
               删除
             </a-button>
           </template>
           <template #end>
-            <a-button type="primary" @click="openEnvEdit">
+            <a-button type="primary" :disabled="!activeEnvCanManage" @click="openEnvEdit">
               <template #icon><EditOutlined /></template>
               编辑
             </a-button>
@@ -380,6 +384,11 @@ const activeEnvScope = computed(() => {
 const activeEnvScopeLabel = computed(() =>
   API_ENVIRONMENT_SCOPE_LABEL[activeEnvScope.value] ?? '',
 );
+const activeEnvCanManage = computed(
+  () =>
+    apiStore.environments.find((item) => item.id === activeEnvId.value)
+      ?.canManage ?? false,
+);
 
 const envGroups = computed(() => {
   const keyword = (envSearchKeyword.value ?? '').trim().toLowerCase();
@@ -485,7 +494,7 @@ function openEnvCreate() {
 
 function openEnvEdit() {
   const env = apiStore.environments.find((item) => item.id === activeEnvId.value);
-  if (!env) return;
+  if (!env || !env.canManage) return;
   envEditingId.value = env.id;
   envForm.scope = env.scope ?? 'system';
   envForm.name = env.name;
@@ -495,6 +504,7 @@ function openEnvEdit() {
 async function saveEnv() {
   const projectId = libraryProjectId.value;
   if (!projectId || !envForm.name.trim()) return;
+  if (envEditingId.value && !activeEnvCanManage.value) return;
   await apiStore.saveEnvironment(
     projectId,
     {
@@ -515,7 +525,7 @@ async function saveEnv() {
 
 function removeEnv() {
   const projectId = libraryProjectId.value;
-  if (!projectId || !activeEnvId.value) return;
+  if (!projectId || !activeEnvId.value || !activeEnvCanManage.value) return;
   Modal.confirm({
     title: '删除环境？',
     content: '将同时无法使用该环境下的服务配置。',
@@ -541,6 +551,7 @@ function openServiceCreate() {
 }
 
 function openServiceEdit(row: ApiEnvironmentServiceRow) {
+  if (!row.canManage) return;
   serviceEditingId.value = row.id;
   serviceForm.name = row.name;
   serviceForm.serverAddress = row.serverAddress ?? '';
@@ -553,6 +564,12 @@ async function saveService() {
   const projectId = libraryProjectId.value;
   if (!projectId || !activeEnvId.value || !serviceForm.name.trim()) return;
   if (!serviceForm.serverAddress.trim()) return;
+  if (serviceEditingId.value) {
+    const current = services.value.find(
+      (item) => item.id === serviceEditingId.value,
+    );
+    if (!current?.canManage) return;
+  }
   const payload = {
     name: serviceForm.name.trim(),
     serverAddress: serviceForm.serverAddress.trim(),
@@ -571,12 +588,14 @@ async function saveService() {
 async function removeService(serviceId: string) {
   const projectId = libraryProjectId.value;
   if (!projectId || !activeEnvId.value) return;
+  if (!services.value.find((item) => item.id === serviceId)?.canManage) return;
   await apiStore.removeEnvironmentService(projectId, activeEnvId.value, serviceId);
 }
 
 async function moveService(serviceId: string, direction: 'up' | 'down' | 'top') {
   const projectId = libraryProjectId.value;
   if (!projectId || !activeEnvId.value) return;
+  if (!services.value.find((item) => item.id === serviceId)?.canManage) return;
   await apiStore.reorderEnvironmentService(
     projectId,
     activeEnvId.value,
@@ -785,6 +804,11 @@ async function moveService(serviceId: string, direction: 'up' | 'down' | 'top') 
 .service-editable-cell:hover {
   color: var(--cf-brand, #b60f2d);
   text-decoration: underline;
+}
+.service-editable-cell:disabled {
+  color: var(--cf-text-body, #344054);
+  text-decoration: none;
+  cursor: default;
 }
 .service-cell-text {
   display: block;

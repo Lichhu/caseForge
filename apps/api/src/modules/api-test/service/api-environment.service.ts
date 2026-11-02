@@ -4,9 +4,7 @@ import { Repository } from "typeorm";
 import {
   auditFieldsForCreate,
   auditFieldsForUpdate,
-  RequestContext,
 } from "@common/audit/request-context";
-import { scopedWhere } from "@common/audit/user-scope";
 import { ApiTestEnvironmentEntity } from "@api-test/entity/api-test-environment.entity";
 import { ApiTestEnvironmentServiceEntity } from "@api-test/entity/api-test-environment-service.entity";
 import { SaveApiEnvironmentDto } from "@api-test/dto/save-environment.dto";
@@ -22,6 +20,7 @@ import {
 } from "@api-test/util/secret-crypto.util";
 import { toPublicApiEnvironmentService } from "@common/http/public-response.util";
 import { globalLibraryProjectId } from "@api-test/util/global-library.util";
+import { ApiTestLibraryAccessService } from "./api-test-library-access.service";
 
 export interface ApiServiceAddressBinding {
   environmentId: string;
@@ -38,14 +37,19 @@ export class ApiEnvironmentService {
     private readonly envRepo: Repository<ApiTestEnvironmentEntity>,
     @InjectRepository(ApiTestEnvironmentServiceEntity)
     private readonly serviceRepo: Repository<ApiTestEnvironmentServiceEntity>,
+    private readonly access: ApiTestLibraryAccessService,
   ) {}
 
   async listEnvironments(projectId: string) {
-    const rows = await this.envRepo.find({
-      where: scopedWhere(),
-      order: { isDefault: "DESC", updatedAt: "DESC" },
-    });
-    return rows.map((row) => this.toPublic(row));
+    const [rows, isDispatcher] = await Promise.all([
+      this.envRepo.find({
+        order: { isDefault: "DESC", updatedAt: "DESC" },
+      }),
+      this.access.isDispatcher(),
+    ]);
+    return rows.map((row) =>
+      this.toPublic(row, this.access.canManage(row.createdBy, isDispatcher)),
+    );
   }
 
   async createEnvironment(projectId: string, payload: SaveApiEnvironmentDto) {
@@ -71,7 +75,7 @@ export class ApiEnvironmentService {
       saved.isDefault = true;
       await this.envRepo.save(saved);
     }
-    return this.toPublic(saved);
+    return this.toPublic(saved, true);
   }
 
   async updateEnvironment(
@@ -80,6 +84,7 @@ export class ApiEnvironmentService {
     payload: SaveApiEnvironmentDto,
   ) {
     const existing = await this.requireEnv(projectId, environmentId);
+    await this.access.assertCanManage(existing.createdBy, "执行环境");
     if (payload.isDefault) {
       await this.clearDefault(projectId);
     }
@@ -99,11 +104,12 @@ export class ApiEnvironmentService {
       ...existing,
       ...auditFieldsForUpdate(),
     });
-    return this.toPublic(saved);
+    return this.toPublic(saved, true);
   }
 
   async deleteEnvironment(projectId: string, environmentId: string) {
-    await this.requireEnv(projectId, environmentId);
+    const existing = await this.requireEnv(projectId, environmentId);
+    await this.access.assertCanManage(existing.createdBy, "执行环境");
     await this.envRepo.softDelete({ id: environmentId });
     return { ok: true };
   }
@@ -156,11 +162,17 @@ export class ApiEnvironmentService {
 
   async listEnvironmentServices(projectId: string, environmentId: string) {
     await this.requireEnv(projectId, environmentId);
-    const rows = await this.serviceRepo.find({
-      where: { environmentId },
-      order: { sortOrder: "ASC", createdAt: "ASC" },
-    });
-    return rows.map((row) => toPublicApiEnvironmentService(row));
+    const [rows, isDispatcher] = await Promise.all([
+      this.serviceRepo.find({
+        where: { environmentId },
+        order: { sortOrder: "ASC", createdAt: "ASC" },
+      }),
+      this.access.isDispatcher(),
+    ]);
+    return rows.map((row) => ({
+      ...toPublicApiEnvironmentService(row),
+      canManage: this.access.canManage(row.createdBy, isDispatcher),
+    }));
   }
 
   /** 轻量查询服务的“忽略证书校验”开关，供按步骤地址调试的路径继承。 */
@@ -170,7 +182,7 @@ export class ApiEnvironmentService {
     serviceId: string,
   ): Promise<boolean> {
     const row = await this.serviceRepo.findOne({
-      where: scopedWhere({ environmentId, id: serviceId, enabled: true }),
+      where: { environmentId, id: serviceId, enabled: true },
     });
     return Boolean(row?.ignoreSslVerify);
   }
@@ -184,11 +196,9 @@ export class ApiEnvironmentService {
   ): Promise<ApiServiceAddressBinding[]> {
     const [environments, services] = await Promise.all([
       this.envRepo.find({
-        where: scopedWhere(),
         order: { isDefault: "DESC", createdAt: "ASC" },
       }),
       this.serviceRepo.find({
-        where: scopedWhere(),
         order: { sortOrder: "ASC", createdAt: "ASC" },
       }),
     ]);
@@ -241,7 +251,10 @@ export class ApiEnvironmentService {
       ...auditFieldsForCreate(),
     });
     this.applyServiceConnectionFields(entity, payload);
-    return toPublicApiEnvironmentService(await this.serviceRepo.save(entity));
+    return {
+      ...toPublicApiEnvironmentService(await this.serviceRepo.save(entity)),
+      canManage: true,
+    };
   }
 
   async updateEnvironmentService(
@@ -255,6 +268,7 @@ export class ApiEnvironmentService {
       environmentId,
       serviceId,
     );
+    await this.access.assertCanManage(existing.createdBy, "环境服务");
     existing.name = payload.name.trim();
     existing.jdbcUrl = payload.jdbcUrl?.trim() || undefined;
     existing.remoteConnection = payload.remoteConnection?.trim() || undefined;
@@ -270,9 +284,15 @@ export class ApiEnvironmentService {
     }
     if (payload.enabled !== undefined) existing.enabled = payload.enabled;
     this.applyServiceConnectionFields(existing, payload);
-    return toPublicApiEnvironmentService(
-      await this.serviceRepo.save({ ...existing, ...auditFieldsForUpdate() }),
-    );
+    return {
+      ...toPublicApiEnvironmentService(
+        await this.serviceRepo.save({
+          ...existing,
+          ...auditFieldsForUpdate(),
+        }),
+      ),
+      canManage: true,
+    };
   }
 
   async reorderEnvironmentService(
@@ -290,6 +310,7 @@ export class ApiEnvironmentService {
     if (index < 0) {
       throw new NotFoundException("环境服务不存在");
     }
+    await this.access.assertCanManage(rows[index].createdBy, "环境服务");
 
     if (direction === "top" && index > 0) {
       const [target] = rows.splice(index, 1);
@@ -312,7 +333,12 @@ export class ApiEnvironmentService {
     environmentId: string,
     serviceId: string,
   ) {
-    await this.requireService(projectId, environmentId, serviceId);
+    const service = await this.requireService(
+      projectId,
+      environmentId,
+      serviceId,
+    );
+    await this.access.assertCanManage(service.createdBy, "环境服务");
     await this.serviceRepo.softDelete({ id: serviceId });
     return { ok: true };
   }
@@ -324,7 +350,7 @@ export class ApiEnvironmentService {
   ) {
     await this.requireEnv(projectId, environmentId);
     const row = await this.serviceRepo.findOne({
-      where: scopedWhere({ environmentId, id: serviceId }),
+      where: { environmentId, id: serviceId },
     });
     if (!row) {
       throw new NotFoundException("环境服务不存在");
@@ -334,7 +360,7 @@ export class ApiEnvironmentService {
 
   private async requireEnv(projectId: string, environmentId: string) {
     const row = await this.envRepo.findOne({
-      where: scopedWhere({ id: environmentId, enabled: true }),
+      where: { id: environmentId, enabled: true },
     });
     if (!row) {
       throw new NotFoundException("执行环境不存在或已禁用");
@@ -343,20 +369,17 @@ export class ApiEnvironmentService {
   }
 
   private async clearDefault(projectId: string) {
-    await this.envRepo.update(
-      { createdBy: RequestContext.getUserName() },
-      { isDefault: false },
-    );
+    await this.envRepo.update({ isDefault: true }, { isDefault: false });
   }
 
   private async hasDefault(projectId: string) {
     const count = await this.envRepo.count({
-      where: scopedWhere({ isDefault: true }),
+      where: { isDefault: true },
     });
     return count > 0;
   }
 
-  private toPublic(row: ApiTestEnvironmentEntity) {
+  private toPublic(row: ApiTestEnvironmentEntity, canManage: boolean) {
     const secrets = decryptSecrets(row.secretsEncrypted);
     const token = secrets.token ?? "";
     return {
@@ -371,6 +394,7 @@ export class ApiEnvironmentService {
       hasToken: Boolean(token),
       isDefault: row.isDefault,
       enabled: row.enabled,
+      canManage,
     };
   }
 

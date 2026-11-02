@@ -126,16 +126,15 @@
 
       <div class="scenario-mapping-list">
         <button
-          v-for="scenario in scenarios"
+          v-for="scenario in activeScenarios"
           :key="scenario.id"
           type="button"
           class="scenario-mapping-item"
           :class="{
             selected: form.scenarioIds.includes(scenario.id),
             preview: previewScenarioId === scenario.id,
-            inactive: !scenario.isActive,
           }"
-          @click="previewScenarioId = scenario.id"
+          @click="selectScenarioPreview(scenario)"
         >
           <a-checkbox
             :checked="form.scenarioIds.includes(scenario.id)"
@@ -236,8 +235,13 @@ const apiStore = useApiTestStore();
 
 const configCanEdit = ref(false);
 const canEdit = computed(() => props.canEdit && configCanEdit.value);
+const activeScenarios = computed(() =>
+  scenarios.value.filter((scenario) => scenario.isActive),
+);
 const previewScenario = computed(
-  () => scenarios.value.find((item) => item.id === previewScenarioId.value) ?? null,
+  () =>
+    activeScenarios.value.find((item) => item.id === previewScenarioId.value) ??
+    null,
 );
 const previewPrompts = computed(() =>
   (previewScenario.value?.prompts ?? [])
@@ -246,7 +250,9 @@ const previewPrompts = computed(() =>
 );
 
 function normalizeScenarioIds(ids: string[]) {
-  const available = new Set(scenarios.value.map((scenario) => scenario.id));
+  const available = new Set(
+    activeScenarios.value.map((scenario) => scenario.id),
+  );
   return ids.filter((id) => available.has(id));
 }
 
@@ -281,7 +287,7 @@ function startCreate() {
     sortOrder: rows.value.length + 1,
     isActive: true,
   };
-  previewScenarioId.value = scenarios.value[0]?.id ?? "";
+  previewScenarioId.value = activeScenarios.value[0]?.id ?? "";
 }
 
 async function loadConfig(options?: { keepSelection?: boolean }) {
@@ -290,6 +296,7 @@ async function loadConfig(options?: { keepSelection?: boolean }) {
     const config = await getApiGenerationConfig();
     rows.value = config.rows;
     scenarios.value = config.scenarios;
+    pruneInactiveScenarios();
     configCanEdit.value = config.canEdit;
     const current =
       rows.value.find((item) => item.id === selectedId.value) ?? rows.value[0];
@@ -310,6 +317,8 @@ async function loadConfig(options?: { keepSelection?: boolean }) {
 
 function toggleScenario(id: string, event: unknown) {
   if (!canEdit.value || !form.value) return;
+  const scenario = scenarios.value.find((item) => item.id === id);
+  if (!scenario?.isActive) return;
   const checked = Boolean(
     (event as { target?: { checked?: boolean } })?.target?.checked,
   );
@@ -318,6 +327,24 @@ function toggleScenario(id: string, event: unknown) {
   else next.delete(id);
   form.value.scenarioIds = [...next];
   previewScenarioId.value = id;
+}
+
+function selectScenarioPreview(scenario: ScenarioLibraryItem) {
+  previewScenarioId.value = scenario.id;
+}
+
+function pruneInactiveScenarios() {
+  if (!form.value) return;
+  form.value.scenarioIds = normalizeScenarioIds(form.value.scenarioIds);
+  const preview = activeScenarios.value.find(
+    (scenario) => scenario.id === previewScenarioId.value,
+  );
+  if (!preview?.isActive) {
+    previewScenarioId.value =
+      form.value.scenarioIds[0] ||
+      activeScenarios.value[0]?.id ||
+      "";
+  }
 }
 
 function activePromptCount(scenario: ScenarioLibraryItem) {
@@ -334,7 +361,7 @@ function buildPayload() {
     code: form.value.code.trim(),
     name: form.value.name.trim(),
     description: form.value.description.trim(),
-    scenarioIds: [...form.value.scenarioIds],
+    scenarioIds: normalizeScenarioIds(form.value.scenarioIds),
     sortOrder: form.value.sortOrder,
     isActive: form.value.isActive,
   };

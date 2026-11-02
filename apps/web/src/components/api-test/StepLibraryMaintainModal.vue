@@ -48,8 +48,9 @@
             :shared-variables="sharedVariables"
             :saving="saving"
             :show-delete="Boolean(editingId)"
-            :can-delete="Boolean(editingId)"
-            footer-hint="保存后更新步骤库"
+            :can-delete="Boolean(editingId) && currentCanManage"
+            :can-save="currentCanManage"
+            :footer-hint="currentCanManage ? '保存后更新步骤库' : '仅创建人或管理员可修改此步骤'"
             @save="saveStep"
             @delete="removeActiveStep"
           />
@@ -108,6 +109,9 @@ const editingId = ref("");
 const editingStep = ref<ApiCaseStep | null>(null);
 const currentRow = computed(
   () => rows.value.find((row) => row.id === editingId.value) ?? null,
+);
+const currentCanManage = computed(
+  () => !editingId.value || Boolean(currentRow.value?.canManage),
 );
 const debugTransactionId = computed(
   () => apiStore.activeTransactionId || "step-library",
@@ -179,6 +183,7 @@ function openEdit(row: ApiStepLibraryRow) {
 }
 
 async function saveStep(payload: { name: string; step: ApiCaseStep }) {
+  if (!currentCanManage.value) return;
   saving.value = true;
   try {
     const saved = await saveStepLibrary(payload, editingId.value || undefined);
@@ -193,6 +198,7 @@ async function saveStep(payload: { name: string; step: ApiCaseStep }) {
 }
 
 function removeStep(row: ApiStepLibraryRow) {
+  if (!row.canManage) return;
   Modal.confirm({
     title: "删除步骤",
     content: `确定删除「${row.name}」？`,

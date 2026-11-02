@@ -37,9 +37,19 @@ export class ApiGenerationConfigService {
       }),
       this.canEdit(),
     ]);
+    const activeScenarioIds = new Set(
+      scenarios
+        .filter((scenario) => scenario.isActive)
+        .map((scenario) => scenario.id),
+    );
     return {
       canEdit,
-      rows: properties.map((row) => this.toPublic(row)),
+      rows: properties.map((row) =>
+        this.toPublic(
+          row,
+          (row.scenarioIds ?? []).filter((id) => activeScenarioIds.has(id)),
+        ),
+      ),
       scenarios: scenarios.map(toPublicScenario),
     };
   }
@@ -132,10 +142,10 @@ export class ApiGenerationConfigService {
     const uniqueIds = [...new Set(ids)];
     if (!uniqueIds.length) return;
     const count = await this.scenarioRepo.count({
-      where: { id: In(uniqueIds), scope: "api" },
+      where: { id: In(uniqueIds), scope: "api", isActive: true },
     });
     if (count !== uniqueIds.length) {
-      throw new BadRequestException("包含不存在或非接口测试用途的场景");
+      throw new BadRequestException("包含不存在、已停用或非接口测试用途的场景");
     }
   }
 
@@ -158,13 +168,13 @@ export class ApiGenerationConfigService {
     }
   }
 
-  private toPublic(row: ApiServicePropertyEntity) {
+  private toPublic(row: ApiServicePropertyEntity, scenarioIds?: string[]) {
     return {
       id: row.id,
       code: row.code,
       name: row.name,
       description: row.description ?? "",
-      scenarioIds: row.scenarioIds ?? [],
+      scenarioIds: scenarioIds ?? row.scenarioIds ?? [],
       sortOrder: row.sortOrder,
       isActive: row.isActive,
       createdAt: row.createdAt,

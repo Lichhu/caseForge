@@ -301,7 +301,7 @@
         </a-button>
       </div>
       <span class="step-editor-footer__hint">{{ footerHint }}</span>
-      <a-button type="primary" :loading="saving" @click="save">保存</a-button>
+      <a-button type="primary" :loading="saving" :disabled="!canSave" @click="save">保存</a-button>
     </div>
 
     <a-modal
@@ -518,6 +518,7 @@ const props = withDefaults(
     saving?: boolean;
     showDelete?: boolean;
     canDelete?: boolean;
+    canSave?: boolean;
     footerHint?: string;
   }>(),
   {
@@ -529,6 +530,7 @@ const props = withDefaults(
     saving: false,
     showDelete: false,
     canDelete: true,
+    canSave: true,
     footerHint: "",
   },
 );
@@ -1100,6 +1102,7 @@ function buildStep(): ApiHttpCaseStep | null {
 }
 
 function save() {
+  if (!props.canSave) return;
   const step = buildStep();
   if (step) emit("save", { name: step.name, step });
 }

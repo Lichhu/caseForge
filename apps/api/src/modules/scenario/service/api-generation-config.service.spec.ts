@@ -89,6 +89,44 @@ describe("ApiGenerationConfigService", () => {
     );
   });
 
+  it("removes inactive scenarios from the service property mapping", async () => {
+    const { service, scenarioRepo } = makeService();
+    (scenarioRepo.find as jest.Mock).mockResolvedValue([
+      {
+        id: "scenario-1",
+        name: "必填参数校验",
+        description: "必填",
+        category: "功能",
+        generationKey: "required_fields",
+        scope: "api",
+        isActive: true,
+        prompts: [],
+      },
+      {
+        id: "scenario-2",
+        name: "正向流程",
+        description: "正向",
+        category: "通用规则",
+        generationKey: "positive_flow",
+        scope: "api",
+        isActive: false,
+        prompts: [],
+      },
+    ]);
+
+    const result = await RequestContext.run("alice", () =>
+      service.listConfig(),
+    );
+
+    expect(result.rows[0].scenarioIds).toEqual(["scenario-1"]);
+    expect(result.scenarios.find((scenario) => scenario.id === "scenario-2")).toMatchObject(
+      {
+        id: "scenario-2",
+        isActive: false,
+      },
+    );
+  });
+
   it("resolves mapped scenarios for a generation profile", async () => {
     const { service } = makeService();
 
@@ -141,5 +179,31 @@ describe("ApiGenerationConfigService", () => {
       scenarioIds: ["scenario-1"],
     });
     expect(propertyRepo.save).toHaveBeenCalled();
+  });
+
+  it("rejects inactive scenarios when saving a service property", async () => {
+    const { service, propertyRepo, scenarioRepo } = makeService();
+    propertyRepo.findOne.mockResolvedValueOnce(null);
+    scenarioRepo.count.mockResolvedValueOnce(1);
+
+    await expect(
+      RequestContext.run("alice", () =>
+        service.create({
+          code: "custom_property",
+          name: "自定义属性",
+          description: "说明",
+          scenarioIds: ["scenario-1", "scenario-disabled"],
+          sortOrder: 9,
+          isActive: true,
+        }),
+      ),
+    ).rejects.toThrow("包含不存在、已停用或非接口测试用途的场景");
+    expect(scenarioRepo.count).toHaveBeenCalledWith({
+      where: {
+        id: expect.anything(),
+        scope: "api",
+        isActive: true,
+      },
+    });
   });
 });
