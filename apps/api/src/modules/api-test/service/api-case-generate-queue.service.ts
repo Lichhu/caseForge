@@ -43,8 +43,8 @@ import { ApiCaseService } from "./api-case.service";
 import { ApiCaseGenerateScenarioEntity } from "@api-test/entity/api-case-generate-scenario.entity";
 import {
   API_CASE_RULE_VERSION,
-  scenariosForProperty,
 } from "@api-test/util/api-case-scenarios.util";
+import { ApiGenerationConfigService } from "@scenario/service/api-generation-config.service";
 
 export interface ApiCaseGenerateQueueStatus {
   jobId?: string;
@@ -83,6 +83,7 @@ export class ApiCaseGenerateQueueService
     private readonly scenarioRepo: Repository<ApiCaseGenerateScenarioEntity>,
     @Inject(forwardRef(() => ApiCaseService))
     private readonly apiCaseService: ApiCaseService,
+    private readonly apiGenerationConfig: ApiGenerationConfigService,
   ) {}
 
   onModuleInit() {
@@ -152,13 +153,38 @@ export class ApiCaseGenerateQueueService
       (options?.channelIds ?? []).includes(channel.id),
     );
     const versionCode = this.formatVersionCode(new Date());
-    const scenarios = scenariosForProperty(profile.serviceProperty);
+    const generationConfig =
+      await this.apiGenerationConfig.resolveForGeneration(
+        profile.serviceProperty,
+      );
+    const scenarios = generationConfig.scenarios.map((scenario) => {
+      const prompts = scenario.prompts
+        .filter((prompt) => prompt.isActive)
+        .sort((a, b) => a.sortOrder - b.sortOrder)
+        .map((prompt) => ({
+          id: prompt.id,
+          name: prompt.name,
+          content: prompt.content,
+          sortOrder: prompt.sortOrder,
+        }));
+      return {
+        key:
+          scenario.generationKey?.trim() ||
+          `custom_${scenario.id.replace(/-/g, "")}`,
+        name: scenario.name,
+        promptIds: prompts.map((prompt) => prompt.id),
+        prompts,
+      };
+    });
+    if (!scenarios.length) {
+      throw new Error("所选服务属性未配置可用场景或提示词");
+    }
     const job = await this.jobRepo.save(
       this.jobRepo.create({
         projectId,
         transactionId,
         endpointIds: null,
-        promptIds: null,
+        promptIds: scenarios.flatMap((scenario) => scenario.promptIds),
         status: "queued",
         versionCode,
         ruleVersion: API_CASE_RULE_VERSION,
@@ -173,6 +199,11 @@ export class ApiCaseGenerateQueueService
           largePayloadFieldPath: options?.largePayloadFieldPath?.trim()
             ? options.largePayloadFieldPath.trim()
             : undefined,
+          generationProperty: {
+            code: generationConfig.property.code,
+            name: generationConfig.property.name,
+          },
+          generationScenarios: scenarios,
         },
         scenarioCount: scenarios.length,
         queuedAt: new Date(),

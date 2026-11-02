@@ -169,6 +169,7 @@ export interface ScenarioLibraryItem {
   name: string;
   description: string;
   category: string;
+  generationKey?: string | null;
   scope?: ScenarioScope;
   isActive: boolean;
   prompts: PromptLibraryItem[];
@@ -178,6 +179,7 @@ export interface ScenarioLibraryPayload {
   name: string;
   description: string;
   category: string;
+  generationKey?: string | null;
   scope?: ScenarioScope;
   isActive: boolean;
   prompts: Array<{

@@ -1101,7 +1101,10 @@ onMounted(async () => {
       />
     </a-modal>
 
-    <SystemConfigDrawer v-model:open="systemConfigOpen" />
+    <SystemConfigDrawer
+      v-model:open="systemConfigOpen"
+      :can-edit-generation-config="isDispatcher"
+    />
     <RequirementProgressDrawer
       v-model:open="progressOpen"
       :requirement="progressRecord"

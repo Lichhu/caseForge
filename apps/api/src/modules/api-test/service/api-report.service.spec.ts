@@ -1,3 +1,4 @@
+import JSZip from "jszip";
 import { ApiReportService } from "./api-report.service";
 
 describe("ApiReportService requirement report", () => {
@@ -56,9 +57,12 @@ describe("ApiReportService requirement report", () => {
         {
           id: "case-1",
           caseNo: "TX-001-001",
+          title: "余额查询成功",
           transactionCode: "TX-001",
           description: "正常查询",
           expected: { assertions: [] },
+          metadata: { scenarioKey: "positive_flow", scenarioName: "正向流程" },
+          polarity: "positive",
         },
       ]),
     };
@@ -73,6 +77,14 @@ describe("ApiReportService requirement report", () => {
         requirementNo: "REQ-001",
       }),
     };
+    const requirementRepo = {
+      findOne: jest.fn().mockResolvedValue({
+        projectCode: "REQ-001",
+        projectName: "需求项目",
+        versionName: "V1.0",
+        claimedByName: "测试人员",
+      }),
+    };
     const transactionRepo = {
       findOne: jest.fn().mockResolvedValue(transaction),
     };
@@ -82,6 +94,13 @@ describe("ApiReportService requirement report", () => {
       find: jest.fn(),
       softDelete: jest.fn(),
     };
+    const reportConfigRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    };
+    const aiWorkflow = {
+      canUseAiChat: jest.fn().mockReturnValue(true),
+      runWithAiChatJsonArray: jest.fn().mockResolvedValue([]),
+    };
     return new ApiReportService(
       executionService as never,
       caseRepo as never,
@@ -90,6 +109,9 @@ describe("ApiReportService requirement report", () => {
       projectRepo as never,
       transactionRepo as never,
       exportRepo as never,
+      requirementRepo as never,
+      reportConfigRepo as never,
+      aiWorkflow as never,
     );
   }
 
@@ -144,5 +166,89 @@ describe("ApiReportService requirement report", () => {
     expect(result.fileName).toBe(`REQ-001_TX-001_${runId}.pdf`);
     expect(result.buffer.subarray(0, 4).toString()).toBe("%PDF");
     expect(result.buffer.length).toBeGreaterThan(1000);
+  });
+
+  it("builds a project-type DOCX with the execution ZIP embedded", async () => {
+    const service = buildService();
+    (service as any).requirementRepo.findOne.mockResolvedValue({
+      id: "requirement-1",
+      projectCode: "REQ-001",
+      projectName: "需求项目",
+      versionName: "项目类版本",
+      claimedByName: "项目测试人员",
+    });
+    (service as any).reportConfigRepo.find.mockResolvedValue([
+      { configKey: "reviewer_name", configValue: "常万恒" },
+      { configKey: "approver_name", configValue: "陈志斌" },
+    ]);
+    (service as any).aiWorkflow.runWithAiChatJsonArray.mockResolvedValue([
+      { caseId: "case-1", riskPoints: ["字段值校验"] },
+    ]);
+
+    const result = await service.exportRequirementReport(projectId, "html", [
+      { transactionId, runId },
+    ]);
+
+    expect(result.format).toBe("docx");
+    expect(result.fileName).toBe("REQ-001接口测试报告.docx");
+    expect(result.contentType).toContain("wordprocessingml");
+    const archive = await JSZip.loadAsync(result.buffer);
+    const documentXml = await archive
+      .file("word/document.xml")!
+      .async("string");
+    expect(documentXml).toContain("需求点编号：REQ-001");
+    expect(documentXml).toContain("起草人：项目测试人员");
+    expect(documentXml).toContain("审核人：常万恒");
+    expect(documentXml).toContain("批准人：陈志斌");
+    expect(documentXml).toContain("REQ-001接口测试报告.zip");
+  });
+
+  it("blocks a project-type report when reviewer or approver config is missing", async () => {
+    const service = buildService();
+    (service as any).requirementRepo.findOne.mockResolvedValue({
+      id: "requirement-1",
+      projectCode: "REQ-001",
+      projectName: "需求项目",
+      versionName: "项目类版本",
+      claimedByName: "项目测试人员",
+    });
+    (service as any).reportConfigRepo.find.mockResolvedValue([
+      { configKey: "reviewer_name", configValue: "常万恒" },
+    ]);
+
+    await expect(
+      service.exportRequirementReport(projectId, "html", [
+        { transactionId, runId },
+      ]),
+    ).rejects.toThrow("未配置报告审核人或批准人");
+  });
+
+  it("combines multiple selected histories for one transaction into one HTML", async () => {
+    const service = buildService();
+    const secondRunId = "44444444-4444-4444-8444-444444444444";
+    const zipBuffer = await (service as any).buildProjectReportHtmlZip(
+      "REQ-001",
+      [
+        { transaction, run, context: {} },
+        {
+          transaction,
+          run: {
+            ...run,
+            id: secondRunId,
+            versionCode: "20261026-130000",
+          },
+          context: {},
+        },
+      ],
+    );
+    const archive = await JSZip.loadAsync(zipBuffer);
+    const files = Object.keys(archive.files).filter(
+      (name) => !archive.files[name].dir,
+    );
+
+    expect(files).toEqual(["接口质量测试报告-TX-001-查询交易.html"]);
+    const html = await archive.file(files[0])!.async("string");
+    expect(html).toContain(runId);
+    expect(html).toContain(secondRunId);
   });
 });

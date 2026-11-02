@@ -28,4 +28,19 @@ describe("UserContextMiddleware", () => {
     const next = run({ "x-user-name": "system" });
     expect(next).toHaveBeenCalledWith();
   });
+
+  it("rewrites user-scoped generation config routes", () => {
+    const request = {
+      headers: {},
+      query: {},
+      url: "/api/v1/alice/api-generation-config/service-properties",
+    };
+    const next = jest.fn();
+    middleware.use(request as never, {} as never, next);
+
+    expect(request.url).toBe(
+      "/api/v1/api-generation-config/service-properties",
+    );
+    expect(next).toHaveBeenCalledWith();
+  });
 });

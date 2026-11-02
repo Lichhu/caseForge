@@ -9,7 +9,7 @@
     :ok-button-props="{
       disabled: !selectedRowKeys.length || loading || Boolean(loadError),
     }"
-    :ok-text="exporting ? '正在生成…' : `导出 HTML (${selectedRowKeys.length})`"
+    :ok-text="exporting ? '正在生成…' : `导出报告 (${selectedRowKeys.length})`"
     cancel-text="取消"
     @ok="submitExport"
     @cancel="emit('update:open', false)"
@@ -22,7 +22,7 @@
         <span>
           已勾选历史 <strong>{{ selectedRowKeys.length }}</strong> 条
         </span>
-        <span>导出格式 <strong>HTML</strong></span>
+        <span>导出格式 <strong>系统自动选择</strong></span>
       </div>
 
       <div class="report-transaction-list">
@@ -32,26 +32,33 @@
           :color="historyCount(transaction.id) ? 'blue' : 'default'"
         >
           {{ transaction.code }} ·
-          {{ historyCount(transaction.id) ? `${historyCount(transaction.id)} 次执行` : "暂无历史" }}
+          {{
+            historyCount(transaction.id)
+              ? `${historyCount(transaction.id)} 次执行`
+              : "暂无历史"
+          }}
         </a-tag>
       </div>
 
-      <a-alert
-        v-if="loadError"
-        type="error"
-        show-icon
-        :message="loadError"
-      />
+      <a-alert v-if="loadError" type="error" show-icon :message="loadError" />
 
       <div class="report-history-toolbar">
         <span class="report-history-hint">
           报告按「交易码 + 执行历史 ID」区分，选中历史下方展示对应执行案例。
         </span>
         <a-space :size="4">
-          <a-button size="small" :disabled="!selectableRows.length" @click="selectAll">
+          <a-button
+            size="small"
+            :disabled="!selectableRows.length"
+            @click="selectAll"
+          >
             全选
           </a-button>
-          <a-button size="small" :disabled="!selectedRowKeys.length" @click="clearSelection">
+          <a-button
+            size="small"
+            :disabled="!selectedRowKeys.length"
+            @click="clearSelection"
+          >
             清空
           </a-button>
         </a-space>
@@ -70,20 +77,31 @@
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'transactionCode'">
-              <span class="report-transaction-code">{{ record.transactionCode }}</span>
+              <span class="report-transaction-code">{{
+                record.transactionCode
+              }}</span>
             </template>
             <template v-else-if="column.key === 'runId'">
-              <span class="report-run-id" :title="record.id">{{ record.id }}</span>
+              <span class="report-run-id" :title="record.id">{{
+                record.id
+              }}</span>
             </template>
             <template v-else-if="column.key === 'versionCode'">
               {{ record.versionCode || "—" }}
             </template>
             <template v-else-if="column.key === 'result'">
-              <span>总数 {{ record.totalCount }} · 通过 {{ record.passedCount }} · 失败 {{ record.failedCount + record.errorCount }}</span>
-              <strong class="report-pass-rate">{{ runPassRate(record) }}%</strong>
+              <span
+                >总数 {{ record.totalCount }} · 通过 {{ record.passedCount }} ·
+                失败 {{ record.failedCount + record.errorCount }}</span
+              >
+              <strong class="report-pass-rate"
+                >{{ runPassRate(record) }}%</strong
+              >
             </template>
             <template v-else-if="column.key === 'status'">
-              <a-tag :color="record.status === 'completed' ? 'green' : 'default'">
+              <a-tag
+                :color="record.status === 'completed' ? 'green' : 'default'"
+              >
                 {{ runStatusLabel(record.status) }}
               </a-tag>
             </template>
@@ -135,7 +153,13 @@ const selectedRowKeys = ref<string[]>([]);
 
 const columns = [
   { title: "交易码", key: "transactionCode", width: 150 },
-  { title: "接口名称", dataIndex: "transactionName", key: "transactionName", width: 180, ellipsis: true },
+  {
+    title: "接口名称",
+    dataIndex: "transactionName",
+    key: "transactionName",
+    width: 180,
+    ellipsis: true,
+  },
   { title: "执行历史 ID", key: "runId", width: 300 },
   { title: "执行版本", key: "versionCode", width: 150 },
   { title: "执行时间", key: "createdAt", width: 170 },
@@ -185,11 +209,12 @@ const rowSelection = computed(() => ({
 }));
 
 watch(
-  () => [
-    props.open,
-    props.projectId,
-    props.transactions.map((item) => item.id).join(","),
-  ] as const,
+  () =>
+    [
+      props.open,
+      props.projectId,
+      props.transactions.map((item) => item.id).join(","),
+    ] as const,
   ([open]) => {
     if (open) void loadHistories();
   },

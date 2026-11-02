@@ -465,11 +465,15 @@ export function splitRunSnapshotForDisplay(
   snapshot: Record<string, unknown> | null | undefined,
 ): { meta: string; body: string | null } {
   if (!snapshot) return { meta: "—", body: null };
-  const { body, ...rest } = snapshot;
+  const { body, bodyText, ...rest } = snapshot;
   const meta = JSON.stringify(beautifyPayloadValue(rest), null, 2);
-  const bodyText =
-    body == null || body === "" ? null : formatRunSnapshotField(body);
-  return { meta, body: bodyText };
+  const bodySource =
+    typeof bodyText === "string" && bodyText.length ? bodyText : body;
+  const bodyDisplay =
+    bodySource == null || bodySource === ""
+      ? null
+      : formatRunSnapshotField(bodySource);
+  return { meta, body: bodyDisplay };
 }
 
 /** 美化案例请求/预期 JSON：缩进 JSON，并格式化内嵌 XML 字符串 */

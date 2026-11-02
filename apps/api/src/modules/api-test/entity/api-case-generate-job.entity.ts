@@ -83,6 +83,21 @@ export class ApiCaseGenerateJobEntity extends SoftDeletableEntity {
     afterSteps?: ApiCaseStep[];
     /** 大报文测试字段路径；存在时生成完成后附加 1 条大报文案例 */
     largePayloadFieldPath?: string;
+    generationProperty?: {
+      code: string;
+      name: string;
+    };
+    generationScenarios?: Array<{
+      key: string;
+      name: string;
+      promptIds: string[];
+      prompts: Array<{
+        id: string;
+        name: string;
+        content: string;
+        sortOrder: number;
+      }>;
+    }>;
   } | null;
 
   @Column({ type: "int", default: 0 })

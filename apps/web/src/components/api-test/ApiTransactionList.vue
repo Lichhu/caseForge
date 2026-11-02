@@ -62,7 +62,9 @@
               <span class="transaction-code">{{ record.code }}</span>
             </template>
             <template v-else-if="column.key === 'caseCount'">
-              <span class="transaction-case-count">{{ record.caseCount ?? 0 }}</span>
+              <span class="transaction-case-count">{{
+                record.caseCount ?? 0
+              }}</span>
             </template>
             <template v-else-if="column.key === 'report'">
               <a-button
@@ -78,23 +80,31 @@
               <span v-else class="transaction-muted">—</span>
             </template>
             <template v-else-if="column.key === 'name'">
-              <span class="transaction-muted">{{ displayTransactionName(record) }}</span>
+              <span class="transaction-muted">{{
+                displayTransactionName(record)
+              }}</span>
             </template>
             <template v-else-if="column.key === 'reqCode'">
-              <span class="transaction-muted">{{ record.reqCode || '—' }}</span>
+              <span class="transaction-muted">{{ record.reqCode || "—" }}</span>
             </template>
             <template v-else-if="column.key === 'serviceCode'">
-              <span class="transaction-muted">{{ record.serviceCode || '—' }}</span>
+              <span class="transaction-muted">{{
+                record.serviceCode || "—"
+              }}</span>
             </template>
             <template v-else-if="column.key === 'reqSystemId'">
-              <span class="transaction-muted">{{ record.reqSystemId || '—' }}</span>
+              <span class="transaction-muted">{{
+                record.reqSystemId || "—"
+              }}</span>
             </template>
             <template v-else-if="column.key === 'taskId'">
-              <span class="transaction-muted">{{ record.taskId || '—' }}</span>
+              <span class="transaction-muted">{{ record.taskId || "—" }}</span>
             </template>
             <template v-else-if="column.key === 'syncStatus'">
               <a-tooltip
-                :title="record.syncError?.trim() || syncStatusHint(record.syncStatus)"
+                :title="
+                  record.syncError?.trim() || syncStatusHint(record.syncStatus)
+                "
                 :overlay-style="{ maxWidth: '360px' }"
               >
                 <span class="transaction-status" :class="record.syncStatus">
@@ -103,17 +113,32 @@
               </a-tooltip>
             </template>
             <template v-else-if="column.key === 'description'">
-              <span class="transaction-muted">{{ record.description || '—' }}</span>
+              <span class="transaction-muted">{{
+                record.description || "—"
+              }}</span>
             </template>
             <template v-else-if="column.key === 'createdAt'">
-              <span class="transaction-muted">{{ formatDateTime(record.createdAt) }}</span>
+              <span class="transaction-muted">{{
+                formatDateTime(record.createdAt)
+              }}</span>
             </template>
             <template v-else-if="column.key === 'actions'">
               <a-space :size="4">
-                <a-button type="link" size="small" class="transaction-action" @click.stop="openEdit(record)">
+                <a-button
+                  type="link"
+                  size="small"
+                  class="transaction-action"
+                  @click.stop="openEdit(record)"
+                >
                   编辑
                 </a-button>
-                <a-button type="link" size="small" danger class="transaction-action" @click.stop="onDelete(record)">
+                <a-button
+                  type="link"
+                  size="small"
+                  danger
+                  class="transaction-action"
+                  @click.stop="onDelete(record)"
+                >
                   删除
                 </a-button>
               </a-space>
@@ -171,13 +196,26 @@
     >
       <a-form layout="vertical">
         <a-form-item label="交易码" required>
-          <a-input v-model:value="form.code" maxlength="128" placeholder="如 addCtmSealInfo" />
+          <a-input
+            v-model:value="form.code"
+            maxlength="128"
+            placeholder="如 addCtmSealInfo"
+          />
         </a-form-item>
         <a-form-item label="接口名称">
-          <a-input v-model:value="form.name" maxlength="256" placeholder="可选，默认同交易码" />
+          <a-input
+            v-model:value="form.name"
+            maxlength="256"
+            placeholder="可选，默认同交易码"
+          />
         </a-form-item>
         <a-form-item label="备注">
-          <a-textarea v-model:value="form.description" :rows="3" maxlength="2000" placeholder="可选" />
+          <a-textarea
+            v-model:value="form.description"
+            :rows="3"
+            maxlength="2000"
+            placeholder="可选"
+          />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -185,29 +223,38 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import {
+  computed,
+  onActivated,
+  onDeactivated,
+  onMounted,
+  onUnmounted,
+  reactive,
+  ref,
+  watch,
+} from "vue";
+import { useRouter } from "vue-router";
 import {
   CloudUploadOutlined,
   ExportOutlined,
   PlusOutlined,
   SearchOutlined,
   SyncOutlined,
-} from '@ant-design/icons-vue';
-import { message, Modal } from 'ant-design-vue';
+} from "@ant-design/icons-vue";
+import { message, Modal } from "ant-design-vue";
 import {
   caseForgePageSizeOptionLabels,
   DEFAULT_CASE_FORGE_PAGE_SIZE,
   normalizeCaseForgePageSize,
-} from '@case-forge/shared';
-import { useApiTestStore } from '@/stores/apiTest';
-import ApiTransactionSmpSyncModal from '@/components/api-test/ApiTransactionSmpSyncModal.vue';
-import PreproductionSyncModal from '@/components/api-test/PreproductionSyncModal.vue';
-import ApiRequirementReportModal from '@/components/api-test/ApiRequirementReportModal.vue';
+} from "@case-forge/shared";
+import { useApiTestStore } from "@/stores/apiTest";
+import ApiTransactionSmpSyncModal from "@/components/api-test/ApiTransactionSmpSyncModal.vue";
+import PreproductionSyncModal from "@/components/api-test/PreproductionSyncModal.vue";
+import ApiRequirementReportModal from "@/components/api-test/ApiRequirementReportModal.vue";
 import type {
   ApiTransactionRow,
   RequirementReportSelection,
-} from '@/api/apiTestClient';
+} from "@/api/apiTestClient";
 import {
   downloadBase64Report,
   downloadBlob,
@@ -215,8 +262,8 @@ import {
   getReportExport,
   previewPreproductionSync,
   syncPreproductionCases,
-} from '@/api/apiTestClient';
-import type { PreproductionSyncPreview } from '@case-forge/shared';
+} from "@/api/apiTestClient";
+import type { PreproductionSyncPreview } from "@case-forge/shared";
 
 const apiStore = useApiTestStore();
 const router = useRouter();
@@ -232,8 +279,8 @@ const preprodTransactionIds = ref<string[]>([]);
 const requirementReportOpen = ref(false);
 const requirementReportExporting = ref(false);
 const requirementReportTransactions = ref<ApiTransactionRow[]>([]);
-const editingId = ref('');
-const keyword = ref('');
+const editingId = ref("");
+const keyword = ref("");
 const listPage = ref(1);
 const listPageSize = ref(DEFAULT_CASE_FORGE_PAGE_SIZE);
 const pageSizeOptions = caseForgePageSizeOptionLabels();
@@ -241,16 +288,18 @@ const selectedRowKeys = ref<string[]>([]);
 const pollTimer = ref<number | null>(null);
 const POLL_INTERVAL_MS = 5000;
 const form = reactive({
-  code: '',
-  name: '',
-  description: '',
+  code: "",
+  name: "",
+  description: "",
 });
 
 watch(
-  () => apiStore.transactions.map((item) => item.id).join(','),
+  () => apiStore.transactions.map((item) => item.id).join(","),
   () => {
     const existingIds = new Set(apiStore.transactions.map((item) => item.id));
-    selectedRowKeys.value = selectedRowKeys.value.filter((id) => existingIds.has(id));
+    selectedRowKeys.value = selectedRowKeys.value.filter((id) =>
+      existingIds.has(id),
+    );
   },
 );
 
@@ -259,18 +308,65 @@ watch(keyword, () => {
 });
 
 const columns = [
-  { title: '交易码', dataIndex: 'code', key: 'code', width: 180, fixed: 'left' as const },
-  { title: '案例', key: 'caseCount', width: 72, align: 'center' as const },
-  { title: '报表', key: 'report', width: 96, align: 'center' as const },
-  { title: '接口名称', dataIndex: 'name', key: 'name', width: 200, ellipsis: true },
-  { title: '需求编号', dataIndex: 'reqCode', key: 'reqCode', width: 140, ellipsis: true },
-  { title: '服务编码', dataIndex: 'serviceCode', key: 'serviceCode', width: 140, ellipsis: true },
-  { title: '需求系统', dataIndex: 'reqSystemId', key: 'reqSystemId', width: 100, ellipsis: true },
-  { title: '任务ID', dataIndex: 'taskId', key: 'taskId', width: 120, ellipsis: true },
-  { title: '生成状态', key: 'syncStatus', width: 108, align: 'center' as const },
-  { title: '备注', key: 'description', width: 200, ellipsis: true },
-  { title: '创建时间', key: 'createdAt', width: 168 },
-  { title: '操作', key: 'actions', width: 108, align: 'center' as const, fixed: 'right' as const },
+  {
+    title: "交易码",
+    dataIndex: "code",
+    key: "code",
+    width: 180,
+    fixed: "left" as const,
+  },
+  { title: "案例", key: "caseCount", width: 72, align: "center" as const },
+  { title: "报表", key: "report", width: 96, align: "center" as const },
+  {
+    title: "接口名称",
+    dataIndex: "name",
+    key: "name",
+    width: 200,
+    ellipsis: true,
+  },
+  {
+    title: "需求编号",
+    dataIndex: "reqCode",
+    key: "reqCode",
+    width: 140,
+    ellipsis: true,
+  },
+  {
+    title: "服务编码",
+    dataIndex: "serviceCode",
+    key: "serviceCode",
+    width: 140,
+    ellipsis: true,
+  },
+  {
+    title: "需求系统",
+    dataIndex: "reqSystemId",
+    key: "reqSystemId",
+    width: 100,
+    ellipsis: true,
+  },
+  {
+    title: "任务ID",
+    dataIndex: "taskId",
+    key: "taskId",
+    width: 120,
+    ellipsis: true,
+  },
+  {
+    title: "生成状态",
+    key: "syncStatus",
+    width: 108,
+    align: "center" as const,
+  },
+  { title: "备注", key: "description", width: 200, ellipsis: true },
+  { title: "创建时间", key: "createdAt", width: 168 },
+  {
+    title: "操作",
+    key: "actions",
+    width: 108,
+    align: "center" as const,
+    fixed: "right" as const,
+  },
 ];
 
 const filteredTransactions = computed(() => {
@@ -288,7 +384,7 @@ const filteredTransactions = computed(() => {
       item.taskId,
     ]
       .filter(Boolean)
-      .join(' ');
+      .join(" ");
     return normalizeSearchText(haystack).includes(normalizedKeyword);
   });
 });
@@ -302,7 +398,7 @@ const paginatedTransactions = computed(() => {
 });
 
 const hasGeneratingRows = computed(() =>
-  paginatedTransactions.value.some((item) => item.syncStatus === 'generating'),
+  paginatedTransactions.value.some((item) => item.syncStatus === "generating"),
 );
 
 function startPolling() {
@@ -362,22 +458,22 @@ watch(
 );
 
 const emptyDescription = computed(() => {
-  if (!apiStore.transactions.length) return '暂无交易码，请点击右上角「新建」';
-  if (keyword.value.trim()) return '暂无匹配交易码';
-  return '暂无交易码';
+  if (!apiStore.transactions.length) return "暂无交易码，请点击右上角「新建」";
+  if (keyword.value.trim()) return "暂无匹配交易码";
+  return "暂无交易码";
 });
 
 function normalizeSearchText(value: string) {
   return value
     .toLowerCase()
-    .replace(/[‐‑‒–—―－]/g, '-')
-    .replace(/\s+/g, '');
+    .replace(/[‐‑‒–—―－]/g, "-")
+    .replace(/\s+/g, "");
 }
 
 function formatDateTime(value: string) {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
-  const pad = (part: number) => String(part).padStart(2, '0');
+  if (Number.isNaN(date.getTime())) return "—";
+  const pad = (part: number) => String(part).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
@@ -391,12 +487,12 @@ const rowSelection = computed(() => ({
 
 function customRow(record: ApiTransactionRow) {
   return {
-    class: 'transaction-row',
+    class: "transaction-row",
     onClick: (event: MouseEvent) => {
       const target = event.target as HTMLElement;
       if (
         target.closest(
-          '.ant-checkbox-wrapper, .ant-checkbox, .ant-table-selection-column, .transaction-action, .ant-btn',
+          ".ant-checkbox-wrapper, .ant-checkbox, .ant-table-selection-column, .transaction-action, .ant-btn",
         )
       ) {
         return;
@@ -407,10 +503,10 @@ function customRow(record: ApiTransactionRow) {
 }
 
 function openCreate() {
-  editingId.value = '';
-  form.code = '';
-  form.name = '';
-  form.description = '';
+  editingId.value = "";
+  form.code = "";
+  form.name = "";
+  form.description = "";
   modalOpen.value = true;
 }
 
@@ -420,11 +516,11 @@ function openSmpSync() {
 
 function openRequirementReportExport() {
   if (!apiStore.activeProjectId) {
-    message.warning('请先选择需求');
+    message.warning("请先选择需求");
     return;
   }
   if (!selectedRowKeys.value.length) {
-    message.warning('请先勾选需要导出报告的交易码');
+    message.warning("请先勾选需要导出报告的交易码");
     return;
   }
   const selectedIds = new Set(selectedRowKeys.value);
@@ -444,16 +540,18 @@ async function handleRequirementReportExport(payload: {
     const { blob, fileName } = await exportRequirementReport(
       projectId,
       payload.selections,
-      'html',
+      "html",
     );
     downloadBlob(blob, fileName);
-    message.success(`需求测试 HTML 报告已导出（${payload.selections.length} 条执行历史）`);
+    message.success(
+      `需求测试报告已导出（${payload.selections.length} 条执行历史）`,
+    );
     requirementReportOpen.value = false;
     selectedRowKeys.value = [];
     await apiStore.refreshTransactions(projectId);
   } catch (error) {
     message.error(
-      error instanceof Error ? error.message : '需求测试报告导出失败，请重试',
+      error instanceof Error ? error.message : "需求测试报告导出失败，请重试",
     );
   } finally {
     requirementReportExporting.value = false;
@@ -463,7 +561,7 @@ async function handleRequirementReportExport(payload: {
 async function syncToPreproduction() {
   const projectId = apiStore.activeProjectId;
   if (!projectId) {
-    message.warning('请先选择项目');
+    message.warning("请先选择项目");
     return;
   }
   const transactionIds = [...selectedRowKeys.value];
@@ -472,22 +570,22 @@ async function syncToPreproduction() {
     const preview = await previewPreproductionSync(projectId, transactionIds);
     if (preview.applicationMissing) {
       Modal.confirm({
-        title: '请先维护需求归属应用',
+        title: "请先维护需求归属应用",
         content:
-          '当前需求未维护所属应用，无法同步准生产。请先到需求管理编辑需求并补充归属应用。',
-        okText: '去需求管理',
-        cancelText: '取消',
+          "当前需求未维护所属应用，无法同步准生产。请先到需求管理编辑需求并补充归属应用。",
+        okText: "去需求管理",
+        cancelText: "取消",
         centered: true,
         onOk: () =>
           router.push({
-            path: '/api-test/requirement',
+            path: "/api-test/requirement",
             query: {
-              status: 'testing',
+              status: "testing",
               ...(preview.requirement?.id
                 ? {
                     requirementId: preview.requirement.id,
                     projectCode: preview.requirement.projectCode,
-                    edit: '1',
+                    edit: "1",
                   }
                 : {}),
             },
@@ -496,7 +594,7 @@ async function syncToPreproduction() {
       return;
     }
     if (!transactionIds.length) {
-      message.warning('请至少选择一个交易码');
+      message.warning("请至少选择一个交易码");
       return;
     }
     preprodTransactionIds.value = transactionIds;
@@ -504,7 +602,7 @@ async function syncToPreproduction() {
     preprodPreviewOpen.value = true;
   } catch (error) {
     message.error(
-      error instanceof Error ? error.message : '准生产同步预检失败，请重试',
+      error instanceof Error ? error.message : "准生产同步预检失败，请重试",
     );
   } finally {
     preprodPreviewLoading.value = false;
@@ -527,11 +625,11 @@ async function runPreprodSync(caseIds: string[]) {
     });
     const skipped = result.skipped
       ? `，跳过 ${result.skipped} 条（已存在或不可同步）`
-      : '';
+      : "";
     if (!result.created && !result.updated) {
       message.warning(`没有可写入的案例${skipped}`);
     } else {
-      const restored = result.updated ? `，恢复 ${result.updated} 条` : '';
+      const restored = result.updated ? `，恢复 ${result.updated} 条` : "";
       message.success(
         `同步完成：新增 ${result.created} 条${restored}${skipped}`,
       );
@@ -541,7 +639,7 @@ async function runPreprodSync(caseIds: string[]) {
     selectedRowKeys.value = [];
   } catch (error) {
     message.error(
-      error instanceof Error ? error.message : '同步准生产失败，请重试',
+      error instanceof Error ? error.message : "同步准生产失败，请重试",
     );
   } finally {
     preprodSyncing.value = false;
@@ -550,25 +648,39 @@ async function runPreprodSync(caseIds: string[]) {
 
 function syncStatusText(status?: string) {
   switch (status) {
-    case 'pending': return '待生成';
-    case 'generating': return '生成中';
-    case 'success': return '生成成功';
-    case 'failed': return '生成失败';
-    case 'cancelled': return '取消生成';
-    case 'changed': return '已变更';
-    default: return '—';
+    case "pending":
+      return "待生成";
+    case "generating":
+      return "生成中";
+    case "success":
+      return "生成成功";
+    case "failed":
+      return "生成失败";
+    case "cancelled":
+      return "取消生成";
+    case "changed":
+      return "已变更";
+    default:
+      return "—";
   }
 }
 
 function syncStatusHint(status?: string) {
   switch (status) {
-    case 'pending': return '等待生成接口测试案例';
-    case 'generating': return '正在生成接口测试案例';
-    case 'success': return '接口测试案例已生成';
-    case 'failed': return '生成失败，请查看详情或重试';
-    case 'cancelled': return '已取消生成';
-    case 'changed': return '服管数据已变更，请重新生成案例';
-    default: return '';
+    case "pending":
+      return "等待生成接口测试案例";
+    case "generating":
+      return "正在生成接口测试案例";
+    case "success":
+      return "接口测试案例已生成";
+    case "failed":
+      return "生成失败，请查看详情或重试";
+    case "cancelled":
+      return "已取消生成";
+    case "changed":
+      return "服管数据已变更，请重新生成案例";
+    default:
+      return "";
   }
 }
 
@@ -576,13 +688,13 @@ function openEdit(item: ApiTransactionRow) {
   editingId.value = item.id;
   form.code = item.code;
   form.name = item.name;
-  form.description = item.description ?? '';
+  form.description = item.description ?? "";
   modalOpen.value = true;
 }
 
 function displayTransactionName(item: ApiTransactionRow) {
   const name = item.name?.trim();
-  if (!name || name === item.code) return '—';
+  if (!name || name === item.code) return "—";
   return name;
 }
 
@@ -590,17 +702,21 @@ async function downloadLatestReport(item: ApiTransactionRow) {
   const projectId = apiStore.activeProjectId;
   if (!projectId || !item.lastReportExport) return;
   try {
-    const row = await getReportExport(projectId, item.id, item.lastReportExport.id);
+    const row = await getReportExport(
+      projectId,
+      item.id,
+      item.lastReportExport.id,
+    );
     downloadBase64Report(row);
   } catch {
-    message.warning('获取导出记录失败');
+    message.warning("获取导出记录失败");
   }
 }
 
 async function onSave() {
   const code = form.code.trim();
   if (!code) {
-    message.warning('请输入交易码');
+    message.warning("请输入交易码");
     return Promise.reject();
   }
   const name = form.name.trim();
@@ -630,15 +746,17 @@ function enterTransaction(transactionId: string) {
 
 function onDelete(item: ApiTransactionRow) {
   Modal.confirm({
-    title: '删除交易码',
+    title: "删除交易码",
     content: `确定删除「${item.code}」？关联文档与案例将一并删除。`,
-    okText: '删除',
-    cancelText: '取消',
-    okType: 'danger',
+    okText: "删除",
+    cancelText: "取消",
+    okType: "danger",
     centered: true,
     onOk: async () => {
       await apiStore.removeTransaction(item.id);
-      selectedRowKeys.value = selectedRowKeys.value.filter((id) => id !== item.id);
+      selectedRowKeys.value = selectedRowKeys.value.filter(
+        (id) => id !== item.id,
+      );
     },
   });
 }
@@ -647,11 +765,11 @@ function onBatchDelete() {
   const ids = [...selectedRowKeys.value];
   if (!ids.length) return;
   Modal.confirm({
-    title: '批量删除交易码',
+    title: "批量删除交易码",
     content: `确定删除选中的 ${ids.length} 条交易码？关联文档与案例将一并删除。`,
-    okText: '删除',
-    cancelText: '取消',
-    okType: 'danger',
+    okText: "删除",
+    cancelText: "取消",
+    okType: "danger",
     centered: true,
     async onOk() {
       deleting.value = true;

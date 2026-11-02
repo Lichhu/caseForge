@@ -1104,7 +1104,7 @@ export class ApiExecutionService {
       method: input.request.method,
       url: url.toString(),
       headers: redactHeaders(headers),
-      body: input.request.body,
+      ...requestBodySnapshotFields(input.request),
       encoding:
         input.encoding ??
         input.request.encoding ??
@@ -1226,7 +1226,7 @@ export class ApiExecutionService {
     const requestSnapshot = {
       method: input.request.method,
       target: `${target.host}:${target.port}`,
-      body: input.request.body,
+      ...requestBodySnapshotFields(input.request),
       encoding,
       framing: resolvedFraming,
       transport: "tcp",
@@ -1863,6 +1863,20 @@ function substituteVariablesPath(path: string, vars: Record<string, string>) {
     /\{(\w+)\}/g,
     (_, key: string) => vars[key] ?? `{${key}}`,
   );
+}
+
+/**
+ * 执行快照保留编辑器中的原始报文文本，避免对象经 MySQL JSON 往返后丢失 Key 顺序。
+ */
+export function requestBodySnapshotFields(
+  request: Pick<ApiCaseRequest, "body" | "bodyText">,
+) {
+  return {
+    body: request.body,
+    ...(typeof request.bodyText === "string"
+      ? { bodyText: request.bodyText }
+      : {}),
+  };
 }
 
 export function buildEncodedHttpBody(

@@ -48,6 +48,10 @@
           :open="open"
           embedded
         />
+        <ApiGenerationConfigPanel
+          v-if="activeTab === 'service-properties'"
+          :can-edit="canEditGenerationConfig"
+        />
       </div>
     </div>
   </a-drawer>
@@ -56,6 +60,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import {
+  AppstoreOutlined,
   CodeOutlined,
   DatabaseOutlined,
   GlobalOutlined,
@@ -67,10 +72,22 @@ import ApiDataFunctionMaintainModal from "./ApiDataFunctionMaintainModal.vue";
 import ApiDatabaseConnectionMaintainModal from "./ApiDatabaseConnectionMaintainModal.vue";
 import ApiEnvironmentMaintainModal from "./ApiEnvironmentMaintainModal.vue";
 import StepLibraryMaintainModal from "./StepLibraryMaintainModal.vue";
+import ApiGenerationConfigPanel from "./ApiGenerationConfigPanel.vue";
 
-type LibraryTab = "functions" | "database" | "environment" | "steps";
+type LibraryTab =
+  | "functions"
+  | "database"
+  | "service-properties"
+  | "environment"
+  | "steps";
 
 const open = defineModel<boolean>("open", { default: false });
+withDefaults(
+  defineProps<{
+    canEditGenerationConfig?: boolean;
+  }>(),
+  { canEditGenerationConfig: false },
+);
 const activeTab = ref<LibraryTab>("functions");
 const tabs: Array<{
   key: LibraryTab;
@@ -81,6 +98,11 @@ const tabs: Array<{
   { key: "database", label: "数据库", icon: DatabaseOutlined },
   { key: "environment", label: "环境库", icon: GlobalOutlined },
   { key: "steps", label: "步骤库", icon: UnorderedListOutlined },
+  {
+    key: "service-properties",
+    label: "服务属性",
+    icon: AppstoreOutlined,
+  },
 ];
 const drawerBodyStyle = {
   padding: "0",

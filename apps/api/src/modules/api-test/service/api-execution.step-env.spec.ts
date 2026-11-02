@@ -1,5 +1,8 @@
 import { BadRequestException } from "@nestjs/common";
-import { environmentFromStep } from "@api-test/service/api-execution.service";
+import {
+  environmentFromStep,
+  requestBodySnapshotFields,
+} from "@api-test/service/api-execution.service";
 import { parseServerAddress } from "@case-forge/shared";
 import type { ApiHttpCaseStep } from "@case-forge/shared";
 
@@ -83,6 +86,28 @@ describe("parseServerAddress", () => {
       host: "32.114.71.6",
       port: 60030,
       serverAddress: "socket2://32.114.71.6:60030",
+    });
+  });
+});
+
+describe("requestBodySnapshotFields", () => {
+  it("preserves the editor source body order for execution history", () => {
+    const bodyText = '{\n  "second": 2,\n  "first": 1\n}';
+
+    expect(
+      requestBodySnapshotFields({
+        body: { first: 1, second: 2 },
+        bodyText,
+      }),
+    ).toEqual({
+      body: { first: 1, second: 2 },
+      bodyText,
+    });
+  });
+
+  it("keeps legacy snapshots compatible when source text is absent", () => {
+    expect(requestBodySnapshotFields({ body: { first: 1 } })).toEqual({
+      body: { first: 1 },
     });
   });
 });

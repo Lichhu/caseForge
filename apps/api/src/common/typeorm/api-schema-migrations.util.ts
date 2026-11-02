@@ -88,6 +88,8 @@ async function alignUuidColumn(
 }
 
 export async function applyApiTestSchemaMigrations(runner: Queryable) {
+  await ensureApiTestReportConfigTable(runner);
+  await ensureApiGenerationConfigSchema(runner);
   await ensureApiStepTables(runner);
   await ensureApiDataFunctionTables(runner);
   await ensureApiAssertionGenerateJobTable(runner);
@@ -108,6 +110,61 @@ export async function applyApiTestSchemaMigrations(runner: Queryable) {
   await ensureApiCaseGenerateJobColumns(runner);
   await ensureExecutionPlatformTables(runner);
   await ensureRunnerPlatformColumns(runner);
+}
+
+async function ensureApiTestReportConfigTable(runner: Queryable) {
+  if (await tableExists(runner, "api_test_report_config")) {
+    return;
+  }
+  await runner.query(`
+    CREATE TABLE api_test_report_config (
+      configKey VARCHAR(64) NOT NULL PRIMARY KEY,
+      configValue VARCHAR(255) NOT NULL,
+      description VARCHAR(255) NULL,
+      createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+      updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  await runner.query(`
+    INSERT INTO api_test_report_config (configKey, configValue, description)
+    VALUES
+      ('reviewer_name', '常万恒', '项目类接口测试报告审核人'),
+      ('approver_name', '陈志斌', '项目类接口测试报告批准人')
+  `);
+}
+
+async function ensureApiGenerationConfigSchema(runner: Queryable) {
+  if (
+    (await tableExists(runner, "scenario_library")) &&
+    !(await columnExists(runner, "scenario_library", "generationKey"))
+  ) {
+    await runner.query(`
+      ALTER TABLE scenario_library
+        ADD COLUMN generationKey VARCHAR(64) NULL
+        COMMENT '接口案例生成内置规则标识'
+        AFTER category
+    `);
+  }
+
+  if (!(await tableExists(runner, "api_generation_service_property"))) {
+    await runner.query(`
+      CREATE TABLE api_generation_service_property (
+        id VARCHAR(36) CHARACTER SET utf8 NOT NULL PRIMARY KEY,
+        code VARCHAR(64) NOT NULL,
+        name VARCHAR(120) NOT NULL,
+        description TEXT NULL,
+        scenarioIds JSON NOT NULL,
+        sortOrder INT NOT NULL DEFAULT 0,
+        isActive TINYINT NOT NULL DEFAULT 1,
+        createdBy VARCHAR(255) NULL DEFAULT 'system',
+        modifiedBy VARCHAR(255) NULL DEFAULT 'system',
+        createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+        updatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+        deleted_at DATETIME(6) NULL,
+        INDEX idx_api_generation_service_property_sort (sortOrder, code)
+      ) DEFAULT CHARSET = utf8mb4
+    `);
+  }
 }
 
 async function ensureApiPreproductionRunSetTable(runner: Queryable) {
@@ -194,12 +251,24 @@ async function ensureApiPreproductionRunSetCaseTable(runner: Queryable) {
   }
   // MySQL 不支持部分唯一索引，软删除行仍占用唯一键；改为普通索引，
   // (runSetId, caseId) 的唯一性由服务层保证。
-  if (await indexExists(runner, "api_preprod_run_set_case", "uk_api_preprod_run_set_case")) {
+  if (
+    await indexExists(
+      runner,
+      "api_preprod_run_set_case",
+      "uk_api_preprod_run_set_case",
+    )
+  ) {
     await runner.query(
       "ALTER TABLE api_preprod_run_set_case DROP INDEX uk_api_preprod_run_set_case",
     );
   }
-  if (!(await indexExists(runner, "api_preprod_run_set_case", "idx_api_preprod_run_set_case"))) {
+  if (
+    !(await indexExists(
+      runner,
+      "api_preprod_run_set_case",
+      "idx_api_preprod_run_set_case",
+    ))
+  ) {
     await runner.query(
       "CREATE INDEX idx_api_preprod_run_set_case ON api_preprod_run_set_case (runSetId, caseId)",
     );
@@ -238,11 +307,7 @@ async function ensureApiPreproductionRunRecordTable(runner: Queryable) {
   `);
   if (
     (await tableExists(runner, "api_preprod_run_record")) &&
-    !(await columnExists(
-      runner,
-      "api_preprod_run_record",
-      "runSetId",
-    ))
+    !(await columnExists(runner, "api_preprod_run_record", "runSetId"))
   )
     await runner.query(
       "ALTER TABLE api_preprod_run_record ADD COLUMN runSetId VARCHAR(36) CHARACTER SET utf8 NULL AFTER caseId",
@@ -309,19 +374,12 @@ export async function ensureApiStepTables(runner: Queryable) {
   `);
   if (
     (await tableExists(runner, "api_step_debug_record")) &&
-    !(await columnExists(
-      runner,
-      "api_step_debug_record",
-      "caseSource",
-    ))
+    !(await columnExists(runner, "api_step_debug_record", "caseSource"))
   )
     await runner.query(
       "ALTER TABLE api_step_debug_record ADD COLUMN caseSource VARCHAR(16) NOT NULL DEFAULT 'project' AFTER caseId",
     );
-  const debugColumns = await tableColumnTypes(
-    runner,
-    "api_step_debug_record",
-  );
+  const debugColumns = await tableColumnTypes(runner, "api_step_debug_record");
   const uuidColumnsNeedAlign = ["projectId", "caseId", "stepId"].some(
     (columnName) => debugColumns.get(columnName) !== "varchar(36)",
   );

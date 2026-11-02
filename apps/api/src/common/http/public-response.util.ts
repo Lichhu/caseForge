@@ -38,6 +38,7 @@ export function toPublicScenario(scenario: ScenarioEntity) {
     name: scenario.name,
     description: scenario.description,
     category: scenario.category,
+    generationKey: scenario.generationKey ?? null,
     scope: scenario.scope,
     isActive: scenario.isActive,
     prompts: (scenario.prompts ?? []).map(toPublicPrompt),

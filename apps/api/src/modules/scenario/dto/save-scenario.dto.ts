@@ -82,6 +82,12 @@ export class SaveScenarioDto {
   @MaxLength(64)
   category: string;
 
+  @ApiPropertyOptional({ example: "pagination" })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  generationKey?: string;
+
   @ApiPropertyOptional({ example: true })
   @IsOptional()
   isActive?: boolean;

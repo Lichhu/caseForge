@@ -5,6 +5,7 @@ export const API_ROUTE_MODULES = new Set([
   "case-editor",
   "dynamic-instruct",
   "scenario",
+  "api-generation-config",
   "api-test",
   "requirement-platform",
 ]);

@@ -1619,7 +1619,7 @@ export class ApiTestController {
           this.apiReportService.recordExport({
             projectId,
             transactionId: selection.transactionId,
-            format: body.format,
+            format: result.format,
             runId: selection.runId,
             fileName: result.fileName,
             contentType: result.contentType,
@@ -1633,7 +1633,7 @@ export class ApiTestController {
     res.setHeader("Content-Type", result.contentType);
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="requirement-test-report.${body.format}"; filename*=UTF-8''${encodeURIComponent(result.fileName)}`,
+      `attachment; filename="requirement-test-report.${result.format}"; filename*=UTF-8''${encodeURIComponent(result.fileName)}`,
     );
     res.send(result.buffer);
   }

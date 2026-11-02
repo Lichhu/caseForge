@@ -144,8 +144,11 @@ describe("ApiCaseService positive flow generation", () => {
       [
         {
           title: "正向流程",
+          description:
+            "系统用户执行TX001正常交易时，使用合法请求参数并遵循示例报文，预期接口处理成功并返回正确业务结果，用于验证核心业务流程是否符合预期。",
           polarity: "positive",
           changes: [],
+          expected: "接口返回成功并返回正确业务结果",
         },
       ],
     );

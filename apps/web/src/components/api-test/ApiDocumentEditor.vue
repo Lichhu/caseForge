@@ -273,42 +273,72 @@
           </a-form-item>
         </div>
         <section class="generation-scenarios-panel">
-          <div class="generation-scenarios-heading">
-            <div><strong>适用场景</strong><span>{{ selectedServicePropertyLabel }} · {{ matchedApiScenarios.length }} 个场景</span></div>
-          </div>
+          <button
+            type="button"
+            class="generation-scenarios-heading"
+            :class="{ 'is-open': generationScenariosExpanded }"
+            :aria-expanded="generationScenariosExpanded"
+            @click="generationScenariosExpanded = !generationScenariosExpanded"
+          >
+            <span class="generation-scenarios-heading-main">
+              <span class="generation-scenarios-icon">
+                <UnorderedListOutlined />
+              </span>
+              <span class="generation-scenarios-heading-copy">
+                <strong>适用场景</strong>
+                <span>{{ selectedServicePropertyLabel }}</span>
+              </span>
+            </span>
+            <span class="generation-scenarios-heading-actions">
+              <span class="generation-scenarios-count">
+                {{ matchedApiScenarios.length }} 个场景
+              </span>
+              <span>{{ generationScenariosExpanded ? '收起' : '查看' }}</span>
+              <DownOutlined
+                class="generation-scenarios-chevron"
+                :class="{ 'is-open': generationScenariosExpanded }"
+              />
+            </span>
+          </button>
           <div v-if="scenarioLibraryLoading" class="generation-scenarios-state">正在加载场景与提示词…</div>
           <div v-else-if="!matchedApiScenarios.length" class="generation-scenarios-state">
             暂无匹配场景，请在接口测试场景库中维护场景和提示词。
           </div>
-          <div v-else class="generation-scenarios-content">
+          <div v-else-if="generationScenariosExpanded" class="generation-scenarios-content">
             <nav class="generation-scenario-list" aria-label="适用场景">
               <button
                 v-for="scenario in matchedApiScenarios"
                 :key="scenario.id"
                 type="button"
                 :class="['generation-scenario-option', { 'is-active': selectedApiScenarioId === scenario.id }]"
+                :aria-current="selectedApiScenarioId === scenario.id ? 'true' : undefined"
                 @click="selectedApiScenarioId = scenario.id"
               >
                 <span class="generation-scenario-option-name">{{ scenario.name }}</span>
                 <span class="generation-scenario-option-meta">{{ scenario.category }} · {{ activeScenarioPrompts(scenario).length }} 条提示词</span>
               </button>
             </nav>
-            <div class="generation-prompt-list">
-              <div v-if="!selectedScenarioPrompts.length" class="generation-scenarios-state generation-scenarios-state--inline">该场景暂无启用的提示词</div>
-              <article v-for="prompt in selectedScenarioPrompts" :key="prompt.id" class="generation-prompt-item">
-                <div class="generation-prompt-item-heading">
-                  <strong>{{ prompt.name }}</strong>
-                  <a-tag v-if="prompt.isDefault" color="blue">默认</a-tag>
+            <div class="generation-prompt-pane">
+              <div class="generation-prompt-pane-head">
+                <div>
+                  <span>当前场景</span>
+                  <strong>{{ selectedApiScenario?.name || '请选择场景' }}</strong>
                 </div>
-                <p v-if="prompt.tags.length" class="generation-prompt-tags">{{ prompt.tags.join(' / ') }}</p>
-                <pre :class="['generation-prompt-content', { 'is-expanded': expandedPromptIds.has(prompt.id) }]">{{ prompt.content }}</pre>
-                <button
-                  v-if="prompt.content.length > 280"
-                  type="button"
-                  class="generation-prompt-toggle"
-                  @click="togglePromptExpanded(prompt.id)"
-                >{{ expandedPromptIds.has(prompt.id) ? '收起' : '展开全文' }}</button>
-              </article>
+                <span>{{ selectedScenarioPrompts.length }} 条提示词</span>
+              </div>
+              <div class="generation-prompt-list">
+                <div v-if="!selectedScenarioPrompts.length" class="generation-scenarios-state generation-scenarios-state--inline">该场景暂无启用的提示词</div>
+                <article v-for="prompt in selectedScenarioPrompts" :key="prompt.id" class="generation-prompt-item">
+                  <div class="generation-prompt-item-heading">
+                    <strong>{{ prompt.name }}</strong>
+                    <a-tag v-if="prompt.isDefault" color="blue">默认</a-tag>
+                  </div>
+                  <div v-if="prompt.tags.length" class="generation-prompt-tags">
+                    <a-tag v-for="tag in prompt.tags" :key="tag" :bordered="false">{{ tag }}</a-tag>
+                  </div>
+                  <pre class="generation-prompt-content">{{ prompt.content }}</pre>
+                </article>
+              </div>
             </div>
           </div>
         </section>
@@ -722,6 +752,7 @@ import AssertionRowsEditor from '@/components/api-test/AssertionRowsEditor.vue';
 import KeyValueRowsEditor from '@/components/api-test/KeyValueRowsEditor.vue';
 import { IMMERSIVE_OVERLAY_Z_INDEX, NESTED_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import { useApiTestStore } from '@/stores/apiTest';
+import type { ScenarioLibraryItem } from '@/api/client';
 import type { ApiCaseRequest, ApiCaseStep, ApiDocGenerationProfile } from '@case-forge/shared';
 import { isDbStep } from '@case-forge/shared';
 import * as XLSX from 'xlsx';
@@ -742,7 +773,7 @@ import {
   type HttpMethod,
 } from '@/utils/casePayloadFormat.util';
 import { randomUuid } from '@/utils/randomUuid';
-import { debugRunCase, deleteStepLibrary, generateAssertions, getAssertionGenerateResult, getAssertionGenerateStatus, listDataFunctions, listStepLibrary, saveStepLibrary, type ApiStepLibraryRow, type DebugRunResult } from '@/api/apiTestClient';
+import { debugRunCase, deleteStepLibrary, generateAssertions, getApiGenerationConfig, getAssertionGenerateResult, getAssertionGenerateStatus, listDataFunctions, listStepLibrary, saveStepLibrary, type ApiServicePropertyConfigRow, type ApiStepLibraryRow, type DebugRunResult } from '@/api/apiTestClient';
 import { messagePathOptions } from '@/utils/messagePathOptions';
 import { assertionsToRows, buildExpectedFromRows, type AssertionRow } from '@/utils/assertionRows.util';
 import { createEmptyKeyValueRow, type KeyValueRow } from '@/utils/casePayloadFormat.util';
@@ -758,7 +789,9 @@ const popupContainer = () => document.body;
 const nestedDropdownStyle = { zIndex: NESTED_OVERLAY_Z_INDEX + 1 };
 const scenarioLibraryLoading = ref(false);
 const selectedApiScenarioId = ref('');
-const expandedPromptIds = ref(new Set<string>());
+const generationScenariosExpanded = ref(false);
+const generationProperties = ref<ApiServicePropertyConfigRow[]>([]);
+const generationScenarios = ref<ScenarioLibraryItem[]>([]);
 const sections = ref<ApiDocTableSection[]>([]);
 const sectionData = ref<Record<string, string>[][]>([]);
 const sectionPages = ref<number[]>([]);
@@ -1111,44 +1144,32 @@ function confirmLibraryDebugExport() {
 }
 async function removeLibraryStep(id: string) { await deleteStepLibrary(id); await refreshStepLibrary(); }
 const channelKeyword = ref('');
-const servicePropertyOptions = [
-  ['query_non_accounting', '查询类非涉账'], ['query_accounting', '查询类涉账'],
-  ['management_non_accounting', '管理类非涉账'], ['management_accounting', '管理类涉账'],
-  ['accounting', '记账类'], ['reversal', '冲正类'], ['file', '文件类'], ['push', '推送类'],
-].map(([value, label]) => ({ value, label }));
-const selectedServicePropertyLabel = computed(() =>
-  servicePropertyOptions.find((option) => option.value === generationProfile.serviceProperty)?.label ?? generationProfile.serviceProperty,
+const servicePropertyOptions = computed(() =>
+  generationProperties.value
+    .filter((item) => item.isActive)
+    .map((item) => ({ value: item.code, label: item.name })),
 );
-const LARGE_PAYLOAD_SCENARIO_NAME = '大报文与文件上传';
+const selectedServicePropertyLabel = computed(() =>
+  servicePropertyOptions.value.find((option) => option.value === generationProfile.serviceProperty)?.label ?? generationProfile.serviceProperty,
+);
 const matchedApiScenarios = computed(() => {
-  const property = generationProfile.serviceProperty;
-  const accounting = ['query_accounting', 'management_accounting', 'accounting', 'reversal'].includes(property);
-  const propertyKeywords: Record<string, string[]> = {
-    query_non_accounting: ['查询', '非涉帐', '非涉账'],
-    query_accounting: ['查询', '涉帐', '涉账'],
-    management_non_accounting: ['管理', '非涉帐', '非涉账'],
-    management_accounting: ['管理', '涉帐', '涉账'],
-    accounting: ['账务', '记账', '涉帐', '涉账'],
-    reversal: ['冲正', '涉帐', '涉账'],
-    file: ['文件', '非涉帐', '非涉账'],
-    push: ['推送', '非涉帐', '非涉账'],
-  };
-  const keywords = propertyKeywords[property] ?? [];
-  return apiStore.apiScenarios
-    .filter((scenario) => scenario.isActive)
-    .filter((scenario) => largePayloadEnabled.value || scenario.name !== LARGE_PAYLOAD_SCENARIO_NAME)
-    .filter((scenario) => {
-      if (scenario.category === '通用规则') return true;
-      const searchable = [scenario.name, scenario.description, scenario.category, ...scenario.prompts.flatMap((prompt) => prompt.tags ?? [])].join(' ');
-      const hasAccountingScenario = /涉帐|涉账|账务|记账|冲正/.test(searchable);
-      if (hasAccountingScenario && !accounting) return false;
-      return keywords.some((keyword) => searchable.includes(keyword));
-    });
+  const property = generationProperties.value.find(
+    (item) => item.code === generationProfile.serviceProperty,
+  );
+  const ids = new Set(property?.scenarioIds ?? []);
+  const byId = new Map(
+    generationScenarios.value
+      .filter((scenario) => scenario.isActive && ids.has(scenario.id))
+      .map((scenario) => [scenario.id, scenario]),
+  );
+  return (property?.scenarioIds ?? [])
+    .map((id) => byId.get(id))
+    .filter((scenario): scenario is ScenarioLibraryItem => Boolean(scenario));
 });
 const selectedApiScenario = computed(() =>
   matchedApiScenarios.value.find((scenario) => scenario.id === selectedApiScenarioId.value) ?? matchedApiScenarios.value[0],
 );
-function activeScenarioPrompts(scenario: (typeof apiStore.apiScenarios)[number]) {
+function activeScenarioPrompts(scenario: ScenarioLibraryItem) {
   return scenario.prompts.filter((prompt) => prompt.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
 }
 const selectedScenarioPrompts = computed(() => selectedApiScenario.value ? activeScenarioPrompts(selectedApiScenario.value) : []);
@@ -1157,13 +1178,6 @@ watch(matchedApiScenarios, (scenarios) => {
     selectedApiScenarioId.value = scenarios[0]?.id ?? '';
   }
 }, { immediate: true });
-watch(() => generationProfile.serviceProperty, () => { expandedPromptIds.value.clear(); });
-function togglePromptExpanded(id: string) {
-  const next = new Set(expandedPromptIds.value);
-  if (next.has(id)) next.delete(id);
-  else next.add(id);
-  expandedPromptIds.value = next;
-}
 const transportOptions = [{ value: 'http', label: 'HTTP' }, { value: 'socket', label: 'SOCKET' }];
 const messageFormatOptions = [{ value: 'json', label: 'JSON' }, { value: 'xml', label: 'XML' }, { value: 'text', label: 'TEXT' }];
 const filteredChannels = computed(() => {
@@ -1622,15 +1636,38 @@ async function onGenerate() {
   const tid = transactionId.value;
   if (!pid || !tid) return;
 
+  scenarioLibraryLoading.value = true;
+  try {
+    const config = await getApiGenerationConfig();
+    generationProperties.value = config.rows.filter((item) => item.isActive);
+    generationScenarios.value = config.scenarios.filter(
+      (scenario) => scenario.isActive,
+    );
+    if (
+      !generationProperties.value.some(
+        (item) => item.code === generationProfile.serviceProperty,
+      )
+    ) {
+      generationProfile.serviceProperty =
+        generationProperties.value[0]?.code ?? '';
+    }
+  } catch (error) {
+    message.error(
+      error instanceof Error ? error.message : '加载服务属性配置失败',
+    );
+    return;
+  } finally {
+    scenarioLibraryLoading.value = false;
+  }
+
+  if (!generationProperties.value.length) {
+    message.warning('暂无启用的服务属性，请先由分发人在系统配置中维护');
+    return;
+  }
+  generationScenariosExpanded.value = false;
   generationProfile.exampleMessage = exampleMessage.value.trim();
   selectedChannelIds.value = selectedChannelIds.value.filter((id) => generationProfile.channels.some((channel) => channel.id === id));
   generateModalOpen.value = true;
-  scenarioLibraryLoading.value = true;
-  void apiStore.loadApiScenarioLibrary().catch(() => {
-    message.error('加载接口测试场景失败');
-  }).finally(() => {
-    scenarioLibraryLoading.value = false;
-  });
   void refreshStepLibrary();
 }
 
@@ -1725,6 +1762,10 @@ function onConfirmGenerate() {
   }
   if (largePayloadEnabled.value && !largePayloadFieldPath.value) {
     message.warning('请选择大报文测试字段');
+    return;
+  }
+  if (!matchedApiScenarios.value.length) {
+    message.warning('当前服务属性未配置可用场景');
     return;
   }
   apiStore.markCaseGenerateStarted(tid);
@@ -1857,71 +1898,155 @@ async function onSave() {
 
 .generation-scenarios-panel {
   margin: 0 0 16px;
-  border: 1px solid #d9dde5;
-  border-radius: 6px;
+  border: 1px solid #e4e7ec;
+  border-radius: 10px;
   background: #fff;
+  box-shadow: 0 1px 2px rgb(16 24 40 / 4%);
   overflow: hidden;
 }
 
 .generation-scenarios-heading {
-  padding: 10px 12px;
-  border-bottom: 1px solid #e4e7ec;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 13px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: #fff;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease;
+}
+
+.generation-scenarios-heading:hover {
   background: #fafbfc;
 }
 
-.generation-scenarios-heading > div {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
+.generation-scenarios-heading.is-open {
+  border-bottom-color: #eaecf0;
+  background: #fafbfc;
 }
 
-.generation-scenarios-heading strong {
-  color: #344054;
+.generation-scenarios-heading-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.generation-scenarios-icon {
+  display: grid;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 8px;
+  background: #fff1f3;
+  color: var(--cf-brand, #b60f2d);
   font-size: 14px;
 }
 
-.generation-scenarios-heading span,
+.generation-scenarios-heading-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.generation-scenarios-heading-copy > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generation-scenarios-heading-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.generation-scenarios-count {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f2f4f7;
+  color: #475467;
+  font-size: 11px;
+}
+
+.generation-scenarios-chevron {
+  flex-shrink: 0;
+  color: #98a2b3;
+  font-size: 10px;
+  transition: transform 0.16s ease;
+}
+
+.generation-scenarios-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.generation-scenarios-heading-copy strong {
+  color: #1d2939;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.generation-scenarios-heading-copy span,
 .generation-scenario-option-meta {
   color: #667085;
   font-size: 12px;
 }
 
 .generation-scenarios-content {
-  display: grid;
-  grid-template-columns: minmax(180px, 0.34fr) minmax(0, 1fr);
-  min-height: 190px;
-  max-height: 330px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #fbfcfe;
 }
 
 .generation-scenario-list {
-  overflow-y: auto;
-  border-right: 1px solid #e4e7ec;
-  background: #fafbfc;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid #eaecf0;
+  background: #f8f9fb;
 }
 
 .generation-scenario-option {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 100%;
-  min-height: 58px;
-  padding: 10px 12px;
-  border: 0;
-  border-bottom: 1px solid #eaecf0;
-  background: transparent;
+  display: grid;
+  flex: 0 1 210px;
+  gap: 3px;
+  min-width: 150px;
+  padding: 8px 10px;
+  border: 1px solid #e4e7ec;
+  border-radius: 7px;
+  background: #fff;
   color: #344054;
   text-align: left;
   cursor: pointer;
+  transition:
+    border-color 0.14s ease,
+    background-color 0.14s ease,
+    box-shadow 0.14s ease;
 }
 
 .generation-scenario-option:hover {
-  background: #f2f4f7;
+  border-color: #d0d5dd;
+  background: #fff;
 }
 
 .generation-scenario-option.is-active {
-  border-left: 2px solid #1677ff;
-  background: #eaf3ff;
-  color: #0958d9;
+  border-color: #d59aa5;
+  background: #fff5f6;
+  box-shadow: 0 0 0 2px rgb(182 15 45 / 6%);
+  color: #7f1d1d;
 }
 
 .generation-scenario-option-name {
@@ -1935,20 +2060,53 @@ async function onSave() {
   white-space: nowrap;
 }
 
+.generation-prompt-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.generation-prompt-pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 8px;
+}
+
+.generation-prompt-pane-head > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.generation-prompt-pane-head span {
+  color: #98a2b3;
+  font-size: 11px;
+}
+
+.generation-prompt-pane-head strong {
+  overflow: hidden;
+  color: #344054;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .generation-prompt-list {
-  overflow-y: auto;
-  padding: 10px;
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
+  overflow: visible;
 }
 
 .generation-prompt-item {
-  padding: 10px 11px;
+  padding: 11px 12px;
   border: 1px solid #e4e7ec;
-  border-radius: 4px;
+  border-radius: 8px;
   background: #fff;
-}
-
-.generation-prompt-item + .generation-prompt-item {
-  margin-top: 8px;
+  overflow: visible;
 }
 
 .generation-prompt-item-heading {
@@ -1964,43 +2122,35 @@ async function onSave() {
 }
 
 .generation-prompt-tags {
-  margin: 5px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 7px 0 0;
+}
+
+.generation-prompt-tags :deep(.ant-tag) {
+  margin: 0;
   color: #667085;
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .generation-prompt-content {
-  margin: 8px 0 0;
+  margin: 9px 0 0;
+  padding: 9px 10px;
+  border-radius: 6px;
+  background: #f8f9fb;
   color: #475467;
   font-family: inherit;
   font-size: 12px;
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 7;
-  overflow: hidden;
-}
-
-.generation-prompt-content.is-expanded {
-  display: block;
   overflow: visible;
-}
-
-.generation-prompt-toggle {
-  margin-top: 6px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #1677ff;
-  font-size: 12px;
-  cursor: pointer;
 }
 
 .generation-scenarios-state {
   display: grid;
-  min-height: 120px;
+  min-height: 76px;
   padding: 16px;
   place-items: center;
   color: #98a2b3;
@@ -2536,23 +2686,17 @@ async function onSave() {
     grid-template-columns: 1fr;
   }
 
-  .generation-scenarios-content {
-    grid-template-columns: 1fr;
-    max-height: 420px;
-  }
-
   .generation-scenario-list {
-    display: flex;
-    max-height: 120px;
-    border-right: 0;
-    border-bottom: 1px solid #e4e7ec;
+    max-height: 160px;
+    overflow-y: auto;
   }
 
   .generation-scenario-option {
-    flex: 0 0 180px;
-    min-height: 58px;
-    border-right: 1px solid #eaecf0;
-    border-bottom: 0;
+    flex-basis: 160px;
+  }
+
+  .generation-scenarios-heading-actions > span:not(.generation-scenarios-count) {
+    display: none;
   }
 
   .channel-editor-columns {

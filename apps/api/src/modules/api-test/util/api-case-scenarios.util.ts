@@ -20,15 +20,11 @@ const SERVICE_SCENARIOS: Record<ApiServiceProperty, ApiCaseScenarioKey[]> = {
   query_non_accounting: [
     "positive_flow",
     "pagination",
-    "required_fields",
-    "all_fields_empty",
   ],
   query_accounting: [
     "positive_flow",
     "pagination",
-    "required_fields",
     "precision",
-    "all_fields_empty",
   ],
   management_non_accounting: [
     "positive_flow",
@@ -36,7 +32,6 @@ const SERVICE_SCENARIOS: Record<ApiServiceProperty, ApiCaseScenarioKey[]> = {
     "related_fields",
     "enum",
     "idempotency",
-    "all_fields_empty",
   ],
   management_accounting: [
     "positive_flow",
@@ -45,7 +40,6 @@ const SERVICE_SCENARIOS: Record<ApiServiceProperty, ApiCaseScenarioKey[]> = {
     "enum",
     "precision",
     "idempotency",
-    "all_fields_empty",
   ],
   accounting: [
     "positive_flow",
@@ -55,7 +49,6 @@ const SERVICE_SCENARIOS: Record<ApiServiceProperty, ApiCaseScenarioKey[]> = {
     "accounting_business",
     "related_fields",
     "idempotency",
-    "all_fields_empty",
   ],
   reversal: [
     "positive_flow",
@@ -65,10 +58,9 @@ const SERVICE_SCENARIOS: Record<ApiServiceProperty, ApiCaseScenarioKey[]> = {
     "accounting_business",
     "related_fields",
     "idempotency",
-    "all_fields_empty",
   ],
-  file: ["positive_flow", "idempotency", "all_fields_empty"],
-  push: ["positive_flow", "idempotency", "all_fields_empty"],
+  file: ["positive_flow", "idempotency"],
+  push: ["positive_flow", "idempotency"],
 };
 
 export function scenariosForProperty(property: ApiServiceProperty) {
@@ -80,6 +72,7 @@ export function scenariosForProperty(property: ApiServiceProperty) {
 
 export interface ScenarioAiCase {
   title: string;
+  description?: string;
   polarity: "positive" | "negative";
   changes: Array<{ path: string; value: string }>;
   expected?: string;
@@ -170,11 +163,12 @@ export function extractFieldsByRequirement(structuredMarkdown: string): {
 }
 
 export function buildScenarioPrompts(input: {
-  scenarioKey: ApiCaseScenarioKey;
+  scenarioKey: string;
   scenarioName: string;
   structuredMarkdown: string;
   transactionCode: string;
-  serviceProperty: ApiServiceProperty;
+  serviceProperty: string;
+  scenarioPromptText?: string;
 }): Array<{ prompt: string; inputFieldCount: number }> {
   const basic = extractApiDocSection(input.structuredMarkdown, "基础信息");
   const service = extractApiDocSection(input.structuredMarkdown, "服务信息");
@@ -183,10 +177,16 @@ export function buildScenarioPrompts(input: {
     `你正在为银行接口的「${input.scenarioName}」场景生成测试案例。`,
     "先判断场景是否适用；不适用时 cases 返回空数组并说明原因。",
     "适用时仅返回字段修改计划，不返回完整请求报文。",
-    "只输出一个 JSON 对象：{applicable,reason,cases:[{title,polarity,changes:[{path,value}],expected}]}。",
+    "只输出一个 JSON 对象：{applicable,reason,cases:[{title,description,polarity,changes:[{path,value}],expected}]}。",
+    "title 必须简要描述“业务场景 + 业务规则或被测条件”，不得只写字段名，不得包含案例编号；示例：反向-省份列表查询-分页参数非法。",
+    "description 必须描述用例设计目标，建议格式：{角色}在{业务场景}中执行{交易或操作}时，{输入或触发条件}，预期{结果}，用于验证{业务规则}是否正确。",
+    "文档未提供角色时使用“系统用户”，不得编造角色；description 不得为空，不得只写错误码或重复 title。",
     'polarity 只能取英文枚举值 "positive"（正向案例）或 "negative"（反向案例），不得输出「正向」「反向」等中文取值。',
     "changes.path 必须使用请求字段完整路径；不得编造请求字段。",
-    `场景规则：${scenarioRule(input.scenarioKey)}`,
+    `场景规则：${
+      input.scenarioPromptText?.trim() ||
+      scenarioRule(input.scenarioKey)
+    }`,
     `交易码：${input.transactionCode}`,
     `服务属性：${input.serviceProperty}`,
     `服务名称：${getApiDocFieldValue(basic, "服务名称(中)") || getApiDocFieldValue(basic, "服务名称")}`,
@@ -238,12 +238,25 @@ export function validateScenarioAiResult(
   );
   const seen = new Set<string>();
   result.cases = result.cases.filter((item) => {
+    item.title = String(item.title ?? "").trim();
+    item.expected = String(item.expected ?? "").trim();
+    item.description = normalizeCaseDescription(
+      item.title,
+      item.description,
+      item.expected,
+    );
     item.changes = item.changes.filter((change) => {
       const path = allowed.get(change.path.toLowerCase());
       if (path) change.path = path;
       return Boolean(path);
     });
-    if (!item.changes.length && item.polarity === "negative") return false;
+    if (
+      !item.title ||
+      !item.description ||
+      (!item.changes.length && item.polarity === "negative")
+    ) {
+      return false;
+    }
     const key = `${item.title}|${JSON.stringify(item.changes)}`;
     if (seen.has(key)) return false;
     seen.add(key);
@@ -253,7 +266,7 @@ export function validateScenarioAiResult(
 }
 
 export function assertScenarioCoverage(
-  scenarioKey: ApiCaseScenarioKey,
+  scenarioKey: string,
   result: ScenarioAiResult,
   structuredMarkdown?: string,
 ) {
@@ -275,9 +288,12 @@ export function assertScenarioCoverage(
   if (scenarioKey === "idempotency" && result.cases.length !== 1) {
     throw new Error("幂等性场景必须生成 1 条案例");
   }
-  if (scenarioKey === "pagination" && positive < 2) {
+  if (
+    scenarioKey === "pagination" &&
+    (result.cases.length !== 4 || positive !== 4)
+  ) {
     throw new Error(
-      "分页场景必须至少生成 2 条覆盖分页实效的正向案例（如首页查询、翻页生效）",
+      "分页场景必须生成 4 条正向案例（单页、多页、单条、多条）",
     );
   }
   if (scenarioKey === "all_fields_empty" && result.cases.length !== 1) {
@@ -362,16 +378,15 @@ function assertEachFieldHasPolarities(
   }
 }
 
-function scenarioRule(key: ApiCaseScenarioKey) {
+function scenarioRule(key: string) {
   switch (key) {
     case "positive_flow":
       return "生成1条成功正向案例。";
     case "pagination":
       return [
-        "按字段代码、中文名称和描述的语义识别分页，不限固定命名：page/pageNo/pageNum、size/pageSize/limit/rowCount/perPage 及名称含“页码/页数/每页/查询条数”的字段；start/startSize/startIndex/beginRow/offset 及名称含“开始条数/起始条数/起始位置/偏移量”的字段。存在页大小加起始位置（如 size+start、size+startSize）也适用；字段语义有歧义时以中文名称和描述为准。",
-        "起始值必须遵循文档或示例报文：示例 start=1 时正向首条使用 1，不得按习惯改成 0；只有文档明确为零基偏移量时才使用 0。不适用时说明具体原因。",
-        "适用时生成以下「分页实效」案例：① 首页查询：页码取起始值、页大小取文档默认值或示例值，预期成功且返回条数不超过页大小；② 翻页生效：页码加 1（起始位置模式则起始位置加页大小），页大小不变，预期成功且返回数据与上一页不重复；③ 最小页大小：页大小=1，预期成功且仅返回 1 条；④ 页码超末页：页码取远超最大页数的值，预期成功且列表为空（文档规定报错时按文档）。",
-        "反向 1~2 条：页码为负数或非数字、页大小为 0/负数；文档规定页大小上限时须覆盖超上限。每条案例的预期结果须写明分页实效验证点。",
+        "按字段代码、中文名称和描述的语义识别页码和页大小字段，不限固定命名。",
+        "起始值和默认页大小必须遵循文档或示例报文，不得自行改成零基偏移量。",
+        "适用时固定生成 4 条正向案例：① 单页：结果总数不超过一个页大小；② 多页：至少存在两页数据，翻页后结果与上一页不重复；③ 单条：页大小为 1 时只返回 1 条；④ 多条：页大小大于 1 时返回不超过页大小的多条数据。",
       ].join(" ");
     case "required_fields":
       return [
@@ -393,6 +408,8 @@ function scenarioRule(key: ApiCaseScenarioKey) {
       return "生成利率超界、余额不足、非本人扣款账户、未传密码、金额或利率超范围等适用的涉账异常案例。";
     case "all_fields_empty":
       return "生成 1 条请求报文每个字段均置为空值的反向案例，验证接口校验能力。";
+    default:
+      return "";
   }
 }
 
@@ -416,6 +433,13 @@ export function parseScenarioAiResult(text: string): ScenarioAiResult | null {
       )
       .map((item) => ({
         ...item,
+        title: item.title.trim(),
+        expected: String(item.expected ?? "").trim(),
+        description: normalizeCaseDescription(
+          item.title.trim(),
+          item.description,
+          item.expected,
+        ),
         polarity: normalizePolarity(item.polarity),
         changes: item.changes
           .filter((change) => change && typeof change.path === "string")
@@ -428,6 +452,17 @@ export function parseScenarioAiResult(text: string): ScenarioAiResult | null {
   } catch {
     return null;
   }
+}
+
+function normalizeCaseDescription(
+  title: string,
+  description: unknown,
+  expected: unknown,
+) {
+  const explicit = String(description ?? "").trim();
+  if (explicit) return explicit;
+  const expectedText = String(expected ?? "").trim();
+  return `系统用户在“${title || "当前接口"}”业务场景中执行交易操作时，触发对应业务规则，预期${expectedText || "接口完成预期业务处理"}，用于验证该业务规则是否正确。`;
 }
 
 /** AI 偶尔把枚举值翻成中文，统一归一为文档约定的英文取值 */

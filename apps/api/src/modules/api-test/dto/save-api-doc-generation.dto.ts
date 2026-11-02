@@ -5,10 +5,11 @@ import {
   IsIn,
   IsNotEmpty,
   IsString,
+  Matches,
+  MaxLength,
   ValidateNested,
 } from "class-validator";
 import { Type } from "class-transformer";
-import { API_SERVICE_PROPERTIES } from "@case-forge/shared";
 
 class ApiDocChannelDto {
   @IsString() @IsNotEmpty({ message: "渠道标识不能为空" }) id!: string;
@@ -18,9 +19,11 @@ class ApiDocChannelDto {
 }
 
 export class SaveApiDocGenerationDto {
-  @ApiProperty({ enum: API_SERVICE_PROPERTIES })
-  @IsIn(API_SERVICE_PROPERTIES)
-  serviceProperty!: (typeof API_SERVICE_PROPERTIES)[number];
+  @ApiProperty({ example: "query_non_accounting" })
+  @IsString()
+  @MaxLength(64)
+  @Matches(/^[a-z][a-z0-9_]*$/)
+  serviceProperty!: string;
 
   @IsIn(["http", "socket"])
   transport!: "http" | "socket";

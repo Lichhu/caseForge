@@ -19,6 +19,27 @@ export interface DefaultApiScenarioDefinition {
   prompts: DefaultApiScenarioPrompt[];
 }
 
+export const DEFAULT_API_SCENARIO_KEYS: Record<string, string> = {
+  正向流程: "positive_flow",
+  必填参数检验: "required_fields",
+  关联字段组合: "related_fields",
+  精度校验: "precision",
+  枚举: "enum",
+  页码和页大小: "pagination",
+  幂等性校验: "idempotency",
+  业务场景: "accounting_business",
+  全字段空值校验: "all_fields_empty",
+};
+
+/** 系统默认场景旧名称到当前名称的迁移映射。 */
+export const DEFAULT_API_SCENARIO_RENAMES: Record<string, string> = {
+  必填参数校验: "必填参数检验",
+  字段关联校验: "关联字段组合",
+  枚举值校验: "枚举",
+  分页参数校验: "页码和页大小",
+  涉帐业务场景: "业务场景",
+};
+
 export const DEFAULT_API_SCENARIOS: DefaultApiScenarioDefinition[] = [
   {
     name: "正向流程",
@@ -31,6 +52,7 @@ export const DEFAULT_API_SCENARIOS: DefaultApiScenarioDefinition[] = [
         content: [
           "优先生成正向（caseType=正）案例，覆盖接口文档中的核心业务成功路径。",
           "请求报文使用合法、典型的字段取值；预期结果明确成功响应断言（HTTP 写状态码，TCP 写 bizResCode/关键节点，见「通讯与报文格式」）。",
+          "响应耗时默认要求小于 2 秒；外部系统数据源接口可按实际环境调整阈值，但必须在预期结果或 remark 中明确。",
           "若文档标注服务属性为查询类/管理类/账务类等，案例名称与描述应体现对应业务语义。",
           "同一接口至少 1 条高优先级（priority=高）正向案例。",
         ].join("\n"),
@@ -42,7 +64,7 @@ export const DEFAULT_API_SCENARIOS: DefaultApiScenarioDefinition[] = [
     ],
   },
   {
-    name: "必填参数校验",
+    name: "必填参数检验",
     description: "功能：参数名与是否必填",
     category: "功能",
     isActive: true,
@@ -55,6 +77,7 @@ export const DEFAULT_API_SCENARIOS: DefaultApiScenarioDefinition[] = [
           "- 传空字符串或仅空格；",
           "- 传 null（若字段类型允许）。",
           "每条案例仅变更一个必填字段，其余字段保持合法取值。",
+          "存在非必填字段时，再生成 1 条正向案例，将所有非必填字段置为空值，必填字段保持合法取值。",
           "预期结果应包含明确的业务/参数错误提示或约定错误码，不得返回成功。",
           "若文档无必填字段标注，则跳过本提示词。",
         ].join("\n"),
@@ -71,7 +94,7 @@ export const DEFAULT_API_SCENARIOS: DefaultApiScenarioDefinition[] = [
         ].join("\n"),
         tags: ["参数名", "反向"],
         sortOrder: 2,
-        isActive: true,
+        isActive: false,
         isDefault: false,
       },
     ],
@@ -101,7 +124,7 @@ export const DEFAULT_API_SCENARIOS: DefaultApiScenarioDefinition[] = [
     ],
   },
   {
-    name: "字段关联校验",
+    name: "关联字段组合",
     description: "功能：字段之间的业务关联",
     category: "功能",
     isActive: true,
@@ -143,7 +166,7 @@ export const DEFAULT_API_SCENARIOS: DefaultApiScenarioDefinition[] = [
     ],
   },
   {
-    name: "枚举值校验",
+    name: "枚举",
     description: "功能：枚举取值覆盖与非法枚举",
     category: "功能",
     isActive: true,
@@ -155,6 +178,7 @@ export const DEFAULT_API_SCENARIOS: DefaultApiScenarioDefinition[] = [
           "- 若枚举个数少（≤5），正向案例尽量全量覆盖各枚举值；",
           "- 若枚举个数多，正向覆盖文档备注的生产常用值；",
           "- 反向：传文档中不存在的枚举值。",
+          "- 存在交易类型等枚举字段时，补充新增成功、修改成功、删除成功各 1 条正向案例。",
           "非法枚举预期：有明确报错信息，或说明是否兜底为默认值。",
         ].join("\n"),
         tags: ["枚举", "码值"],
@@ -165,7 +189,7 @@ export const DEFAULT_API_SCENARIOS: DefaultApiScenarioDefinition[] = [
     ],
   },
   {
-    name: "分页参数校验",
+    name: "页码和页大小",
     description: "通用规则：页码与页大小",
     category: "通用规则",
     isActive: true,
@@ -173,11 +197,12 @@ export const DEFAULT_API_SCENARIOS: DefaultApiScenarioDefinition[] = [
       {
         name: "分页异常与功能",
         content: [
-          "若接口文档存在分页字段（页码/pageNum/pageNo、页大小/pageSize/limit 等），生成案例：",
-          "【反向-页码】负数(-1)、特殊符号(%)、超大值(99999999)、类型错误(中文/英文/浮点1.2)、空值(空格/空串)；",
-          "【反向-页大小】同上，另加 null；",
-          "【正向-功能】页码传第1页、第2页；页大小传10、20；",
-          "【缺参】不传页码和页大小，验证是否有默认分页与默认页大小。",
+          "若接口文档存在页码和页大小字段（页码/pageNum/pageNo、页大小/pageSize/limit 等），固定生成 4 条正向案例：",
+          "- 单页：结果总数不超过一个页大小；",
+          "- 多页：至少存在两页数据，翻页后结果与上一页不重复；",
+          "- 单条：页大小为 1 时只返回 1 条；",
+          "- 多条：页大小大于 1 时返回不超过页大小的多条数据。",
+          "正例必须遵循文档或示例报文中的起始值、默认页大小及字段命名。",
           "无分页字段则跳过。",
         ].join("\n"),
         tags: ["分页", "pageNum", "pageSize"],
@@ -230,7 +255,7 @@ export const DEFAULT_API_SCENARIOS: DefaultApiScenarioDefinition[] = [
     ],
   },
   {
-    name: "涉帐业务场景",
+    name: "业务场景",
     description: "涉帐接口：结合业务交互设计场景",
     category: "涉帐接口",
     isActive: true,
@@ -319,6 +344,26 @@ export const DEFAULT_API_SCENARIOS: DefaultApiScenarioDefinition[] = [
         sortOrder: 1,
         isActive: true,
         isDefault: false,
+      },
+    ],
+  },
+  {
+    name: "全字段空值校验",
+    description: "通用规则：请求报文字段全部置空",
+    category: "通用规则",
+    isActive: true,
+    prompts: [
+      {
+        name: "全字段空值",
+        content: [
+          "将请求报文中的每个字段均置为空值，生成 1 条反向案例。",
+          "预期接口应校验失败或返回明确错误提示，不得将全空报文处理成功。",
+          "该场景由平台直接生成完整空值报文，提示词用于说明业务预期。",
+        ].join("\n"),
+        tags: ["全字段空值", "反向"],
+        sortOrder: 1,
+        isActive: true,
+        isDefault: true,
       },
     ],
   },

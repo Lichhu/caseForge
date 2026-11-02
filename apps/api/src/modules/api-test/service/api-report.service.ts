@@ -7,6 +7,7 @@ import { InjectRepository } from "@nestjs/typeorm";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 import { In, Repository } from "typeorm";
+import JSZip from "jszip";
 import {
   applyPdfCjkFont,
   formatRunItemStatus,
@@ -24,9 +25,22 @@ import { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
 import { ApiTransactionEntity } from "@api-test/entity/api-transaction.entity";
 import { ApiTestEnvironmentEntity } from "@api-test/entity/api-test-environment.entity";
 import { ApiReportExportEntity } from "@api-test/entity/api-report-export.entity";
+import { ApiTestReportConfigEntity } from "@api-test/entity/api-test-report-config.entity";
+import { ApiRequirementEntity } from "@requirement-platform/entity/api-requirement.entity";
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { auditFieldsForCreate } from "@common/audit/request-context";
+import { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
 import { ApiExecutionService } from "./api-execution.service";
+import {
+  buildRiskAnalysisRows,
+  buildRiskClassificationPrompt,
+  isProjectTypeVersion,
+  shortenRequirementNo,
+  validateRiskClassifications,
+  type ProjectRiskClassification,
+  type ProjectRiskSourceCase,
+} from "@api-test/util/api-project-report-risk.util";
+import { buildProjectReportDocx } from "@api-test/util/api-project-report-docx.util";
 
 function sanitizeExportFileToken(value: string) {
   return value
@@ -34,6 +48,14 @@ function sanitizeExportFileToken(value: string) {
     .replace(/[\u0000-\u001F\u007F]/g, "_")
     .replace(/[\\/:*?"<>|]/g, "_")
     .replace(/\s+/g, "_");
+}
+
+function sanitizeReportToken(value: string) {
+  return value
+    .trim()
+    .replace(/[\u0000-\u001F\u007F]/g, "_")
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/\s+/g, " ");
 }
 
 function buildExportFileName(
@@ -65,9 +87,7 @@ function buildRequirementExportFileName(
   const ext = format === "xlsx" ? "xlsx" : format;
   const req = sanitizeExportFileToken(requirementNo);
   if (records.length === 1) {
-    const transactionCode = sanitizeExportFileToken(
-      records[0].transactionCode,
-    );
+    const transactionCode = sanitizeExportFileToken(records[0].transactionCode);
     const runId = sanitizeExportFileToken(records[0].runId);
     return `${req ? `${req}_` : ""}${transactionCode}_${runId}.${ext}`;
   }
@@ -84,6 +104,11 @@ type RequirementReportEntry = {
   run: RunDetail;
   context: Partial<ApiReportContext>;
 };
+type RequirementReportFormat = "xlsx" | "pdf" | "html" | "docx";
+
+const PROJECT_REPORT_CONTENT_TYPE =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const PROJECT_REPORT_CONFIG_KEYS = ["reviewer_name", "approver_name"] as const;
 
 @Injectable()
 export class ApiReportService {
@@ -101,6 +126,11 @@ export class ApiReportService {
     private readonly transactionRepo: Repository<ApiTransactionEntity>,
     @InjectRepository(ApiReportExportEntity)
     private readonly exportRepo: Repository<ApiReportExportEntity>,
+    @InjectRepository(ApiRequirementEntity)
+    private readonly requirementRepo: Repository<ApiRequirementEntity>,
+    @InjectRepository(ApiTestReportConfigEntity)
+    private readonly reportConfigRepo: Repository<ApiTestReportConfigEntity>,
+    private readonly aiWorkflow: AiWorkflowService,
   ) {}
 
   async recordExport(input: {
@@ -267,6 +297,7 @@ export class ApiReportService {
     fileName: string;
     contentType: string;
     selections: RequirementReportSelection[];
+    format: RequirementReportFormat;
   }> {
     const uniqueSelections = [
       ...new Map(
@@ -280,10 +311,22 @@ export class ApiReportService {
       throw new BadRequestException("请至少选择一条执行历史");
     }
 
-    const project = await this.projectRepo.findOne({
-      where: { id: projectId },
-      select: ["id", "title", "requirementNo"],
-    });
+    const [project, linkedRequirement] = await Promise.all([
+      this.projectRepo.findOne({
+        where: { id: projectId },
+        select: ["id", "title", "requirementNo"],
+      }),
+      this.requirementRepo.findOne({
+        where: { claimedProjectId: projectId },
+      }),
+    ]);
+    const requirement =
+      linkedRequirement ??
+      (project?.requirementNo?.trim()
+        ? await this.requirementRepo.findOne({
+            where: { projectCode: project.requirementNo.trim() },
+          })
+        : null);
     const entries: RequirementReportEntry[] = [];
     for (const selection of uniqueSelections) {
       const transaction = await this.transactionRepo.findOne({
@@ -322,6 +365,7 @@ export class ApiReportService {
     }
 
     const requirementNo =
+      requirement?.projectCode?.trim() ||
       entries[0].transaction.reqCode?.trim() ||
       project?.requirementNo?.trim() ||
       project?.title?.trim() ||
@@ -339,6 +383,20 @@ export class ApiReportService {
       runId: entry.run.id,
     }));
 
+    if (isProjectTypeVersion(requirement?.versionName)) {
+      return this.exportProjectRequirementReport({
+        projectId,
+        requirementNo,
+        requirementName:
+          requirement?.projectName?.trim() ||
+          project?.title?.trim() ||
+          requirementNo,
+        draftName: requirement?.claimedByName?.trim() || "—",
+        entries,
+        normalizedSelections,
+      });
+    }
+
     if (format === "xlsx") {
       return {
         buffer: await this.toRequirementExcel(entries),
@@ -346,6 +404,7 @@ export class ApiReportService {
         contentType:
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         selections: normalizedSelections,
+        format,
       };
     }
     if (format === "html") {
@@ -365,6 +424,7 @@ export class ApiReportService {
         fileName,
         contentType: "text/html; charset=utf-8",
         selections: normalizedSelections,
+        format,
       };
     }
     return {
@@ -372,7 +432,187 @@ export class ApiReportService {
       fileName,
       contentType: "application/pdf",
       selections: normalizedSelections,
+      format,
     };
+  }
+
+  private async exportProjectRequirementReport(input: {
+    projectId: string;
+    requirementNo: string;
+    requirementName: string;
+    draftName: string;
+    entries: RequirementReportEntry[];
+    normalizedSelections: RequirementReportSelection[];
+  }) {
+    const configs = await this.loadProjectReportConfig();
+    const [riskRows, zipBuffer] = await Promise.all([
+      this.classifyProjectReportRisks(input.entries),
+      this.buildProjectReportHtmlZip(input.requirementNo, input.entries),
+    ]);
+    const totalCases = input.entries.reduce(
+      (sum, entry) => sum + entry.run.totalCount,
+      0,
+    );
+    const passedCases = input.entries.reduce(
+      (sum, entry) => sum + entry.run.passedCount,
+      0,
+    );
+    const failedCases = input.entries.reduce(
+      (sum, entry) => sum + entry.run.failedCount + entry.run.errorCount,
+      0,
+    );
+    const passRate =
+      totalCases > 0 ? ((passedCases / totalCases) * 100).toFixed(2) : "0.00";
+    const overview =
+      `本次共选择 ${new Set(input.entries.map((entry) => entry.transaction.id)).size} 个交易、` +
+      `${input.entries.length} 个执行历史，执行案例 ${totalCases} 条，` +
+      `通过 ${passedCases} 条，失败/错误 ${failedCases} 条，总通过率 ${passRate}%。`;
+    const conclusion =
+      failedCases === 0 && totalCases > 0
+        ? "本次接口测试通过。"
+        : "本次接口测试不通过，详见风险分析及执行报告。";
+    const zipFileName = `${input.requirementNo}接口测试报告.zip`;
+    const docx = await buildProjectReportDocx({
+      requirementNo: input.requirementNo,
+      requirementNoShort: shortenRequirementNo(input.requirementNo),
+      projectName: input.requirementName,
+      draftName: input.draftName,
+      reviewerName: configs.reviewerName,
+      approverName: configs.approverName,
+      overview,
+      conclusion,
+      riskRows,
+      zipFileName,
+      zipBuffer,
+    });
+
+    return {
+      buffer: docx,
+      fileName: `${input.requirementNo}接口测试报告.docx`,
+      contentType: PROJECT_REPORT_CONTENT_TYPE,
+      selections: input.normalizedSelections,
+      format: "docx" as const,
+    };
+  }
+
+  private async loadProjectReportConfig() {
+    const rows = await this.reportConfigRepo.find({
+      where: { configKey: In([...PROJECT_REPORT_CONFIG_KEYS]) },
+    });
+    const values = new Map(
+      rows.map((row) => [row.configKey, row.configValue?.trim() ?? ""]),
+    );
+    const reviewerName = values.get("reviewer_name") ?? "";
+    const approverName = values.get("approver_name") ?? "";
+    if (!reviewerName || !approverName) {
+      throw new BadRequestException("未配置报告审核人或批准人");
+    }
+    return { reviewerName, approverName };
+  }
+
+  private async buildProjectReportHtmlZip(
+    requirementNo: string,
+    entries: RequirementReportEntry[],
+  ) {
+    const groups = new Map<string, RequirementReportEntry[]>();
+    for (const entry of entries) {
+      const group = groups.get(entry.transaction.id) ?? [];
+      group.push(entry);
+      groups.set(entry.transaction.id, group);
+    }
+
+    const zip = new JSZip();
+    for (const group of groups.values()) {
+      const transaction = group[0].transaction;
+      const html = buildApiRequirementReportHtml(
+        group.map((entry) => ({
+          transactionCode: entry.transaction.code,
+          transactionName: entry.transaction.name,
+          run: entry.run,
+          context: entry.context,
+        })),
+        requirementNo,
+      );
+      const fileName =
+        `接口质量测试报告-${sanitizeReportToken(transaction.code)}-` +
+        `${sanitizeReportToken(transaction.name || "未命名交易")}.html`;
+      zip.file(fileName, html);
+    }
+    return zip.generateAsync({
+      type: "nodebuffer",
+      compression: "DEFLATE",
+      compressionOptions: { level: 6 },
+    });
+  }
+
+  private async classifyProjectReportRisks(entries: RequirementReportEntry[]) {
+    if (!this.aiWorkflow.canUseAiChat()) {
+      throw new BadRequestException("风险分析分类失败，请稍后重试");
+    }
+
+    const sourceCases = new Map<string, ProjectRiskSourceCase>();
+    for (const entry of entries) {
+      for (const item of entry.run.items) {
+        if (!sourceCases.has(item.caseId)) {
+          sourceCases.set(item.caseId, {
+            caseId: item.caseId,
+            title: item.caseTitle,
+          });
+        }
+      }
+    }
+    const caseIds = [...sourceCases.keys()];
+    const caseRows = caseIds.length
+      ? await this.caseRepo.find({
+          where: { id: In(caseIds) },
+          select: [
+            "id",
+            "caseNo",
+            "title",
+            "description",
+            "metadata",
+            "polarity",
+          ],
+          withDeleted: true,
+        })
+      : [];
+    for (const row of caseRows) {
+      sourceCases.set(row.id, {
+        caseId: row.id,
+        caseNo: row.caseNo,
+        title: row.title,
+        description: row.description,
+        scenarioName: row.metadata?.scenarioName,
+        scenarioKey: row.metadata?.scenarioKey,
+        polarity: row.polarity,
+      });
+    }
+
+    try {
+      const cases = [...sourceCases.values()];
+      const classifications: ProjectRiskClassification[] = [];
+      for (let index = 0; index < cases.length; index += 40) {
+        const chunk = cases.slice(index, index + 40);
+        const rows = await this.aiWorkflow.runWithAiChatJsonArray<unknown>(
+          buildRiskClassificationPrompt(chunk),
+          undefined,
+          { context: "项目类报告风险分类" },
+        );
+        classifications.push(...validateRiskClassifications(chunk, rows));
+      }
+      const executionCases = entries.flatMap((entry) =>
+        entry.run.items.map((item) => ({
+          caseId: item.caseId,
+          caseNo: sourceCases.get(item.caseId)?.caseNo,
+          title: item.caseTitle,
+          transactionCode: entry.transaction.code,
+          status: item.status,
+        })),
+      );
+      return buildRiskAnalysisRows(executionCases, classifications);
+    } catch {
+      throw new BadRequestException("风险分析分类失败，请稍后重试");
+    }
   }
 
   private async resolveExportFileName(
@@ -456,11 +696,11 @@ export class ApiReportService {
       selectedTransaction
         ? Promise.resolve(selectedTransaction)
         : run.transactionId
-        ? this.transactionRepo.findOne({
-            where: { id: run.transactionId },
-            select: ["id", "code", "name"],
-          })
-        : null,
+          ? this.transactionRepo.findOne({
+              where: { id: run.transactionId },
+              select: ["id", "code", "name"],
+            })
+          : null,
       this.projectRepo.findOne({
         where: { id: run.projectId },
         select: ["id", "title", "requirementNo"],

@@ -12,7 +12,13 @@
       <aside class="scenario-manager-list">
         <div class="list-toolbar action-toolbar action-toolbar--compact">
           <strong>场景库</strong>
-          <a-button type="primary" @click="createEmptyScenario">新增场景</a-button>
+          <a-button
+            v-if="!readonly"
+            type="primary"
+            @click="createEmptyScenario"
+          >
+            新增场景
+          </a-button>
         </div>
         <div class="scenario-list-scroll">
           <div
@@ -28,6 +34,7 @@
             <a-input
               :value="item.name"
               :maxlength="FIELD_LIMITS.scenarioName"
+              :readonly="readonly"
               show-count
               class="scenario-name-input"
               placeholder="场景名称"
@@ -43,11 +50,13 @@
                 <a-switch
                   size="small"
                   :checked="Boolean(item.isActive)"
+                  :disabled="readonly"
                   @mousedown.stop
                   @change="(checked: boolean) => toggleScenarioActive(item, checked)"
                 />
               </div>
               <a-button
+                v-if="!readonly"
                 type="text"
                 danger
                 size="small"
@@ -64,7 +73,12 @@
       <section class="scenario-manager-editor">
         <div class="list-toolbar action-toolbar action-toolbar--compact">
           <strong>提示词包</strong>
-          <a-button type="primary" :disabled="!activeScenario" @click="addPromptRow">
+          <a-button
+            v-if="!readonly"
+            type="primary"
+            :disabled="!activeScenario"
+            @click="addPromptRow"
+          >
             新增提示词
           </a-button>
         </div>
@@ -84,6 +98,7 @@
               class="scenario-prompt-textarea"
               :auto-size="{ minRows: 3, maxRows: 32 }"
               :maxlength="FIELD_LIMITS.promptContent"
+              :readonly="readonly"
               show-count
               placeholder="请输入提示词内容"
               @update:value="(value: string) => handlePromptContentInput(record.id, value)"
@@ -95,11 +110,19 @@
                 <a-switch
                   size="small"
                   :checked="record.isActive"
+                  :disabled="readonly"
                   @change="(checked: boolean) => togglePromptActive(record, checked)"
                 />
                 <span>{{ record.isActive ? '启用' : '停用' }}</span>
               </div>
-              <a-button type="link" danger @click="confirmDeletePrompt(record.id)">删除</a-button>
+              <a-button
+                v-if="!readonly"
+                type="link"
+                danger
+                @click="confirmDeletePrompt(record.id)"
+              >
+                删除
+              </a-button>
             </div>
           </article>
           <a-empty
@@ -117,6 +140,7 @@
       </span>
       <a-button @click="closeScenarioModal">关闭</a-button>
       <a-button
+        v-if="!readonly"
         type="primary"
         :loading="scenarioSaveUi === 'saving'"
         :disabled="!activeScenario || (!activeScenarioDirty && scenarioSaveUi !== 'error')"
@@ -142,9 +166,11 @@ import { configureAppMessage, configureScenarioModalMessage } from '@/utils/glob
 const props = withDefaults(
   defineProps<{
     scope?: ScenarioScope;
+    readonly?: boolean;
   }>(),
   {
     scope: SCENARIO_SCOPE_CASE,
+    readonly: false,
   },
 );
 

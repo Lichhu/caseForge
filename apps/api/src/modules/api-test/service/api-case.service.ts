@@ -51,7 +51,6 @@ import {
   assertScenarioCoverage,
   parseScenarioAiResult,
   validateScenarioAiResult,
-  type ApiCaseScenarioKey,
 } from "@api-test/util/api-case-scenarios.util";
 import { assembleBodyFromExample } from "@api-test/util/api-case-body-assembler.util";
 import { extractRequestFieldPaths } from "@api-test/util/api-case-scenarios.util";
@@ -536,6 +535,7 @@ export class ApiCaseService {
     });
     if (!endpoint || !job.snapshot)
       throw new BadRequestException("没有可生成案例的接口端点");
+    const caseActionName = transaction.name || transaction.code || endpoint.name;
     const tasks = await this.scenarioRepo.find({
       where: { jobId: job.id },
       order: { createdAt: "ASC" },
@@ -561,8 +561,10 @@ export class ApiCaseService {
             cases: [
               {
                 title: "正向流程",
+                description: `系统用户执行${caseActionName}正常交易时，使用合法请求参数并遵循示例报文，预期接口处理成功并返回正确业务结果，用于验证核心业务流程是否符合预期。`,
                 polarity: "positive" as const,
                 changes: [],
+                expected: "接口返回成功并返回正确业务结果",
               },
             ],
           };
@@ -607,6 +609,7 @@ export class ApiCaseService {
             cases: [
               {
                 title: "全字段空值",
+                description: `系统用户执行${caseActionName}交易时，请求报文中全部业务字段置为空值，预期接口拒绝处理并返回明确参数校验错误，用于验证全字段空值校验规则是否正确。`,
                 polarity: "negative" as const,
                 changes: fieldPaths.map((path) => ({ path, value: "" })),
                 expected:
@@ -631,11 +634,16 @@ export class ApiCaseService {
           continue;
         }
         const prompts = buildScenarioPrompts({
-          scenarioKey: task.scenarioKey as ApiCaseScenarioKey,
+          scenarioKey: task.scenarioKey,
           scenarioName: task.scenarioName,
           structuredMarkdown: job.snapshot.structuredMarkdown,
           transactionCode: transaction.code,
           serviceProperty: job.snapshot.profile.serviceProperty,
+          scenarioPromptText: job.snapshot.generationScenarios
+            ?.find((scenario) => scenario.key === task.scenarioKey)
+            ?.prompts.sort((a, b) => a.sortOrder - b.sortOrder)
+            .map((prompt) => prompt.content)
+            .join("\n\n"),
         });
         task.promptChars = prompts.reduce(
           (sum, item) => sum + item.prompt.length,
@@ -674,7 +682,7 @@ export class ApiCaseService {
           job.snapshot.structuredMarkdown,
         );
         assertScenarioCoverage(
-          task.scenarioKey as ApiCaseScenarioKey,
+          task.scenarioKey,
           result,
           job.snapshot.structuredMarkdown,
         );
@@ -731,6 +739,7 @@ export class ApiCaseService {
     task: ApiCaseGenerateScenarioEntity,
     plans: Array<{
       title: string;
+      description?: string;
       polarity: "positive" | "negative";
       changes: Array<{ path: string; value: string }>;
       expected?: string;
@@ -738,6 +747,9 @@ export class ApiCaseService {
   ) {
     if (!job.snapshot) return 0;
     const profile = job.snapshot.profile;
+    const generationScenario = job.snapshot.generationScenarios?.find(
+      (scenario) => scenario.key === task.scenarioKey,
+    );
     const channels = profile.channels.length ? profile.channels : [null];
     let seq = await maxCaseNoSuffix(
       this.caseRepo,
@@ -789,7 +801,8 @@ export class ApiCaseService {
             endpointId: endpoint.id,
             title,
             caseNo: formatCaseNo(transactionCode, seq),
-            description: plan.expected ?? "",
+            description: plan.description ?? "",
+            remark: plan.expected ?? "",
             transactionCode,
             owner: RequestContext.getUserName(),
             priority: "P1",
@@ -812,6 +825,7 @@ export class ApiCaseService {
               versionCode: job.versionCode ?? undefined,
               scenarioTaskId: task.id,
               scenarioKey: task.scenarioKey,
+              promptIds: generationScenario?.promptIds ?? [],
               channelId: channel?.id,
               channelName: channel?.name,
               channelSnapshot: channel

@@ -31,7 +31,7 @@ export interface ApiDocChannel {
 }
 
 export interface ApiDocGenerationProfile {
-  serviceProperty: ApiServiceProperty;
+  serviceProperty: string;
   transport: "http" | "socket";
   messageFormat: "json" | "xml" | "text";
   exampleMessage: string;

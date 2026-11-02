@@ -7,6 +7,8 @@ import { SYSTEM_OWNER } from "@common/audit/user-scope";
 import { PromptEntity } from "@scenario/entity/prompt.entity";
 import { ScenarioEntity } from "@scenario/entity/scenario.entity";
 import {
+  DEFAULT_API_SCENARIO_KEYS,
+  DEFAULT_API_SCENARIO_RENAMES,
   DEFAULT_API_SCENARIOS,
   type DefaultApiScenarioDefinition,
 } from "./default-api-scenarios";
@@ -35,11 +37,32 @@ async function upsertScenario(
   });
 
   if (!scenario) {
+    const previousName = Object.entries(DEFAULT_API_SCENARIO_RENAMES).find(
+      ([, nextName]) => nextName === definition.name,
+    )?.[0];
+    if (previousName) {
+      scenario = await scenarioRepo.findOne({
+        where: {
+          name: previousName,
+          scope: SCENARIO_SCOPE_API,
+          createdBy: SYSTEM_OWNER,
+        },
+        relations: ["prompts"],
+      });
+      if (scenario) {
+        scenario.name = definition.name;
+        await scenarioRepo.save(scenario);
+      }
+    }
+  }
+
+  if (!scenario) {
     scenario = await scenarioRepo.save(
       scenarioRepo.create({
         name: definition.name,
         description: definition.description,
         category: definition.category,
+        generationKey: DEFAULT_API_SCENARIO_KEYS[definition.name] ?? null,
         scope: SCENARIO_SCOPE_API,
         isActive: definition.isActive,
         createdBy: SYSTEM_OWNER,
@@ -47,15 +70,11 @@ async function upsertScenario(
       }),
     );
   } else {
-    await scenarioRepo.save(
-      scenarioRepo.create({
-        ...scenario,
-        description: definition.description,
-        category: definition.category,
-        isActive: definition.isActive,
-        modifiedBy: SYSTEM_OWNER,
-      }),
-    );
+    const generationKey = DEFAULT_API_SCENARIO_KEYS[definition.name] ?? null;
+    if (scenario.generationKey !== generationKey) {
+      scenario.generationKey = generationKey;
+      await scenarioRepo.save(scenario);
+    }
   }
 
   const existingPrompts = await promptRepo.find({
@@ -64,15 +83,11 @@ async function upsertScenario(
   const existingByName = new Map(
     existingPrompts.map((prompt) => [prompt.name, prompt]),
   );
-  const keepIds = new Set<string>();
-
   for (const promptDef of definition.prompts) {
     const current = existingByName.get(promptDef.name);
     if (current) {
-      keepIds.add(current.id);
-      await promptRepo.save(
-        promptRepo.create({
-          ...current,
+      if ((current.modifiedBy || SYSTEM_OWNER) === SYSTEM_OWNER) {
+        Object.assign(current, {
           content: promptDef.content,
           tags: promptDef.tags,
           sortOrder: promptDef.sortOrder,
@@ -80,12 +95,13 @@ async function upsertScenario(
           isActive: promptDef.isActive,
           isDefault: promptDef.isDefault,
           modifiedBy: SYSTEM_OWNER,
-        }),
-      );
+        });
+        await promptRepo.save(current);
+      }
       continue;
     }
 
-    const created = await promptRepo.save(
+    await promptRepo.save(
       promptRepo.create({
         scenarioId: scenario.id,
         name: promptDef.name,
@@ -100,13 +116,5 @@ async function upsertScenario(
         modifiedBy: SYSTEM_OWNER,
       }),
     );
-    keepIds.add(created.id);
-  }
-
-  const staleIds = existingPrompts
-    .filter((prompt) => prompt.isSystem && !keepIds.has(prompt.id))
-    .map((prompt) => prompt.id);
-  if (staleIds.length) {
-    await promptRepo.softDelete(staleIds);
   }
 }

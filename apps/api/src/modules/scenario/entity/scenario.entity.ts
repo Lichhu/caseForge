@@ -37,6 +37,10 @@ export class ScenarioEntity extends SoftDeletableEntity {
   @Column()
   category: string;
 
+  /** 接口案例生成内置规则标识；自定义场景为空。 */
+  @Column({ type: "varchar", length: 64, nullable: true })
+  generationKey?: string;
+
   /** 场景归属：case=案例动态指令，api=接口测试 */
   @Column({ length: 16, default: "case" })
   scope: ScenarioScope;

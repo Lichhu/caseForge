@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+  <defs>
+    <linearGradient id="folder" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd56a"/>
+      <stop offset="1" stop-color="#f3a627"/>
+    </linearGradient>
+  </defs>
+  <path fill="#d88a12" d="M8 18h31l7 9h42v57H8z"/>
+  <path fill="url(#folder)" d="M8 27h80v49H8z"/>
+  <path fill="#fff8df" d="M43 27h12v41H43z"/>
+  <path fill="#5f6670" d="M46 31h6v9h-6zm0 13h6v9h-6zm0 13h6v9h-6z"/>
+  <path fill="#303740" d="M45 61h8v8h-8z"/>
+</svg>

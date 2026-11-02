@@ -30,6 +30,48 @@ describe("parseScenarioAiResult", () => {
     expect(result?.cases[0].changes[0].value).toBe("1");
   });
 
+  it("keeps an explicit business-oriented case description", () => {
+    const result = parseScenarioAiResult(
+      JSON.stringify({
+        applicable: true,
+        reason: "适用",
+        cases: [
+          {
+            title: "反向-省份列表查询-分页参数非法",
+            description:
+              "系统用户在省份列表查询场景中执行分页查询时传入非法页码，预期接口拒绝处理并返回参数错误，用于验证页码校验规则是否正确。",
+            polarity: "negative",
+            changes: [{ path: "Transaction/Body/request/bizBody/pageNum", value: "-1" }],
+            expected: "接口返回参数错误",
+          },
+        ],
+      }),
+    );
+
+    expect(result?.cases[0].description).toContain("系统用户在省份列表查询场景");
+    expect(result?.cases[0].description).toContain("用于验证页码校验规则");
+  });
+
+  it("builds a compatible description when AI omits it", () => {
+    const result = parseScenarioAiResult(
+      JSON.stringify({
+        applicable: true,
+        cases: [
+          {
+            title: "反向-客户号为空",
+            polarity: "negative",
+            changes: [{ path: "Transaction/Body/request/bizBody/custNo", value: "" }],
+            expected: "接口提示客户号不能为空",
+          },
+        ],
+      }),
+    );
+
+    expect(result?.cases[0].description).toBe(
+      "系统用户在“反向-客户号为空”业务场景中执行交易操作时，触发对应业务规则，预期接口提示客户号不能为空，用于验证该业务规则是否正确。",
+    );
+  });
+
   it("trims change paths before validation", () => {
     const result = parseScenarioAiResult(
       JSON.stringify({
@@ -238,25 +280,26 @@ describe("assertScenarioCoverage", () => {
     changes: [{ path: "Transaction/Body/request/bizBody/value", value: "1" }],
   });
 
-  it("requires at least two positive pagination effectiveness cases", () => {
+  it("requires exactly four positive pagination effectiveness cases", () => {
     expect(() =>
       assertScenarioCoverage("pagination", {
         applicable: true,
         reason: "分页字段存在",
         cases: [testCase("positive")],
       }),
-    ).toThrow("分页实效");
+    ).toThrow("4 条正向案例");
   });
 
-  it("accepts pagination results with two positive cases", () => {
+  it("accepts pagination results with the required four positive cases", () => {
     expect(() =>
       assertScenarioCoverage("pagination", {
         applicable: true,
         reason: "分页字段存在",
         cases: [
-          { title: "首页查询", polarity: "positive", changes: [] },
-          { title: "翻页生效", polarity: "positive", changes: [] },
-          testCase("negative"),
+          { title: "单页", polarity: "positive", changes: [] },
+          { title: "多页", polarity: "positive", changes: [] },
+          { title: "单条", polarity: "positive", changes: [] },
+          { title: "多条", polarity: "positive", changes: [] },
         ],
       }),
     ).not.toThrow();
@@ -304,6 +347,25 @@ describe("assertScenarioCoverage", () => {
 });
 
 describe("buildScenarioPrompts", () => {
+  it("requires business-oriented titles and independent descriptions", () => {
+    const prompt = buildScenarioPrompts({
+      scenarioKey: "required_fields",
+      scenarioName: "必填参数检验",
+      structuredMarkdown: [
+        "请求报文",
+        "----",
+        "节点路径 | 节点代码 | 节点名称 | 节点类型 | 数据类型 | 长度 | 是否必填 | 描述",
+        "Transaction/Body/request/bizBody | custNo | 客户号 | 单节点 | VARCHAR2 | 20 | Y |",
+      ].join("\n"),
+      transactionCode: "0101",
+      serviceProperty: "management_non_accounting",
+    })[0].prompt;
+
+    expect(prompt).toContain("title 必须简要描述");
+    expect(prompt).toContain("description 必须描述用例设计目标");
+    expect(prompt).toContain("文档未提供角色时使用“系统用户”");
+  });
+
   it("recognizes nonstandard pagination field names", () => {
     const prompt = buildScenarioPrompts({
       scenarioKey: "pagination",
@@ -319,12 +381,11 @@ describe("buildScenarioPrompts", () => {
       serviceProperty: "query_non_accounting",
     })[0].prompt;
 
-    expect(prompt).toContain("start/startSize/startIndex/beginRow/offset");
-    expect(prompt).toContain("size+start、size+startSize");
-    expect(prompt).toContain("示例 start=1 时正向首条使用 1");
-    expect(prompt).toContain("分页实效");
-    expect(prompt).toContain("翻页生效");
-    expect(prompt).toContain("页码超末页");
+    expect(prompt).toContain("固定生成 4 条正向案例");
+    expect(prompt).toContain("单页");
+    expect(prompt).toContain("多页");
+    expect(prompt).toContain("单条");
+    expect(prompt).toContain("多条");
   });
 });
 
@@ -340,9 +401,9 @@ describe("all_fields_empty scenario", () => {
     "push",
   ];
 
-  it("is registered for every service property", () => {
+  it("is not part of the default service-property mapping", () => {
     for (const property of properties) {
-      expect(scenariosForProperty(property).map((item) => item.key)).toContain(
+      expect(scenariosForProperty(property).map((item) => item.key)).not.toContain(
         "all_fields_empty",
       );
     }
@@ -385,10 +446,12 @@ describe("required_fields scenario", () => {
     "Transaction/Body/request/bizBody | REMARK | 备注 | 单节点 | VARCHAR2 | 200 | 条件必填 |",
   ].join("\n");
 
-  it("is registered for both query service properties", () => {
+  it("is registered for management and accounting service properties", () => {
     for (const property of [
-      "query_non_accounting",
-      "query_accounting",
+      "management_non_accounting",
+      "management_accounting",
+      "accounting",
+      "reversal",
     ] as ApiServiceProperty[]) {
       expect(scenariosForProperty(property)).toContainEqual({
         key: "required_fields",
@@ -449,6 +512,20 @@ describe("required_fields scenario", () => {
     expect(prompt).toContain("必填字段：逐个生成反向案例");
     expect(prompt).toContain("全部非必填字段置为空值");
     expect(prompt).toContain("至少传其一");
+  });
+
+  it("uses the configured database prompt instead of the built-in rule", () => {
+    const prompt = buildScenarioPrompts({
+      scenarioKey: "required_fields",
+      scenarioName: "必填参数检验",
+      structuredMarkdown: doc,
+      transactionCode: "0101",
+      serviceProperty: "query_accounting",
+      scenarioPromptText: "数据库配置规则：只验证客户号缺失。",
+    })[0].prompt;
+
+    expect(prompt).toContain("数据库配置规则：只验证客户号缺失。");
+    expect(prompt).not.toContain("必填字段：逐个生成反向案例");
   });
 
   it("requires a negative case for every required field", () => {

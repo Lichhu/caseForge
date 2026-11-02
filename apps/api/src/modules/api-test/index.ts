@@ -31,6 +31,7 @@ import { ApiDataFunctionEntity } from "./entity/api-data-function.entity";
 import { ApiStepLibraryEntity } from "./entity/api-step-library.entity";
 import { ApiStepDebugRecordEntity } from "./entity/api-step-debug-record.entity";
 import { ApiReportExportEntity } from "./entity/api-report-export.entity";
+import { ApiTestReportConfigEntity } from "./entity/api-test-report-config.entity";
 import { ApiDocService } from "./service/api-doc.service";
 import { ApiCaseService } from "./service/api-case.service";
 import { ApiCaseGenerateQueueService } from "./service/api-case-generate-queue.service";
@@ -47,6 +48,7 @@ import { ApiPreproductionRunService } from "./service/api-preproduction-run.serv
 import { ApiDataFunctionService } from "./service/api-data-function.service";
 import { SqlStepRunnerService } from "./service/sql-step-runner.service";
 import { ApiStepLibraryService } from "./service/api-step-library.service";
+import { ScenarioModule } from "@scenario/index";
 
 @Module({
   imports: [
@@ -73,12 +75,14 @@ import { ApiStepLibraryService } from "./service/api-step-library.service";
       ApiStepLibraryEntity,
       ApiStepDebugRecordEntity,
       ApiReportExportEntity,
+      ApiTestReportConfigEntity,
       CaseProjectEntity,
       ApiRequirementEntity,
     ]),
     NotifyModule,
     MinioStorageModule,
     AiWorkflowModule,
+    ScenarioModule,
   ],
   controllers: [ApiTestController],
   providers: [

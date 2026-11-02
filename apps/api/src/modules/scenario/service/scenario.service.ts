@@ -1,7 +1,11 @@
 /**
  * @file 场景与提示词库业务服务
  */
-import { BadRequestException, Injectable } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+} from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import {
   SavePromptDto,
@@ -15,6 +19,8 @@ import {
   type ScenarioScope,
 } from "@case-forge/shared";
 import { In, Repository } from "typeorm";
+import { RequestContext } from "@common/audit/request-context";
+import { ApiRequirementDispatcherEntity } from "@requirement-platform/entity/api-requirement-dispatcher.entity";
 import {
   assertAccessible,
   assertOwned,
@@ -33,12 +39,17 @@ export class ScenarioService {
     private readonly scenarioRepo: Repository<ScenarioEntity>,
     @InjectRepository(PromptEntity)
     private readonly promptRepo: Repository<PromptEntity>,
+    @InjectRepository(ApiRequirementDispatcherEntity)
+    private readonly dispatcherRepo: Repository<ApiRequirementDispatcherEntity>,
   ) {}
 
   /** 按归属列出系统预置与当前用户维护的场景及其提示词 */
   async listScenarios(scope: ScenarioScope = SCENARIO_SCOPE_CASE) {
     const rows = await this.scenarioRepo.find({
-      where: scopedWhereWithSystem({ scope }),
+      where:
+        scope === "api"
+          ? { scope }
+          : scopedWhereWithSystem({ scope }),
       relations: ["prompts"],
       order: {
         updatedAt: "DESC",
@@ -70,12 +81,17 @@ export class ScenarioService {
         },
       },
     });
+    if (scenario?.scope === "api") return scenario;
     assertAccessible(scenario, "场景");
     return scenario;
   }
 
-  private async getOwnedScenario(id: string) {
+  private async getEditableScenario(id: string) {
     const scenario = await this.findScenarioEntity(id);
+    if (scenario.scope === "api") {
+      await this.assertDispatcher();
+      return scenario;
+    }
     assertOwned(scenario, "场景");
     return scenario;
   }
@@ -86,12 +102,14 @@ export class ScenarioService {
    */
   async createScenario(dto: SaveScenarioDto) {
     const scope = normalizeScenarioScope(dto.scope, SCENARIO_SCOPE_CASE);
+    if (scope === "api") await this.assertDispatcher();
     await this.ensureScenarioNameUnique(dto.name.trim(), scope);
     const scenario = await this.scenarioRepo.save(
       this.scenarioRepo.create({
         name: dto.name.trim(),
         description: dto.description?.trim() || "",
         category: dto.category.trim(),
+        generationKey: dto.generationKey?.trim() || undefined,
         scope,
         isActive: dto.isActive ?? true,
       }),
@@ -109,7 +127,7 @@ export class ScenarioService {
    * @param dto - 保存载荷
    */
   async updateScenario(id: string, dto: SaveScenarioDto) {
-    const scenario = await this.getOwnedScenario(id);
+    const scenario = await this.getEditableScenario(id);
     await this.ensureScenarioNameUnique(dto.name.trim(), scenario.scope, id);
     await this.scenarioRepo.save(
       this.scenarioRepo.create({
@@ -117,6 +135,10 @@ export class ScenarioService {
         name: dto.name.trim(),
         description: dto.description?.trim() || "",
         category: dto.category.trim(),
+        generationKey:
+          dto.generationKey !== undefined
+            ? dto.generationKey.trim() || scenario.generationKey
+            : scenario.generationKey,
         isActive: dto.isActive !== undefined ? dto.isActive : scenario.isActive,
       }),
     );
@@ -132,13 +154,13 @@ export class ScenarioService {
    * @param id - 场景 ID
    */
   async deleteScenario(id: string) {
-    const scenario = await this.getOwnedScenario(id);
+    const scenario = await this.getEditableScenario(id);
     await this.scenarioRepo.softRemove(scenario);
     return { id, deleted: true };
   }
 
   private async replacePrompts(scenarioId: string, prompts: SavePromptDto[]) {
-    await this.getOwnedScenario(scenarioId);
+    await this.getEditableScenario(scenarioId);
     const existing = await this.promptRepo.find({
       where: scopedWhere({ scenarioId }),
       select: ["id"],
@@ -161,7 +183,10 @@ export class ScenarioService {
     excludeId?: string,
   ) {
     const existing = await this.scenarioRepo.findOne({
-      where: scopedWhereWithSystem({ name, scope }),
+      where:
+        scope === "api"
+          ? { name, scope }
+          : scopedWhereWithSystem({ name, scope }),
     });
     if (existing && existing.id !== excludeId) {
       throw new BadRequestException(`场景名称「${name}」已存在`);
@@ -200,6 +225,15 @@ export class ScenarioService {
     );
     if (entities.length) {
       await this.promptRepo.save(entities);
+    }
+  }
+
+  private async assertDispatcher() {
+    const isDispatcher = await this.dispatcherRepo.exists({
+      where: { userName: RequestContext.getUserName() },
+    });
+    if (!isDispatcher) {
+      throw new ForbiddenException("仅分发人可维护接口测试场景与提示词");
     }
   }
 }

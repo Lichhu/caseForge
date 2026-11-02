@@ -1,4 +1,5 @@
 import { http } from "@/api/client";
+import type { ScenarioLibraryItem } from "@/api/client";
 import {
   DEFAULT_CASE_FORGE_PAGE_SIZE,
   normalizeCaseForgePageSize,
@@ -60,6 +61,33 @@ export interface ApiTransactionRow {
     fileName: string;
     createdAt: string;
   } | null;
+}
+
+export interface ApiServicePropertyConfigRow {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  scenarioIds: string[];
+  sortOrder: number;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ApiGenerationConfigResponse {
+  canEdit: boolean;
+  rows: ApiServicePropertyConfigRow[];
+  scenarios: ScenarioLibraryItem[];
+}
+
+export interface SaveApiServicePropertyPayload {
+  code: string;
+  name: string;
+  description?: string;
+  scenarioIds: string[];
+  sortOrder?: number;
+  isActive?: boolean;
 }
 
 export interface SmpTransactionCandidate {
@@ -1057,7 +1085,7 @@ async function readBlobPrefix(blob: Blob, length = 8) {
 
 async function assertExportBlobFormat(
   blob: Blob,
-  format: "xlsx" | "pdf" | "html",
+  format: "xlsx" | "pdf" | "html" | "docx",
 ) {
   const prefix = await readBlobPrefix(blob, 16);
   if (prefix.trimStart().startsWith("{")) {
@@ -1078,6 +1106,9 @@ async function assertExportBlobFormat(
   }
   if (format === "xlsx" && !prefix.startsWith("PK")) {
     throw new Error("导出 Excel 失败：服务端返回了非 xlsx 内容");
+  }
+  if (format === "docx" && !prefix.startsWith("PK")) {
+    throw new Error("导出 Word 报告失败：服务端返回了非 DOCX 内容");
   }
 }
 
@@ -1124,7 +1155,10 @@ export async function exportRequirementReport(
   const blob = new Blob([response.data], {
     type: contentType || undefined,
   });
-  await assertExportBlobFormat(blob, format);
+  await assertExportBlobFormat(
+    blob,
+    contentType.includes("wordprocessingml") ? "docx" : format,
+  );
   const headerDisposition = response.headers["content-disposition"];
   const fileName =
     parseContentDispositionFileName(
@@ -1771,4 +1805,43 @@ export async function exportCaseTemplate(payload: {
     }),
     fileName,
   };
+}
+
+export async function getApiGenerationConfig() {
+  return (
+    await http.get<ApiGenerationConfigResponse>(
+      "api-generation-config/service-properties",
+    )
+  ).data;
+}
+
+export async function createApiGenerationServiceProperty(
+  payload: SaveApiServicePropertyPayload,
+) {
+  return (
+    await http.post<ApiServicePropertyConfigRow>(
+      "api-generation-config/service-properties",
+      payload,
+    )
+  ).data;
+}
+
+export async function updateApiGenerationServiceProperty(
+  id: string,
+  payload: SaveApiServicePropertyPayload,
+) {
+  return (
+    await http.patch<ApiServicePropertyConfigRow>(
+      `api-generation-config/service-properties/${id}`,
+      payload,
+    )
+  ).data;
+}
+
+export async function deleteApiGenerationServiceProperty(id: string) {
+  return (
+    await http.delete<{ id: string; deleted: boolean }>(
+      `api-generation-config/service-properties/${id}`,
+    )
+  ).data;
 }
