@@ -124,7 +124,7 @@
               </div>
               <div v-if="canEdit" class="pool-member-actions" role="cell">
                 <a-button
-                  v-if="!item.isDispatcher || item.userName !== 'system'"
+                  v-if="canRemoveMember(item)"
                   type="text"
                   size="small"
                   danger
@@ -134,7 +134,9 @@
                   <template #icon><DeleteOutlined /></template>
                   移出
                 </a-button>
-                <span v-else class="pool-protected">不可移出</span>
+                <span v-else-if="item.isDispatcher" class="pool-protected">
+                  通知管理员移出
+                </span>
             </div>
             </div>
 
@@ -174,6 +176,7 @@ import {
   searchPoolCandidates,
   type RequirementPoolMember,
 } from "@/api/requirementPlatform";
+import { getUserName } from "@/utils/userContext";
 
 const props = withDefaults(
   defineProps<{
@@ -184,6 +187,7 @@ const props = withDefaults(
 
 const loading = ref(false);
 const saving = ref(false);
+const currentUserName = getUserName();
 const candidatesLoading = ref(false);
 const members = ref<RequirementPoolMember[]>([]);
 const candidates = ref<Array<{ userName: string; nickName: string }>>([]);
@@ -217,6 +221,12 @@ function memberInitial(member: RequirementPoolMember) {
   return (member.nickName?.trim() || member.userName?.trim() || "?")
     .slice(0, 1)
     .toUpperCase();
+}
+
+function canRemoveMember(member: RequirementPoolMember) {
+  if (!props.canEdit) return false;
+  if (!member.isDispatcher) return true;
+  return currentUserName === "system";
 }
 
 function formatJoinedAt(value: string) {
@@ -283,8 +293,8 @@ async function removeUser(member: RequirementPoolMember) {
   saving.value = true;
   try {
     if (member.isDispatcher) {
-      if (member.userName === "system") {
-        message.warning("system 分发人不可移除");
+      if (currentUserName !== "system") {
+        message.warning("仅 system 分发人可移除分发人");
         return;
       }
       await removeDispatcher(member.id.replace(/^dispatcher:/, ""));

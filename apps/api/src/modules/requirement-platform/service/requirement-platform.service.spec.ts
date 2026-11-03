@@ -196,10 +196,41 @@ describe("RequirementPlatformService", () => {
     );
 
     await expect(
-      RequestContext.run("alice", () =>
+      RequestContext.run("system", () =>
         service.removeDispatcher("dispatcher-system"),
       ),
     ).rejects.toThrow("system 分发人不可移除");
+  });
+
+  it("only allows the system dispatcher to remove another dispatcher", async () => {
+    const dispatcherRepo = {
+      exists: jest.fn().mockResolvedValue(true),
+      findOne: jest.fn().mockResolvedValue({
+        id: "dispatcher-alice",
+        userName: "alice",
+      }),
+      count: jest.fn().mockResolvedValue(2),
+      softDelete: jest.fn(),
+    };
+    const service = new RequirementPlatformService(
+      {} as any,
+      dispatcherRepo as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await expect(
+      RequestContext.run("alice", () =>
+        service.removeDispatcher("dispatcher-alice"),
+      ),
+    ).rejects.toThrow("仅 system 分发人可移除分发人");
+    expect(dispatcherRepo.softDelete).not.toHaveBeenCalled();
   });
 
   it("does not list the system dispatcher in the requirement pool", async () => {
@@ -285,5 +316,54 @@ describe("RequirementPlatformService", () => {
         nickName: "张三",
       }),
     ]);
+  });
+
+  it("restores a soft-deleted dispatcher instead of inserting a duplicate", async () => {
+    const dispatcherRepo = {
+      exists: jest.fn().mockResolvedValue(true),
+      findOne: jest.fn().mockResolvedValue({
+        id: "dispatcher-wb10517",
+        userName: "wb10517",
+        deletedAt: new Date("2026-10-01T00:00:00.000Z"),
+      }),
+      restore: jest.fn().mockResolvedValue(undefined),
+      update: jest.fn().mockResolvedValue(undefined),
+      findOneByOrFail: jest.fn().mockResolvedValue({
+        id: "dispatcher-wb10517",
+        userName: "wb10517",
+        remark: "恢复后的分发人",
+      }),
+      create: jest.fn(),
+      save: jest.fn(),
+    };
+    const service = new RequirementPlatformService(
+      {} as any,
+      dispatcherRepo as any,
+      {} as any,
+      {} as any,
+      { findOne: jest.fn().mockResolvedValue({ userName: "wb10517" }) } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await expect(
+      RequestContext.run("alice", () =>
+        service.addDispatcher({
+          userName: "wb10517",
+          remark: "恢复后的分发人",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      id: "dispatcher-wb10517",
+      userName: "wb10517",
+    });
+    expect(dispatcherRepo.restore).toHaveBeenCalledWith(
+      "dispatcher-wb10517",
+    );
+    expect(dispatcherRepo.create).not.toHaveBeenCalled();
+    expect(dispatcherRepo.save).not.toHaveBeenCalled();
   });
 });

@@ -358,13 +358,18 @@ export class RequirementPlatformService {
       where: { userName, status: "0", delFlag: "0" },
     });
     if (!user) throw new BadRequestException("用户不存在或已停用");
-    const existing = await this.dispatcherRepo.findOne({ where: { userName } });
-    if (existing) return existing;
-    const member = await this.memberRepo.findOne({
+    const existing = await this.dispatcherRepo.findOne({
       where: { userName },
       withDeleted: true,
     });
-    if (member?.deletedAt) await this.memberRepo.restore(member.id);
+    if (existing?.deletedAt) {
+      await this.dispatcherRepo.restore(existing.id);
+      await this.dispatcherRepo.update(existing.id, {
+        remark: dto.remark?.trim() || null,
+      });
+      return this.dispatcherRepo.findOneByOrFail({ id: existing.id });
+    }
+    if (existing) return existing;
     return this.dispatcherRepo.save(
       this.dispatcherRepo.create({
         userName,
@@ -375,6 +380,9 @@ export class RequirementPlatformService {
 
   async removeDispatcher(id: string) {
     await this.assertDispatcher();
+    if (getScopedUserName() !== "system") {
+      throw new ForbiddenException("仅 system 分发人可移除分发人");
+    }
     const dispatcher = await this.dispatcherRepo.findOne({ where: { id } });
     if (!dispatcher) throw new NotFoundException("分发人不存在");
     if (dispatcher.userName === "system") {
