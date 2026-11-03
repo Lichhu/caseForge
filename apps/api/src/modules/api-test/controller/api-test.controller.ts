@@ -77,6 +77,7 @@ import { SmpSyncTransactionsDto } from "@api-test/dto/smp-sync-transactions.dto"
 import { ListApiCasesDto } from "@api-test/dto/list-api-cases.dto";
 import { ListApiExecutionSetsDto } from "@api-test/dto/list-api-execution-sets.dto";
 import { ListPreproductionRunSetsDto } from "@api-test/dto/list-preproduction-run-sets.dto";
+import { UpdatePreproductionRunSetDto } from "@api-test/dto/update-preproduction-run-set.dto";
 import { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
 import { ApiAssertionGenerateQueueService } from "@api-test/service/api-assertion-generate-queue.service";
 import { ApiDataFunctionService } from "@api-test/service/api-data-function.service";
@@ -282,6 +283,24 @@ export class ApiTestController {
       runSetId,
       body.caseIds ?? [],
     );
+  }
+
+  @Patch(":projectId/preproduction/run-sets/:runSetId")
+  @ApiOperation({ summary: "编辑执行推送集" })
+  updatePreproductionRunSet(
+    @Param("projectId") _projectId: string,
+    @Param("runSetId") runSetId: string,
+    @Body() body: UpdatePreproductionRunSetDto,
+  ) {
+    return this.preproductionRunService.updateRunSet(runSetId, {
+      name: body.name,
+      versionId: body.versionId,
+      versionLabel: body.versionLabel,
+      applicationId: body.applicationId || null,
+      applicationLabel: body.applicationLabel || null,
+      roundId: body.roundId || null,
+      roundLabel: body.roundLabel || null,
+    });
   }
 
   @Get(":projectId/preproduction/run-sets/:runSetId/cases")

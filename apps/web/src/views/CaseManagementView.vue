@@ -321,7 +321,7 @@
               </a-tooltip>
             </template>
           </a-table-column>
-          <a-table-column title="操作" key="actions" width="170">
+          <a-table-column title="操作" key="actions" width="220">
             <template #default="{ record }">
               <a-button
                 type="link"
@@ -338,6 +338,13 @@
                 :loading="runningRunSetId === record.id"
                 @click.stop="executeRunSet(record)"
                 >执行</a-button
+              >
+              <a-button
+                type="link"
+                size="small"
+                :disabled="record.status === 'running' || running"
+                @click.stop="openRunSetEdit(record)"
+                >编辑</a-button
               >
               <a-popconfirm
                 title="确认删除该执行推送集？"
@@ -575,6 +582,48 @@
           :options="createRunSetVersionOptions"
           :loading="createRunSetOptionsLoading"
           placeholder="请选择版本"
+        />
+      </div>
+    </a-modal>
+    <a-modal
+      v-model:open="editRunSetOpen"
+      title="编辑执行推送集"
+      ok-text="保存"
+      :confirm-loading="updatingRunSet"
+      :ok-button-props="{
+        disabled: !editRunSetVersionId || editRunSetOptionsLoading,
+      }"
+      @ok="confirmEditRunSet"
+    >
+      <div class="execution-fields">
+        <label>名称</label>
+        <a-input
+          v-model:value="editRunSetName"
+          placeholder="未命名推送集"
+          allow-clear
+        />
+        <label>版本</label>
+        <a-select
+          v-model:value="editRunSetVersionId"
+          :options="editRunSetVersionOptions"
+          :loading="editRunSetOptionsLoading"
+          placeholder="请选择版本"
+          @change="onEditRunSetVersionChange"
+        />
+        <label>应用</label>
+        <a-select
+          v-model:value="editRunSetApplicationId"
+          :options="editRunSetApplicationOptions"
+          :loading="editRunSetOptionsLoading"
+          :disabled="!editRunSetVersionId || editRunSetOptionsLoading"
+          @change="onEditRunSetApplicationChange"
+        />
+        <label>轮次</label>
+        <a-select
+          v-model:value="editRunSetRoundId"
+          :options="editRunSetRoundOptions"
+          :loading="editRunSetOptionsLoading"
+          :disabled="!editRunSetVersionId || editRunSetOptionsLoading"
         />
       </div>
     </a-modal>
@@ -880,6 +929,7 @@ import {
   runPreproductionCaseAndPush,
   retryPreproductionRunPush,
   createPreproductionRunSet,
+  updatePreproductionRunSet,
   listPreproductionRunSets,
   listPreproductionRunSetRecords,
   listPreproductionRunSetCases,
@@ -977,6 +1027,23 @@ const createRunSetVersionId = ref<string>();
 const createRunSetVersionOptions = ref<Array<{ value: string; label: string }>>(
   [],
 );
+const editRunSetOpen = ref(false);
+const editingRunSet = ref<ApiPreproductionRunSet | null>(null);
+const editRunSetName = ref("");
+const editRunSetVersionId = ref<string>();
+const editRunSetApplicationId = ref<string>("");
+const editRunSetRoundId = ref<string>("");
+const editRunSetVersionOptions = ref<Array<{ value: string; label: string }>>(
+  [],
+);
+const editRunSetApplicationOptions = ref<
+  Array<{ value: string; label: string }>
+>([{ value: "", label: "按案例归属应用" }]);
+const editRunSetRoundOptions = ref<Array<{ value: string; label: string }>>([
+  { value: "", label: "执行时选择" },
+]);
+const editRunSetOptionsLoading = ref(false);
+const updatingRunSet = ref(false);
 const runSetExecutionOpen = ref(false);
 const runSetExecutionTarget = ref<ApiPreproductionRunSet | null>(null);
 const runSetExecutionGroups = ref<ExecutionApplicationGroup[]>([]);
@@ -1435,6 +1502,179 @@ async function confirmCreateRunSet() {
     );
   } finally {
     creatingRunSet.value = false;
+  }
+}
+
+function optionLabel(
+  options: Array<{ value: string; label: string }>,
+  value?: string | null,
+) {
+  if (!value) return null;
+  return options.find((item) => item.value === value)?.label ?? value;
+}
+
+async function loadEditRunSetApplications(versionId: string) {
+  const applications = versionId
+    ? await listExecutionPlans(versionId, "0")
+    : [];
+  editRunSetApplicationOptions.value = [
+    { value: "", label: "按案例归属应用" },
+    ...applications.map((application) => ({
+      value: application.id,
+      label: application.name,
+    })),
+  ];
+}
+
+async function loadEditRunSetRounds(versionId: string, applicationId: string) {
+  const rounds =
+    versionId && applicationId
+      ? await listExecutionPlans(versionId, applicationId)
+      : [];
+  editRunSetRoundOptions.value = [
+    { value: "", label: "执行时选择" },
+    ...rounds.map((round) => ({
+      value: round.id,
+      label: executionRoundLabel(round),
+    })),
+  ];
+}
+
+async function openRunSetEdit(record: ApiPreproductionRunSet) {
+  if (record.status === "running" || running.value) return;
+  editingRunSet.value = record;
+  editRunSetName.value = record.name ?? "";
+  editRunSetVersionId.value = record.versionId;
+  editRunSetApplicationId.value = record.applicationId ?? "";
+  editRunSetRoundId.value = record.roundId ?? "";
+  editRunSetVersionOptions.value = [];
+  editRunSetApplicationOptions.value = [
+    { value: "", label: "按案例归属应用" },
+  ];
+  editRunSetRoundOptions.value = [{ value: "", label: "执行时选择" }];
+  editRunSetOpen.value = true;
+  editRunSetOptionsLoading.value = true;
+  try {
+    const versions = await listExecutionVersions();
+    editRunSetVersionOptions.value = versions.map((item) => ({
+      value: item.id,
+      label: item.name,
+    }));
+    if (
+      !editRunSetVersionOptions.value.some(
+        (item) => item.value === record.versionId,
+      )
+    ) {
+      editRunSetVersionOptions.value.unshift({
+        value: record.versionId,
+        label: record.versionLabel,
+      });
+    }
+    await loadEditRunSetApplications(record.versionId);
+    if (
+      record.applicationId &&
+      !editRunSetApplicationOptions.value.some(
+        (item) => item.value === record.applicationId,
+      )
+    ) {
+      editRunSetApplicationOptions.value.push({
+        value: record.applicationId,
+        label: record.applicationLabel || record.applicationId,
+      });
+    }
+    if (record.applicationId) {
+      await loadEditRunSetRounds(record.versionId, record.applicationId);
+      if (
+        record.roundId &&
+        !editRunSetRoundOptions.value.some(
+          (item) => item.value === record.roundId,
+        )
+      ) {
+        editRunSetRoundOptions.value.push({
+          value: record.roundId,
+          label: record.roundLabel || record.roundId,
+        });
+      }
+    }
+  } catch {
+    message.error("加载执行推送集选项失败，请重试");
+  } finally {
+    editRunSetOptionsLoading.value = false;
+  }
+}
+
+async function onEditRunSetVersionChange(value?: string) {
+  editRunSetApplicationId.value = "";
+  editRunSetRoundId.value = "";
+  editRunSetOptionsLoading.value = true;
+  try {
+    await loadEditRunSetApplications(value ?? "");
+    await loadEditRunSetRounds(value ?? "", "");
+  } catch {
+    message.error("加载版本应用失败，请重试");
+  } finally {
+    editRunSetOptionsLoading.value = false;
+  }
+}
+
+async function onEditRunSetApplicationChange(value?: string) {
+  editRunSetRoundId.value = "";
+  editRunSetOptionsLoading.value = true;
+  try {
+    await loadEditRunSetRounds(editRunSetVersionId.value ?? "", value ?? "");
+  } catch {
+    message.error("加载应用轮次失败，请重试");
+  } finally {
+    editRunSetOptionsLoading.value = false;
+  }
+}
+
+async function confirmEditRunSet() {
+  const record = editingRunSet.value;
+  if (!record || updatingRunSet.value) return;
+  if (!editRunSetVersionId.value) {
+    message.warning("请选择版本");
+    return;
+  }
+  updatingRunSet.value = true;
+  try {
+    const updated = await updatePreproductionRunSet(
+      projectId.value || cases.value[0]?.projectId || "all",
+      record.id,
+      {
+        name: editRunSetName.value.trim() || undefined,
+        versionId: editRunSetVersionId.value,
+        versionLabel:
+          optionLabel(
+            editRunSetVersionOptions.value,
+            editRunSetVersionId.value,
+          ) ?? editRunSetVersionId.value,
+        applicationId: editRunSetApplicationId.value || null,
+        applicationLabel:
+          optionLabel(
+            editRunSetApplicationOptions.value,
+            editRunSetApplicationId.value,
+          ) ?? null,
+        roundId: editRunSetRoundId.value || null,
+        roundLabel:
+          optionLabel(
+            editRunSetRoundOptions.value,
+            editRunSetRoundId.value,
+          ) ?? null,
+      },
+    );
+    if (runSetDetail.value?.id === updated.id) {
+      runSetDetail.value = updated;
+    }
+    editRunSetOpen.value = false;
+    await loadRunSets();
+    message.success("执行推送集已更新");
+  } catch (error) {
+    message.error(
+      error instanceof Error ? error.message : "更新执行推送集失败",
+    );
+  } finally {
+    updatingRunSet.value = false;
   }
 }
 

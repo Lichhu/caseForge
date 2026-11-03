@@ -1622,6 +1622,27 @@ export async function createPreproductionRunSet(
   ).data;
 }
 
+export async function updatePreproductionRunSet(
+  projectId: string,
+  runSetId: string,
+  payload: {
+    name?: string;
+    versionId: string;
+    versionLabel: string;
+    applicationId?: string | null;
+    applicationLabel?: string | null;
+    roundId?: string | null;
+    roundLabel?: string | null;
+  },
+) {
+  return (
+    await http.patch<ApiPreproductionRunSet>(
+      `api-test/${projectId}/preproduction/run-sets/${runSetId}`,
+      payload,
+    )
+  ).data;
+}
+
 export async function attachPreproductionRunSetCases(
   projectId: string,
   runSetId: string,

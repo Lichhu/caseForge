@@ -502,6 +502,10 @@ import {
 } from "@/api/apiTestClient";
 import { NESTED_OVERLAY_Z_INDEX } from "@/constants/overlay-z-index";
 import { versionLabel } from "@/utils/caseManagement";
+import {
+  debugRecordConnected,
+  debugRecordProtocol,
+} from "@/utils/debugRecordStatus.util";
 import PreproductionStepDetailDrawer from "./PreproductionStepDetailDrawer.vue";
 
 const props = defineProps<{
@@ -734,15 +738,6 @@ function onStepUpdated(row: ManagedCaseRow) {
     }
   }
   emit("updated", row);
-}
-
-function debugRecordConnected(record: StepDebugRecordRow) {
-  return !record.record.error && record.record.statusCode > 0;
-}
-
-function debugRecordProtocol(record: StepDebugRecordRow) {
-  const request = record.record.request as { kind?: string } | null;
-  return request?.kind === "db" ? "SQL" : "HTTP";
 }
 
 async function fetchStepDebugHistory(stepId: string, showError = true) {

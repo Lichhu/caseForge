@@ -1131,6 +1131,7 @@ import { clearStepDebugRecords, listStepDebugRecords, listAllApiCases, listDataF
 import type { ApiDatabaseConnectionRow } from '@/api/apiTestClient';
 import { useApiTestStore } from '@/stores/apiTest';
 import { randomUuid } from '@/utils/randomUuid';
+import { debugRecordConnected, debugRecordProtocol } from '@/utils/debugRecordStatus.util';
 import KeyValueRowsEditor from '@/components/api-test/KeyValueRowsEditor.vue';
 import AssertionRowsEditor from '@/components/api-test/AssertionRowsEditor.vue';
 import ApiCaseExportModal from '@/components/api-test/ApiCaseExportModal.vue';
@@ -1966,11 +1967,6 @@ function variableReference(name: string) { return `{{${name}}}`; }
 const debugHistoryOpen = ref(false);
 const debugHistory = ref<Awaited<ReturnType<typeof listStepDebugRecords>>>([]);
 type DebugHistoryRow = Awaited<ReturnType<typeof listStepDebugRecords>>[number];
-function debugRecordConnected(row: DebugHistoryRow) { return !row.record.error && row.record.statusCode > 0; }
-function debugRecordProtocol(row: DebugHistoryRow) {
-  const request = row.record.request as { kind?: string } | null;
-  return request?.kind === 'db' ? 'SQL' : 'HTTP';
-}
 function debugRecordDatabaseLabel(row: DebugHistoryRow) {
   const request = row.record.request as {
     connectionName?: string | null;

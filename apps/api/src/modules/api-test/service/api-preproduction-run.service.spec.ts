@@ -98,7 +98,15 @@ function makeService(options?: {
     execution as never,
     delivery as never,
   );
-  return { service, records, runSets, runSetCases, preproductionCases, execution, delivery };
+  return {
+    service,
+    records,
+    runSets,
+    runSetCases,
+    preproductionCases,
+    execution,
+    delivery,
+  };
 }
 
 describe("ApiPreproductionRunService", () => {
@@ -121,11 +129,16 @@ describe("ApiPreproductionRunService", () => {
     });
 
     const result = await RequestContext.run("alice", () =>
-      service.runCaseAndPush("project-1", "case-1", {
-        versionId: "version-1",
-        applicationId: "application-1",
-        roundId: "round-1",
-      }, "set-1"),
+      service.runCaseAndPush(
+        "project-1",
+        "case-1",
+        {
+          versionId: "version-1",
+          applicationId: "application-1",
+          roundId: "round-1",
+        },
+        "set-1",
+      ),
     );
 
     expect(execution.runCases).toHaveBeenCalledWith(
@@ -313,9 +326,10 @@ describe("ApiPreproductionRunService", () => {
       service.listRunSets({ keyword: " 回归 " }),
     );
 
-    const query = runSets.findAndCount.mock.calls[
-      runSets.findAndCount.mock.calls.length - 1
-    ][0];
+    const query =
+      runSets.findAndCount.mock.calls[
+        runSets.findAndCount.mock.calls.length - 1
+      ][0];
     expect(query.where).toHaveLength(2);
     expect(query.where[0].name.value).toBe("%回归%");
     expect(query.where[1].versionLabel.value).toBe("%回归%");
@@ -349,20 +363,18 @@ describe("ApiPreproductionRunService", () => {
     const { service, runSetCases, execution } = makeService();
     runSetCases.count.mockResolvedValue(1);
     // 第一次 find 用于查已存在成员，第二次用于返回关联后的成员列表。
-    runSetCases.find
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        {
-          id: "member-1",
-          runSetId: "set-1",
-          caseId: "case-1",
-          projectId: "project-1",
-          transactionId: "transaction-1",
-          caseTitle: "准生产案例",
-          sortOrder: 0,
-          createdAt: new Date("2026-10-27T00:00:00.000Z"),
-        },
-      ]);
+    runSetCases.find.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        id: "member-1",
+        runSetId: "set-1",
+        caseId: "case-1",
+        projectId: "project-1",
+        transactionId: "transaction-1",
+        caseTitle: "准生产案例",
+        sortOrder: 0,
+        createdAt: new Date("2026-10-27T00:00:00.000Z"),
+      },
+    ]);
 
     const members = await RequestContext.run("alice", () =>
       service.attachCases("set-1", ["case-1"]),
@@ -449,6 +461,63 @@ describe("ApiPreproductionRunService", () => {
     ).rejects.toThrow("执行推送中的集合不能删除");
     expect(runSets.softDelete).not.toHaveBeenCalled();
     expect(runSetCases.softDelete).not.toHaveBeenCalled();
+  });
+
+  it("updates the execution selection of a non-running push set", async () => {
+    const { service, runSets } = makeService();
+    runSets.findOne.mockResolvedValue({
+      id: "set-1",
+      name: "旧名称",
+      versionId: "version-1",
+      versionLabel: "V1",
+      applicationId: "application-1",
+      applicationLabel: "手机银行",
+      roundId: "round-1",
+      roundLabel: "第一轮",
+      status: "pending",
+      totalCount: 0,
+      completedCount: 0,
+      passedCount: 0,
+      failedCount: 0,
+      errorCount: 0,
+      pushSuccessCount: 0,
+      pushFailedCount: 0,
+      createdBy: "alice",
+      createdAt: new Date("2026-10-27T00:00:00.000Z"),
+    });
+
+    const result = await RequestContext.run("alice", () =>
+      service.updateRunSet("set-1", {
+        name: "新名称",
+        versionId: "version-2",
+        versionLabel: "V2",
+        applicationId: "application-2",
+        applicationLabel: "网上银行",
+        roundId: "round-2",
+        roundLabel: "第二轮",
+      }),
+    );
+
+    expect(result).toMatchObject({
+      name: "新名称",
+      versionId: "version-2",
+      applicationLabel: "网上银行",
+      roundLabel: "第二轮",
+    });
+    expect(runSets.save).toHaveBeenCalled();
+  });
+
+  it("refuses to edit a push set while it is executing", async () => {
+    const { service } = makeService();
+
+    await expect(
+      RequestContext.run("alice", () =>
+        service.updateRunSet("set-1", {
+          versionId: "version-2",
+          versionLabel: "V2",
+        }),
+      ),
+    ).rejects.toThrow("执行推送中的集合不能编辑");
   });
 
   it("refuses to execute a case that is not a member of the push set", async () => {

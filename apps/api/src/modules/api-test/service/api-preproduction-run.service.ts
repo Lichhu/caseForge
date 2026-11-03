@@ -40,6 +40,16 @@ interface CreateRunSetInput {
   totalCount?: number;
 }
 
+interface UpdateRunSetInput {
+  name?: string;
+  versionId: string;
+  versionLabel: string;
+  applicationId?: string | null;
+  applicationLabel?: string | null;
+  roundId?: string | null;
+  roundLabel?: string | null;
+}
+
 type StepSnapshot = {
   stepName?: string;
   status?: string;
@@ -109,8 +119,7 @@ export class ApiPreproductionRunService {
       order: { sortOrder: "DESC" },
     });
     const existingCaseIds = new Set(existing.map((item) => item.caseId));
-    const nextSortOrder =
-      existing.length > 0 ? existing[0].sortOrder + 1 : 0;
+    const nextSortOrder = existing.length > 0 ? existing[0].sortOrder + 1 : 0;
     const additions = cases
       .filter((item) => !existingCaseIds.has(item.id))
       .map((item, index) =>
@@ -129,6 +138,21 @@ export class ApiPreproductionRunService {
     }
     await this.syncRunSetTotal(runSet);
     return this.listRunSetCases(runSetId);
+  }
+
+  async updateRunSet(runSetId: string, input: UpdateRunSetInput) {
+    const runSet = await this.findRunSet(runSetId);
+    if (runSet.status === "running") {
+      throw new BadRequestException("执行推送中的集合不能编辑");
+    }
+    runSet.name = input.name?.trim() || null;
+    runSet.versionId = input.versionId.trim();
+    runSet.versionLabel = input.versionLabel.trim();
+    runSet.applicationId = input.applicationId?.trim() || null;
+    runSet.applicationLabel = input.applicationLabel?.trim() || null;
+    runSet.roundId = input.roundId?.trim() || null;
+    runSet.roundLabel = input.roundLabel?.trim() || null;
+    return toPublicRunSet(await this.runSets.save(runSet));
   }
 
   async detachCase(runSetId: string, caseId: string) {
@@ -173,7 +197,9 @@ export class ApiPreproductionRunService {
 
   /** 关联/取消关联后同步集合的案例总数。 */
   private async syncRunSetTotal(runSet: ApiPreproductionRunSetEntity) {
-    const count = await this.runSetCases.count({ where: { runSetId: runSet.id } });
+    const count = await this.runSetCases.count({
+      where: { runSetId: runSet.id },
+    });
     if (runSet.totalCount === count) return runSet;
     runSet.totalCount = count;
     return this.runSets.save(runSet);
@@ -320,7 +346,9 @@ export class ApiPreproductionRunService {
       throw new BadRequestException("执行未完成，无法单独重试推送");
     }
     if (!record.versionId || !record.applicationId || !record.roundId) {
-      throw new BadRequestException("原执行记录缺少版本、应用或轮次，无法重试推送");
+      throw new BadRequestException(
+        "原执行记录缺少版本、应用或轮次，无法重试推送",
+      );
     }
     return this.pushRecord(record, {
       versionId: record.versionId,
@@ -364,8 +392,7 @@ export class ApiPreproductionRunService {
     record: ApiPreproductionRunRecordEntity,
     error: unknown,
   ) {
-    const message =
-      error instanceof Error ? error.message : "案例步骤执行失败";
+    const message = error instanceof Error ? error.message : "案例步骤执行失败";
     const stepName = /步骤「([^」]+)」/.exec(message)?.[1];
     record.executionStatus = "error";
     record.currentStepName = stepName ?? "执行前校验";
@@ -454,9 +481,7 @@ export class ApiPreproductionRunService {
     runSet.pushFailedCount = completed.filter(
       (row) => row.pushStatus === "failed",
     ).length;
-    const pushPending = completed.some(
-      (row) => row.pushStatus === "pending",
-    );
+    const pushPending = completed.some((row) => row.pushStatus === "pending");
     if (latest.size === 0) {
       // 尚无执行记录：关联了案例但还没开始跑的集合保持「待执行」。
       if (runSet.status !== "running") {
@@ -533,7 +558,7 @@ export class ApiPreproductionRunService {
       stepName:
         status === "passed"
           ? `全部 ${totalSteps} 个步骤执行完成`
-          : failed?.stepName ?? (steps.length ? "案例步骤" : "主请求"),
+          : (failed?.stepName ?? (steps.length ? "案例步骤" : "主请求")),
       error:
         status === "passed"
           ? null
