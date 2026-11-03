@@ -45,7 +45,7 @@ export type ApiPreproductionRunSetStatus =
   | "partial_failed"
   | "failed";
 
-/** 一次“运行推送”或“批量执行”产生的执行推送集。 */
+/** 人工创建并统一执行的执行推送集。 */
 export interface ApiPreproductionRunSet {
   id: string;
   name?: string | null;
@@ -85,6 +85,7 @@ export interface ApiPreproductionRunSetCase {
   caseId: string;
   projectId: string;
   transactionId: string;
+  caseNo?: string | null;
   caseTitle: string;
   sortOrder: number;
   createdAt: string;

@@ -1590,7 +1590,8 @@ export async function runPreproductionCaseAndPush(
     versionId: string;
     applicationId: string;
     roundId: string;
-    runSetId: string;
+    /** 仅从执行推送集触发时传入；手动单条运行不传。 */
+    runSetId?: string;
   },
 ) {
   return (

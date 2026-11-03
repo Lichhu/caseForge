@@ -373,13 +373,12 @@ export class ApiTestController {
       runSetId?: string;
     },
   ) {
-    if (
-      !body.versionId ||
-      !body.applicationId ||
-      !body.roundId ||
-      !body.runSetId
-    ) {
-      throw new BadRequestException("请选择版本、应用和轮次");
+    if (!body.versionId || !body.applicationId || !body.roundId) {
+      const missing: string[] = [];
+      if (!body.versionId) missing.push("版本");
+      if (!body.applicationId) missing.push("应用");
+      if (!body.roundId) missing.push("轮次");
+      throw new BadRequestException(`运行推送缺少${missing.join("、")}`);
     }
     return this.preproductionRunService.runCaseAndPush(
       projectId,
@@ -389,7 +388,7 @@ export class ApiTestController {
         applicationId: body.applicationId,
         roundId: body.roundId,
       },
-      body.runSetId,
+      body.runSetId?.trim() || undefined,
     );
   }
 

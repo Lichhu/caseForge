@@ -111,12 +111,11 @@
               >关联</a-button
             >
             <a-button
+              v-if="selectedCases.length > 1"
               size="small"
-              type="primary"
-              :disabled="loading || selecting"
-              :loading="running"
-              @click="prepareExecution"
-              >执行</a-button
+              :disabled="loading || selecting || running"
+              @click="openBatchEdit"
+              >批量处理</a-button
             >
             <span class="case-action-divider" aria-hidden="true" />
             <a-button
@@ -432,13 +431,18 @@
       @updated="onCaseUpdated"
       @run-push="prepareSingleExecution"
     />
+    <PreproductionBatchEditDrawer
+      v-model:open="batchEditOpen"
+      :case-ids="batchEditCaseIds"
+      @updated="onBatchEditUpdated"
+    />
     <a-modal
       v-model:open="executionOpen"
       :width="680"
       centered
       wrap-class-name="management-dialog"
-      :title="executionCases.length === 1 ? '确认运行推送' : '确认批量执行'"
-      :ok-text="executionCases.length === 1 ? '开始运行推送' : '开始批量执行'"
+      title="确认运行推送"
+      ok-text="开始运行推送"
       :confirm-loading="running"
       :z-index="NESTED_OVERLAY_Z_INDEX"
       :ok-button-props="{
@@ -447,13 +451,11 @@
           !executionRoundValue ||
           Boolean(executionValidationError),
       }"
-      @ok="runSelected"
+      @ok="runSinglePush"
     >
       <p class="dialog-intro">
-        将按顺序执行
-        {{ executionCases.length }} 个案例的完整步骤列表。每个案例生成独立 HTML
-        报告并推送结果到测管；批量执行会在当前案例完成“执行 +
-        推送”后再处理下一条。
+        将执行「{{ executionCases[0]?.title || "当前案例" }}」的完整步骤列表，
+        生成 HTML 报告并推送结果到测管。单条运行推送不会创建或加入执行推送集。
       </p>
       <a-alert
         type="warning"
@@ -486,12 +488,6 @@
               {{ executionValidationError }}
             </span>
             <span v-else>选择版本后自动校验案例归属应用</span>
-            <small
-              v-if="executionApplicationGroups.length > 1"
-              class="execution-application-hint"
-            >
-              多个应用将分别创建执行推送集，仅展示共同可用轮次
-            </small>
           </a-spin>
         </div>
         <label>轮次</label>
@@ -816,7 +812,7 @@
             row-key="id"
             size="small"
             :pagination="false"
-            :scroll="{ x: 1080 }"
+            :scroll="{ x: 1240 }"
             class="run-set-detail-table"
           >
             <a-table-column title="序号" key="sequence" width="70">
@@ -824,7 +820,12 @@
                 {{ Number(record.sortOrder) + 1 }}
               </template>
             </a-table-column>
-            <a-table-column title="案例" data-index="caseTitle" />
+            <a-table-column title="案例编号" key="caseNo" width="180">
+              <template #default="{ record }">
+                {{ record.caseNo || "—" }}
+              </template>
+            </a-table-column>
+            <a-table-column title="案例名称" data-index="caseTitle" />
             <a-table-column title="执行" key="execution" width="120">
               <template #default="{ record }">
                 <a-tag
@@ -943,19 +944,8 @@ import { versionLabel } from "@/utils/caseManagement";
 import { getUserName } from "@/utils/userContext";
 import { NESTED_OVERLAY_Z_INDEX } from "@/constants/overlay-z-index";
 import PreproductionCaseDetailDrawer from "@/components/api-test/PreproductionCaseDetailDrawer.vue";
+import PreproductionBatchEditDrawer from "@/components/api-test/PreproductionBatchEditDrawer.vue";
 
-type Result = {
-  caseId: string;
-  title: string;
-  projectId: string;
-  transactionId: string;
-  execution: string;
-  delivery: string;
-  recordId?: string;
-  runId?: string;
-  reportUrl?: string;
-  publishing?: boolean;
-};
 type ExecutionCase = Pick<
   ManagedCaseRow,
   | "id"
@@ -1075,6 +1065,8 @@ const deleteConfirmSingle = ref(false);
 const detailDrawerOpen = ref(false);
 const detailCase = ref<ManagedCaseRow | null>(null);
 const detailLoading = ref(false);
+const batchEditOpen = ref(false);
+const batchEditCaseIds = ref<string[]>([]);
 const latestRunRecords = ref<Record<string, ApiPreproductionRunRecord>>({});
 const runRecordsOpen = ref(false);
 const runRecordsCase = ref<ManagedCaseRow | null>(null);
@@ -1085,7 +1077,6 @@ const designer = ref<string>();
 const designerOptions = ref<Array<{ value: string; label: string; user: any }>>(
   [],
 );
-const results = ref<Result[]>([]);
 const projectOptions = computed(() => filterOptions.value.projects);
 const transactionOptions = computed(() => filterOptions.value.transactions);
 const applicationOptions = computed(() => filterOptions.value.applications);
@@ -1128,8 +1119,6 @@ const rowSelection = computed(() => ({
     selectedKeys.value = [...rows.keys()];
   },
 }));
-const publishing = computed(() => results.value.some((r) => r.publishing));
-
 function executionStatusLabel(status: ApiPreproductionRunExecutionStatus) {
   return {
     running: "执行中",
@@ -1917,8 +1906,6 @@ async function retryRecordPush(record: ApiPreproductionRunRecord) {
     runRecords.value = runRecords.value.map((item) =>
       item.id === updated.id ? updated : item,
     );
-    const result = results.value.find((item) => item.caseId === updated.caseId);
-    if (result) applyRunRecord(result, updated);
     if (updated.pushStatus === "success") {
       message.success("已重新推送到测管");
     } else {
@@ -2196,24 +2183,14 @@ async function confirmExport() {
     exporting.value = false;
   }
 }
-async function prepareExecution() {
-  await prepareExecutionFor(selectedCases.value);
-}
 async function prepareSingleExecution() {
-  if (!detailCase.value) return;
-  await prepareExecutionFor([detailCase.value]);
-}
-async function prepareExecutionFor(targets: ExecutionCase[]) {
-  if (running.value || publishing.value) return;
-  if (!targets.length) {
-    message.warning("请至少选择一条案例");
+  const target = detailCase.value;
+  if (!target || running.value) return;
+  if (!target.enabled) {
+    message.warning("未启用案例不可运行推送");
     return;
   }
-  if (targets.some((c) => !c.enabled)) {
-    message.warning("选中案例包含未启用案例，请先启用或取消勾选");
-    return;
-  }
-  executionCases.value = targets;
+  executionCases.value = [target];
   executionVersionId.value = undefined;
   executionRoundValue.value = undefined;
   executionValidationError.value = "";
@@ -2231,6 +2208,26 @@ async function prepareExecutionFor(targets: ExecutionCase[]) {
     message.error("加载执行版本失败，请重试");
   } finally {
     executionOptionsLoading.value = false;
+  }
+}
+
+function openBatchEdit() {
+  if (selectedCases.value.length < 2 || running.value) return;
+  batchEditCaseIds.value = selectedCases.value.map((item) => item.id);
+  batchEditOpen.value = true;
+}
+
+function onBatchEditUpdated(rows: ManagedCaseRow[]) {
+  for (const row of rows) {
+    const index = cases.value.findIndex((item) => item.id === row.id);
+    if (index >= 0) cases.value[index] = row;
+    if (selectedRows.value.has(row.id)) {
+      selectedRows.value.set(row.id, {
+        ...selectedRows.value.get(row.id),
+        ...row,
+      });
+    }
+    if (detailCase.value?.id === row.id) detailCase.value = row;
   }
 }
 
@@ -2393,21 +2390,9 @@ async function onExecutionVersionChange(value?: string) {
   }
   await validateExecutionApplications(value);
 }
-function applyRunRecord(result: Result, record: ApiPreproductionRunRecord) {
-  result.recordId = record.id;
-  result.runId = record.runId ?? undefined;
-  result.reportUrl = record.reportUrl ?? undefined;
-  result.execution = executionStatusLabel(record.executionStatus);
-  if (record.pushStatus === "success") {
-    result.delivery = "已推送测管";
-  } else if (record.pushStatus === "failed") {
-    result.delivery = `推送失败：${record.pushError || "未知原因"}`;
-  } else {
-    result.delivery = "推送测管中";
-  }
-}
-async function runSelected() {
-  if (running.value || publishing.value || !executionCases.value.length) return;
+async function runSinglePush() {
+  const testCase = executionCases.value[0];
+  if (running.value || !testCase) return;
   if (!executionVersionId.value || !executionRoundValue.value) {
     message.warning("请选择版本和轮次");
     return;
@@ -2417,95 +2402,39 @@ async function runSelected() {
     return;
   }
   const roundKey = executionRoundValue.value;
-  const groups = executionApplicationGroups.value
-    .map((group) => ({
-      ...group,
-      round: group.rounds.find((round) => executionRoundKey(round) === roundKey),
-    }))
-    .filter(
-      (
-        group,
-      ): group is ExecutionApplicationGroup & { round: ExecutionPlan } =>
-        Boolean(group.round),
-    );
-  if (!groups.length) {
+  const group = executionApplicationGroups.value.find((item) =>
+    item.cases.some((testCaseItem) => testCaseItem.id === testCase.id),
+  );
+  const round = group?.rounds.find(
+    (item) => executionRoundKey(item) === roundKey,
+  );
+  if (!group || !round) {
     message.warning("所选应用没有可用轮次");
     return;
   }
-  const targets = [...executionCases.value];
   const versionId = executionVersionId.value;
-  const versionLabel =
-    executionVersionOptions.value.find((item) => item.value === versionId)
-      ?.label ?? versionId;
   running.value = true;
+  executionOpen.value = false;
   try {
-    results.value = targets.map((c) => ({
-      caseId: c.id,
-      title: c.title,
-      projectId: c.projectId,
-      transactionId: c.transactionId,
-      execution: "待执行",
-      delivery: "—",
-    }));
-    const resultByCase = new Map(
-      results.value.map((result) => [result.caseId, result]),
-    );
-    executionOpen.value = false;
-    for (const group of groups) {
-      const runSet = await createPreproductionRunSet(
-        group.cases[0].projectId,
-        {
-          versionId,
-          versionLabel,
-          applicationId: group.application.id,
-          applicationLabel: group.application.name,
-          roundId: group.round.id,
-          roundLabel: executionRoundLabel(group.round),
-          totalCount: group.cases.length,
-        },
-      );
-      const selection = {
+    const record = await runPreproductionCaseAndPush(
+      testCase.projectId,
+      testCase.id,
+      {
         versionId,
         applicationId: group.application.id,
-        roundId: group.round.id,
-        runSetId: runSet.id,
-      };
-      await attachPreproductionRunSetCases(
-        group.cases[0].projectId,
-        runSet.id,
-        group.cases.map((testCase) => testCase.id),
-      );
-      for (const testCase of group.cases) {
-        const result = resultByCase.get(testCase.id);
-        if (!result) continue;
-        result.execution = "执行中";
-        try {
-          const record = await runPreproductionCaseAndPush(
-            result.projectId,
-            result.caseId,
-            selection,
-          );
-          applyRunRecord(result, record);
-          upsertLatestRunRecord(record);
-        } catch (error) {
-          result.execution = "请求失败";
-          result.delivery =
-            error instanceof Error
-              ? error.message
-              : "执行请求失败，请检查案例步骤配置";
-        }
-      }
-      try {
-        await finishPreproductionRunSet(group.cases[0].projectId, runSet.id);
-      } catch {
-        /* 单条记录已落库，集合汇总失败不影响执行结果展示 */
-      }
-    }
+        roundId: round.id,
+      },
+    );
+    upsertLatestRunRecord(record);
     await loadLatestRunRecords(cases.value);
-    await loadRunSets();
+    if (record.pushStatus === "success") {
+      message.success("运行推送已完成");
+    } else {
+      message.error(record.pushError || "执行完成，但推送测管失败");
+    }
   } catch (error) {
     message.error(
-      error instanceof Error ? error.message : "创建执行推送集失败",
+      error instanceof Error ? error.message : "运行推送失败，请检查案例配置",
     );
   } finally {
     running.value = false;
@@ -3001,11 +2930,6 @@ onBeforeUnmount(() => {
 }
 .execution-validation-error {
   color: #b42318;
-}
-.execution-application-hint {
-  display: block;
-  margin-top: 4px;
-  color: #98a2b3;
 }
 .export-field {
   display: grid;

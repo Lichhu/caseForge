@@ -10,6 +10,7 @@ function makeService(options?: {
     id: "case-1",
     projectId: "project-1",
     transactionId: "transaction-1",
+    caseNo: "CASE-001",
     title: "准生产案例",
     enabled: true,
     snapshot: {
@@ -165,6 +166,46 @@ describe("ApiPreproductionRunService", () => {
       currentStepName: "全部 2 个步骤执行完成",
       pushStatus: "success",
       reportUrl: "https://smp.example/reports/run-1.html",
+    });
+  });
+
+  it("runs a manual single-case push without touching push sets", async () => {
+    const { service, records, runSets, runSetCases, execution } = makeService({
+      run: {
+        id: "run-manual",
+        items: [
+          {
+            status: "passed",
+            requestSnapshot: {
+              steps: [
+                { stepName: "登录", status: "passed" },
+                { stepName: "查询余额", status: "passed" },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    const result = await RequestContext.run("alice", () =>
+      service.runCaseAndPush("project-1", "case-1", {
+        versionId: "version-1",
+        applicationId: "application-1",
+        roundId: "round-1",
+      }),
+    );
+
+    expect(execution.runCases).toHaveBeenCalledTimes(1);
+    expect(records.create).toHaveBeenCalledWith(
+      expect.objectContaining({ runSetId: null }),
+    );
+    expect(runSets.findOne).not.toHaveBeenCalled();
+    expect(runSets.save).not.toHaveBeenCalled();
+    expect(runSetCases.findOne).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      runSetId: null,
+      executionStatus: "passed",
+      pushStatus: "success",
     });
   });
 
@@ -337,6 +378,81 @@ describe("ApiPreproductionRunService", () => {
     expect(query.where[1].createdBy).toBe("alice");
   });
 
+  it("repairs stale completed-set aggregates when listing from active members", async () => {
+    const { service, records, runSets, runSetCases } = makeService();
+    runSets.findAndCount.mockResolvedValue([
+      [
+        {
+          id: "set-1",
+          name: "天热哇",
+          versionId: "version-1",
+          versionLabel: "V1",
+          status: "failed",
+          totalCount: 5,
+          completedCount: 5,
+          passedCount: 0,
+          failedCount: 1,
+          errorCount: 4,
+          pushSuccessCount: 0,
+          pushFailedCount: 5,
+          createdBy: "alice",
+          createdAt: new Date("2026-10-27T00:00:00.000Z"),
+        },
+      ],
+      1,
+    ]);
+    runSetCases.find.mockResolvedValue([
+      { caseId: "case-4" },
+      { caseId: "case-5" },
+      { caseId: "case-6" },
+    ]);
+    records.find.mockResolvedValue([
+      {
+        caseId: "case-1",
+        runSetId: "set-1",
+        executionStatus: "passed",
+        pushStatus: "success",
+        createdAt: new Date("2026-10-27T00:00:00.000Z"),
+      },
+      {
+        caseId: "case-4",
+        runSetId: "set-1",
+        executionStatus: "failed",
+        pushStatus: "failed",
+        createdAt: new Date("2026-10-27T00:01:00.000Z"),
+      },
+      {
+        caseId: "case-5",
+        runSetId: "set-1",
+        executionStatus: "error",
+        pushStatus: "failed",
+        createdAt: new Date("2026-10-27T00:02:00.000Z"),
+      },
+      {
+        caseId: "case-6",
+        runSetId: "set-1",
+        executionStatus: "error",
+        pushStatus: "failed",
+        createdAt: new Date("2026-10-27T00:03:00.000Z"),
+      },
+    ]);
+
+    const result = await RequestContext.run("alice", () =>
+      service.listRunSets(),
+    );
+
+    expect(result.rows[0]).toMatchObject({
+      totalCount: 3,
+      completedCount: 3,
+      passedCount: 0,
+      failedCount: 1,
+      errorCount: 2,
+      pushSuccessCount: 0,
+      pushFailedCount: 3,
+      status: "failed",
+    });
+  });
+
   it("creates an empty push set that stays pending until it is executed", async () => {
     const { service } = makeService();
 
@@ -362,8 +478,8 @@ describe("ApiPreproductionRunService", () => {
   it("associates selected cases into a push set without running them", async () => {
     const { service, runSetCases, execution } = makeService();
     runSetCases.count.mockResolvedValue(1);
-    // 第一次 find 用于查已存在成员，第二次用于返回关联后的成员列表。
-    runSetCases.find.mockResolvedValueOnce([]).mockResolvedValueOnce([
+    // 第一次 find 用于查已存在成员；后续汇总和返回成员列表都使用关联后的结果。
+    runSetCases.find.mockResolvedValueOnce([]).mockResolvedValue([
       {
         id: "member-1",
         runSetId: "set-1",
@@ -391,6 +507,7 @@ describe("ApiPreproductionRunService", () => {
       ]),
     );
     expect(members).toHaveLength(1);
+    expect(members[0].caseNo).toBe("CASE-001");
   });
 
   it("rejects associating a disabled case into a push set", async () => {
@@ -413,18 +530,84 @@ describe("ApiPreproductionRunService", () => {
   });
 
   it("removes a case from the push set membership", async () => {
-    const { service, runSetCases } = makeService();
+    const { service, records, runSets, runSetCases } = makeService();
+    const remainingMembers = ["case-4", "case-5", "case-6"].map(
+      (caseId, index) => ({
+        id: `member-${index + 4}`,
+        runSetId: "set-1",
+        caseId,
+        projectId: "project-1",
+        transactionId: "transaction-1",
+        caseTitle: `案例${index + 4}`,
+        sortOrder: index,
+        createdAt: new Date("2026-10-27T00:00:00.000Z"),
+      }),
+    );
+    runSets.findOne.mockResolvedValue({
+      id: "set-1",
+      status: "failed",
+      totalCount: 5,
+      completedCount: 5,
+      passedCount: 0,
+      failedCount: 1,
+      errorCount: 4,
+      pushSuccessCount: 0,
+      pushFailedCount: 5,
+      createdBy: "alice",
+      createdAt: new Date("2026-10-27T00:00:00.000Z"),
+    });
     runSetCases.findOne.mockResolvedValue({
       id: "member-1",
       runSetId: "set-1",
       caseId: "case-1",
     });
+    runSetCases.find.mockResolvedValue(remainingMembers);
+    records.find.mockResolvedValue([
+      {
+        caseId: "case-1",
+        executionStatus: "passed",
+        pushStatus: "success",
+      },
+      {
+        caseId: "case-2",
+        executionStatus: "passed",
+        pushStatus: "success",
+      },
+      {
+        caseId: "case-4",
+        executionStatus: "failed",
+        pushStatus: "failed",
+      },
+      {
+        caseId: "case-5",
+        executionStatus: "error",
+        pushStatus: "failed",
+      },
+      {
+        caseId: "case-6",
+        executionStatus: "error",
+        pushStatus: "failed",
+      },
+    ]);
 
-    await RequestContext.run("alice", () =>
+    const members = await RequestContext.run("alice", () =>
       service.detachCase("set-1", "case-1"),
     );
 
     expect(runSetCases.softDelete).toHaveBeenCalledWith({ id: "member-1" });
+    expect(runSets.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        totalCount: 3,
+        completedCount: 3,
+        passedCount: 0,
+        failedCount: 1,
+        errorCount: 2,
+        pushSuccessCount: 0,
+        pushFailedCount: 3,
+        status: "failed",
+      }),
+    );
+    expect(members).toHaveLength(3);
   });
 
   it("soft deletes the push set and its members while keeping run records", async () => {

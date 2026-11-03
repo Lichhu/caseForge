@@ -136,7 +136,7 @@ export class ApiPreproductionRunService {
     if (additions.length) {
       await this.runSetCases.save(additions);
     }
-    await this.syncRunSetTotal(runSet);
+    await this.refreshRunSet(runSet);
     return this.listRunSetCases(runSetId);
   }
 
@@ -166,7 +166,7 @@ export class ApiPreproductionRunService {
     // 软删除：保留成员行以便复用历史 sortOrder，唯一性由服务层按未删除行保证。
     await this.runSetCases.softDelete({ id: existing.id });
     const runSet = await this.findRunSet(runSetId);
-    await this.syncRunSetTotal(runSet);
+    await this.refreshRunSet(runSet);
     return this.listRunSetCases(runSetId);
   }
 
@@ -192,17 +192,16 @@ export class ApiPreproductionRunService {
       where: { runSetId },
       order: { sortOrder: "ASC" },
     });
-    return rows.map(toPublicRunSetCase);
-  }
-
-  /** 关联/取消关联后同步集合的案例总数。 */
-  private async syncRunSetTotal(runSet: ApiPreproductionRunSetEntity) {
-    const count = await this.runSetCases.count({
-      where: { runSetId: runSet.id },
-    });
-    if (runSet.totalCount === count) return runSet;
-    runSet.totalCount = count;
-    return this.runSets.save(runSet);
+    const cases = rows.length
+      ? await this.preproductionCases.find({
+          where: { id: In(rows.map((row) => row.caseId)) },
+          select: ["id", "caseNo"],
+        })
+      : [];
+    const caseNoById = new Map(cases.map((item) => [item.id, item.caseNo]));
+    return rows.map((row) =>
+      toPublicRunSetCase(row, caseNoById.get(row.caseId)),
+    );
   }
 
   async finishRunSet(runSetId: string) {
@@ -230,7 +229,8 @@ export class ApiPreproductionRunService {
       skip: (page - 1) * size,
       take: size,
     });
-    for (const row of rows.filter((item) => item.status === "running")) {
+    // 成员关系变化后，完成态集合的汇总也可能失效，因此每次列表都按当前成员重算。
+    for (const row of rows) {
       await this.refreshRunSet(row);
     }
     const executionRecords = rows.length
@@ -272,6 +272,12 @@ export class ApiPreproductionRunService {
     return rows.map(toPublicRunRecord);
   }
 
+  /**
+   * 执行单案例并推送测管。
+   *
+   * 手动单条运行不传 runSetId，执行记录独立保存；只有从执行推送集触发时
+   * 才传入集合 ID，并校验案例确实是该集合的成员。
+   */
   async runCaseAndPush(
     projectId: string,
     caseId: string,
@@ -450,6 +456,11 @@ export class ApiPreproductionRunService {
   }
 
   private async refreshRunSet(runSet: ApiPreproductionRunSetEntity) {
+    const members = await this.runSetCases.find({
+      where: { runSetId: runSet.id },
+      select: ["caseId"],
+    });
+    const memberCaseIds = new Set(members.map((member) => member.caseId));
     const rows = await this.records.find({
       where: {
         runSetId: runSet.id,
@@ -460,8 +471,11 @@ export class ApiPreproductionRunService {
     // 同一案例可能多次执行，只取最新一条参与汇总，避免重复计数。
     const latest = new Map<string, ApiPreproductionRunRecordEntity>();
     for (const row of rows) {
-      if (!latest.has(row.caseId)) latest.set(row.caseId, row);
+      if (memberCaseIds.has(row.caseId) && !latest.has(row.caseId)) {
+        latest.set(row.caseId, row);
+      }
     }
+    runSet.totalCount = memberCaseIds.size;
     const completed = [...latest.values()].filter(
       (row) => row.executionStatus !== "running",
     );
@@ -483,11 +497,9 @@ export class ApiPreproductionRunService {
     ).length;
     const pushPending = completed.some((row) => row.pushStatus === "pending");
     if (latest.size === 0) {
-      // 尚无执行记录：关联了案例但还没开始跑的集合保持「待执行」。
-      if (runSet.status !== "running") {
-        runSet.status = "pending";
-        runSet.finishedAt = null;
-      }
+      // 当前成员没有执行记录：集合回到待执行，忽略已移出案例的历史记录。
+      runSet.status = "pending";
+      runSet.finishedAt = null;
     } else if (
       completed.length < runSet.totalCount ||
       pushPending ||
@@ -631,6 +643,7 @@ function toIsoString(value?: Date | string | null) {
 
 function toPublicRunSetCase(
   row: ApiPreproductionRunSetCaseEntity,
+  caseNo?: string | null,
 ): ApiPreproductionRunSetCase {
   return {
     id: row.id,
@@ -638,6 +651,7 @@ function toPublicRunSetCase(
     caseId: row.caseId,
     projectId: row.projectId,
     transactionId: row.transactionId,
+    caseNo: caseNo ?? null,
     caseTitle: row.caseTitle,
     sortOrder: row.sortOrder,
     createdAt: toIsoString(row.createdAt)!,
