@@ -35,6 +35,21 @@
       </div>
     </div>
 
+    <div
+      v-if="batchAssertionRunning && !batchMode"
+      class="batch-background-progress"
+    >
+      <RobotOutlined />
+      <span>AI 批量生成断言仍在后台继续</span>
+      <strong>
+        {{ batchAssertionProgress.done }}/{{ batchAssertionProgress.total }}
+      </strong>
+      <span>
+        成功 {{ batchAssertionProgress.success }}，失败
+        {{ batchAssertionProgress.failed }}
+      </span>
+    </div>
+
     <div v-if="showCaseWorkspace" class="dynamic-layout">
       <div class="test-point-list test-point-list-panel case-list-panel">
         <div class="test-point-list-header">
@@ -149,10 +164,13 @@
           <div class="instruction-editor-body">
             <div class="editor-hero editor-hero-batch">
               <div>
-                <h3>已选 {{ selectedIds.length }} 条案例 · {{ batchSelectedSteps.size }} 个步骤</h3>
-                <p>展开案例勾选步骤，批量操作仅作用于勾选的步骤</p>
+                <h3>批量编辑 {{ selectedIds.length }} 条案例</h3>
+                <p>先选择案例，再展开并勾选需要批量处理的步骤</p>
               </div>
-              <a-tag color="processing">批量操作</a-tag>
+              <div class="batch-selection-summary">
+                <strong>{{ batchSelectedSteps.size }}</strong>
+                <span>个步骤已选</span>
+              </div>
             </div>
 
             <div class="editor-block batch-config-block">
@@ -168,24 +186,72 @@
                 <span class="batch-config-summary">{{ batchConfigSummary }}</span>
               </div>
               <div v-if="batchConfigExpanded" class="batch-config-body">
-                <div class="editor-block-title">执行环境</div>
-                <div class="batch-request-config">
-                  <a-select v-model:value="batchEnvironmentId" placeholder="环境" :options="debugEnvironmentOptions" @change="batchEnvironmentServiceId = ''" />
-                  <a-select v-model:value="batchEnvironmentServiceId" show-search option-filter-prop="searchText" allow-clear placeholder="输入名称或地址筛选" :options="batchEnvironmentServiceOptions" :disabled="!batchEnvironmentId" />
-                </div>
-                <div class="editor-block-title">请求配置</div>
-                <div class="batch-request-config batch-request-config--request">
-                  <a-select v-model:value="batchRequest.protocol" allow-clear placeholder="通讯协议" :options="protocolOptions" />
-                  <a-select
-                    v-if="batchRequest.protocol === 'http'"
-                    v-model:value="batchRequest.method"
-                    allow-clear
-                    placeholder="HTTP 方法"
-                    :options="httpMethodOptions"
-                  />
-                  <a-select v-model:value="batchRequest.encoding" allow-clear placeholder="编码" :options="encodingOptions" />
-                  <a-input v-if="batchRequest.protocol === 'http'" v-model:value="batchRequest.path" class="batch-request-path" placeholder="请求路径" allow-clear />
-                </div>
+                <section class="batch-config-section">
+                  <div class="batch-config-section-head">
+                    <strong>执行环境</strong>
+                    <span>不选择时沿用每个步骤原有地址</span>
+                  </div>
+                  <div class="batch-environment-grid">
+                    <label class="batch-field">
+                      <span>环境</span>
+                      <a-select
+                        v-model:value="batchEnvironmentId"
+                        placeholder="请选择执行环境"
+                        :options="debugEnvironmentOptions"
+                        allow-clear
+                        @change="onBatchEnvironmentChange"
+                      />
+                    </label>
+                    <label class="batch-field">
+                      <span>服务地址</span>
+                      <a-select
+                        v-model:value="batchEnvironmentServiceId"
+                        show-search
+                        option-filter-prop="searchText"
+                        allow-clear
+                        placeholder="可按服务名称、主机或地址搜索"
+                        :options="batchEnvironmentServiceOptions"
+                        :disabled="!batchEnvironmentId"
+                      >
+                        <template #notFoundContent>
+                          {{ batchEnvironmentId ? "当前环境没有匹配地址" : "请先选择环境" }}
+                        </template>
+                      </a-select>
+                    </label>
+                  </div>
+                  <div
+                    class="batch-target-preview"
+                    :class="{ empty: !batchSelectedAddressInfo.address }"
+                  >
+                    <span>当前地址</span>
+                    <strong>{{ batchSelectedAddressInfo.name }}</strong>
+                    <code>{{ batchSelectedAddressInfo.address || "未选择，批量操作沿用步骤原地址" }}</code>
+                  </div>
+                </section>
+                <section class="batch-config-section">
+                  <div class="batch-config-section-head">
+                    <strong>请求配置</strong>
+                    <span>仅修改已填写的配置项</span>
+                  </div>
+                  <div class="batch-request-config batch-request-config--request">
+                    <label class="batch-field">
+                      <span>通讯协议</span>
+                      <a-select v-model:value="batchRequest.protocol" allow-clear placeholder="不修改" :options="protocolOptions" />
+                    </label>
+                    <label v-if="batchRequest.protocol === 'http'" class="batch-field">
+                      <span>HTTP 方法</span>
+                      <a-select v-model:value="batchRequest.method" allow-clear placeholder="不修改" :options="httpMethodOptions" />
+                    </label>
+                    <label class="batch-field">
+                      <span>报文编码</span>
+                      <a-select v-model:value="batchRequest.encoding" allow-clear placeholder="不修改" :options="encodingOptions" />
+                    </label>
+                    <label v-if="batchRequest.protocol === 'http'" class="batch-field batch-field-wide">
+                      <span>请求路径</span>
+                      <a-input v-model:value="batchRequest.path" placeholder="不修改" allow-clear />
+                    </label>
+                  </div>
+                </section>
                 <div v-if="batchFullRequestUrl" class="batch-request-url">
                   完整请求路径：<span>{{ batchFullRequestUrl }}</span>
                 </div>
@@ -193,10 +259,15 @@
             </div>
             <div class="editor-block">
               <div class="editor-block-title-row batch-case-summary-head">
-                <div class="editor-block-title">已选案例（展开勾选步骤）</div>
+                <div>
+                  <div class="editor-block-title">已选案例</div>
+                  <p class="batch-case-summary-hint">勾选案例可快速全选其步骤，点击案例名称展开步骤明细</p>
+                </div>
                 <span class="batch-case-head-actions">
-                  <a-button type="link" size="small" @click="selectAllBatchSteps">全选</a-button>
-                  <a-button type="link" size="small" @click="clearAllBatchSteps">清空</a-button>
+                  <a-button size="small" @click="expandAllBatchCases">展开全部</a-button>
+                  <a-button size="small" @click="collapseAllBatchCases">收起全部</a-button>
+                  <a-button size="small" @click="selectAllBatchSteps">全选步骤</a-button>
+                  <a-button size="small" @click="clearAllBatchSteps">清空步骤</a-button>
                 </span>
               </div>
               <ul class="batch-case-summary-list">
@@ -208,13 +279,24 @@
                     @click="toggleBatchCaseExpand(row.id)"
                     @keydown.enter="toggleBatchCaseExpand(row.id)"
                   >
-                    <DownOutlined :class="['case-step-chevron', { 'is-open': batchExpandedCaseIds.has(row.id) }]" />
-                    <strong class="batch-case-summary-title" :title="row.title">{{ row.title || '未命名案例' }}</strong>
-                    <span class="batch-case-summary-no">{{ row.caseNo || row.transactionCode || '待分配编号' }}</span>
-                    <span class="batch-case-step-count">{{ selectedStepCountForCase(row) }}/{{ caseStepRows(row).length }} 步骤已选</span>
+                    <a-checkbox
+                      :checked="isBatchCaseFullySelected(row)"
+                      :indeterminate="isBatchCasePartiallySelected(row)"
+                      class="batch-case-selector"
+                      @click.stop
+                      @change="(event: unknown) => onBatchCaseCheckboxChange(row, event)"
+                    />
+                    <span class="batch-case-expander">
+                      <DownOutlined :class="['case-step-chevron', { 'is-open': batchExpandedCaseIds.has(row.id) }]" />
+                    </span>
+                    <span class="batch-case-identity">
+                      <strong class="batch-case-summary-title" :title="row.title">{{ row.title || '未命名案例' }}</strong>
+                      <small>{{ row.caseNo || row.transactionCode || '待分配编号' }}</small>
+                    </span>
+                    <span class="batch-case-step-count">{{ selectedStepCountForCase(row) }}/{{ caseStepRows(row).length }} 步骤</span>
                     <span class="batch-case-head-actions" @click.stop>
-                      <a-button type="link" size="small" @click="selectAllSteps(row)">全选</a-button>
-                      <a-button type="link" size="small" @click="clearCaseSteps(row)">清空</a-button>
+                      <a-button size="small" @click="selectAllSteps(row)">全选</a-button>
+                      <a-button size="small" @click="clearCaseSteps(row)">清空</a-button>
                     </span>
                   </div>
                   <div v-if="batchExpandedCaseIds.has(row.id)" class="batch-step-list">
@@ -824,6 +906,51 @@
                 </div>
               </div>
             </div>
+
+          <section
+            v-if="executionResultContext"
+            class="case-execution-result-context"
+          >
+            <header class="case-execution-result-head">
+              <div>
+                <span>来自执行结果</span>
+                <strong>
+                  {{
+                    executionResultContext.runVersionCode ||
+                    executionResultContext.runId
+                  }}
+                </strong>
+                <small>
+                  {{ executionResultStatusLabel(executionResultContext.item.status) }}
+                  · {{ formatExecutionDuration(executionResultContext.item.durationMs) }}
+                </small>
+              </div>
+              <a-space>
+                <a-tag
+                  :color="
+                    executionResultContext.item.status === 'passed'
+                      ? 'success'
+                      : 'error'
+                  "
+                >
+                  {{ executionResultContext.item.status === "passed" ? "断言通过" : "存在失败" }}
+                </a-tag>
+                <a-button size="small" type="primary" @click="returnToExecutionResult">
+                  返回执行平台
+                </a-button>
+                <a-button size="small" @click="dismissExecutionResultContext">
+                  关闭结果
+                </a-button>
+              </a-space>
+            </header>
+            <ApiRunSnapshotTabs
+              :request-snapshot="executionResultContext.item.requestSnapshot"
+              :response-snapshot="executionResultContext.item.responseSnapshot"
+              :assertions="executionResultContext.item.assertions"
+              :show-snapshots="false"
+              dense
+            />
+          </section>
           </div>
 
           <div class="instruction-editor-footer dynamic-editor-footer action-toolbar case-editor-footer">
@@ -1127,7 +1254,7 @@ import type {
 } from '@case-forge/shared';
 import { copyText } from '@/utils/copyText';
 import type { ApiEnvironmentServiceRow, ApiTestCaseRow, DebugRunResult } from '@/api/apiTestClient';
-import { clearStepDebugRecords, listStepDebugRecords, listAllApiCases, listDataFunctions, listDatabaseConnections, debugRunCase, debugManagedSqlStep, generateAssertions, getAssertionGenerateStatus, getAssertionGenerateResult } from '@/api/apiTestClient';
+import { clearStepDebugRecords, listStepDebugRecords, listAllApiCases, getManagedCaseDetails, listDataFunctions, listDatabaseConnections, debugRunCase, debugManagedSqlStep, generateAssertions, getAssertionGenerateStatus, getAssertionGenerateResult } from '@/api/apiTestClient';
 import type { ApiDatabaseConnectionRow } from '@/api/apiTestClient';
 import { useApiTestStore } from '@/stores/apiTest';
 import { randomUuid } from '@/utils/randomUuid';
@@ -1135,6 +1262,7 @@ import { debugRecordConnected, debugRecordProtocol } from '@/utils/debugRecordSt
 import KeyValueRowsEditor from '@/components/api-test/KeyValueRowsEditor.vue';
 import AssertionRowsEditor from '@/components/api-test/AssertionRowsEditor.vue';
 import ApiCaseExportModal from '@/components/api-test/ApiCaseExportModal.vue';
+import ApiRunSnapshotTabs from '@/components/api-test/ApiRunSnapshotTabs.vue';
 import { IMMERSIVE_OVERLAY_Z_INDEX, NESTED_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import {
   assertionsToRows,
@@ -1447,7 +1575,13 @@ async function copyCurlCommand() {
 
 const batchEnvironmentServiceOptions = computed(() =>
   (apiStore.environmentServices[batchEnvironmentId.value] ?? [])
-    .filter((service) => service.enabled)
+    .filter((service) => {
+      if (!service.enabled) return false;
+      if (!batchRequest.protocol) return true;
+      const expectedTransport =
+        batchRequest.protocol === 'socket' ? 'tcp' : batchRequest.protocol;
+      return (service.transport ?? 'http') === expectedTransport;
+    })
     .map((service) => {
       const transport = service.transport ?? 'http';
       const address = service.baseUrl?.trim() || service.serverAddress?.trim() || (service.host && service.port ? `${service.host}:${service.port}` : '');
@@ -1458,6 +1592,23 @@ const batchEnvironmentServiceOptions = computed(() =>
       };
     }),
 );
+const batchSelectedAddressInfo = computed(() => {
+  const environment = apiStore.environments.find(
+    (item) => item.id === batchEnvironmentId.value,
+  );
+  const service = (apiStore.environmentServices[batchEnvironmentId.value] ?? [])
+    .find((item) => item.id === batchEnvironmentServiceId.value);
+  const address =
+    service?.baseUrl?.trim() ||
+    service?.serverAddress?.trim() ||
+    (service?.host && service.port ? `${service.host}:${service.port}` : '') ||
+    environment?.baseUrl?.trim() ||
+    '';
+  return {
+    name: service?.name || environment?.name || '未选择',
+    address,
+  };
+});
 const batchFullRequestUrl = computed(() => {
   if (batchRequest.protocol !== 'http' || !batchEnvironmentId.value) return '';
   const environment = apiStore.environments.find((item) => item.id === batchEnvironmentId.value);
@@ -1477,6 +1628,27 @@ watch(batchEnvironmentId, (environmentId) => {
     void apiStore.refreshEnvironmentServices(projectId.value, environmentId);
   }
 });
+
+watch(
+  () => batchRequest.protocol,
+  () => {
+    if (
+      batchEnvironmentServiceId.value &&
+      !batchEnvironmentServiceOptions.value.some(
+        (item) => item.value === batchEnvironmentServiceId.value,
+      )
+    ) {
+      batchEnvironmentServiceId.value = '';
+    }
+  },
+);
+
+function onBatchEnvironmentChange(environmentId?: string) {
+  batchEnvironmentServiceId.value = '';
+  if (projectId.value && environmentId) {
+    void apiStore.refreshEnvironmentServices(projectId.value, environmentId);
+  }
+}
 
 function syncDebugServiceSelection() {
   if (
@@ -1800,8 +1972,29 @@ function toggleBatchStep(caseId: string, stepId: string, checked: boolean) { if 
 function onBatchStepChange(caseId: string, stepId: string, event: { target: { checked: boolean } }) { toggleBatchStep(caseId, stepId, event.target.checked); }
 function selectAllSteps(row: ApiTestCaseRow) { for (const step of caseStepRows(row)) batchSelectedSteps.add(batchStepKey(row.id, step.id)); }
 function clearCaseSteps(row: ApiTestCaseRow) { for (const step of caseStepRows(row)) batchSelectedSteps.delete(batchStepKey(row.id, step.id)); }
+function isBatchCaseFullySelected(row: ApiTestCaseRow) {
+  const steps = caseStepRows(row);
+  return steps.length > 0 && steps.every((step) => batchSelectedSteps.has(batchStepKey(row.id, step.id)));
+}
+function isBatchCasePartiallySelected(row: ApiTestCaseRow) {
+  const selected = selectedStepCountForCase(row);
+  return selected > 0 && selected < caseStepRows(row).length;
+}
+function onBatchCaseCheckboxChange(row: ApiTestCaseRow, event: unknown) {
+  const checked = Boolean(
+    (event as { target?: { checked?: boolean } })?.target?.checked,
+  );
+  if (checked) {
+    selectAllSteps(row);
+    batchExpandedCaseIds.add(row.id);
+  } else {
+    clearCaseSteps(row);
+  }
+}
 function selectAllBatchSteps() { for (const row of selectedRows.value) selectAllSteps(row); }
 function clearAllBatchSteps() { batchSelectedSteps.clear(); }
+function expandAllBatchCases() { for (const row of selectedRows.value) batchExpandedCaseIds.add(row.id); }
+function collapseAllBatchCases() { batchExpandedCaseIds.clear(); }
 function selectedStepCountForCase(row: ApiTestCaseRow) { return caseStepRows(row).filter((step) => batchSelectedSteps.has(batchStepKey(row.id, step.id))).length; }
 function batchStepStatus(step: ApiCaseStep) {
   if (isDbStep(step))
@@ -1815,7 +2008,7 @@ function currentDbStepIssueFor(step: ApiCaseStep) {
   if (!step.db?.connectionId) return '请选择数据库连接';
   return validateDbStepSql(step.db?.sql ?? '', step.db?.mode ?? 'query');
 }
-const batchConfigExpanded = ref(false);
+const batchConfigExpanded = ref(true);
 const batchStepErrors = reactive<Record<string, string>>({});
 function batchStepRunState(caseId: string, stepId: string) {
   const state = batchAssertionStatuses[batchStepKey(caseId, stepId)];
@@ -1899,6 +2092,45 @@ function caseSavePayload(row: ApiTestCaseRow, steps: ApiCaseStep[]) {
 const activeCase = computed(() =>
   apiStore.cases.find((item) => item.id === apiStore.activeCaseId) ?? null,
 );
+const executionResultContext = computed(() => {
+  const context = apiStore.executionCaseContext;
+  if (
+    !context ||
+    context.transactionId !== apiStore.activeTransactionId ||
+    context.item.caseId !== apiStore.activeCaseId
+  ) {
+    return null;
+  }
+  return context;
+});
+
+function executionResultStatusLabel(status: string) {
+  if (status === "passed") return "执行通过";
+  if (status === "failed") return "执行失败";
+  if (status === "error") return "执行异常";
+  if (status === "skipped") return "执行跳过";
+  if (status === "running") return "执行中";
+  return status || "未知状态";
+}
+
+function formatExecutionDuration(durationMs?: number) {
+  if (durationMs == null) return "—";
+  return durationMs >= 1000
+    ? `${(durationMs / 1000).toFixed(1)} 秒`
+    : `${durationMs} ms`;
+}
+
+function returnToExecutionResult() {
+  const projectId = apiStore.activeProjectId;
+  const transactionId = apiStore.activeTransactionId;
+  if (!projectId || !transactionId) return;
+  apiStore.setWorkspaceStage(projectId, transactionId, "api-runner");
+}
+
+function dismissExecutionResultContext() {
+  apiStore.executionCaseContext = null;
+}
+
 const payloadEditorKey = computed(
   () => apiStore.activeCaseId || (isNewCase.value ? 'new-case' : 'none'),
 );
@@ -2808,6 +3040,7 @@ function selectCase(caseId: string) {
 }
 
 function toggleBatchMode() {
+  const exitingBatch = batchMode.value;
   batchMode.value = !batchMode.value;
   batchSelectedSteps.clear();
   batchExpandedCaseIds.clear();
@@ -2822,6 +3055,9 @@ function toggleBatchMode() {
   }
   if (apiStore.activeCaseId) {
     apiStore.selectedCaseIds = [apiStore.activeCaseId];
+  }
+  if (exitingBatch && batchAssertionRunning.value) {
+    message.info("批量 AI 生成断言将在后台继续，完成后会提示结果");
   }
 }
 
@@ -2875,14 +3111,7 @@ function isActiveCard(caseId: string) {
 function handleCardClick(caseId: string) {
   if (batchMode.value) {
     const checked = !selectedIds.value.includes(caseId);
-    apiStore.toggleCaseSelection(caseId, checked);
-    const row = caseLookup.value.get(caseId);
-    if (checked) {
-      if (row) batchExpandedCaseIds.add(caseId);
-    } else {
-      if (row) clearCaseSteps(row);
-      batchExpandedCaseIds.delete(caseId);
-    }
+    setBatchCaseSelected(caseId, checked);
     return;
   }
   selectCase(caseId);
@@ -2913,7 +3142,18 @@ function readCheckboxChecked(event: unknown) {
 }
 
 function onToggleSelect(caseId: string, checked: boolean) {
+  setBatchCaseSelected(caseId, checked);
+}
+
+function setBatchCaseSelected(caseId: string, checked: boolean) {
   apiStore.toggleCaseSelection(caseId, checked);
+  const row = caseLookup.value.get(caseId);
+  if (checked) {
+    if (row) batchExpandedCaseIds.add(caseId);
+  } else {
+    if (row) clearCaseSteps(row);
+    batchExpandedCaseIds.delete(caseId);
+  }
 }
 
 function beautifyRequestJson() {
@@ -3371,6 +3611,41 @@ async function waitForAssertionResult(caseId: string, jobId: string) {
   }
 }
 
+type BatchAssertionUpdate = {
+  target: NonNullable<ApiHttpCaseStep["target"]>;
+  expected: ApiHttpCaseStep["expected"];
+};
+
+async function persistBatchAssertionUpdates(
+  caseId: string,
+  updates: Map<string, BatchAssertionUpdate>,
+) {
+  if (!updates.size) return false;
+  const [latest] = await getManagedCaseDetails([caseId]);
+  if (!latest) return false;
+  const latestSteps = caseStepRows(latest);
+  let changed = false;
+  const mergedSteps = latestSteps.map((step) => {
+    const update = updates.get(step.id);
+    if (!update || !isHttpStep(step)) return step;
+    changed = true;
+    return {
+      ...cloneJson(step),
+      target: update.target,
+      expected: update.expected,
+    };
+  });
+  if (!changed) return false;
+  await apiStore.saveCase(
+    projectId.value!,
+    transactionId.value!,
+    caseSavePayload(latest, mergedSteps),
+    caseId,
+    { silent: true },
+  );
+  return true;
+}
+
 async function onBatchGenerateAssertions() {
   if (!projectId.value || !transactionId.value || !batchSelectedSteps.size) return;
   const fallbackEnv = apiStore.environments.find((item) => item.id === batchEnvironmentId.value);
@@ -3396,20 +3671,32 @@ async function onBatchGenerateAssertions() {
     message.warning('所选步骤都没有执行地址，请先给步骤配置地址，或在批量设置中选择执行环境');
     return;
   }
+  const selectedStepKeys = new Set(batchSelectedSteps);
   batchAssertionRunning.value = true;
   Object.keys(batchAssertionStatuses).forEach((key) => delete batchAssertionStatuses[key]);
   Object.keys(batchStepErrors).forEach((key) => delete batchStepErrors[key]);
-  Object.assign(batchAssertionProgress, { done: 0, total: batchSelectedSteps.size, success: 0, failed: 0 });
+  Object.assign(batchAssertionProgress, {
+    done: 0,
+    total: httpSelectedSteps.length,
+    success: 0,
+    failed: 0,
+  });
   try {
     for (const row of allCases) {
       const steps = caseStepRows(row);
-      if (!steps.some((step) => batchSelectedSteps.has(batchStepKey(row.id, step.id)))) continue;
+      if (
+        !steps.some((step) =>
+          selectedStepKeys.has(batchStepKey(row.id, step.id)),
+        )
+      ) {
+        continue;
+      }
       const nextSteps = cloneJson(steps);
-      let changed = false;
+      const generatedUpdates = new Map<string, BatchAssertionUpdate>();
       for (let stepIndex = 0; stepIndex < nextSteps.length; stepIndex += 1) {
         const step = nextSteps[stepIndex];
         const stepKey = batchStepKey(row.id, step.id);
-        if (!batchSelectedSteps.has(stepKey)) continue;
+        if (!selectedStepKeys.has(stepKey)) continue;
         /* SQL 步骤的断言留到第二步，这里只处理请求步骤 */
         if (!isHttpStep(step)) continue;
         batchAssertionStatuses[stepKey] = 'running';
@@ -3448,7 +3735,10 @@ async function onBatchGenerateAssertions() {
           if (!assertions.length) throw new Error('AI 未生成有效断言');
           step.target = target;
           step.expected = buildExpectedFromRows(assertionsToRows(assertions));
-          changed = true;
+          generatedUpdates.set(step.id, {
+            target,
+            expected: step.expected,
+          });
           batchAssertionStatuses[stepKey] = 'success';
           batchAssertionProgress.success += 1;
         } catch (error) {
@@ -3459,7 +3749,7 @@ async function onBatchGenerateAssertions() {
           batchAssertionProgress.done += 1;
         }
       }
-      if (changed) await apiStore.saveCase(projectId.value, transactionId.value, caseSavePayload(row, nextSteps), row.id, { silent: true });
+      await persistBatchAssertionUpdates(row.id, generatedUpdates);
     }
     message.success(`批量生成完成：成功 ${batchAssertionProgress.success}，失败 ${batchAssertionProgress.failed}`);
     await apiStore.refreshCases(projectId.value, transactionId.value);
@@ -3676,6 +3966,57 @@ function onBatchDelete() {
   padding: 10px 14px;
 }
 
+.case-execution-result-context {
+  flex-shrink: 0;
+  margin: 0 12px 8px;
+  padding: 8px 10px;
+  border: 1px solid #f1c9d0;
+  border-radius: 8px;
+  background: #fffbfc;
+}
+
+.case-execution-result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.case-execution-result-head > div:first-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.case-execution-result-head > div:first-child > span {
+  color: #98a2b3;
+  font-size: 10px;
+}
+
+.case-execution-result-head strong {
+  color: #8c1f3d;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.case-execution-result-head small {
+  color: #667085;
+  font-size: 11px;
+}
+
+.case-execution-result-head :deep(.ant-space) {
+  gap: 6px !important;
+}
+
+.case-execution-result-head :deep(.ant-btn) {
+  height: 26px;
+  padding-inline: 9px;
+  font-size: 12px;
+}
+
 .api-case-panel .instruction-editor-body > .case-payload-block {
   flex: 0 0 auto;
   min-height: 0;
@@ -3820,23 +4161,148 @@ function onBatchDelete() {
   white-space: nowrap;
 }
 .batch-config-body {
-  padding: 4px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
   border-top: 1px solid #f2f4f7;
+  background: #fafbfc;
+}
+.batch-selection-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 7px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
+  background: #fff7f7;
+  color: #667085;
+  font-size: 12px;
+}
+.batch-selection-summary strong {
+  color: #b60f2d;
+  font-size: 18px;
+}
+.batch-config-section {
+  padding: 12px;
+  border: 1px solid #eaecf0;
+  border-radius: 10px;
+  background: #fff;
+}
+.batch-config-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.batch-config-section-head strong {
+  color: #344054;
+  font-size: 13px;
+}
+.batch-config-section-head span {
+  color: #98a2b3;
+  font-size: 12px;
+}
+.batch-environment-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(360px, 1.4fr);
+  gap: 12px;
+}
+.batch-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.batch-field > span {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 500;
+}
+.batch-field :deep(.ant-select-selector),
+.batch-field :deep(.ant-input-affix-wrapper),
+.batch-field :deep(.ant-input) {
+  min-height: 36px;
+}
+.batch-field-wide {
+  grid-column: 1 / -1;
+}
+.batch-target-preview {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 10px;
+  padding: 9px 11px;
+  border: 1px solid #abefc6;
+  border-radius: 8px;
+  background: #f6fef9;
+  font-size: 12px;
+}
+.batch-target-preview > span {
+  color: #667085;
+}
+.batch-target-preview > strong {
+  color: #067647;
+}
+.batch-target-preview > code {
+  overflow: hidden;
+  color: #344054;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.batch-target-preview.empty {
+  border-color: #eaecf0;
+  background: #f9fafb;
+}
+.batch-target-preview.empty > strong {
+  color: #98a2b3;
 }
 .batch-case-summary-list .batch-case-block:last-child { margin-bottom: 0; }
 .batch-case-head {
-  display: flex;
+  display: grid;
+  grid-template-columns: 24px 20px minmax(220px, 1fr) auto auto;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: 10px;
+  padding: 10px 12px;
   cursor: pointer;
   user-select: none;
   font-size: 13px;
 }
 .batch-case-head:hover { background: #fcfcfd; }
-.batch-case-step-count { margin-left: auto; color: #98a2b3; font-size: 12px; white-space: nowrap; }
-.batch-case-head-actions { display: flex; gap: 2px; margin-left: 4px; }
-.batch-case-head-actions .ant-btn { height: auto; padding: 0 4px; font-size: 12px; }
+.batch-case-selector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.batch-case-expander { display: flex; justify-content: center; color: #98a2b3; }
+.batch-case-identity {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+.batch-case-identity small {
+  overflow: hidden;
+  color: #98a2b3;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.batch-case-step-count {
+  color: #667085;
+  font-size: 12px;
+  white-space: nowrap;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #f2f4f7;
+}
+.batch-case-head-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: 4px;
+}
+.batch-case-head-actions .ant-btn { height: 28px; font-size: 12px; }
 .batch-step-list {
   display: flex;
   flex-direction: column;
@@ -3846,15 +4312,16 @@ function onBatchDelete() {
   background: #fafbfc;
 }
 .batch-step-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: 20px minmax(180px, 1.1fr) 140px minmax(220px, 1.4fr) 76px;
   align-items: center;
-  gap: 8px;
-  padding: 4px 6px;
+  gap: 10px;
+  padding: 7px 9px;
   border-radius: 6px;
+  cursor: pointer;
 }
 .batch-step-item:hover { background: #f2f4f7; }
 .batch-step-name {
-  flex: 0 1 260px;
   min-width: 0;
   overflow: hidden;
   color: #344054;
@@ -3863,7 +4330,6 @@ function onBatchDelete() {
   white-space: nowrap;
 }
 .batch-step-env {
-  flex: 0 1 120px;
   min-width: 0;
   overflow: hidden;
   color: #606875;
@@ -3872,7 +4338,6 @@ function onBatchDelete() {
   white-space: nowrap;
 }
 .batch-step-address {
-  flex: 1;
   min-width: 0;
   overflow: hidden;
   color: #7a8290;
@@ -3884,13 +4349,33 @@ function onBatchDelete() {
 .batch-case-summary-head { margin-bottom: 12px; }
 .batch-case-summary-head .editor-block-title { margin-bottom: 0; }
 .batch-case-summary-list .batch-case-block { margin-bottom: 6px; }
-.batch-case-head { padding: 6px 10px; }
-.batch-step-item { padding: 3px 6px; }
+.batch-case-summary-hint {
+  margin: 3px 0 0;
+  color: #98a2b3;
+  font-size: 12px;
+}
 
 .batch-assertion-progress {
   margin-right: auto;
   color: #667085;
   font-size: 12px;
+}
+
+.batch-background-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fff7f7;
+  color: #667085;
+  font-size: 12px;
+}
+
+.batch-background-progress strong {
+  color: #b60f2d;
 }
 
 .batch-case-summary-more {
@@ -3908,12 +4393,11 @@ function onBatchDelete() {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.batch-request-path {
-  grid-column: 1 / -1;
-}
-
 .batch-request-url {
-  margin-top: 12px;
+  margin-top: 0;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: #f2f4f7;
   color: #667085;
   font-size: 13px;
 }
@@ -3924,9 +4408,15 @@ function onBatchDelete() {
 }
 
 @media (max-width: 720px) {
+  .case-execution-result-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
   .batch-request-config {
     grid-template-columns: 1fr;
   }
+  .batch-environment-grid { grid-template-columns: 1fr; }
+  .batch-field-wide { grid-column: auto; }
 }
 
 .case-card-title strong {

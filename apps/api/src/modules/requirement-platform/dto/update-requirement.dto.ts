@@ -14,6 +14,12 @@ export class UpdateRequirementDto {
   @MaxLength(120)
   projectName?: string;
 
+  @ApiPropertyOptional({ example: "项目类版本" })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  versionName?: string;
+
   @ApiPropertyOptional({ example: "手机银行" })
   @IsOptional()
   @IsString()

@@ -9,6 +9,14 @@ export const REQUIREMENT_STATUSES = [
 
 export type RequirementStatus = (typeof REQUIREMENT_STATUSES)[number];
 
+/** 手动创建或编辑需求时可选的需求版本预设 */
+export const REQUIREMENT_VERSION_NAMES = [
+  "项目类版本",
+  "非项目类版本",
+] as const;
+
+export type RequirementVersionName = (typeof REQUIREMENT_VERSION_NAMES)[number];
+
 /** 需求状态中文标签 */
 export const REQUIREMENT_STATUS_LABELS: Record<RequirementStatus, string> = {
   pending_dispatch: "待分发",

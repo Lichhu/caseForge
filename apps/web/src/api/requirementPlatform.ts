@@ -23,6 +23,7 @@ export interface RequirementPlatformListResponse {
 export async function createRequirement(payload: {
   projectCode: string;
   projectName: string;
+  versionName: string;
   applicationName: string;
 }) {
   const { data } = await http.post<RequirementPlatformItem>(
@@ -45,6 +46,7 @@ export async function updateRequirement(
     projectCode: string;
     projectName: string;
     applicationName: string;
+    versionName: string;
   }>,
 ) {
   const { data } = await http.patch<RequirementPlatformItem>(
@@ -67,6 +69,7 @@ export interface RequirementPoolMember {
   nickName: string;
   remark?: string | null;
   isDispatcher?: boolean;
+  createdAt: string;
 }
 
 export async function fetchPoolMembers(): Promise<RequirementPoolMember[]> {
@@ -93,6 +96,27 @@ export async function addPoolMember(
     { userName },
   );
   return data;
+}
+
+export interface RequirementDispatcher {
+  id: string;
+  userName: string;
+  remark?: string | null;
+  createdAt: string;
+}
+
+export async function addDispatcher(
+  userName: string,
+): Promise<RequirementDispatcher> {
+  const { data } = await http.post<RequirementDispatcher>(
+    "/requirement-platform/dispatchers",
+    { userName },
+  );
+  return data;
+}
+
+export async function removeDispatcher(id: string): Promise<void> {
+  await http.delete(`/requirement-platform/dispatchers/${id}`);
 }
 
 export async function removePoolMember(id: string): Promise<void> {

@@ -112,6 +112,13 @@ export type ApiWorkspaceStage =
   | "api-runner"
   | "api-report";
 
+export interface ApiExecutionCaseContext {
+  runId: string;
+  runVersionCode?: string | null;
+  transactionId: string;
+  item: ApiRunDetail["items"][number];
+}
+
 const stageKey = (projectId: string, transactionId: string) =>
   `case-forge:api-stage:${projectId}:${transactionId}`;
 const activeProjectKey = "case-forge:api-active-project";
@@ -161,6 +168,7 @@ interface State {
   generatingCaseTransactionIds: string[];
   running: boolean;
   apiScenarios: ScenarioLibraryItem[];
+  executionCaseContext: ApiExecutionCaseContext | null;
 }
 
 export const useApiTestStore = defineStore("apiTest", {
@@ -200,6 +208,7 @@ export const useApiTestStore = defineStore("apiTest", {
     generatingCaseTransactionIds: [],
     running: false,
     apiScenarios: [],
+    executionCaseContext: null,
   }),
   getters: {
     activeProject(state): ProjectListItem | null {
@@ -360,6 +369,7 @@ export const useApiTestStore = defineStore("apiTest", {
       this.selectedEnvironmentId = "";
       this.selectedEnvironmentServiceId = "";
       this.workspaceStage = "api-document";
+      this.executionCaseContext = null;
     },
     async removeProject(projectId: string) {
       await deleteProject(projectId);
@@ -579,6 +589,7 @@ export const useApiTestStore = defineStore("apiTest", {
       this.activeCaseId = "";
       this.selectedEnvironmentId = "";
       this.selectedEnvironmentServiceId = "";
+      this.executionCaseContext = null;
       await this.loadWorkspaceStage(
         projectId,
         transactionId,

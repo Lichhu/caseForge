@@ -78,7 +78,7 @@ function enqueueInput(mock: ReturnType<typeof createMessageServiceMock>) {
 }
 
 describe("RequirementNotifyService 事件通知", () => {
-  it("分发后给被分发人写入未发送消息，含需求编号与专属访问链接", () => {
+  it("分发后给被分发人写入未发送消息，链接不包含用户名", () => {
     const { service, messageService } = buildService();
     service.notifyDispatched(
       requirement({ dispatchedTo: "zhangsan", dispatchedBy: "boss" }),
@@ -92,7 +92,8 @@ describe("RequirementNotifyService 事件通知", () => {
     });
     const content = enqueueInput(messageService)?.content as string;
     expect(content).toContain("XQ2026-0001");
-    expect(content).toContain("userName=zhangsan");
+    expect(content).toContain("http://localhost:33550/api-test/requirement");
+    expect(content).not.toContain("userName");
   });
 
   it("没有分发对象时不写入消息", () => {
@@ -149,12 +150,26 @@ describe("RequirementNotifyService 事件通知", () => {
 });
 
 describe("RequirementNotifyService 超期提醒", () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    // 2026-11-03 08:31（Asia/Shanghai，周二）
+    jest.setSystemTime(new Date("2026-11-03T00:31:00.000Z"));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it("给每个分发人各写入一条汇总提醒，并回写 overdueNotifiedAt", async () => {
     const { service, requirementRepo, dispatcherRepo, messageService } =
       buildService();
     requirementRepo.find.mockResolvedValue([
       requirement({ id: "req-1", status: "pending_dispatch" }),
-      requirement({ id: "req-2", status: "pending_dispatch" }),
+      requirement({
+        id: "req-2",
+        projectCode: "XQ2026-0002",
+        status: "pending_dispatch",
+      }),
     ]);
     dispatcherRepo.find.mockResolvedValue([
       { userName: "boss1" },
@@ -175,6 +190,9 @@ describe("RequirementNotifyService 超期提醒", () => {
     expect(messageService.enqueue.mock.calls[0]?.[0]?.content).toContain(
       "2 条",
     );
+    expect(messageService.enqueue.mock.calls[0]?.[0]?.content).toContain(
+      "XQ2026-0001、XQ2026-0002",
+    );
     expect(requirementRepo.update).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ overdueNotifiedAt: expect.any(Date) }),
@@ -192,6 +210,83 @@ describe("RequirementNotifyService 超期提醒", () => {
     await service.scanOverdue();
 
     expect(messageService.enqueue).not.toHaveBeenCalled();
+    expect(requirementRepo.update).not.toHaveBeenCalled();
+  });
+
+  it("每 20 个需求编号分批发送，且每条都带总数", async () => {
+    const { service, requirementRepo, dispatcherRepo, messageService } =
+      buildService();
+    const rows = Array.from({ length: 45 }, (_, index) =>
+      requirement({
+        id: `req-${index + 1}`,
+        projectCode: `XQ-${String(index + 1).padStart(2, "0")}`,
+        status: "pending_dispatch",
+      }),
+    );
+    requirementRepo.find.mockResolvedValue(rows);
+    dispatcherRepo.find.mockResolvedValue([
+      { userName: "boss1" },
+    ] as ApiRequirementDispatcherEntity[]);
+
+    await service.scanOverdue();
+
+    expect(messageService.enqueue).toHaveBeenCalledTimes(3);
+    const contents = messageService.enqueue.mock.calls.map(
+      (call) => call[0].content,
+    );
+    expect(contents).toHaveLength(3);
+    for (const content of contents) {
+      expect(content).toContain("共 45 条");
+    }
+    expect(contents[0]).toContain("第 1-20 条");
+    expect(contents[1]).toContain("第 21-40 条");
+    expect(contents[2]).toContain("第 41-45 条");
+    const allContent = contents.join("\n");
+    for (const row of rows) {
+      expect(allContent).toContain(row.projectCode);
+    }
+  });
+
+  it("窗口外不查询、不入队也不回写提醒标记", async () => {
+    // 08:29（Asia/Shanghai）
+    jest.setSystemTime(new Date("2026-11-03T00:29:00.000Z"));
+    const { service, requirementRepo, dispatcherRepo, messageService } =
+      buildService();
+
+    await service.scanOverdue();
+
+    expect(requirementRepo.find).not.toHaveBeenCalled();
+    expect(dispatcherRepo.find).not.toHaveBeenCalled();
+    expect(messageService.enqueue).not.toHaveBeenCalled();
+    expect(requirementRepo.update).not.toHaveBeenCalled();
+  });
+
+  it("周末不发送超期提醒", async () => {
+    // 2026-11-07 09:00（Asia/Shanghai，周六）
+    jest.setSystemTime(new Date("2026-11-07T01:00:00.000Z"));
+    const { service, requirementRepo, dispatcherRepo } = buildService();
+
+    await service.scanOverdue();
+
+    expect(requirementRepo.find).not.toHaveBeenCalled();
+    expect(dispatcherRepo.find).not.toHaveBeenCalled();
+    expect(requirementRepo.update).not.toHaveBeenCalled();
+  });
+
+  it("消息入队失败时不回写提醒标记，等待下次扫描", async () => {
+    const { service, requirementRepo, dispatcherRepo, messageService } =
+      buildService();
+    requirementRepo.find.mockResolvedValue([
+      requirement({ status: "pending_dispatch" }),
+    ]);
+    dispatcherRepo.find.mockResolvedValue([
+      { userName: "boss1" },
+    ] as ApiRequirementDispatcherEntity[]);
+    messageService.enqueue.mockRejectedValue(new Error("db down"));
+
+    await service.scanOverdue();
+
+    expect(messageService.enqueue).toHaveBeenCalledTimes(1);
     expect(requirementRepo.update).not.toHaveBeenCalled();
   });
 

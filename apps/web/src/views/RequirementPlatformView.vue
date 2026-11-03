@@ -11,7 +11,6 @@ import {
   EyeOutlined,
   EditOutlined,
   DeleteOutlined,
-  TeamOutlined,
   PlusOutlined,
   SettingOutlined,
 } from "@ant-design/icons-vue";
@@ -20,7 +19,10 @@ import type {
   RequirementPlatformItem,
   RequirementStatus,
 } from "@case-forge/shared";
-import { REQUIREMENT_STATUS_LABELS } from "@case-forge/shared";
+import {
+  REQUIREMENT_STATUS_LABELS,
+  REQUIREMENT_VERSION_NAMES,
+} from "@case-forge/shared";
 import {
   claimRequirement,
   dispatchRequirement,
@@ -33,11 +35,6 @@ import {
   updateRequirement,
   deleteRequirement,
   setRequirementStatus,
-  fetchPoolMembers,
-  searchPoolCandidates,
-  addPoolMember,
-  removePoolMember,
-  type RequirementPoolMember,
 } from "@/api/requirementPlatform";
 import { getUserName } from "@/utils/userContext";
 import SystemConfigDrawer from "@/components/api-test/SystemConfigDrawer.vue";
@@ -59,8 +56,13 @@ const createSubmitting = ref(false);
 const createForm = ref({
   projectCode: "",
   projectName: "",
+  versionName: undefined as string | undefined,
   applicationName: undefined as string | undefined,
 });
+const requirementVersionOptions = REQUIREMENT_VERSION_NAMES.map((value) => ({
+  value,
+  label: value,
+}));
 const applicationOptions = ref<string[]>([]);
 const applicationLoading = ref(false);
 const editVisible = ref(false);
@@ -70,15 +72,21 @@ const editForm = ref({
   projectCode: "",
   projectName: "",
   applicationName: "",
+  versionName: "",
 });
-const poolVisible = ref(false);
-const poolLoading = ref(false);
-const poolMembers = ref<RequirementPoolMember[]>([]);
-const poolCandidates = ref<Array<{ userName: string; nickName: string }>>([]);
-const poolSearch = ref("");
-const poolSelectedUser = ref<string>();
-const poolSaving = ref(false);
-
+const editVersionOptions = computed(() => {
+  const currentVersion = editForm.value.versionName.trim();
+  if (
+    !currentVersion ||
+    REQUIREMENT_VERSION_NAMES.some((value) => value === currentVersion)
+  ) {
+    return requirementVersionOptions;
+  }
+  return [
+    { value: currentVersion, label: `${currentVersion}（当前版本）` },
+    ...requirementVersionOptions,
+  ];
+});
 const statusFilter = ref<"all" | RequirementStatus>(
   route.query.status === "testing" ? "testing" : "pending_dispatch",
 );
@@ -343,18 +351,31 @@ async function handleSync() {
 }
 
 async function confirmCreate() {
-  const { projectCode, projectName, applicationName } = createForm.value;
-  if (!projectCode.trim() || !projectName.trim() || !applicationName) {
-    message.warning("需求编号、需求名和所属应用必填");
+  const { projectCode, projectName, versionName, applicationName } =
+    createForm.value;
+  const trimmedVersionName = versionName?.trim();
+  if (
+    !projectCode.trim() ||
+    !projectName.trim() ||
+    !trimmedVersionName ||
+    !applicationName
+  ) {
+    message.warning("需求编号、需求名、需求版本和所属应用必填");
     return;
   }
   createSubmitting.value = true;
   try {
-    await createRequirement({ projectCode, projectName, applicationName });
+    await createRequirement({
+      projectCode,
+      projectName,
+      versionName: trimmedVersionName,
+      applicationName,
+    });
     createVisible.value = false;
     createForm.value = {
       projectCode: "",
       projectName: "",
+      versionName: undefined,
       applicationName: undefined,
     };
     await loadList();
@@ -386,76 +407,11 @@ async function openCreate() {
   createForm.value = {
     projectCode: "",
     projectName: "",
+    versionName: undefined,
     applicationName: undefined,
   };
   createVisible.value = true;
   await loadApplicationOptions();
-}
-
-async function openPool() {
-  poolVisible.value = true;
-  await loadPoolMembers();
-  await searchPoolUsers("");
-}
-
-async function loadPoolMembers() {
-  poolLoading.value = true;
-  try {
-    poolMembers.value = await fetchPoolMembers();
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : "加载人员池失败");
-  } finally {
-    poolLoading.value = false;
-  }
-}
-
-let poolSearchTimer: ReturnType<typeof setTimeout> | undefined;
-function handlePoolSearch(value: string) {
-  poolSearch.value = value;
-  if (poolSearchTimer) clearTimeout(poolSearchTimer);
-  poolSearchTimer = setTimeout(() => void searchPoolUsers(value), 250);
-}
-
-async function searchPoolUsers(value: string) {
-  try {
-    poolCandidates.value = await searchPoolCandidates(value);
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : "搜索用户失败");
-  }
-}
-
-async function addSelectedPoolUser() {
-  if (!poolSelectedUser.value) {
-    message.warning("请选择用户");
-    return;
-  }
-  poolSaving.value = true;
-  try {
-    await addPoolMember(poolSelectedUser.value);
-    poolSelectedUser.value = undefined;
-    poolSearch.value = "";
-    await loadPoolMembers();
-    poolCandidates.value = [];
-    message.success("已添加到人员池");
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : "添加失败");
-  } finally {
-    poolSaving.value = false;
-  }
-}
-
-async function deletePoolUser(member: RequirementPoolMember) {
-  if (member.isDispatcher) return;
-  poolSaving.value = true;
-  try {
-    await removePoolMember(member.id);
-    await Promise.all([loadPoolMembers(), searchPoolUsers(poolSearch.value)]);
-    message.success("已从人员池移除");
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : "移除失败");
-  } finally {
-    poolSaving.value = false;
-  }
 }
 
 // ---------------- 分发 ----------------
@@ -553,6 +509,7 @@ async function openEdit(row: RequirementPlatformItem) {
     projectCode: row.projectCode,
     projectName: row.projectName,
     applicationName: row.applicationName?.trim() || "",
+    versionName: row.versionName?.trim() || "",
   };
   editVisible.value = true;
 }
@@ -561,8 +518,9 @@ async function confirmEdit() {
   const code = editForm.value.projectCode.trim();
   const name = editForm.value.projectName.trim();
   const applicationName = editForm.value.applicationName.trim();
-  if (!code || !name || !applicationName) {
-    message.warning("需求编号、需求名和归属应用必填");
+  const versionName = editForm.value.versionName.trim();
+  if (!code || !name || !applicationName || !versionName) {
+    message.warning("需求编号、需求名、需求版本和归属应用必填");
     return;
   }
   editSubmitting.value = true;
@@ -571,6 +529,7 @@ async function confirmEdit() {
       projectCode: code,
       projectName: name,
       applicationName,
+      versionName,
     });
     editVisible.value = false;
     await loadList();
@@ -705,9 +664,6 @@ onMounted(async () => {
               </a-button>
               <a-button @click="openCreate"
                 ><template #icon><PlusOutlined /></template>手动创建</a-button
-              >
-              <a-button @click="openPool"
-                ><template #icon><TeamOutlined /></template>人员池</a-button
               >
             </template>
             <a-button @click="systemConfigOpen = true">
@@ -949,6 +905,15 @@ onMounted(async () => {
             v-model:value="createForm.projectName"
             placeholder="请输入需求名"
         /></a-form-item>
+        <a-form-item label="需求版本" required>
+          <a-auto-complete
+            v-model:value="createForm.versionName"
+            allow-clear
+            :options="requirementVersionOptions"
+            :maxlength="255"
+            placeholder="选择或输入需求版本"
+          />
+        </a-form-item>
         <a-form-item label="归属应用" required>
           <a-select
             v-model:value="createForm.applicationName"
@@ -979,6 +944,15 @@ onMounted(async () => {
         <a-form-item label="需求名" required
           ><a-input v-model:value="editForm.projectName" maxlength="120"
         /></a-form-item>
+        <a-form-item label="需求版本" required>
+          <a-auto-complete
+            v-model:value="editForm.versionName"
+            allow-clear
+            :options="editVersionOptions"
+            :maxlength="255"
+            placeholder="选择或输入需求版本"
+          />
+        </a-form-item>
         <a-form-item label="归属应用" required>
           <a-select
             v-model:value="editForm.applicationName"
@@ -992,66 +966,6 @@ onMounted(async () => {
           />
         </a-form-item>
       </a-form>
-    </a-modal>
-
-    <a-modal
-      v-model:open="poolVisible"
-      title="需求人员池"
-      :footer="null"
-      width="560px"
-    >
-      <div class="pool-add-row">
-        <a-select
-          v-model:value="poolSelectedUser"
-          show-search
-          :filter-option="false"
-          :search-value="poolSearch"
-          :options="
-            poolCandidates.map((user) => ({
-              value: user.userName,
-              label: `${user.nickName}（${user.userName}）`,
-            }))
-          "
-          placeholder="搜索姓名或账号"
-          :virtual="true"
-          class="pool-user-select"
-          @search="handlePoolSearch"
-        />
-        <a-button
-          type="primary"
-          :loading="poolSaving"
-          @click="addSelectedPoolUser"
-          >添加成员</a-button
-        >
-      </div>
-      <a-spin :spinning="poolLoading">
-        <a-list
-          :data-source="poolMembers"
-          item-layout="horizontal"
-          class="pool-member-list"
-        >
-          <template #renderItem="{ item }">
-            <a-list-item>
-              <div class="pool-member-identity">
-                <span class="pool-member-name">{{ item.nickName }}</span>
-                <span class="pool-member-account">{{ item.userName }}</span>
-              </div>
-              <div class="pool-member-actions">
-                <a-tag v-if="item.isDispatcher" color="red">分发人</a-tag>
-                <a-button
-                  v-else
-                  size="small"
-                  danger
-                  :loading="poolSaving"
-                  @click="deletePoolUser(item)"
-                  >移除</a-button
-                >
-              </div>
-            </a-list-item>
-          </template>
-          <template #emptyText>人员池暂无普通成员</template>
-        </a-list>
-      </a-spin>
     </a-modal>
 
     <a-modal
@@ -1104,6 +1018,8 @@ onMounted(async () => {
     <SystemConfigDrawer
       v-model:open="systemConfigOpen"
       :can-edit-generation-config="isDispatcher"
+      :can-view-requirement-pool="isDispatcher || isMember"
+      :can-edit-requirement-pool="isDispatcher"
     />
     <RequirementProgressDrawer
       v-model:open="progressOpen"
@@ -1395,67 +1311,6 @@ onMounted(async () => {
   margin-bottom: 12px;
   color: rgba(60, 60, 67, 0.75);
   font-size: 13px;
-}
-
-.pool-add-row {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.pool-user-select {
-  flex: 1;
-  min-width: 0;
-}
-
-.pool-member-list {
-  max-height: 420px;
-  overflow: auto;
-}
-
-.pool-member-list :deep(.ant-list-item) {
-  min-height: 54px;
-  padding: 10px 12px;
-  border-radius: 6px;
-  transition: background 0.15s ease;
-}
-
-.pool-member-list :deep(.ant-list-item:hover) {
-  background: #f6f8fb;
-}
-
-.pool-member-identity,
-.pool-member-actions {
-  display: flex;
-  align-items: center;
-}
-
-.pool-member-identity {
-  flex: 1;
-  min-width: 0;
-  gap: 10px;
-  white-space: nowrap;
-}
-
-.pool-member-name {
-  overflow: hidden;
-  color: var(--cf-text);
-  font-size: 13px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-}
-
-.pool-member-account {
-  flex: 0 0 auto;
-  color: var(--cf-text-muted);
-  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
-  font-size: 12px;
-}
-
-.pool-member-actions {
-  flex: 0 0 auto;
-  justify-content: flex-end;
-  margin-left: 16px;
 }
 
 @media (max-width: 1280px) {

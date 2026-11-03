@@ -218,8 +218,12 @@ export class RequirementPlatformService {
     const projectCode = dto.projectCode.trim();
     const projectName = dto.projectName.trim();
     const applicationName = dto.applicationName.trim();
-    if (!projectCode || !projectName || !applicationName) {
-      throw new BadRequestException("需求编号、需求名和所属应用必填");
+    const versionName = dto.versionName.trim();
+    if (!projectCode || !projectName || !applicationName || !versionName) {
+      throw new BadRequestException("需求编号、需求名、需求版本和所属应用必填");
+    }
+    if (versionName.length > 255) {
+      throw new BadRequestException("需求版本不能超过 255 个字符");
     }
     await this.assertCodeAvailable(projectCode);
     const deletedRow = await this.requirementRepo.findOne({
@@ -234,6 +238,7 @@ export class RequirementPlatformService {
         await requirementRepo.update(deletedRow.id, {
           projectName,
           applicationName,
+          versionName,
           createdBy: userName,
           status: "pending_dispatch",
           dispatchedTo: null,
@@ -257,6 +262,7 @@ export class RequirementPlatformService {
           projectCode,
           projectName,
           applicationName,
+          versionName,
           createdBy: userName,
           status: "pending_dispatch",
         }),
@@ -290,6 +296,16 @@ export class RequirementPlatformService {
       const name = dto.projectName.trim();
       if (!name) throw new BadRequestException("需求名必填");
       row.projectName = name;
+    }
+    if (dto.versionName !== undefined) {
+      const versionName = dto.versionName.trim();
+      if (!versionName) {
+        throw new BadRequestException("需求版本必填");
+      }
+      if (versionName.length > 255) {
+        throw new BadRequestException("需求版本不能超过 255 个字符");
+      }
+      row.versionName = versionName;
     }
     if (dto.applicationName !== undefined) {
       const applicationName = dto.applicationName.trim();
@@ -359,6 +375,11 @@ export class RequirementPlatformService {
 
   async removeDispatcher(id: string) {
     await this.assertDispatcher();
+    const dispatcher = await this.dispatcherRepo.findOne({ where: { id } });
+    if (!dispatcher) throw new NotFoundException("分发人不存在");
+    if (dispatcher.userName === "system") {
+      throw new BadRequestException("system 分发人不可移除");
+    }
     if ((await this.dispatcherRepo.count()) <= 1) {
       throw new BadRequestException("至少保留一名分发人");
     }
@@ -511,7 +532,7 @@ export class RequirementPlatformService {
   }
 
   async listPoolMembers() {
-    await this.assertDispatcher();
+    await this.assertRequirementViewer();
     const members = await this.memberRepo.find({ order: { createdAt: "ASC" } });
     const dispatchers = await this.dispatcherRepo.find({
       order: { createdAt: "ASC" },
@@ -532,10 +553,12 @@ export class RequirementPlatformService {
     const nameByUser = new Map(
       users.map((user) => [user.userName, user.nickName]),
     );
-    return rows.map((row) => ({
-      ...row,
-      nickName: nameByUser.get(row.userName) ?? row.userName,
-    }));
+    return rows
+      .filter((row) => row.userName !== "system")
+      .map((row) => ({
+        ...row,
+        nickName: nameByUser.get(row.userName) ?? row.userName,
+      }));
   }
 
   async searchPoolCandidates(keyword = "") {

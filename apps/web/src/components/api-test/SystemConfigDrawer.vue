@@ -52,18 +52,23 @@
           v-if="activeTab === 'service-properties'"
           :can-edit="canEditGenerationConfig"
         />
+        <RequirementPoolPanel
+          v-if="activeTab === 'requirement-pool'"
+          :can-edit="canEditRequirementPool"
+        />
       </div>
     </div>
   </a-drawer>
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import {
   AppstoreOutlined,
   CodeOutlined,
   DatabaseOutlined,
   GlobalOutlined,
+  TeamOutlined,
   UnorderedListOutlined,
 } from "@ant-design/icons-vue";
 import { GLOBAL_LIBRARY_PROJECT_ID } from "@/constants/library";
@@ -73,23 +78,31 @@ import ApiDatabaseConnectionMaintainModal from "./ApiDatabaseConnectionMaintainM
 import ApiEnvironmentMaintainModal from "./ApiEnvironmentMaintainModal.vue";
 import StepLibraryMaintainModal from "./StepLibraryMaintainModal.vue";
 import ApiGenerationConfigPanel from "./ApiGenerationConfigPanel.vue";
+import RequirementPoolPanel from "./RequirementPoolPanel.vue";
 
 type LibraryTab =
   | "functions"
   | "database"
   | "service-properties"
+  | "requirement-pool"
   | "environment"
   | "steps";
 
 const open = defineModel<boolean>("open", { default: false });
-withDefaults(
+const props = withDefaults(
   defineProps<{
     canEditGenerationConfig?: boolean;
+    canViewRequirementPool?: boolean;
+    canEditRequirementPool?: boolean;
   }>(),
-  { canEditGenerationConfig: false },
+  {
+    canEditGenerationConfig: false,
+    canViewRequirementPool: false,
+    canEditRequirementPool: false,
+  },
 );
 const activeTab = ref<LibraryTab>("functions");
-const tabs: Array<{
+const baseTabs: Array<{
   key: LibraryTab;
   label: string;
   icon: typeof CodeOutlined;
@@ -103,7 +116,20 @@ const tabs: Array<{
     label: "服务属性",
     icon: AppstoreOutlined,
   },
+  {
+    key: "requirement-pool",
+    label: "人员池维护",
+    icon: TeamOutlined,
+  },
 ];
+const tabs = computed(() =>
+  baseTabs.filter(
+    (tab) =>
+      tab.key !== "requirement-pool" ||
+      props.canViewRequirementPool ||
+      props.canEditRequirementPool,
+  ),
+);
 const drawerBodyStyle = {
   padding: "0",
   display: "flex",

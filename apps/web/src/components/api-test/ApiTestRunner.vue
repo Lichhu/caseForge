@@ -169,169 +169,192 @@
 
             <div v-else-if="apiStore.transactionRuns.length" class="exec-run-detail">
               <div class="exec-run-history-panel">
-                <div class="exec-run-history-head">
-                  <span class="exec-run-history-title">执行历史</span>
-                  <span class="exec-run-history-count">共 {{ apiStore.transactionRuns.length }} 次</span>
-                </div>
-                <div class="exec-run-history-track">
-                  <div
-                    v-for="item in apiStore.transactionRuns"
-                    :key="item.id"
-                    class="exec-run-history-entry"
-                    :class="[
-                      `exec-run-history-entry--${runHistoryChipClass(item)}`,
-                      { expanded: expandedRunId === item.id },
-                    ]"
-                  >
-                    <div
+                <aside class="exec-run-history-list-pane">
+                  <div class="exec-run-history-head">
+                    <div>
+                      <span class="exec-run-history-title">执行历史</span>
+                      <p>选择一次执行查看案例结果</p>
+                    </div>
+                    <span class="exec-run-history-count">共 {{ apiStore.transactionRuns.length }} 次</span>
+                  </div>
+                  <div class="exec-run-history-track">
+                    <button
+                      v-for="item in apiStore.transactionRuns"
+                      :key="item.id"
+                      type="button"
                       class="exec-run-history-item"
                       :class="[
                         `exec-run-history-item--${runHistoryChipClass(item)}`,
                         { active: expandedRunId === item.id },
                       ]"
+                      @click="toggleRunDetail(item.id)"
                     >
-                      <div class="exec-run-history-item-main" @click="toggleRunDetail(item.id)">
-                        <span class="exec-run-history-item-stats">
-                          <span class="exec-run-history-stat">
-                            总数 <strong>{{ item.totalCount }}</strong>
-                          </span>
-                          <span class="exec-run-history-stat exec-run-history-stat--pass">
-                            通过 <strong>{{ item.passedCount }}</strong>
-                          </span>
-                          <span class="exec-run-history-stat exec-run-history-stat--fail">
-                            失败 <strong>{{ runHistoryFailedCount(item) }}</strong>
-                          </span>
-                          <span class="exec-run-history-stat exec-run-history-stat--rate">
-                            通过率 <strong>{{ runHistoryPassRate(item) }}%</strong>
-                          </span>
-                        </span>
+                      <span class="exec-run-history-item-top">
                         <span class="exec-run-history-item-outcome">{{ runHistoryOutcomeLabel(item) }}</span>
-                        <span class="exec-run-history-item-trailing">
-                          <span v-if="item.versionCode" class="exec-run-history-version" :title="`执行版本 ${item.versionCode}`">
-                            {{ item.versionCode }}
-                          </span>
-                          <span class="exec-run-history-item-time">{{ formatHistoryTime(item.createdAt) }}</span>
-                          <a-tooltip title="重新执行">
-                            <a-button
-                              type="text"
-                              size="small"
-                              class="exec-run-history-rerun"
-                              :loading="rerunningRunId === item.id"
-                              :disabled="apiStore.running && rerunningRunId !== item.id"
-                              @click.stop="onRerunHistory(item.id)"
-                            >
-                              <template #icon><RedoOutlined /></template>
-                            </a-button>
-                          </a-tooltip>
-                          <a-tooltip title="删除">
-                            <a-button
-                              type="text"
-                              size="small"
-                              class="exec-run-history-delete"
-                              :loading="deletingRunId === item.id"
-                              :disabled="apiStore.running || (!!deletingRunId && deletingRunId !== item.id)"
-                              @click.stop="onDeleteHistory(item.id)"
-                            >
-                              <template #icon><DeleteOutlined /></template>
-                            </a-button>
-                          </a-tooltip>
-                          <DownOutlined class="exec-run-history-item-chevron" />
-                        </span>
-                      </div>
+                        <span class="exec-run-history-item-time">{{ formatHistoryTime(item.createdAt) }}</span>
+                      </span>
+                      <span class="exec-run-history-item-version">{{ item.versionCode || "无执行版本" }}</span>
+                      <span class="exec-run-history-item-stats">
+                        <span class="exec-run-history-stat">总数 <strong>{{ item.totalCount }}</strong></span>
+                        <span class="exec-run-history-stat exec-run-history-stat--pass">通过 <strong>{{ item.passedCount }}</strong></span>
+                        <span class="exec-run-history-stat exec-run-history-stat--fail">失败 <strong>{{ runHistoryFailedCount(item) }}</strong></span>
+                        <span class="exec-run-history-stat exec-run-history-stat--rate">通过率 <strong>{{ runHistoryPassRate(item) }}%</strong></span>
+                      </span>
                       <span class="exec-run-history-item-bar" aria-hidden="true">
                         <i :style="{ width: `${runHistoryPassRate(item)}%` }" />
                       </span>
-                    </div>
-                    <div v-if="expandedRunId === item.id" class="exec-run-history-detail">
-                      <a-spin :spinning="runDetailLoading">
-                        <div class="exec-run-results-header">
-                          <h4 class="exec-run-results-title">案例明细</h4>
-                          <span class="exec-run-results-hint">点击案例名称或左侧按钮展开查看请求、响应与断言</span>
-                        </div>
-                        <a-table
-                          v-if="apiStore.activeRun?.id === item.id"
-                          class="exec-run-results-table"
-                          size="small"
-                          row-key="id"
-                          :data-source="apiStore.activeRun.items"
-                          :columns="itemColumns"
-                          :pagination="false"
-                          :expanded-row-keys="expandedKeys"
-                          @expand="onExpand"
-                        >
-                          <template #bodyCell="{ column, record }">
-                            <template v-if="column.key === 'caseTitle'">
-                              <span class="exec-run-case-title" :title="record.caseTitle">
-                                {{ record.caseTitle || '未命名案例' }}
-                              </span>
-                            </template>
-                            <template v-else-if="column.key === 'status'">
-                              <span
-                                class="exec-run-status-pill"
-                                :class="`exec-run-status-pill--${record.status}`"
-                              >
-                                {{ runItemStatusLabel(record.status) }}
-                              </span>
-                            </template>
-                            <template v-else-if="column.key === 'durationMs'">
-                              <span class="exec-run-duration">{{ formatDuration(record.durationMs) }}</span>
-                            </template>
-                            <template v-else-if="column.key === 'actions'">
-                              <span class="exec-run-item-actions">
-                                <a-tooltip title="重新执行">
-                                  <a-button type="text" size="small" :loading="rerunningItemId === record.id" @click.stop="onRerunItem(item.id, record.caseId)">
-                                    <template #icon><RedoOutlined /></template>
-                                  </a-button>
-                                </a-tooltip>
-                                <a-tooltip title="打开案例编辑">
-                                  <a-button type="text" size="small" @click.stop="openRunCase(record.caseId)">
-                                    <template #icon><EditOutlined /></template>
-                                  </a-button>
-                                </a-tooltip>
-                              </span>
-                            </template>
-                          </template>
-                          <template #expandedRowRender="{ record }">
-                            <div class="exec-run-expand">
-                              <div v-if="runItemSteps(record).length" class="exec-run-step-list">
-                                <div
-                                  v-for="(step, index) in runItemSteps(record)"
-                                  :key="String(step.stepId ?? index)"
-                                  class="exec-run-step-block"
-                                >
-                                  <div class="exec-run-step-head">
-                                    <span class="exec-run-step-index">步骤 {{ index + 1 }}</span>
-                                    <strong class="exec-run-step-name">{{ step.stepName || '未命名步骤' }}</strong>
-                                    <span v-if="step.parallelGroup" class="exec-run-parallel-pill">∥ 并行组 {{ step.parallelGroup }}</span>
-                                    <span
-                                      class="exec-run-status-pill exec-run-status-pill--sm"
-                                      :class="`exec-run-status-pill--${step.status}`"
-                                    >
-                                      {{ runItemStatusLabel(step.status || '') }}
-                                    </span>
-                                    <span class="exec-run-duration">{{ formatDuration(step.durationMs) }}</span>
-                                    <span class="exec-run-started">开始 {{ formatStepTime(step.startedAt) }}</span>
-                                  </div>
-                                  <ApiRunSnapshotTabs
-                                    :request-snapshot="step.request"
-                                    :response-snapshot="step.response"
-                                    :assertions="step.assertions ?? []"
-                                  />
-                                </div>
-                              </div>
-                              <ApiRunSnapshotTabs
-                                v-else
-                                :request-snapshot="record.requestSnapshot"
-                                :response-snapshot="record.responseSnapshot"
-                                :assertions="record.assertions ?? []"
-                              />
-                            </div>
-                          </template>
-                        </a-table>
-                      </a-spin>
-                    </div>
+                    </button>
                   </div>
-                </div>
+                </aside>
+                <section class="exec-run-history-detail-pane">
+                  <template v-if="selectedHistoryRun">
+                    <div class="exec-run-detail-head">
+                      <div>
+                        <span class="exec-run-detail-eyebrow">执行结果</span>
+                        <h3>
+                          {{ selectedHistoryRun.versionCode || "本次执行" }}
+                          <span
+                            class="exec-run-status-pill"
+                            :class="`exec-run-status-pill--${selectedHistoryRun.status}`"
+                          >
+                            {{ runHistoryOutcomeLabel(selectedHistoryRun) }}
+                          </span>
+                        </h3>
+                        <p>{{ formatHistoryTime(selectedHistoryRun.createdAt) }}</p>
+                      </div>
+                      <div class="exec-run-detail-actions">
+                        <a-button
+                          size="small"
+                          :loading="rerunningRunId === selectedHistoryRun.id"
+                          :disabled="apiStore.running && rerunningRunId !== selectedHistoryRun.id"
+                          @click="onRerunHistory(selectedHistoryRun.id)"
+                        >
+                          <template #icon><RedoOutlined /></template>
+                          重新执行
+                        </a-button>
+                        <a-button
+                          size="small"
+                          danger
+                          :loading="deletingRunId === selectedHistoryRun.id"
+                          :disabled="apiStore.running || (!!deletingRunId && deletingRunId !== selectedHistoryRun.id)"
+                          @click="onDeleteHistory(selectedHistoryRun.id)"
+                        >
+                          <template #icon><DeleteOutlined /></template>
+                          删除
+                        </a-button>
+                      </div>
+                    </div>
+                    <div class="exec-run-detail-summary">
+                      <span>案例总数 <strong>{{ selectedHistoryRun.totalCount }}</strong></span>
+                      <span class="is-pass">通过 <strong>{{ selectedHistoryRun.passedCount }}</strong></span>
+                      <span class="is-fail">失败/异常 <strong>{{ runHistoryFailedCount(selectedHistoryRun) }}</strong></span>
+                      <span>通过率 <strong>{{ runHistoryPassRate(selectedHistoryRun) }}%</strong></span>
+                    </div>
+                    <a-spin :spinning="runDetailLoading">
+                      <div class="exec-run-results-header">
+                        <h4 class="exec-run-results-title">案例明细</h4>
+                        <span class="exec-run-results-hint">
+                          <a-tag
+                            v-if="executionContextItem"
+                            color="error"
+                            :bordered="false"
+                          >
+                            已定位：
+                            {{
+                              executionContextItem.caseTitle ||
+                              executionContextItem.caseId
+                            }}
+                          </a-tag>
+                          点击案例名称或左侧按钮展开查看请求、响应与断言
+                        </span>
+                      </div>
+                      <a-table
+                        v-if="apiStore.activeRun?.id === selectedHistoryRun.id"
+                        class="exec-run-results-table"
+                        size="small"
+                        row-key="id"
+                        :data-source="apiStore.activeRun.items"
+                        :columns="itemColumns"
+                        :pagination="false"
+                        :expanded-row-keys="expandedKeys"
+                        :row-class-name="executionContextRowClass"
+                        :scroll="{ y: 520 }"
+                        @expand="onExpand"
+                      >
+                        <template #bodyCell="{ column, record }">
+                          <template v-if="column.key === 'caseTitle'">
+                            <span class="exec-run-case-title" :title="record.caseTitle">
+                              {{ record.caseTitle || '未命名案例' }}
+                            </span>
+                          </template>
+                          <template v-else-if="column.key === 'status'">
+                            <span class="exec-run-status-pill" :class="`exec-run-status-pill--${record.status}`">
+                              {{ runItemStatusLabel(record.status) }}
+                            </span>
+                          </template>
+                          <template v-else-if="column.key === 'durationMs'">
+                            <span class="exec-run-duration">{{ formatDuration(record.durationMs) }}</span>
+                          </template>
+                          <template v-else-if="column.key === 'actions'">
+                            <span class="exec-run-item-actions">
+                              <a-tooltip title="重新执行">
+                                <a-button type="text" size="small" :loading="rerunningItemId === record.id" @click.stop="onRerunItem(selectedHistoryRun.id, record.caseId)">
+                                  <template #icon><RedoOutlined /></template>
+                                </a-button>
+                              </a-tooltip>
+                              <a-tooltip title="打开案例编辑">
+                                <a-button type="text" size="small" @click.stop="openRunCase(record)">
+                                  <template #icon><EditOutlined /></template>
+                                </a-button>
+                              </a-tooltip>
+                            </span>
+                          </template>
+                        </template>
+                        <template #expandedRowRender="{ record }">
+                          <div class="exec-run-expand">
+                            <div v-if="runItemSteps(record).length" class="exec-run-step-list">
+                              <div
+                                v-for="(step, index) in runItemSteps(record)"
+                                :key="String(step.stepId ?? index)"
+                                class="exec-run-step-block"
+                              >
+                                <div class="exec-run-step-head">
+                                  <span class="exec-run-step-index">步骤 {{ index + 1 }}</span>
+                                  <strong class="exec-run-step-name">{{ step.stepName || '未命名步骤' }}</strong>
+                                  <span v-if="step.parallelGroup" class="exec-run-parallel-pill">∥ 并行组 {{ step.parallelGroup }}</span>
+                                  <span class="exec-run-status-pill exec-run-status-pill--sm" :class="`exec-run-status-pill--${step.status}`">
+                                    {{ runItemStatusLabel(step.status || '') }}
+                                  </span>
+                                  <span class="exec-run-duration">{{ formatDuration(step.durationMs) }}</span>
+                                  <span class="exec-run-started">开始 {{ formatStepTime(step.startedAt) }}</span>
+                                </div>
+                                <ApiRunSnapshotTabs
+                                  :request-snapshot="step.request"
+                                  :response-snapshot="step.response"
+                                  :assertions="step.assertions ?? []"
+                                />
+                              </div>
+                            </div>
+                            <ApiRunSnapshotTabs
+                              v-else
+                              :request-snapshot="record.requestSnapshot"
+                              :response-snapshot="record.responseSnapshot"
+                              :assertions="record.assertions ?? []"
+                            />
+                          </div>
+                        </template>
+                      </a-table>
+                      <a-empty
+                        v-else-if="!runDetailLoading"
+                        description="暂无可显示的案例明细"
+                      />
+                    </a-spin>
+                  </template>
+                  <div v-else class="exec-run-detail-placeholder">
+                    <InfoCircleOutlined />
+                    <p>从左侧选择一次执行历史查看案例结果</p>
+                  </div>
+                </section>
               </div>
             </div>
             <div v-else class="exec-set-empty-detail exec-run-empty">
@@ -455,7 +478,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onActivated, ref, watch } from 'vue';
 import { message } from 'ant-design-vue';
 import {
   ArrowDownOutlined,
@@ -480,7 +503,7 @@ import type { ApiCaseRequest, ApiCaseStep } from '@case-forge/shared';
 import ApiEnvironmentMaintainModal from '@/components/api-test/ApiEnvironmentMaintainModal.vue';
 import ApiRunSnapshotTabs from '@/components/api-test/ApiRunSnapshotTabs.vue';
 import { useApiTestStore } from '@/stores/apiTest';
-import type { ApiTestCaseRow } from '@/api/apiTestClient';
+import type { ApiRunDetail, ApiTestCaseRow } from '@/api/apiTestClient';
 import { listAllApiCases, listApiCases } from '@/api/apiTestClient';
 
 const apiStore = useApiTestStore();
@@ -521,6 +544,22 @@ const detailTabOptions = [
 const runnerCaseCount = computed(() => apiStore.runnerCaseIds.length);
 
 const latestRun = computed(() => apiStore.transactionRuns[0] ?? null);
+const selectedHistoryRun = computed(
+  () =>
+    apiStore.transactionRuns.find((item) => item.id === expandedRunId.value) ??
+    null,
+);
+const executionContextItem = computed(() => {
+  const context = apiStore.executionCaseContext;
+  if (
+    !context ||
+    context.transactionId !== apiStore.activeTransactionId ||
+    context.runId !== selectedHistoryRun.value?.id
+  ) {
+    return null;
+  }
+  return context.item;
+});
 
 const latestRunLabel = computed(() => {
   const run = latestRun.value;
@@ -1077,10 +1116,20 @@ async function onRerunItem(runId: string, caseId: string) {
   }
 }
 
-async function openRunCase(caseId: string) {
+async function openRunCase(record: ApiRunDetail["items"][number]) {
   const projectId = apiStore.activeProjectId;
   const transactionId = apiStore.activeTransactionId;
   if (!projectId || !transactionId) return;
+  const caseId = record.caseId;
+  const run = selectedHistoryRun.value;
+  if (run) {
+    apiStore.executionCaseContext = {
+      runId: run.id,
+      runVersionCode: run.versionCode,
+      transactionId,
+      item: record,
+    };
+  }
   const target = apiStore.runnerCases.find((item) => item.id === caseId);
   const versionCode = target?.metadata?.versionCode ?? null;
   const channelId = target?.metadata?.channelId ?? null;
@@ -1091,13 +1140,13 @@ async function openRunCase(caseId: string) {
   const index = cases.findIndex((item) => item.id === caseId);
   apiStore.caseListVersionFilter = versionCode;
   apiStore.caseListChannelFilter = channelId;
-  apiStore.setWorkspaceStage(projectId, transactionId, 'api-cases');
   await apiStore.refreshCases(projectId, transactionId, {
     page: index < 0 ? 1 : Math.floor(index / apiStore.caseListPageSize) + 1,
     versionCode: versionCode ?? undefined,
     channelId: channelId ?? undefined,
   });
   apiStore.activeCaseId = caseId;
+  apiStore.setWorkspaceStage(projectId, transactionId, 'api-cases');
 }
 
 async function onDeleteHistory(runId: string) {
@@ -1130,8 +1179,6 @@ async function onDeleteHistory(runId: string) {
 async function toggleRunDetail(runId: string) {
   detailTab.value = 'result';
   if (expandedRunId.value === runId) {
-    expandedRunId.value = null;
-    expandedKeys.value = [];
     return;
   }
   expandedRunId.value = runId;
@@ -1148,6 +1195,26 @@ async function toggleRunDetail(runId: string) {
     runDetailLoading.value = false;
   }
 }
+
+watch(
+  () => apiStore.transactionRuns.map((item) => item.id).join(','),
+  () => {
+    if (!apiStore.transactionRuns.length) {
+      expandedRunId.value = null;
+      expandedKeys.value = [];
+      return;
+    }
+    if (
+      expandedRunId.value &&
+      apiStore.transactionRuns.some((item) => item.id === expandedRunId.value)
+    ) {
+      return;
+    }
+    const first = apiStore.transactionRuns[0]?.id;
+    if (first) void toggleRunDetail(first);
+  },
+  { immediate: true },
+);
 
 watch(
   () => apiStore.runnerCaseIds,
@@ -1168,6 +1235,43 @@ async function loadRun(runId: string) {
 function onExpand(expanded: boolean, record: { id: string }) {
   expandedKeys.value = expanded ? [record.id] : [];
 }
+
+function executionContextRowClass(record: ApiRunDetail["items"][number]) {
+  const context = apiStore.executionCaseContext;
+  if (
+    !context ||
+    context.transactionId !== apiStore.activeTransactionId ||
+    context.runId !== selectedHistoryRun.value?.id
+  ) {
+    return "";
+  }
+  return context.item.id === record.id ? "exec-run-context-row" : "";
+}
+
+async function restoreExecutionHistoryContext() {
+  const context = apiStore.executionCaseContext;
+  if (
+    !context ||
+    context.transactionId !== apiStore.activeTransactionId ||
+    !apiStore.transactionRuns.some((run) => run.id === context.runId)
+  ) {
+    return;
+  }
+  detailTab.value = "result";
+  expandedRunId.value = context.runId;
+  expandedKeys.value = [context.item.id];
+  if (apiStore.activeRun?.id === context.runId) return;
+  runDetailLoading.value = true;
+  try {
+    await loadRun(context.runId);
+  } finally {
+    runDetailLoading.value = false;
+  }
+}
+
+onActivated(() => {
+  void restoreExecutionHistoryContext();
+});
 </script>
 
 <style scoped>
@@ -1423,10 +1527,15 @@ function onExpand(expanded: boolean, record: { id: string }) {
 }
 
 .exec-run-history-panel {
-  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: minmax(270px, 310px) minmax(0, 1fr);
+  gap: 12px;
+  height: min(720px, calc(100vh - 220px));
+  min-height: 540px;
+  padding: 12px;
   border: 1px solid #eaecf0;
-  border-radius: 10px;
-  background: linear-gradient(180deg, #fff 0%, #fafbfc 100%);
+  border-radius: 12px;
+  background: #f8f9fb;
 }
 
 .exec-run-history-panel--fallback {
@@ -1439,7 +1548,16 @@ function onExpand(expanded: boolean, record: { id: string }) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
+  padding: 2px 2px 0;
+}
+.exec-run-history-head > div {
+  min-width: 0;
+}
+.exec-run-history-head p {
+  margin: 4px 0 0;
+  color: #98a2b3;
+  font-size: 11px;
 }
 
 .exec-run-history-title {
@@ -1456,7 +1574,102 @@ function onExpand(expanded: boolean, record: { id: string }) {
 .exec-run-history-track {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  min-height: 0;
+  padding-right: 2px;
+  overflow: auto;
+}
+.exec-run-history-list-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 10px;
+  border: 1px solid #eaecf0;
+  border-radius: 10px;
+  background: #fff;
+}
+.exec-run-history-detail-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 16px;
+  overflow: auto;
+  border: 1px solid #eaecf0;
+  border-radius: 10px;
+  background: #fff;
+}
+.exec-run-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #eaecf0;
+}
+.exec-run-detail-eyebrow {
+  color: #98a2b3;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.exec-run-detail-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  color: #1d2939;
+  font-size: 18px;
+}
+.exec-run-detail-head p {
+  margin: 0;
+  color: #667085;
+  font-size: 12px;
+}
+.exec-run-detail-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.exec-run-detail-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.exec-run-detail-summary > span {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #f8f9fb;
+  color: #667085;
+  font-size: 12px;
+}
+.exec-run-detail-summary strong {
+  margin-left: 4px;
+  color: #344054;
+  font-size: 14px;
+}
+.exec-run-detail-summary .is-pass strong {
+  color: #079455;
+}
+.exec-run-detail-summary .is-fail strong {
+  color: #d92d20;
+}
+.exec-run-detail-placeholder {
+  display: flex;
+  flex: 1;
+  min-height: 300px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #98a2b3;
+  font-size: 13px;
+}
+.exec-run-detail-placeholder :deep(.anticon) {
+  font-size: 28px;
 }
 
 .exec-run-history-entry {
@@ -1560,6 +1773,8 @@ function onExpand(expanded: boolean, record: { id: string }) {
   align-items: stretch;
   gap: 6px;
   width: 100%;
+  font: inherit;
+  cursor: pointer;
   padding: 8px 12px;
   border: 1px solid #eef2f6;
   border-left: 3px solid #d0d5dd;
@@ -1570,6 +1785,20 @@ function onExpand(expanded: boolean, record: { id: string }) {
     border-color 0.15s ease,
     box-shadow 0.15s ease,
     background 0.15s ease;
+}
+.exec-run-history-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.exec-run-history-item-version {
+  overflow: hidden;
+  color: #667085;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .exec-run-history-item:hover {
@@ -1728,6 +1957,10 @@ function onExpand(expanded: boolean, record: { id: string }) {
 }
 
 .exec-run-results-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
   color: #98a2b3;
   font-size: 12px;
   white-space: nowrap;
@@ -1743,6 +1976,10 @@ function onExpand(expanded: boolean, record: { id: string }) {
 .exec-run-results-table :deep(.ant-table-content),
 .exec-run-results-table :deep(.ant-table-body) {
   overflow: visible !important;
+}
+
+.exec-run-results-table :deep(.ant-table-body) {
+  overflow: auto !important;
 }
 
 .exec-run-results-table :deep(tr.ant-table-expanded-row > td.ant-table-cell) {
@@ -1771,6 +2008,12 @@ function onExpand(expanded: boolean, record: { id: string }) {
 
 .exec-run-results-table :deep(.ant-table-tbody > tr:hover > td) {
   background: #fcfcfd !important;
+}
+
+.exec-run-results-table :deep(.exec-run-context-row > td) {
+  background: #fff5f7 !important;
+  border-top: 1px solid #efb7c1;
+  border-bottom: 1px solid #efb7c1;
 }
 
 .exec-run-results-table :deep(.exec-run-case-cell) {
@@ -2003,6 +2246,29 @@ function onExpand(expanded: boolean, record: { id: string }) {
   .exec-run-results-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+@media (max-width: 980px) {
+  .exec-run-history-panel {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 0;
+  }
+  .exec-run-history-track {
+    max-height: 320px;
+  }
+  .exec-run-history-detail-pane {
+    min-height: 420px;
+  }
+}
+
+@media (max-width: 640px) {
+  .exec-run-detail-head {
+    flex-direction: column;
+  }
+  .exec-run-detail-actions {
+    width: 100%;
   }
 }
 
