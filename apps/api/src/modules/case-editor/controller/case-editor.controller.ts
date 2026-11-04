@@ -18,6 +18,7 @@ import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
 import { CancelGenerateDto } from "@case-editor/dto/cancel-generate.dto";
 import { GenerateCasesDto } from "@case-editor/dto/generate-cases.dto";
+import { ExportCaseTreeDto } from "@case-editor/dto/export-case-tree.dto";
 import { RegenerateNodeDto } from "@case-editor/dto/regenerate-node.dto";
 import { SyncToTestPlatformDto } from "@case-editor/dto/sync-to-test-platform.dto";
 import { UpdateRunTreeDto } from "@case-editor/dto/update-run-tree.dto";
@@ -129,24 +130,21 @@ export class CaseEditorController {
   }
 
   /** 导出案例树（支持 excel、xmind；excel 可按 caseNodeIds 筛选） */
-  @Get("projects/:projectId/runs/:runId/export")
+  @Post("projects/:projectId/runs/:runId/export")
   @ApiOperation({ summary: "导出案例树" })
   async exportRun(
     @Param("projectId") projectId: string,
     @Param("runId") runId: string,
-    @Query("format") format: "excel" | "xmind",
-    @Query("template") template: string | undefined,
-    @Query("caseNodeIds") caseNodeIdsRaw: string | undefined,
+    @Body() dto: ExportCaseTreeDto,
     @Res() response: Response,
   ) {
     const run = await this.caseEditorService.getRun(projectId, runId);
     const fileBase = `${run.tree.title.replace(/[\\/:*?"<>|]/g, "_")}`;
-    const caseNodeIds = (caseNodeIdsRaw || "")
-      .split(",")
+    const caseNodeIds = (dto.caseNodeIds ?? [])
       .map((item) => item.trim())
       .filter(Boolean);
-    const downloadTemplate = template === "1" || template === "true";
-    if (format === "xmind") {
+    const downloadTemplate = dto.format === "excel" && dto.template === true;
+    if (dto.format === "xmind") {
       const buffer = await this.exporter.toXmind(run.tree, run.mindMapExtras);
       response.setHeader("Content-Type", "application/vnd.xmind.workbook");
       response.setHeader(
@@ -155,7 +153,7 @@ export class CaseEditorController {
       );
       return response.send(buffer);
     }
-    if (format === "excel") {
+    if (dto.format === "excel") {
       const buffer = downloadTemplate
         ? this.exporter.toExcelTemplate()
         : await this.exporter.toExcel(

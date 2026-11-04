@@ -134,8 +134,7 @@ import {
   normalizeCaseTreeForSkill,
 } from "@case-forge/shared";
 import {
-  exportExcelTemplateUrl,
-  exportUrl,
+  downloadCaseTreeExport,
   syncRunToTestPlatform,
 } from "@/api/client";
 import { useCaseForgeStore } from "@/stores/caseForge";
@@ -292,25 +291,35 @@ async function handleSyncToTestPlatform() {
   await openCaseSelectModal("sync");
 }
 
-function handleDownloadExcelTemplate() {
+async function handleDownloadExcelTemplate() {
   if (!store.activeProject || !store.activeRun) return;
-  window.open(
-    exportExcelTemplateUrl(store.activeProject.id, store.activeRun.id),
-  );
+  try {
+    await downloadCaseTreeExport(
+      store.activeProject.id,
+      store.activeRun.id,
+      { format: "excel", template: true },
+    );
+  } catch (error) {
+    message.error((error as Error)?.message || "下载 Excel 模板失败");
+  }
 }
 
 async function handleCaseSelectConfirm(caseNodeIds: string[]) {
   if (caseSelectModalMode.value === "excel") {
     if (!store.activeProject || !store.activeRun) return;
-    window.open(
-      exportUrl(
+    caseSelectConfirmLoading.value = true;
+    try {
+      await downloadCaseTreeExport(
         store.activeProject.id,
         store.activeRun.id,
-        "excel",
-        caseNodeIds,
-      ),
-    );
-    caseSelectModalOpen.value = false;
+        { format: "excel", caseNodeIds },
+      );
+      caseSelectModalOpen.value = false;
+    } catch (error) {
+      message.error((error as Error)?.message || "导出 Excel 失败");
+    } finally {
+      caseSelectConfirmLoading.value = false;
+    }
     return;
   }
   await submitSyncToTestPlatform(caseNodeIds);
@@ -353,6 +362,14 @@ const download: MenuProps["onClick"] = async ({ key }) => {
       return;
     }
   }
-  window.open(exportUrl(store.activeProject.id, store.activeRun.id, "xmind"));
+  try {
+    await downloadCaseTreeExport(
+      store.activeProject.id,
+      store.activeRun.id,
+      { format: "xmind" },
+    );
+  } catch (error) {
+    message.error((error as Error)?.message || "导出 XMind 失败");
+  }
 };
 </script>

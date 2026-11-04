@@ -854,23 +854,105 @@ export async function batchSaveDynamicTestPointInstruction(payload: {
   return data;
 }
 
-export function exportUrl(
-  projectId: string,
-  runId: string,
-  format: "excel" | "xmind",
-  caseNodeIds?: string[],
-) {
-  const params = new URLSearchParams({ format });
-  if (caseNodeIds?.length) {
-    params.set("caseNodeIds", caseNodeIds.join(","));
-  }
-  return `${getUserApiBaseUrl()}/case-editor/projects/${projectId}/runs/${runId}/export?${params.toString()}`;
+interface CaseTreeExportOptions {
+  format: "excel" | "xmind";
+  template?: boolean;
+  caseNodeIds?: string[];
 }
 
-export function exportExcelTemplateUrl(projectId: string, runId: string) {
-  const params = new URLSearchParams({
-    format: "excel",
-    template: "1",
-  });
-  return `${getUserApiBaseUrl()}/case-editor/projects/${projectId}/runs/${runId}/export?${params.toString()}`;
+function parseDownloadFileName(
+  contentDisposition: string | undefined,
+  fallback: string,
+) {
+  if (!contentDisposition) {
+    return fallback;
+  }
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(contentDisposition)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded.replace(/^"|"$/g, ""));
+    } catch {
+      return fallback;
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(contentDisposition)?.[1];
+  if (!plain) {
+    return fallback;
+  }
+  try {
+    return decodeURIComponent(plain);
+  } catch {
+    return plain;
+  }
+}
+
+async function exportErrorMessage(error: unknown) {
+  const data = (
+    error as {
+      response?: {
+        data?: unknown;
+      };
+    }
+  )?.response?.data;
+  if (!(data instanceof Blob)) {
+    return error;
+  }
+  try {
+    const payload = JSON.parse(await data.text()) as {
+      message?: string | string[];
+    };
+    const message = Array.isArray(payload.message)
+      ? payload.message.join("；")
+      : payload.message;
+    return message ? new Error(message) : error;
+  } catch {
+    return error;
+  }
+}
+
+/** 通过 POST 请求体导出案例树，避免大量案例 ID 超过 Nginx URL 长度限制。 */
+export async function downloadCaseTreeExport(
+  projectId: string,
+  runId: string,
+  options: CaseTreeExportOptions,
+) {
+  try {
+    const response = await http.post<Blob>(
+      `/case-editor/projects/${projectId}/runs/${runId}/export`,
+      options,
+      {
+        responseType: "blob",
+        timeout: 300000,
+      },
+    );
+    const contentType = String(response.headers["content-type"] ?? "");
+    const expectedType =
+      options.format === "excel"
+        ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        : "application/vnd.xmind.workbook";
+    if (contentType && !contentType.includes(expectedType)) {
+      throw new Error("导出失败：服务端返回了非预期文件");
+    }
+    const blob =
+      response.data instanceof Blob
+        ? response.data
+        : new Blob([response.data], { type: contentType || undefined });
+    const disposition = String(
+      response.headers["content-disposition"] ?? "",
+    );
+    const fileName = parseDownloadFileName(
+      disposition,
+      `case-tree.${options.format === "excel" ? "xlsx" : "xmind"}`,
+    );
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  } catch (error) {
+    throw await exportErrorMessage(error);
+  }
 }

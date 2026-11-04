@@ -1469,6 +1469,15 @@ import type {
   ManagedCaseOptions,
   ManagedCaseQuery,
 } from "@case-forge/shared";
+function managedCaseQueryParams(params: ManagedCaseQuery) {
+  const applicationPaths = params.applicationPaths?.filter(Boolean) ?? [];
+  return {
+    ...params,
+    applicationPaths: applicationPaths.length
+      ? applicationPaths.join(",")
+      : undefined,
+  };
+}
 export async function listManagedCases(params: ManagedCaseQuery) {
   return (
     await http.get<{
@@ -1476,13 +1485,15 @@ export async function listManagedCases(params: ManagedCaseQuery) {
       count: number;
       page: number;
       pageSize: number;
-    }>("api-test/case-management/cases", { params })
+    }>("api-test/case-management/cases", {
+      params: managedCaseQueryParams(params),
+    })
   ).data;
 }
 export async function getManagedCaseOptions(params: ManagedCaseQuery) {
   return (
     await http.get<ManagedCaseOptions>("api-test/case-management/options", {
-      params,
+      params: managedCaseQueryParams(params),
     })
   ).data;
 }
@@ -1490,7 +1501,7 @@ export async function selectManagedCases(params: ManagedCaseQuery) {
   return (
     await http.get<ManagedCaseSelection[]>(
       "api-test/case-management/selection",
-      { params },
+      { params: managedCaseQueryParams(params) },
     )
   ).data;
 }
@@ -1521,6 +1532,9 @@ export async function deleteManagedCases(caseIds: string[]) {
 export interface UpdateManagedCaseStepPayload {
   name?: string;
   targetAddress?: string;
+  targetName?: string;
+  environmentId?: string;
+  environmentServiceId?: string;
   transport?: ApiTransport;
   method?: string;
   encoding?: string;

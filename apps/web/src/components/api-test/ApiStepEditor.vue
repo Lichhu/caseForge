@@ -70,6 +70,17 @@
                 />
               </div>
             </div>
+            <div
+              v-if="editor.address.trim()"
+              class="case-target-address-hint"
+              :class="{ 'is-unbound': !editor.serviceId }"
+            >
+              <span>{{ editor.serviceId ? "当前地址" : "已保存地址" }}</span>
+              <code>{{ editor.address }}</code>
+              <em v-if="!editor.serviceId">
+                未匹配到环境和地址项，保存时仍会保留该地址
+              </em>
+            </div>
             <div class="case-protocol-bar" :class="`case-protocol-bar--${editor.protocol}`">
               <div class="case-protocol-field case-protocol-field--protocol">
                 <span class="case-protocol-label">通讯协议</span>
@@ -464,6 +475,8 @@ import {
   getAssertionGenerateResult,
   getAssertionGenerateStatus,
   listDataFunctions,
+  type ApiEnvironmentRow,
+  type ApiEnvironmentServiceRow,
 } from "@/api/apiTestClient";
 import { GLOBAL_LIBRARY_PROJECT_ID } from "@/constants/library";
 import { NESTED_OVERLAY_Z_INDEX } from "@/constants/overlay-z-index";
@@ -822,7 +835,14 @@ async function initEditor(step: ApiHttpCaseStep) {
 }
 
 async function ensureEnvironments() {
-  if (!props.projectId || apiStore.environments.length) return;
+  if (!props.projectId) return;
+  if (
+    apiStore.environments.some(
+      (environment) => environment.projectId === props.projectId,
+    )
+  ) {
+    return;
+  }
   try {
     await apiStore.refreshEnvironments(props.projectId);
   } catch {
@@ -844,29 +864,57 @@ async function resolveTarget(step: ApiHttpCaseStep) {
   const target = step.target;
   if (target?.environmentId) {
     await loadServices(target.environmentId);
-    if (target.environmentServiceId) {
+    const services = apiStore.environmentServices[target.environmentId] ?? [];
+    const service =
+      services.find((item) => item.id === target.environmentServiceId) ??
+      findServiceByAddress(services, target.address);
+    if (service) {
+      editor.environmentId = target.environmentId;
+      editor.serviceId = service.id;
+      editor.targetName = service.name;
+      editor.address = serviceAddress(service);
+    } else if (target.environmentServiceId) {
       editor.serviceId = target.environmentServiceId;
     }
     return;
   }
   if (!target?.address) return;
+  let addressMatch:
+    | {
+        environment: ApiEnvironmentRow;
+        service: ApiEnvironmentServiceRow;
+      }
+    | undefined;
   for (const environment of apiStore.environments) {
     await loadServices(environment.id);
-    const service = (apiStore.environmentServices[environment.id] ?? []).find((item) => {
-      const address = serviceAddress(item);
-      return (
-        address === target.address &&
-        (!target.name || item.name === target.name)
-      );
-    });
+    const services = apiStore.environmentServices[environment.id] ?? [];
+    const service = findServiceByAddress(services, target.address);
     if (service) {
-      editor.environmentId = environment.id;
-      editor.serviceId = service.id;
-      editor.targetName = service.name;
-      editor.address = serviceAddress(service);
-      return;
+      if (!addressMatch || service.name === target.name) {
+        addressMatch = { environment, service };
+      }
+      if (service.name === target.name) break;
     }
   }
+  if (!addressMatch) return;
+  editor.environmentId = addressMatch.environment.id;
+  editor.serviceId = addressMatch.service.id;
+  editor.targetName = addressMatch.service.name;
+  editor.address = serviceAddress(addressMatch.service);
+}
+
+function findServiceByAddress<
+  T extends {
+    name: string;
+    serverAddress?: string;
+    baseUrl?: string;
+    host?: string;
+    port?: number;
+  },
+>(services: T[], address?: string): T | undefined {
+  const normalized = address?.trim();
+  if (!normalized) return undefined;
+  return services.find((service) => serviceAddress(service) === normalized);
 }
 
 function serviceAddress(service: {
@@ -1395,6 +1443,34 @@ function confirmDebugExport() {
   gap: 14px;
   padding: 10px 12px;
   border-bottom: 1px solid #eaecf0;
+}
+.case-target-address-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 10px;
+  color: #667085;
+  font-size: 11px;
+}
+.case-target-address-hint span {
+  flex: none;
+}
+.case-target-address-hint code {
+  min-width: 0;
+  overflow: hidden;
+  color: #344054;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.case-target-address-hint em {
+  margin-left: auto;
+  color: #b54708;
+  font-style: normal;
+}
+.case-target-address-hint.is-unbound {
+  background: #fffaeb;
+  border-bottom: 1px solid #fedf89;
 }
 .case-protocol-field--target :deep(.ant-select) { width: 100%; }
 .case-protocol-bar {

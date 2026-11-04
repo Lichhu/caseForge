@@ -13,6 +13,21 @@ export class UpdatePreproductionStepDto {
   targetAddress?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  targetName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(36)
+  environmentId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(36)
+  environmentServiceId?: string;
+
+  @IsOptional()
   @IsIn(["http", "tcp", "mq", "tuxedo", "other"])
   transport?: ApiTransport;
 

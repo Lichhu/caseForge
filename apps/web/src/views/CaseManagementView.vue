@@ -62,8 +62,11 @@
             class="filter-select filter-application-select"
             allow-clear
             show-search
+            mode="multiple"
+            :max-tag-count="1"
             option-filter-prop="label"
             placeholder="全部归属应用"
+            popup-class-name="application-filter-dropdown"
             aria-label="归属应用"
             :disabled="running"
             :options="applicationOptions"
@@ -981,7 +984,7 @@ let runSetRequestSequence = 0;
 let loadTimer: ReturnType<typeof setTimeout> | undefined;
 const projectId = ref<string>();
 const transactionId = ref<string>();
-const applicationFilter = ref<string>();
+const applicationFilter = ref<string[]>([]);
 const currentPage = ref(1);
 const pageSize = ref(10);
 const tableArea = ref<HTMLElement>();
@@ -1969,7 +1972,7 @@ function formatDateTime(value?: string) {
 }
 function filters() {
   return {
-    applicationPath: applicationFilter.value,
+    applicationPaths: applicationFilter.value,
     projectId: projectId.value,
     transactionId: transactionId.value,
     latestOnly: false,
@@ -2104,10 +2107,10 @@ async function selectAllMatching() {
 }
 watch(projectId, () => {
   transactionId.value = undefined;
-  applicationFilter.value = undefined;
+  applicationFilter.value = [];
 });
 watch(transactionId, () => {
-  applicationFilter.value = undefined;
+  applicationFilter.value = [];
 });
 watch([projectId, transactionId], () => {
   void loadOptions();
@@ -2621,8 +2624,58 @@ onBeforeUnmount(() => {
   min-width: 150px;
 }
 .filters .filter-application-select {
-  flex-basis: 210px;
-  width: 210px;
+  flex-basis: 250px;
+  width: 250px;
+}
+.filters .filter-application-select :deep(.ant-select-selector) {
+  min-height: 32px;
+  padding-inline: 7px;
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+.filters .filter-application-select :deep(.ant-select-selection-overflow) {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 2px;
+  overflow: hidden;
+}
+.filters .filter-application-select :deep(.ant-select-selection-item) {
+  height: 20px;
+  margin-inline-end: 0;
+  padding-inline: 6px;
+  border: 1px solid #d6e4ff;
+  border-radius: 5px;
+  background: #eef4ff;
+  color: #175cd3;
+  font-size: 11px;
+  line-height: 18px;
+}
+.filters .filter-application-select :deep(.ant-select-selection-item-remove) {
+  color: #528bdb;
+  font-size: 10px;
+}
+.filters .filter-application-select :deep(.ant-select-selection-item-remove:hover) {
+  color: #b42318;
+}
+.filters .filter-application-select :deep(.ant-select-selection-placeholder) {
+  color: #98a2b3;
+}
+:global(.application-filter-dropdown) {
+  padding: 5px;
+  border-radius: 9px;
+  box-shadow: 0 10px 28px rgb(16 24 40 / 12%);
+}
+:global(.application-filter-dropdown .ant-select-item) {
+  min-height: 32px;
+  margin: 1px 0;
+  border-radius: 6px;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+:global(.application-filter-dropdown .ant-select-item-option-selected) {
+  background: #eef4ff;
+  color: #175cd3;
+  font-weight: 500;
 }
 .filters :deep(.ant-checkbox-wrapper) {
   display: inline-flex;

@@ -108,17 +108,20 @@ describe("preproduction cases server pagination", () => {
         keyword: "_%!",
         projectId: "p",
         transactionId: "t",
-        applicationPath: "/手机银行",
+        applicationPaths: ["/手机银行", "/云原生数据仓库"],
       }),
     );
     expect(qb.getParameters()).toMatchObject({
       keyword: "%!_!%!!%",
       projectId: "p",
       transactionId: "t",
-      applicationPath: "/手机银行",
-      applicationPathPrefix: "/手机银行/%",
+      applicationPath0: "/手机银行",
+      applicationPathPrefix0: "/手机银行/%",
+      applicationPath1: "/云原生数据仓库",
+      applicationPathPrefix1: "/云原生数据仓库/%",
     });
     expect(qb.getSql()).toContain("`c`.`applicationPath` LIKE ? ESCAPE '!'");
+    expect(qb.getSql()).toContain(" OR ");
     expect(qb.getSql()).toContain("ESCAPE '!'");
     const sql = qb.getQuery();
     expect(sql.indexOf("NOT EXISTS")).toBeLessThan(
@@ -255,6 +258,22 @@ describe("preproduction cases server pagination", () => {
       path: "/new",
     });
     expect(saved.snapshot.metadata.debugEncoding).toBe("GBK");
+
+    await RequestContext.run("alice", () =>
+      service.updateCaseStep("c1", "s1", {
+        targetAddress: "https://new.example.com",
+        targetName: "新环境",
+        environmentId: "env-new",
+        environmentServiceId: "service-new",
+      }),
+    );
+    const lightweightBatchSaved = save.mock.calls[1][0] as any;
+    expect(lightweightBatchSaved.snapshot.steps[0].target).toMatchObject({
+      name: "新环境",
+      address: "https://new.example.com",
+      environmentId: "env-new",
+      environmentServiceId: "service-new",
+    });
   });
 
   it("updates the full preproduction request step from the shared step editor", async () => {
@@ -522,6 +541,11 @@ describe("preproduction cases server pagination", () => {
     expect(
       plainToInstance(ListManagedCasesDto, { latestOnly: "false" }).latestOnly,
     ).toBe(false);
+    expect(
+      plainToInstance(ListManagedCasesDto, {
+        applicationPaths: "/手机银行,/云原生数据仓库",
+      }).applicationPaths,
+    ).toEqual(["/手机银行", "/云原生数据仓库"]);
     for (const value of [
       { page: 0 },
       { pageSize: 1000 },

@@ -122,18 +122,25 @@ export class ApiCaseManagementService {
       qb.andWhere("c.transactionId = :transactionId", {
         transactionId: query.transactionId,
       });
-    if (query.applicationPath) {
-      const escapedPath = query.applicationPath.replace(
-        /[!%_]/g,
-        (char) => `!${char}`,
-      );
-      qb.andWhere(
-        "(c.applicationPath = :applicationPath OR c.applicationPath LIKE :applicationPathPrefix ESCAPE '!')",
-        {
-          applicationPath: query.applicationPath,
-          applicationPathPrefix: `${escapedPath}/%`,
-        },
-      );
+    const applicationPaths = [
+      ...new Set(
+        [...(query.applicationPaths ?? []), query.applicationPath]
+          .map((item) => item?.trim())
+          .filter((item): item is string => Boolean(item)),
+      ),
+    ];
+    if (applicationPaths.length) {
+      const parameters: Record<string, string> = {};
+      const clauses = applicationPaths.map((applicationPath, index) => {
+        const escapedPath = applicationPath.replace(
+          /[!%_]/g,
+          (char) => `!${char}`,
+        );
+        parameters[`applicationPath${index}`] = applicationPath;
+        parameters[`applicationPathPrefix${index}`] = `${escapedPath}/%`;
+        return `(c.applicationPath = :applicationPath${index} OR c.applicationPath LIKE :applicationPathPrefix${index} ESCAPE '!')`;
+      });
+      qb.andWhere(`(${clauses.join(" OR ")})`, parameters);
     }
     const current = managedVersion("c");
     if (query.versionCode)
@@ -322,6 +329,19 @@ export class ApiCaseManagementService {
           ? { environmentId: undefined, environmentServiceId: undefined }
           : {}),
       };
+    }
+    if (dto.targetName !== undefined) {
+      step.target ??= { name: "", address: "" };
+      step.target.name = dto.targetName.trim();
+    }
+    if (dto.environmentId !== undefined) {
+      step.target ??= { name: "", address: "" };
+      step.target.environmentId = dto.environmentId.trim() || undefined;
+    }
+    if (dto.environmentServiceId !== undefined) {
+      step.target ??= { name: "", address: "" };
+      step.target.environmentServiceId =
+        dto.environmentServiceId.trim() || undefined;
     }
     if (dto.step) {
       const next = dto.step as Partial<ApiHttpCaseStep>;

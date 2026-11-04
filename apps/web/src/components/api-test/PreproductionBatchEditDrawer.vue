@@ -233,6 +233,12 @@
                         }}
                       </span>
                       <code>{{ stepPathLabel(record.step) }}</code>
+                    <small
+                      v-if="stepErrors[record.key]"
+                      class="batch-step-error"
+                    >
+                      {{ stepErrors[record.key] }}
+                    </small>
                     </div>
                     <span class="batch-step-encoding">
                       {{ stepEncodingLabel(record.step) }}
@@ -273,11 +279,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { message } from "ant-design-vue";
-import type {
-  ApiCaseStep,
-  ApiHttpCaseStep,
-  ApiTransport,
-} from "@case-forge/shared";
+import type { ApiCaseStep, ApiTransport } from "@case-forge/shared";
 import { isDbStep, isHttpStep } from "@case-forge/shared";
 import {
   getManagedCaseDetails,
@@ -287,6 +289,7 @@ import {
   type ApiEnvironmentRow,
   type ApiEnvironmentServiceRow,
   type ManagedCaseRow,
+  type UpdateManagedCaseStepPayload,
 } from "@/api/apiTestClient";
 import { NESTED_OVERLAY_Z_INDEX } from "@/constants/overlay-z-index";
 import { runWithConcurrency } from "@/utils/concurrency";
@@ -328,6 +331,7 @@ const method = ref<string>();
 const encoding = ref<string>();
 const path = ref("");
 const selectedKeys = ref<string[]>([]);
+const stepErrors = ref<Record<string, string>>({});
 const saveProgress = ref({ done: 0, total: 0 });
 let loadSequence = 0;
 
@@ -628,33 +632,26 @@ function onStepChange(key: string, event: unknown) {
   toggleStep(key, checked);
 }
 
-function buildStep(row: BatchStepRow) {
-  if (!isHttpStep(row.step)) return row.step;
-  const step = structuredClone(row.step) as ApiHttpCaseStep;
-  if (transport.value) step.request.transport = transport.value;
-  if (method.value) step.request.method = method.value;
-  if (encoding.value) step.request.encoding = encoding.value;
-  if (path.value.trim()) step.request.path = path.value.trim();
+function buildPatch(): UpdateManagedCaseStepPayload {
+  const patch: UpdateManagedCaseStepPayload = {};
+  if (transport.value) {
+    patch.transport = transport.value;
+    if (transport.value !== "http") patch.method = "";
+  }
+  if (method.value) patch.method = method.value;
+  if (encoding.value) patch.encoding = encoding.value;
+  if (path.value.trim()) patch.path = path.value.trim();
   if (selectedAddress.value) {
     const environment = selectedEnvironment.value;
     const service = selectedService.value;
-    const sameProject = environment?.projectId === row.projectId;
-    step.target = {
-      ...(step.target ?? {}),
-      name: service?.name || environment?.name || step.target?.name || "",
-      address: selectedAddress.value,
-      ...(sameProject
-        ? {
-            environmentId: environment?.id,
-            environmentServiceId: service?.id,
-          }
-        : {
-            environmentId: undefined,
-            environmentServiceId: undefined,
-          }),
-    };
+    patch.targetAddress = selectedAddress.value;
+    patch.targetName = service?.name || environment?.name || "";
+    if (environment) {
+      patch.environmentId = environment.id;
+      patch.environmentServiceId = service?.id ?? "";
+    }
   }
-  return step;
+  return patch;
 }
 
 async function saveBatch() {
@@ -662,16 +659,24 @@ async function saveBatch() {
   const targets = [...selectedRows.value];
   saving.value = true;
   saveProgress.value = { done: 0, total: targets.length };
+  stepErrors.value = {};
   try {
     const results = await runWithConcurrency(
       targets.map(
         (row) => () =>
-          updateManagedCaseStep(row.caseId, row.step.id, {
-            step: buildStep(row),
-          }),
+          updateManagedCaseStep(row.caseId, row.step.id, buildPatch()),
       ),
       4,
-      () => {
+      (index, result) => {
+        if (result.status === "rejected") {
+          stepErrors.value = {
+            ...stepErrors.value,
+            [targets[index].key]:
+              result.reason instanceof Error
+                ? result.reason.message
+                : "保存失败",
+          };
+        }
         saveProgress.value = {
           done: saveProgress.value.done + 1,
           total: targets.length,
@@ -692,8 +697,11 @@ async function saveBatch() {
       .filter((row): row is ManagedCaseRow => Boolean(row));
     emit("updated", cases.value);
     if (failed) {
+      const firstError = Object.values(stepErrors.value)[0];
       message.warning(
-        `批量设置完成：成功 ${successful} 个步骤，失败 ${failed} 个步骤`,
+        `批量设置完成：成功 ${successful} 个步骤，失败 ${failed} 个步骤${
+          firstError ? `；${firstError}` : ""
+        }`,
       );
     } else {
       message.success(`已更新 ${successful} 个步骤`);
@@ -1072,6 +1080,14 @@ watch(
 .batch-target-cell code {
   color: #667085;
   font-size: 11px;
+}
+
+.batch-step-error {
+  overflow: hidden;
+  color: #b42318;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .batch-footer {

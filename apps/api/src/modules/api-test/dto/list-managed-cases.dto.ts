@@ -42,6 +42,22 @@ export class ListManagedCasesDto implements ManagedCaseQuery {
   applicationPath?: string;
 
   @IsOptional()
+  @Transform(({ value }) => {
+    const source = Array.isArray(value) ? value : String(value ?? "").split(",");
+    return [
+      ...new Set(
+        source.map((item) => String(item).trim()).filter((item) => item),
+      ),
+    ];
+  })
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ArrayUnique()
+  @IsString({ each: true })
+  @MaxLength(2048, { each: true })
+  applicationPaths?: string[];
+
+  @IsOptional()
   @IsString()
   @MaxLength(128)
   versionCode?: string;
