@@ -5,6 +5,8 @@
   "description": "智能案例生成平台 monorepo",
   "packageManager": "pnpm@10.33.4",
   "scripts": {
+    "uat:api": "pnpm --filter @case-forge/shared build && pnpm --filter @case-forge/api uat",
+    "sit:api": "pnpm --filter @case-forge/shared build && pnpm --filter @case-forge/api sit",
     "dev:api": "pnpm --filter @case-forge/shared build && pnpm --filter @case-forge/api dev",
     "local:api": "pnpm --filter @case-forge/shared build && pnpm --filter @case-forge/api local",
     "dev:web": "pnpm --filter @case-forge/shared build && pnpm --filter @case-forge/web dev",

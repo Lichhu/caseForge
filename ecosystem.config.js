@@ -16,12 +16,17 @@
  * 其余环境变量（数据库 / MinIO / AI 接口等）从
  * apps/api/env/.prod.env 读取（NODE_ENV=prod 时自动加载）。
  */
+const path = require('path');
+
 module.exports = {
   apps: [
     {
+      // 保持原名 caseforge-api，与历史部署 / pm2 save 兼容；
+      // sit/uat 分别用 caseforge-api-sit / caseforge-api-uat，可同机并存
       name: 'caseforge-api',
-      // 以 apps/api 为工作目录，env 加载与 dist 路径解析都依赖此目录
-      cwd: './apps/api',
+      // 以 apps/api 为工作目录，env 加载与 dist 路径解析都依赖此目录；
+      // 用 __dirname 锚定，避免受 pm2 start 的执行目录影响
+      cwd: path.join(__dirname, 'apps/api'),
       script: 'dist/bootstrap.js',
 
       // 达梦 dmdb 驱动在建连「消息加密」时使用了 OpenSSL 3.0 默认禁用的
