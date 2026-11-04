@@ -28,6 +28,15 @@ import {
   databaseTestSql,
   type DbPool,
 } from "@api-test/util/database-pool.util";
+import {
+  INPUT_LIMITS,
+  SAFE_LANGUAGE_IDENTIFIER_PATTERN,
+} from "@case-forge/shared";
+import {
+  normalizeOptionalLongText,
+  normalizeRequiredDisplayText,
+  normalizeRequiredLongText,
+} from "@common/validation/input-validation.util";
 
 type FormulaPart = {
   id?: string;
@@ -168,7 +177,27 @@ export class ApiDataFunctionService {
     body: SaveDatabaseConnectionDto,
     id?: string,
   ) {
-    const databaseName = body.databaseName?.trim() ?? "";
+    const name = normalizeRequiredDisplayText(
+      body.name,
+      "连接名称",
+      INPUT_LIMITS.databaseConnectionName,
+    );
+    const host = normalizeRequiredLongText(
+      body.host,
+      "主机",
+      INPUT_LIMITS.databaseHost,
+    );
+    const username = normalizeRequiredLongText(
+      body.username,
+      "用户名",
+      INPUT_LIMITS.databaseUsername,
+    );
+    const databaseName =
+      normalizeOptionalLongText(
+        body.databaseName,
+        "数据库名",
+        INPUT_LIMITS.databaseName,
+      ) ?? "";
     if (
       [
         "Oracle",
@@ -182,7 +211,6 @@ export class ApiDataFunctionService {
       throw new BadRequestException(
         body.type === "Oracle" ? "请填写服务名" : "请填写数据库名",
       );
-    const name = body.name.trim();
     const duplicate = await this.connectionRepo.findOne({ where: { name } });
     if (duplicate && duplicate.id !== id) {
       throw new BadRequestException("同名数据库连接已存在");
@@ -197,10 +225,10 @@ export class ApiDataFunctionService {
     Object.assign(row, {
       name,
       type: body.type,
-      host: body.host.trim(),
+      host,
       port: body.port,
       databaseName,
-      username: body.username.trim(),
+      username,
       readonly: body.readonly ?? true,
       ...(id ? auditFieldsForUpdate() : {}),
     });
@@ -304,6 +332,39 @@ export class ApiDataFunctionService {
     id?: string,
   ) {
     const name = body.name.trim().toUpperCase();
+    if (!name) throw new BadRequestException("函数名称不能为空");
+    if (Array.from(name).length > INPUT_LIMITS.dataFunctionName) {
+      throw new BadRequestException(
+        `函数名称不能超过 ${INPUT_LIMITS.dataFunctionName} 个字符`,
+      );
+    }
+    if (!SAFE_LANGUAGE_IDENTIFIER_PATTERN.test(name)) {
+      throw new BadRequestException(
+        "函数名称仅支持中英文、数字和下划线，且不能以数字开头",
+      );
+    }
+    const params = [...new Set(body.params.map((item) => item.trim()))].filter(
+      Boolean,
+    );
+    if (params.length !== body.params.length) {
+      throw new BadRequestException("函数参数名不能为空或重复");
+    }
+    const invalidParam = params.find(
+      (param) =>
+        Array.from(param).length > INPUT_LIMITS.dataFunctionName ||
+        !SAFE_LANGUAGE_IDENTIFIER_PATTERN.test(param),
+    );
+    if (invalidParam) {
+      throw new BadRequestException(
+        `函数参数「${invalidParam}」仅支持中英文、数字和下划线，且不能以数字开头`,
+      );
+    }
+    const description =
+      normalizeOptionalLongText(
+        body.description,
+        "函数介绍",
+        INPUT_LIMITS.dataFunctionDescription,
+      ) || "";
     const duplicate = await this.functionRepo.findOne({ where: { name } });
     if (duplicate && duplicate.id !== id) {
       throw new BadRequestException("同名数据函数已存在");
@@ -319,10 +380,10 @@ export class ApiDataFunctionService {
     if (id) await this.access.assertCanManage(row.createdBy, "数据函数");
     Object.assign(row, {
       name,
-      params: body.params,
+      params,
       type: body.type,
       config: body.config,
-      description: body.description ?? "",
+      description,
       ...(id ? auditFieldsForUpdate() : {}),
     });
     return this.publicFunction(await this.functionRepo.save(row), true);

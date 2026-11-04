@@ -17,6 +17,7 @@ import { assertApiTestProject } from "@api-test/util/assert-api-project.util";
 import { ApiPreproductionCaseEntity } from "../entity/api-preproduction-case.entity";
 import { ApiTestCaseEntity } from "../entity/api-test-case.entity";
 import { ApiTransactionEntity } from "../entity/api-transaction.entity";
+import { compactCasePayloadStorage } from "../util/api-case-payload-storage.util";
 
 @Injectable()
 export class ApiPreproductionCaseService {
@@ -272,7 +273,7 @@ export class ApiPreproductionCaseService {
           enabled: Boolean(Number(source.enabled)),
           versionCode: source.metadata?.versionCode ?? null,
           generateVersion: source.metadata?.generateVersion ?? null,
-          snapshot: {
+          snapshot: compactCasePayloadStorage({
             description: source.description ?? "",
             remark: source.remark,
             preconditions: source.preconditions ?? [],
@@ -281,7 +282,7 @@ export class ApiPreproductionCaseService {
             expected: source.expected,
             steps: source.steps,
             metadata: source.metadata,
-          },
+          }),
           sourceUpdatedAt: source.updatedAt,
           syncedAt: now,
           syncedBy: user,

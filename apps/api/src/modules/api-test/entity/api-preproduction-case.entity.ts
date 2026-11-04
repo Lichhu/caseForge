@@ -8,6 +8,9 @@ import type {
 } from "@case-forge/shared";
 import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
+  AfterLoad,
+  BeforeInsert,
+  BeforeUpdate,
   Column,
   CreateDateColumn,
   Entity,
@@ -18,6 +21,11 @@ import {
   UpdateDateColumn,
 } from "typeorm";
 import { ApiEndpointEntity } from "./api-endpoint.entity";
+import {
+  compactCasePayloadStorage,
+  restoreCasePayloadStorage,
+  type CasePayloadStorageShape,
+} from "../util/api-case-payload-storage.util";
 
 /** 准生产案例保存的案例内容快照 */
 export interface ApiPreproductionCaseSnapshot {
@@ -120,4 +128,19 @@ export class ApiPreproductionCaseEntity extends SoftDeletableEntity {
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  @BeforeInsert()
+  @BeforeUpdate()
+  compactLargePayload() {
+    this.snapshot = compactCasePayloadStorage(
+      this.snapshot as unknown as CasePayloadStorageShape,
+    ) as unknown as ApiPreproductionCaseSnapshot;
+  }
+
+  @AfterLoad()
+  restoreLargePayload() {
+    this.snapshot = restoreCasePayloadStorage(
+      this.snapshot as unknown as CasePayloadStorageShape,
+    ) as unknown as ApiPreproductionCaseSnapshot;
+  }
 }

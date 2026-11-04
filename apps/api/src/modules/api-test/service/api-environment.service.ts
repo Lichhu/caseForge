@@ -21,6 +21,11 @@ import {
 import { toPublicApiEnvironmentService } from "@common/http/public-response.util";
 import { globalLibraryProjectId } from "@api-test/util/global-library.util";
 import { ApiTestLibraryAccessService } from "./api-test-library-access.service";
+import { INPUT_LIMITS } from "@case-forge/shared";
+import {
+  normalizeOptionalLongText,
+  normalizeRequiredDisplayText,
+} from "@common/validation/input-validation.util";
 
 export interface ApiServiceAddressBinding {
   environmentId: string;
@@ -56,11 +61,18 @@ export class ApiEnvironmentService {
     if (payload.isDefault) {
       await this.clearDefault(projectId);
     }
+    const name = normalizeRequiredDisplayText(
+      payload.name,
+      "环境名称",
+      INPUT_LIMITS.environmentName,
+    );
     const entity = this.envRepo.create({
       projectId: globalLibraryProjectId(),
-      name: payload.name,
+      name,
       scope: payload.scope ?? "system",
-      baseUrl: (payload.baseUrl ?? "").replace(/\/$/, ""),
+      baseUrl: (
+        normalizeOptionalLongText(payload.baseUrl, "环境地址", 512) ?? ""
+      ).replace(/\/$/, ""),
       headers: payload.headers ?? {},
       variables: payload.variables ?? {},
       secretsEncrypted: payload.token
@@ -88,10 +100,16 @@ export class ApiEnvironmentService {
     if (payload.isDefault) {
       await this.clearDefault(projectId);
     }
-    existing.name = payload.name;
+    existing.name = normalizeRequiredDisplayText(
+      payload.name,
+      "环境名称",
+      INPUT_LIMITS.environmentName,
+    );
     if (payload.scope !== undefined) existing.scope = payload.scope;
     if (payload.baseUrl !== undefined) {
-      existing.baseUrl = payload.baseUrl.replace(/\/$/, "");
+      existing.baseUrl = (
+        normalizeOptionalLongText(payload.baseUrl, "环境地址", 512) ?? ""
+      ).replace(/\/$/, "");
     }
     if (payload.headers !== undefined) existing.headers = payload.headers;
     if (payload.variables !== undefined) existing.variables = payload.variables;
@@ -231,14 +249,24 @@ export class ApiEnvironmentService {
     const count = await this.serviceRepo.count({
       where: { environmentId },
     });
+    const name = normalizeRequiredDisplayText(
+      payload.name,
+      "服务名",
+      INPUT_LIMITS.environmentServiceName,
+    );
+    const remark = normalizeOptionalLongText(
+      payload.remark,
+      "备注",
+      INPUT_LIMITS.environmentRemark,
+    );
     const entity = this.serviceRepo.create({
       projectId: globalLibraryProjectId(),
       environmentId,
-      name: payload.name.trim(),
+      name,
       jdbcUrl: payload.jdbcUrl?.trim() || undefined,
       remoteConnection: payload.remoteConnection?.trim() || undefined,
       objectStorage: payload.objectStorage?.trim() || undefined,
-      remark: payload.remark?.trim() || undefined,
+      remark: remark || undefined,
       payloadFormat: payload.payloadFormat,
       encoding: payload.encoding?.trim(),
       framing: payload.framing,
@@ -269,11 +297,20 @@ export class ApiEnvironmentService {
       serviceId,
     );
     await this.access.assertCanManage(existing.createdBy, "环境服务");
-    existing.name = payload.name.trim();
+    existing.name = normalizeRequiredDisplayText(
+      payload.name,
+      "服务名",
+      INPUT_LIMITS.environmentServiceName,
+    );
     existing.jdbcUrl = payload.jdbcUrl?.trim() || undefined;
     existing.remoteConnection = payload.remoteConnection?.trim() || undefined;
     existing.objectStorage = payload.objectStorage?.trim() || undefined;
-    existing.remark = payload.remark?.trim() || undefined;
+    existing.remark =
+      normalizeOptionalLongText(
+        payload.remark,
+        "备注",
+        INPUT_LIMITS.environmentRemark,
+      ) || undefined;
     existing.payloadFormat = payload.payloadFormat;
     existing.encoding = payload.encoding?.trim();
     existing.framing = payload.framing;
@@ -402,23 +439,39 @@ export class ApiEnvironmentService {
     entity: ApiTestEnvironmentServiceEntity,
     payload: SaveApiEnvironmentServiceDto,
   ) {
+    const serverAddress = normalizeOptionalLongText(
+      payload.serverAddress,
+      "服务器地址",
+      INPUT_LIMITS.serverAddress,
+    );
+    const baseUrl = normalizeOptionalLongText(payload.baseUrl, "环境地址", 512);
+    const pathPrefix = normalizeOptionalLongText(
+      payload.pathPrefix,
+      "路径前缀",
+      256,
+    );
+    const host = normalizeOptionalLongText(
+      payload.host,
+      "主机",
+      INPUT_LIMITS.databaseHost,
+    );
     const address =
-      payload.serverAddress?.trim() ||
-      (payload.transport === "tcp" && payload.host && payload.port
-        ? `socket2://${payload.host}:${payload.port}`
-        : payload.baseUrl?.trim() || "");
+      serverAddress ||
+      (payload.transport === "tcp" && host && payload.port
+        ? `socket2://${host}:${payload.port}`
+        : baseUrl || "");
     if (address) {
       applyParsedServerAddress(entity, address);
       return;
     }
     if (payload.transport) entity.transport = payload.transport;
-    if (payload.baseUrl !== undefined) {
-      entity.baseUrl = payload.baseUrl.replace(/\/$/, "");
+    if (baseUrl !== undefined) {
+      entity.baseUrl = baseUrl.replace(/\/$/, "");
     }
-    if (payload.pathPrefix !== undefined) {
-      entity.pathPrefix = payload.pathPrefix?.trim();
+    if (pathPrefix !== undefined) {
+      entity.pathPrefix = pathPrefix;
     }
-    if (payload.host !== undefined) entity.host = payload.host?.trim();
+    if (host !== undefined) entity.host = host;
     if (payload.port !== undefined) entity.port = payload.port;
   }
 }

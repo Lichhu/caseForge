@@ -39,7 +39,16 @@
             <a-input
               v-model:value="form.name"
               class="data-function-name-input"
+              :maxlength="INPUT_LIMITS.dataFunctionName"
+              show-count
               placeholder="如 MSG_ID"
+              @update:value="
+                (value: string) =>
+                  (form.name = normalizeLanguageIdentifierInput(
+                    value,
+                    INPUT_LIMITS.dataFunctionName,
+                  ).toUpperCase())
+              "
             />
           </label>
           <label class="data-function-field data-function-field-wide">
@@ -57,14 +66,32 @@
           </label>
           <label class="data-function-field data-function-desc-field">
             <span class="data-function-field-label">函数介绍</span>
-            <a-input v-model:value="form.description" placeholder="说明函数用途，插入函数时展示" :maxlength="500" allow-clear />
+            <a-input
+              v-model:value="form.description"
+              placeholder="说明函数用途，插入函数时展示"
+              :maxlength="INPUT_LIMITS.dataFunctionDescription"
+              show-count
+              allow-clear
+              @update:value="
+                (value: string) =>
+                  (form.description = normalizeLongTextInput(
+                    value,
+                    INPUT_LIMITS.dataFunctionDescription,
+                  ))
+              "
+            />
           </label>
           <div class="data-function-field data-function-params-field">
             <span class="data-function-field-label">输入参数</span>
             <div class="parameter-rows">
               <div v-for="(name, index) in parameterNames" :key="index" class="parameter-row">
                 <span class="parameter-index">{{ index + 1 }}</span>
-                <a-input :value="name" placeholder="参数名" @input="renameParameter(index, $event)" />
+                <a-input
+                  :value="name"
+                  :maxlength="INPUT_LIMITS.dataFunctionName"
+                  placeholder="参数名"
+                  @input="renameParameter(index, $event)"
+                />
                 <div class="parameter-actions">
                   <a-button type="text" size="small" :disabled="index === 0" title="上移" @click="moveParameter(index, -1)"><ArrowUpOutlined /></a-button>
                   <a-button type="text" size="small" :disabled="index === parameterNames.length - 1" title="下移" @click="moveParameter(index, 1)"><ArrowDownOutlined /></a-button>
@@ -188,7 +215,20 @@
   <a-modal v-model:open="aiScriptOpen" title="AI 生成函数" :confirm-loading="generatingScript" @ok="generateScript">
     <a-form layout="vertical">
       <a-form-item label="生成要求" extra="说明每个参数如何处理，并给出期望结果或示例">
-        <a-textarea v-model:value="scriptRequirement" :rows="6" placeholder="例如：参数一作为前缀 00003，拼接当前时间 yyyyMMddHHmmss，再拼接四位随机数，结果类似 00003202607171719404179" />
+        <a-textarea
+          v-model:value="scriptRequirement"
+          :rows="6"
+          :maxlength="INPUT_LIMITS.scriptRequirement"
+          show-count
+          placeholder="例如：参数一作为前缀 00003，拼接当前时间 yyyyMMddHHmmss，再拼接四位随机数，结果类似 00003202607171719404179"
+          @update:value="
+            (value: string) =>
+              (scriptRequirement = normalizeLongTextInput(
+                value,
+                INPUT_LIMITS.scriptRequirement,
+              ))
+          "
+        />
       </a-form-item>
     </a-form>
   </a-modal>
@@ -209,6 +249,12 @@ import {
   PlusOutlined,
 } from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
+import {
+  INPUT_LIMITS,
+  SAFE_LANGUAGE_IDENTIFIER_PATTERN,
+  normalizeLanguageIdentifierInput,
+  normalizeLongTextInput,
+} from '@case-forge/shared';
 import { IMMERSIVE_OVERLAY_Z_INDEX, NESTED_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import { createDataFunction, deleteDataFunction, generateDataFunctionScript, getDatabaseMetadata, listDataFunctions, listDatabaseConnections, previewDataFunction, updateDataFunction } from '@/api/apiTestClient';
 import LibraryEditorFooter from './LibraryEditorFooter.vue';
@@ -550,7 +596,10 @@ function renameParameter(index: number, event: Event) {
   const input = event.target as HTMLInputElement;
   const names = [...parameterNames.value];
   const previous = names[index];
-  const next = input.value.trim().replace(/,/g, '');
+  const next = normalizeLanguageIdentifierInput(
+    input.value.trim(),
+    INPUT_LIMITS.dataFunctionName,
+  );
   if (!next || names.some((name, itemIndex) => itemIndex !== index && name === next)) return;
   names[index] = next;
   form.parts.forEach((part) => {
@@ -608,6 +657,10 @@ async function saveFunction() {
   form.name = form.name.trim().toUpperCase();
   if (!form.name) {
     message.warning('请输入函数名称');
+    return;
+  }
+  if (!SAFE_LANGUAGE_IDENTIFIER_PATTERN.test(form.name)) {
+    message.warning('函数名称仅支持中英文、数字和下划线，且不能以数字开头');
     return;
   }
   const duplicate = functions.value.some((item) => item.name === form.name && item.id !== activeId.value);

@@ -160,7 +160,11 @@ import { SaveOutlined } from '@ant-design/icons-vue';
 import type { ScenarioLibraryItem } from '@/api/client';
 import { useScenarioLibrary } from '@/composables/useScenarioLibrary';
 import type { ScenarioScope } from '@case-forge/shared';
-import { SCENARIO_SCOPE_CASE } from '@case-forge/shared';
+import {
+  SCENARIO_SCOPE_CASE,
+  normalizeDisplayTextInput,
+  normalizeLongTextInput,
+} from '@case-forge/shared';
 import { configureAppMessage, configureScenarioModalMessage } from '@/utils/globalFeedback';
 
 const props = withDefaults(
@@ -202,7 +206,7 @@ let scenarioSavedFadeTimer: ReturnType<typeof setTimeout> | undefined;
 const promptEditScenarioId = ref('');
 
 function clipText(value: string, maxLength: number) {
-  return value.slice(0, maxLength);
+  return normalizeLongTextInput(value, maxLength);
 }
 
 const activeScenario = computed(() =>
@@ -409,7 +413,7 @@ function clearScenarioAutoSaveTimers() {
 }
 
 function handleScenarioNameInput(item: ScenarioLibraryItem, value: string) {
-  item.name = clipText(value, FIELD_LIMITS.scenarioName);
+  item.name = normalizeDisplayTextInput(value, FIELD_LIMITS.scenarioName);
   if (scenarioSaveUi.value === 'saved') {
     scenarioSaveUi.value = 'idle';
   }

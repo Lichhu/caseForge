@@ -45,10 +45,12 @@ describe("RequirementPlatformService", () => {
       getOne: jest.fn().mockResolvedValue({ id: "p1" }),
     };
     const requirementRepo = {
-      findOne: jest.fn(async ({ where }: { where: Record<string, unknown> }) => {
-        if (where.id === "r1") return row;
-        return null;
-      }),
+      findOne: jest.fn(
+        async ({ where }: { where: Record<string, unknown> }) => {
+          if (where.id === "r1") return row;
+          return null;
+        },
+      ),
       save: jest.fn(async (value) => value),
     };
     const projectRepo = {
@@ -158,7 +160,7 @@ describe("RequirementPlatformService", () => {
     await expect(
       RequestContext.run("alice", () =>
         service.create({
-          projectCode: "XQ-MANUAL-1",
+          projectCode: "XQ2026-0818-01",
           projectName: "手工需求",
           versionName: "客户定制版本 V3",
           applicationName: "客户服务平台",
@@ -167,10 +169,47 @@ describe("RequirementPlatformService", () => {
     ).resolves.toMatchObject({ versionName: "客户定制版本 V3" });
     expect(requirementRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        projectCode: "XQ-MANUAL-1",
+        projectCode: "XQ2026-0818-01",
         versionName: "客户定制版本 V3",
       }),
     );
+  });
+
+  it("rejects invalid requirement codes and dangerous display characters", async () => {
+    const service = new RequirementPlatformService(
+      { findOne: jest.fn().mockResolvedValue(null) } as any,
+      { exists: jest.fn().mockResolvedValue(true) } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await expect(
+      RequestContext.run("alice", () =>
+        service.create({
+          projectCode: "XQ-MANUAL-1",
+          projectName: "手工需求",
+          versionName: "项目类版本",
+          applicationName: "客户服务平台",
+        }),
+      ),
+    ).rejects.toThrow("需求编号格式必须为");
+
+    await expect(
+      RequestContext.run("alice", () =>
+        service.create({
+          projectCode: "XQ2026-0818-01",
+          projectName: "<script>alert(1)</script>",
+          versionName: "项目类版本",
+          applicationName: "客户服务平台",
+        }),
+      ),
+    ).rejects.toThrow("需求名仅支持中英文、数字、空格及常用标点");
   });
 
   it("does not allow removing the system dispatcher", async () => {
@@ -297,9 +336,9 @@ describe("RequirementPlatformService", () => {
       } as any,
       {} as any,
       {
-        find: jest.fn().mockResolvedValue([
-          { userName: "alice", nickName: "张三" },
-        ]),
+        find: jest
+          .fn()
+          .mockResolvedValue([{ userName: "alice", nickName: "张三" }]),
       } as any,
       {} as any,
       {} as any,
@@ -360,9 +399,7 @@ describe("RequirementPlatformService", () => {
       id: "dispatcher-wb10517",
       userName: "wb10517",
     });
-    expect(dispatcherRepo.restore).toHaveBeenCalledWith(
-      "dispatcher-wb10517",
-    );
+    expect(dispatcherRepo.restore).toHaveBeenCalledWith("dispatcher-wb10517");
     expect(dispatcherRepo.create).not.toHaveBeenCalled();
     expect(dispatcherRepo.save).not.toHaveBeenCalled();
   });

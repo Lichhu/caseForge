@@ -128,6 +128,15 @@ curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8080/api/v1/...
 # 浏览器打开 http://<IP>:8080/case-forge?userName=system
 ```
 
+大报文案例需要数据库允许更大的单条 SQL 包。首次部署时使用管理员账号执行：
+
+```bash
+mysql -u root -p < apps/api/scripts/mysql-large-packet.sql
+```
+
+生产环境建议同时把 `max_allowed_packet=64M` 写入 MySQL 的 `[mysqld]` 配置，
+避免数据库重启后恢复旧值。
+
 ---
 
 ## 六、发版更新

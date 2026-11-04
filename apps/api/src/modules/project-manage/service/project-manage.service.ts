@@ -19,10 +19,6 @@ import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
 import { StructDocEntity } from "@struct-doc/entity/struct-doc.entity";
 import { ApiRequirementEntity } from "@requirement-platform/entity/api-requirement.entity";
 import { DataSource, EntityManager, In, Repository } from "typeorm";
-import {
-  extractProjectCodeFromText,
-  isValidProjectRequirementCode,
-} from "@case-editor/util/requirement-code.util";
 import { auditFieldsForCreate } from "@common/audit/request-context";
 import {
   applyUserScope,
@@ -33,16 +29,16 @@ import { toPublicProject } from "@common/http/public-response.util";
 import { RequirementPlatformService } from "@requirement-platform/service/requirement-platform.service";
 import { TestPlatformProjectEntity } from "@common/test-platform/entity/test-platform-project.entity";
 import { TEST_PLATFORM_CONNECTION } from "@common/test-platform";
+import { INPUT_LIMITS } from "@case-forge/shared";
+import {
+  normalizeOptionalDisplayText,
+  normalizeOptionalLongText,
+  normalizeRequiredDisplayText,
+  normalizeRequirementCode,
+} from "@common/validation/input-validation.util";
 
 function normalizeRequirementNo(raw: string): string {
-  const trimmed = raw.trim();
-  const code = extractProjectCodeFromText(trimmed) ?? trimmed;
-  if (!isValidProjectRequirementCode(code)) {
-    throw new BadRequestException(
-      "需求编号格式必须为 XQxxxx-xxxx-xx，例如 XQ2026-0818-01",
-    );
-  }
-  return code.toUpperCase();
+  return normalizeRequirementCode(raw);
 }
 
 /** 项目列表项：对外字段 + 案例生成次数 + 是否来源于需求平台认领 */
@@ -97,10 +93,25 @@ export class ProjectManageService {
     const total = await this.projectRepo.count({
       where: scopedWhere({ platform }),
     });
+    const title =
+      normalizeOptionalDisplayText(
+        dto.title,
+        "项目名称",
+        INPUT_LIMITS.projectTitle,
+      ) || `案例生成项目 ${total + 1}`;
+    const description =
+      normalizeOptionalLongText(
+        dto.description,
+        "项目描述",
+        INPUT_LIMITS.projectDescription,
+      ) || "";
+    const requirementNo = dto.requirementNo?.trim()
+      ? normalizeRequirementCode(dto.requirementNo)
+      : undefined;
     const project = this.projectRepo.create({
-      title: dto.title?.trim() || `案例生成项目 ${total + 1}`,
-      description: dto.description?.trim() || "",
-      requirementNo: dto.requirementNo?.trim() || undefined,
+      title,
+      description,
+      requirementNo,
       platform,
       ...auditFieldsForCreate(),
     });
@@ -135,12 +146,12 @@ export class ProjectManageService {
     }
 
     const query = this.projectRepo
-        .createQueryBuilder("project")
-        .where("project.platform = :platform", { platform })
-        .orderBy("project.createdAt", "DESC")
-        .addOrderBy("project.id", "DESC")
-        .skip((page - 1) * size)
-        .take(size);
+      .createQueryBuilder("project")
+      .where("project.platform = :platform", { platform })
+      .orderBy("project.createdAt", "DESC")
+      .addOrderBy("project.id", "DESC")
+      .skip((page - 1) * size)
+      .take(size);
 
     applyUserScope(query, "project");
 
@@ -222,17 +233,23 @@ export class ProjectManageService {
       : [];
     const requirementByProject = new Map<string, ApiRequirementEntity>();
     for (const item of requirements) {
-      if (item.claimedProjectId) requirementByProject.set(String(item.claimedProjectId), item);
-      if (item.projectCode) requirementByProject.set(`code:${item.projectCode}`, item);
+      if (item.claimedProjectId)
+        requirementByProject.set(String(item.claimedProjectId), item);
+      if (item.projectCode)
+        requirementByProject.set(`code:${item.projectCode}`, item);
     }
-    const sourceProjects = platform === "api-test" && projectRequirementNos.length
-      ? await this.testPlatformProjectRepo.find({
-          where: { projectCode: In(projectRequirementNos), dataStatus: 0 },
-          select: ["projectCode", "applicationName"],
-        })
-      : [];
+    const sourceProjects =
+      platform === "api-test" && projectRequirementNos.length
+        ? await this.testPlatformProjectRepo.find({
+            where: { projectCode: In(projectRequirementNos), dataStatus: 0 },
+            select: ["projectCode", "applicationName"],
+          })
+        : [];
     const applicationNameByCode = new Map(
-      sourceProjects.map((item) => [item.projectCode?.trim(), item.applicationName?.trim() || null]),
+      sourceProjects.map((item) => [
+        item.projectCode?.trim(),
+        item.applicationName?.trim() || null,
+      ]),
     );
 
     return {
@@ -243,15 +260,18 @@ export class ProjectManageService {
         isClaimedFromPlatform: claimedProjectIdSet.has(String(row.id)),
         requirementOwner:
           requirementByProject.get(String(row.id))?.claimedBy ??
-          requirementByProject.get(`code:${row.requirementNo?.trim()}`)?.claimedBy ??
+          requirementByProject.get(`code:${row.requirementNo?.trim()}`)
+            ?.claimedBy ??
           null,
         requirementCreator:
           requirementByProject.get(String(row.id))?.createdBy ??
-          requirementByProject.get(`code:${row.requirementNo?.trim()}`)?.createdBy ??
+          requirementByProject.get(`code:${row.requirementNo?.trim()}`)
+            ?.createdBy ??
           null,
         requirementCreatedAt:
           requirementByProject.get(String(row.id))?.createdAt ??
-          requirementByProject.get(`code:${row.requirementNo?.trim()}`)?.createdAt ??
+          requirementByProject.get(`code:${row.requirementNo?.trim()}`)
+            ?.createdAt ??
           null,
         requirementId:
           requirementByProject.get(String(row.id))?.id ??
@@ -259,12 +279,15 @@ export class ProjectManageService {
           null,
         requirementStatus:
           requirementByProject.get(String(row.id))?.status ??
-          requirementByProject.get(`code:${row.requirementNo?.trim()}`)?.status ??
+          requirementByProject.get(`code:${row.requirementNo?.trim()}`)
+            ?.status ??
           null,
         // 优先用手工创建时记录的需求应用快照，其次回退到源库 b_project
         applicationName:
           requirementByProject.get(String(row.id))?.applicationName?.trim() ||
-          requirementByProject.get(`code:${row.requirementNo?.trim()}`)?.applicationName?.trim() ||
+          requirementByProject
+            .get(`code:${row.requirementNo?.trim()}`)
+            ?.applicationName?.trim() ||
           applicationNameByCode.get(row.requirementNo?.trim() ?? "") ||
           null,
       })),
@@ -318,18 +341,16 @@ export class ProjectManageService {
 
     if (project.platform === "api-test") {
       if (dto.title !== undefined) {
-        const title = dto.title.trim();
-        if (!title) {
-          throw new BadRequestException("请输入需求名称");
-        }
-        project.title = title;
+        project.title = normalizeRequiredDisplayText(
+          dto.title,
+          "需求名称",
+          INPUT_LIMITS.projectTitle,
+        );
       }
       if (dto.requirementNo !== undefined) {
-        const requirementNo = dto.requirementNo.trim();
-        if (!requirementNo) {
-          throw new BadRequestException("请输入需求编号（XQxxxx-xxxx-xx）");
-        }
-        const normalizedRequirementNo = normalizeRequirementNo(requirementNo);
+        const normalizedRequirementNo = normalizeRequirementNo(
+          dto.requirementNo,
+        );
         await this.assertApiTestRequirementAvailable(
           normalizedRequirementNo,
           projectId,
@@ -338,14 +359,25 @@ export class ProjectManageService {
       }
     } else {
       if (dto.title !== undefined) {
-        project.title = dto.title.trim();
+        project.title = normalizeRequiredDisplayText(
+          dto.title,
+          "项目名称",
+          INPUT_LIMITS.projectTitle,
+        );
       }
       if (dto.requirementNo !== undefined) {
-        project.requirementNo = dto.requirementNo.trim() || undefined;
+        project.requirementNo = dto.requirementNo.trim()
+          ? normalizeRequirementCode(dto.requirementNo)
+          : undefined;
       }
     }
     if (dto.description !== undefined) {
-      project.description = dto.description.trim();
+      project.description =
+        normalizeOptionalLongText(
+          dto.description,
+          "项目描述",
+          INPUT_LIMITS.projectDescription,
+        ) || "";
     }
 
     return toPublicProject(await this.projectRepo.save(project));
@@ -381,9 +413,13 @@ export class ProjectManageService {
   async deleteProject(
     projectId: string,
   ): Promise<{ id: string; deleted: boolean }> {
-    const target = await this.projectRepo.findOne({ where: scopedWhere({ id: projectId }) });
+    const target = await this.projectRepo.findOne({
+      where: scopedWhere({ id: projectId }),
+    });
     if (target?.platform === "api-test") {
-      throw new BadRequestException("接口测试项目不可删除，请在需求管理中软删除需求");
+      throw new BadRequestException(
+        "接口测试项目不可删除，请在需求管理中软删除需求",
+      );
     }
     await this.assertProjectNotClaimed([projectId]);
     await this.dataSource.transaction(async (manager) => {
@@ -413,8 +449,13 @@ export class ProjectManageService {
       return { ids: [], deleted: true };
     }
 
-    const apiProjects = await this.projectRepo.find({ where: { id: In(uniqueIds), platform: "api-test" } });
-    if (apiProjects.length) throw new BadRequestException("接口测试项目不可删除，请在需求管理中软删除需求");
+    const apiProjects = await this.projectRepo.find({
+      where: { id: In(uniqueIds), platform: "api-test" },
+    });
+    if (apiProjects.length)
+      throw new BadRequestException(
+        "接口测试项目不可删除，请在需求管理中软删除需求",
+      );
 
     await this.assertProjectNotClaimed(uniqueIds);
 

@@ -11,6 +11,9 @@ import type {
 import { ApiEndpointEntity } from "./api-endpoint.entity";
 import { SoftDeletableEntity } from "@common/entity/soft-deletable.entity";
 import {
+  AfterLoad,
+  BeforeInsert,
+  BeforeUpdate,
   Column,
   CreateDateColumn,
   Entity,
@@ -20,6 +23,11 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from "typeorm";
+import {
+  compactCasePayloadStorage,
+  restoreCasePayloadStorage,
+  type CasePayloadStorageShape,
+} from "../util/api-case-payload-storage.util";
 
 @Entity("api_test_case")
 @Index("idx_api_case_user_deleted_created", [
@@ -118,6 +126,7 @@ export class ApiTestCaseEntity extends SoftDeletableEntity {
     debugEnvironmentId?: string;
     debugEnvironmentServiceId?: string;
     debugEncoding?: string;
+    requestStoredInSteps?: boolean;
     lastDebugRun?: {
       statusCode: number;
       headers: Record<string, string>;
@@ -147,4 +156,26 @@ export class ApiTestCaseEntity extends SoftDeletableEntity {
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  @BeforeInsert()
+  @BeforeUpdate()
+  compactLargePayload() {
+    const compacted = compactCasePayloadStorage(
+      this as unknown as CasePayloadStorageShape,
+    );
+    this.request = compacted.request;
+    this.expected = compacted.expected;
+    this.steps = compacted.steps;
+    this.metadata = compacted.metadata as ApiTestCaseEntity["metadata"];
+  }
+
+  @AfterLoad()
+  restoreLargePayload() {
+    const restored = restoreCasePayloadStorage(
+      this as unknown as CasePayloadStorageShape,
+    );
+    this.request = restored.request;
+    this.expected = restored.expected;
+    this.steps = restored.steps;
+  }
 }

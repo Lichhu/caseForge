@@ -8,6 +8,8 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
+  MaxLength,
 } from "class-validator";
 import type {
   ApiCaseExpected,
@@ -19,6 +21,12 @@ import type {
   CaseLastDebugRun,
   ApiCaseStep,
 } from "@case-forge/shared";
+import {
+  BUSINESS_CODE_PATTERN,
+  DISPLAY_NAME_HINT,
+  INPUT_LIMITS,
+  SAFE_DISPLAY_NAME_PATTERN,
+} from "@case-forge/shared";
 
 export class SaveApiCaseDto {
   @ApiPropertyOptional()
@@ -28,31 +36,46 @@ export class SaveApiCaseDto {
 
   @ApiProperty()
   @IsString()
+  @MaxLength(INPUT_LIMITS.caseName)
+  @Matches(SAFE_DISPLAY_NAME_PATTERN, {
+    message: `案例名称${DISPLAY_NAME_HINT}`,
+  })
   title!: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(INPUT_LIMITS.caseNo)
+  @Matches(BUSINESS_CODE_PATTERN, {
+    message: "案例编号仅支持字母、数字、点、下划线和连字符",
+  })
   caseNo?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(INPUT_LIMITS.caseText)
   description?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(INPUT_LIMITS.caseText)
   remark?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(INPUT_LIMITS.transactionCode)
   transactionCode?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(INPUT_LIMITS.caseOwner)
+  @Matches(SAFE_DISPLAY_NAME_PATTERN, {
+    message: `负责人${DISPLAY_NAME_HINT}`,
+  })
   owner?: string;
 
   @ApiPropertyOptional()

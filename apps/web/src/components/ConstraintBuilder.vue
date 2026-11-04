@@ -566,7 +566,11 @@ import {
 import type { ScenarioLibraryItem, TestPointInstructionItem, TestPointSummaryItem } from '@/api/client';
 import {
   caseForgePageSizeOptionLabels,
+  normalizeDisplayTextInput,
+  normalizeLongTextInput,
   shouldShowCaseForgePagination,
+  validateDisplayText,
+  INPUT_LIMITS,
 } from '@case-forge/shared';
 import { useCaseForgeStore } from '@/stores/caseForge';
 import { configureAppMessage, configureScenarioModalMessage } from '@/utils/globalFeedback';
@@ -600,7 +604,7 @@ const FIELD_LIMITS = {
 } as const;
 
 function clipText(value: string, maxLength: number) {
-  return value.slice(0, maxLength);
+  return normalizeLongTextInput(value, maxLength);
 }
 
 function filterAutocompleteOption(input: string, option: { value?: string; label?: string }) {
@@ -1208,6 +1212,23 @@ function validateDefinitionDraft() {
     message.warning('请填写测试要点');
     return false;
   }
+  const issue =
+    validateDisplayText(definitionDraft.system, {
+      label: '系统',
+      maxLength: INPUT_LIMITS.systemName,
+    }) ||
+    validateDisplayText(definitionDraft.featureModule, {
+      label: '功能模块',
+      maxLength: INPUT_LIMITS.featureModule,
+    }) ||
+    validateDisplayText(definitionDraft.testPoint, {
+      label: '测试要点',
+      maxLength: INPUT_LIMITS.testPoint,
+    });
+  if (issue) {
+    message.warning(issue);
+    return false;
+  }
   return true;
 }
 
@@ -1258,14 +1279,20 @@ async function saveSelection(generateNow: boolean) {
       definition: batchMode.value
         ? undefined
         : {
-            system: clipText(definitionDraft.system.trim(), FIELD_LIMITS.system),
+            system: normalizeDisplayTextInput(
+              definitionDraft.system.trim(),
+              FIELD_LIMITS.system,
+            ),
             systemDesc: definitionDraft.systemDesc.trim(),
-            featureModule: clipText(
+            featureModule: normalizeDisplayTextInput(
               definitionDraft.featureModule.trim(),
               FIELD_LIMITS.featureModule,
             ),
             featureDesc: activeRow.value?.featureDesc || '',
-            testPoint: clipText(definitionDraft.testPoint.trim(), FIELD_LIMITS.testPoint),
+            testPoint: normalizeDisplayTextInput(
+              definitionDraft.testPoint.trim(),
+              FIELD_LIMITS.testPoint,
+            ),
             testPointDesc: activeRow.value?.testPointDesc || '',
           },
       instruction: buildInstructionPayload(generateNow),
@@ -1489,7 +1516,7 @@ function clearScenarioAutoSaveTimers() {
 }
 
 function handleScenarioNameInput(item: ScenarioLibraryItem, value: string) {
-  item.name = clipText(value, FIELD_LIMITS.scenarioName);
+  item.name = normalizeDisplayTextInput(value, FIELD_LIMITS.scenarioName);
   if (scenarioSaveUi.value === 'saved') {
     scenarioSaveUi.value = 'idle';
   }
@@ -1797,10 +1824,16 @@ function confirmDeletePrompt(promptId: string) {
 
 function syncDefinitionDraft(row: TestPointInstructionItem) {
   definitionDraft.id = row.id;
-  definitionDraft.system = clipText(row.system, FIELD_LIMITS.system);
+  definitionDraft.system = normalizeDisplayTextInput(row.system, FIELD_LIMITS.system);
   definitionDraft.systemDesc = row.systemDesc;
-  definitionDraft.featureModule = clipText(row.featureModule, FIELD_LIMITS.featureModule);
-  definitionDraft.testPoint = clipText(row.testPoint, FIELD_LIMITS.testPoint);
+  definitionDraft.featureModule = normalizeDisplayTextInput(
+    row.featureModule,
+    FIELD_LIMITS.featureModule,
+  );
+  definitionDraft.testPoint = normalizeDisplayTextInput(
+    row.testPoint,
+    FIELD_LIMITS.testPoint,
+  );
 }
 
 function syncInstructionDraft(rows: TestPointInstructionItem[]) {

@@ -572,8 +572,17 @@
         <label>名称</label>
         <a-input
           v-model:value="createRunSetName"
+          :maxlength="INPUT_LIMITS.runSetName"
+          show-count
           placeholder="例如：第一轮核心交易回归"
           allow-clear
+          @update:value="
+            (value: string) =>
+              (createRunSetName = normalizeDisplayTextInput(
+                value,
+                INPUT_LIMITS.runSetName,
+              ))
+          "
         />
         <label>版本</label>
         <a-select
@@ -598,8 +607,17 @@
         <label>名称</label>
         <a-input
           v-model:value="editRunSetName"
+          :maxlength="INPUT_LIMITS.runSetName"
+          show-count
           placeholder="未命名推送集"
           allow-clear
+          @update:value="
+            (value: string) =>
+              (editRunSetName = normalizeDisplayTextInput(
+                value,
+                INPUT_LIMITS.runSetName,
+              ))
+          "
         />
         <label>版本</label>
         <a-select
@@ -913,6 +931,11 @@ import type {
   ApiPreproductionRunSet,
   ApiPreproductionRunSetCase,
   ApiPreproductionRunSetStatus,
+} from "@case-forge/shared";
+import {
+  INPUT_LIMITS,
+  normalizeDisplayTextInput,
+  validateDisplayText,
 } from "@case-forge/shared";
 import {
   listManagedCases,
@@ -1463,6 +1486,15 @@ async function prepareCreateRunSet() {
 
 async function confirmCreateRunSet() {
   if (creatingRunSet.value) return;
+  const nameIssue = validateDisplayText(createRunSetName.value, {
+    label: "推送集名称",
+    maxLength: INPUT_LIMITS.runSetName,
+    required: false,
+  });
+  if (nameIssue) {
+    message.warning(nameIssue);
+    return;
+  }
   if (!createRunSetVersionId.value) {
     message.warning("请选择版本");
     return;
@@ -1624,6 +1656,15 @@ async function onEditRunSetApplicationChange(value?: string) {
 async function confirmEditRunSet() {
   const record = editingRunSet.value;
   if (!record || updatingRunSet.value) return;
+  const nameIssue = validateDisplayText(editRunSetName.value, {
+    label: "推送集名称",
+    maxLength: INPUT_LIMITS.runSetName,
+    required: false,
+  });
+  if (nameIssue) {
+    message.warning(nameIssue);
+    return;
+  }
   if (!editRunSetVersionId.value) {
     message.warning("请选择版本");
     return;

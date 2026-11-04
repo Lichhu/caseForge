@@ -4,6 +4,7 @@ import type {
   ApiPreproductionRunSet,
   ApiPreproductionRunSetCase,
 } from "@case-forge/shared";
+import { INPUT_LIMITS } from "@case-forge/shared";
 import {
   BadRequestException,
   Injectable,
@@ -22,6 +23,10 @@ import { ApiPreproductionRunSetEntity } from "../entity/api-preproduction-run-se
 import { ApiPreproductionCaseEntity } from "../entity/api-preproduction-case.entity";
 import { ApiExecutionService } from "./api-execution.service";
 import { ApiCaseReportDeliveryService } from "./api-case-report-delivery.service";
+import {
+  normalizeOptionalDisplayText,
+  normalizeRequiredDisplayText,
+} from "@common/validation/input-validation.util";
 
 interface PushSelection {
   versionId: string;
@@ -77,10 +82,33 @@ export class ApiPreproductionRunService {
     if (!Number.isInteger(totalCount) || totalCount < 0) {
       throw new BadRequestException("执行推送集案例数量不合法");
     }
+    const versionLabel = normalizeRequiredDisplayText(
+      input.versionLabel,
+      "版本名称",
+      INPUT_LIMITS.requirementVersion,
+    );
+    const name = normalizeOptionalDisplayText(
+      input.name,
+      "推送集名称",
+      INPUT_LIMITS.runSetName,
+    );
+    const applicationLabel = normalizeOptionalDisplayText(
+      input.applicationLabel,
+      "应用名称",
+      INPUT_LIMITS.applicationName,
+    );
+    const roundLabel = normalizeOptionalDisplayText(
+      input.roundLabel,
+      "轮次名称",
+      INPUT_LIMITS.requirementVersion,
+    );
     const row = await this.runSets.save(
       this.runSets.create({
         ...input,
-        name: input.name?.trim() || null,
+        versionLabel,
+        name: name || null,
+        applicationLabel: applicationLabel || null,
+        roundLabel: roundLabel || null,
         totalCount,
         status: totalCount > 0 ? "running" : "pending",
         ...auditFieldsForCreate(),

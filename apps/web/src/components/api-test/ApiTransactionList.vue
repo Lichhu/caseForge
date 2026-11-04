@@ -198,23 +198,47 @@
         <a-form-item label="交易码" required>
           <a-input
             v-model:value="form.code"
-            maxlength="128"
+            :maxlength="INPUT_LIMITS.transactionCode"
+            show-count
             placeholder="如 addCtmSealInfo"
+            @update:value="
+              (value: string) =>
+                (form.code = normalizeBusinessCodeInput(
+                  value,
+                  INPUT_LIMITS.transactionCode,
+                ))
+            "
           />
         </a-form-item>
         <a-form-item label="接口名称">
           <a-input
             v-model:value="form.name"
-            maxlength="256"
+            :maxlength="INPUT_LIMITS.transactionName"
+            show-count
             placeholder="可选，默认同交易码"
+            @update:value="
+              (value: string) =>
+                (form.name = normalizeDisplayTextInput(
+                  value,
+                  INPUT_LIMITS.transactionName,
+                ))
+            "
           />
         </a-form-item>
         <a-form-item label="备注">
           <a-textarea
             v-model:value="form.description"
             :rows="3"
-            maxlength="2000"
+            :maxlength="INPUT_LIMITS.transactionDescription"
+            show-count
             placeholder="可选"
+            @update:value="
+              (value: string) =>
+                (form.description = normalizeLongTextInput(
+                  value,
+                  INPUT_LIMITS.transactionDescription,
+                ))
+            "
           />
         </a-form-item>
       </a-form>
@@ -245,6 +269,12 @@ import { message, Modal } from "ant-design-vue";
 import {
   caseForgePageSizeOptionLabels,
   DEFAULT_CASE_FORGE_PAGE_SIZE,
+  BUSINESS_CODE_PATTERN,
+  INPUT_LIMITS,
+  normalizeBusinessCodeInput,
+  normalizeDisplayTextInput,
+  normalizeLongTextInput,
+  validateDisplayText,
   normalizeCaseForgePageSize,
 } from "@case-forge/shared";
 import { useApiTestStore } from "@/stores/apiTest";
@@ -719,7 +749,20 @@ async function onSave() {
     message.warning("请输入交易码");
     return Promise.reject();
   }
+  if (!BUSINESS_CODE_PATTERN.test(code)) {
+    message.warning("交易码仅支持字母、数字、点、下划线和连字符");
+    return Promise.reject();
+  }
   const name = form.name.trim();
+  const nameIssue = validateDisplayText(name, {
+    label: "接口名称",
+    maxLength: INPUT_LIMITS.transactionName,
+    required: false,
+  });
+  if (nameIssue) {
+    message.warning(nameIssue);
+    return Promise.reject();
+  }
   saving.value = true;
   try {
     const payload = {

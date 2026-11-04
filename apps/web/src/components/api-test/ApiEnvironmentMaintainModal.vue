@@ -242,8 +242,10 @@
         <a-auto-complete
           v-model:value="envForm.name"
           :options="nameOptions"
+          :maxlength="INPUT_LIMITS.environmentName"
           placeholder="请输入或选择环境名称"
           allow-clear
+          @update:value="updateEnvName"
         />
       </a-form-item>
     </a-form>
@@ -259,12 +261,33 @@
   >
     <a-form layout="vertical">
       <a-form-item label="服务名" required>
-        <a-input v-model:value="serviceForm.name" placeholder="如 default、ESBJSON" />
+        <a-input
+          v-model:value="serviceForm.name"
+          :maxlength="INPUT_LIMITS.environmentServiceName"
+          show-count
+          placeholder="如 default、ESBJSON"
+          @update:value="
+            (value: string) =>
+              (serviceForm.name = normalizeDisplayTextInput(
+                value,
+                INPUT_LIMITS.environmentServiceName,
+              ))
+          "
+        />
       </a-form-item>
       <a-form-item label="服务器地址" required>
         <a-input
           v-model:value="serviceForm.serverAddress"
+          :maxlength="INPUT_LIMITS.serverAddress"
+          show-count
           placeholder="http://host:port/path 或 socket2://host:port"
+          @update:value="
+            (value: string) =>
+              (serviceForm.serverAddress = normalizeLongTextInput(
+                value,
+                INPUT_LIMITS.serverAddress,
+              ))
+          "
         />
       </a-form-item>
       <a-form-item label="HTTPS 证书">
@@ -280,7 +303,19 @@
         </span>
       </a-form-item>
       <a-form-item label="备注">
-        <a-textarea v-model:value="serviceForm.remark" :rows="2" />
+        <a-textarea
+          v-model:value="serviceForm.remark"
+          :rows="2"
+          :maxlength="INPUT_LIMITS.environmentRemark"
+          show-count
+          @update:value="
+            (value: string) =>
+              (serviceForm.remark = normalizeLongTextInput(
+                value,
+                INPUT_LIMITS.environmentRemark,
+              ))
+          "
+        />
       </a-form-item>
     </a-form>
   </a-modal>
@@ -301,11 +336,15 @@ import {
   RightOutlined,
   VerticalAlignTopOutlined,
 } from '@ant-design/icons-vue';
-import { Modal } from 'ant-design-vue';
+import { message, Modal } from 'ant-design-vue';
 import {
   API_ENVIRONMENT_PRESET_NAMES,
   API_ENVIRONMENT_SCOPE_LABEL,
   API_ENVIRONMENT_SCOPES,
+  INPUT_LIMITS,
+  normalizeDisplayTextInput,
+  normalizeLongTextInput,
+  validateDisplayText,
   type ApiEnvironmentScope,
 } from '@case-forge/shared';
 import type { ApiEnvironmentServiceRow } from '@/api/apiTestClient';
@@ -503,7 +542,15 @@ function openEnvEdit() {
 
 async function saveEnv() {
   const projectId = libraryProjectId.value;
-  if (!projectId || !envForm.name.trim()) return;
+  if (!projectId) return;
+  const issue = validateDisplayText(envForm.name, {
+    label: '环境名称',
+    maxLength: INPUT_LIMITS.environmentName,
+  });
+  if (issue) {
+    message.warning(issue);
+    return;
+  }
   if (envEditingId.value && !activeEnvCanManage.value) return;
   await apiStore.saveEnvironment(
     projectId,
@@ -521,6 +568,12 @@ async function saveEnv() {
     await apiStore.refreshEnvironmentServices(projectId, activeEnvId.value);
   }
   void ensureEnvironmentServiceIndex();
+}
+
+function updateEnvName(value?: string) {
+  envForm.name = value
+    ? normalizeDisplayTextInput(value, INPUT_LIMITS.environmentName)
+    : '';
 }
 
 function removeEnv() {
@@ -562,8 +615,17 @@ function openServiceEdit(row: ApiEnvironmentServiceRow) {
 
 async function saveService() {
   const projectId = libraryProjectId.value;
-  if (!projectId || !activeEnvId.value || !serviceForm.name.trim()) return;
-  if (!serviceForm.serverAddress.trim()) return;
+  if (!projectId || !activeEnvId.value) return;
+  const issue =
+    validateDisplayText(serviceForm.name, {
+      label: '服务名',
+      maxLength: INPUT_LIMITS.environmentServiceName,
+    }) ||
+    (!serviceForm.serverAddress.trim() ? '服务器地址不能为空' : null);
+  if (issue) {
+    message.warning(issue);
+    return;
+  }
   if (serviceEditingId.value) {
     const current = services.value.find(
       (item) => item.id === serviceEditingId.value,

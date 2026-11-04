@@ -1,6 +1,8 @@
 /**
  * 测管平台需求编号：项目名称或需求编号中需包含 XQXXXX-XXXX-XX 格式。
  */
+import { REQUIREMENT_CODE_PATTERN } from "@case-forge/shared";
+
 const PROJECT_CODE_PATTERN = /XQ\d{4}-\d{4}-\d{2}/i;
 
 export function extractProjectCodeFromText(text: string): string | undefined {
@@ -27,5 +29,5 @@ export function resolveProjectRequirementCode(input: {
 }
 
 export function isValidProjectRequirementCode(code: string): boolean {
-  return PROJECT_CODE_PATTERN.test(code);
+  return REQUIREMENT_CODE_PATTERN.test(code);
 }

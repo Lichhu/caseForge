@@ -23,8 +23,10 @@
           <a-auto-complete
             v-model:value="form.name"
             :options="nameOptions"
+            :maxlength="INPUT_LIMITS.environmentName"
             placeholder="请输入或选择环境名称"
             allow-clear
+            @update:value="updateEnvironmentName"
           />
         </a-form-item>
       </a-form>
@@ -37,8 +39,12 @@ import { reactive, ref } from 'vue';
 import {
   API_ENVIRONMENT_PRESET_NAMES,
   API_ENVIRONMENT_SCOPE_LABEL,
+  INPUT_LIMITS,
+  normalizeDisplayTextInput,
+  validateDisplayText,
   type ApiEnvironmentScope,
 } from '@case-forge/shared';
+import { message } from 'ant-design-vue';
 import { useApiTestStore } from '@/stores/apiTest';
 import type { ApiEnvironmentRow } from '@/api/apiTestClient';
 
@@ -77,9 +83,23 @@ function openEdit(env: ApiEnvironmentRow) {
   modalOpen.value = true;
 }
 
+function updateEnvironmentName(value?: string) {
+  form.name = value
+    ? normalizeDisplayTextInput(value, INPUT_LIMITS.environmentName)
+    : '';
+}
+
 async function onSave() {
   const projectId = apiStore.activeProjectId;
-  if (!projectId || !form.name.trim()) return;
+  if (!projectId) return;
+  const issue = validateDisplayText(form.name, {
+    label: '环境名称',
+    maxLength: INPUT_LIMITS.environmentName,
+  });
+  if (issue) {
+    message.warning(issue);
+    return;
+  }
   await apiStore.saveEnvironment(
     projectId,
     {

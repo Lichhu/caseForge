@@ -390,7 +390,20 @@
                   <div class="case-basic-form">
                     <div class="case-basic-field case-basic-field--full">
                       <label class="case-basic-label case-basic-label--required">案例名称</label>
-                      <a-input v-model:value="form.title" size="small" placeholder="案例名称" />
+                      <a-input
+                        v-model:value="form.title"
+                        size="small"
+                        :maxlength="INPUT_LIMITS.caseName"
+                        show-count
+                        placeholder="案例名称"
+                        @update:value="
+                          (value: string) =>
+                            (form.title = normalizeDisplayTextInput(
+                              value,
+                              INPUT_LIMITS.caseName,
+                            ))
+                        "
+                      />
                     </div>
                     <div class="case-basic-field">
                       <label class="case-basic-label case-basic-label--required">案例类型</label>
@@ -402,7 +415,20 @@
                     </div>
                     <div class="case-basic-field">
                       <label class="case-basic-label">案例编号</label>
-                      <a-input v-model:value="form.caseNo" size="small" placeholder="如 PCBS03901001-001" />
+                      <a-input
+                        v-model:value="form.caseNo"
+                        size="small"
+                        :maxlength="INPUT_LIMITS.caseNo"
+                        show-count
+                        placeholder="如 PCBS03901001-001"
+                        @update:value="
+                          (value: string) =>
+                            (form.caseNo = normalizeBusinessCodeInput(
+                              value,
+                              INPUT_LIMITS.caseNo,
+                            ))
+                        "
+                      />
                     </div>
                     <div class="case-basic-field">
                       <label class="case-basic-label">交易码</label>
@@ -410,7 +436,20 @@
                     </div>
                     <div class="case-basic-field">
                       <label class="case-basic-label">负责人</label>
-                      <a-input v-model:value="form.owner" size="small" placeholder="负责人" />
+                      <a-input
+                        v-model:value="form.owner"
+                        size="small"
+                        :maxlength="INPUT_LIMITS.caseOwner"
+                        show-count
+                        placeholder="负责人"
+                        @update:value="
+                          (value: string) =>
+                            (form.owner = normalizeDisplayTextInput(
+                              value,
+                              INPUT_LIMITS.caseOwner,
+                            ))
+                        "
+                      />
                     </div>
                     <div class="case-basic-field">
                       <label class="case-basic-label">创建人</label>
@@ -424,7 +463,16 @@
                         v-model:value="form.description"
                         class="case-basic-textarea"
                         :rows="3"
+                        :maxlength="INPUT_LIMITS.caseText"
+                        show-count
                         placeholder="案例描述"
+                        @update:value="
+                          (value: string) =>
+                            (form.description = normalizeLongTextInput(
+                              value,
+                              INPUT_LIMITS.caseText,
+                            ))
+                        "
                       />
                     </div>
                     <div class="case-basic-meta-item">
@@ -433,7 +481,16 @@
                         v-model:value="form.remark"
                         class="case-basic-textarea"
                         :rows="3"
+                        :maxlength="INPUT_LIMITS.caseText"
+                        show-count
                         placeholder="备注"
+                        @update:value="
+                          (value: string) =>
+                            (form.remark = normalizeLongTextInput(
+                              value,
+                              INPUT_LIMITS.caseText,
+                            ))
+                        "
                       />
                     </div>
                   </div>
@@ -506,7 +563,20 @@
                       </template>
                       <div class="case-step-name-field">
                         <span>步骤名称</span>
-                        <a-input v-model:value="form.stepName" size="small" placeholder="步骤名称" />
+                        <a-input
+                          v-model:value="form.stepName"
+                          size="small"
+                          :maxlength="INPUT_LIMITS.stepName"
+                          show-count
+                          placeholder="步骤名称"
+                          @update:value="
+                            (value: string) =>
+                              (form.stepName = normalizeDisplayTextInput(
+                                value,
+                                INPUT_LIMITS.stepName,
+                              ))
+                          "
+                        />
                       </div>
                       <div class="case-step-detail-tabs">
                         <button v-for="tab in stepDetailTabs" :key="tab.key" type="button" :class="['case-editor-main-tab', { active: stepDetailTab === tab.key }]" @click="stepDetailTab = tab.key">{{ tab.label }}</button>
@@ -856,7 +926,20 @@
                   <div class="case-step-response-list">
                   <a-table :data-source="form.exports" :pagination="false" size="small" row-key="rowId">
                     <a-table-column title="变量名" key="name">
-                      <template #default="{ record }"><a-input v-model:value="record.name" :placeholder="form.stepKind === 'db' ? 'userId' : 'accessToken'" /></template>
+                      <template #default="{ record }">
+                        <a-input
+                          v-model:value="record.name"
+                          :maxlength="INPUT_LIMITS.dataFunctionName"
+                          :placeholder="form.stepKind === 'db' ? 'userId' : 'accessToken'"
+                          @update:value="
+                            (value: string) =>
+                              (record.name = normalizeLanguageIdentifierInput(
+                                value,
+                                INPUT_LIMITS.dataFunctionName,
+                              ))
+                          "
+                        />
+                      </template>
                     </a-table-column>
                     <a-table-column title="来源" key="source" :width="132">
                       <template #default="{ record }"><a-select v-model:value="record.source" size="small" :options="exportSourceOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1, minWidth: 150 }" /></template>
@@ -1110,7 +1193,20 @@
       <a-form layout="vertical">
         <a-form-item label="来源"><a-select v-model:value="debugExportSource" :options="debugExportSourceOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 11 }" @change="onDebugExportSourceChange" /></a-form-item>
         <a-form-item label="字段路径"><a-select v-model:value="debugExportPath" show-search :options="debugExportPathOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 11 }" placeholder="选择字段" /></a-form-item>
-        <a-form-item label="变量名"><a-input v-model:value="debugExportName" placeholder="accessToken" /></a-form-item>
+        <a-form-item label="变量名">
+          <a-input
+            v-model:value="debugExportName"
+            :maxlength="INPUT_LIMITS.dataFunctionName"
+            placeholder="accessToken"
+            @update:value="
+              (value: string) =>
+                (debugExportName = normalizeLanguageIdentifierInput(
+                  value,
+                  INPUT_LIMITS.dataFunctionName,
+                ))
+            "
+          />
+        </a-form-item>
       </a-form>
     </a-modal>
 
@@ -1239,11 +1335,19 @@ import {
   DB_STEP_DEFAULT_MAX_AFFECTED_ROWS,
   DB_STEP_DEFAULT_TIMEOUT_MS,
   DB_STEP_MAX_TIMEOUT_MS,
+  BUSINESS_CODE_PATTERN,
+  INPUT_LIMITS,
+  SAFE_LANGUAGE_IDENTIFIER_PATTERN,
   detectDbSqlKind,
   isDbExportSource,
   isDbStep,
   isHttpStep,
   normalizeCaseForgePageSize,
+  normalizeBusinessCodeInput,
+  normalizeDisplayTextInput,
+  normalizeLanguageIdentifierInput,
+  normalizeLongTextInput,
+  validateDisplayText,
   validateDbStepSql,
 } from '@case-forge/shared';
 import type {
@@ -3235,9 +3339,39 @@ function onCreate() {
 
 function buildSavePayload(): Record<string, unknown> | null {
   if (!form.title.trim()) return null;
+  const titleIssue = validateDisplayText(form.title, {
+    label: '案例名称',
+    maxLength: INPUT_LIMITS.caseName,
+  });
+  if (titleIssue) {
+    message.warning(titleIssue);
+    return null;
+  }
+  if (form.caseNo.trim() && !BUSINESS_CODE_PATTERN.test(form.caseNo.trim())) {
+    message.warning('案例编号仅支持字母、数字、点、下划线和连字符');
+    return null;
+  }
+  const ownerIssue = validateDisplayText(form.owner, {
+    label: '负责人',
+    maxLength: INPUT_LIMITS.caseOwner,
+    required: false,
+  });
+  if (ownerIssue) {
+    message.warning(ownerIssue);
+    return null;
+  }
   const exportNames = form.exports.map((item) => item.name.trim()).filter(Boolean);
   if (new Set(exportNames).size !== exportNames.length) {
     message.warning('同一案例内共享变量名不能重复');
+    return null;
+  }
+  const invalidExportName = exportNames.find(
+    (name) => !SAFE_LANGUAGE_IDENTIFIER_PATTERN.test(name),
+  );
+  if (invalidExportName) {
+    message.warning(
+      `变量名「${invalidExportName}」仅支持中英文、数字和下划线，且不能以数字开头`,
+    );
     return null;
   }
   storeActiveStep();

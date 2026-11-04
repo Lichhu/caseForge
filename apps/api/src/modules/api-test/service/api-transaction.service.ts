@@ -18,6 +18,12 @@ import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
 import { ApiTransactionEntity } from "@api-test/entity/api-transaction.entity";
 import { ApiReportExportEntity } from "@api-test/entity/api-report-export.entity";
 import { SaveApiTransactionDto } from "@api-test/dto/save-transaction.dto";
+import { INPUT_LIMITS } from "@case-forge/shared";
+import {
+  normalizeBusinessCode,
+  normalizeOptionalDisplayText,
+  normalizeOptionalLongText,
+} from "@common/validation/input-validation.util";
 import { toPublicApiTransaction } from "@common/http/public-response.util";
 import { ApiCaseGenerateQueueService } from "./api-case-generate-queue.service";
 
@@ -106,11 +112,22 @@ export class ApiTransactionService {
 
   async createTransaction(projectId: string, payload: SaveApiTransactionDto) {
     await assertApiTestProject(this.projectRepo, projectId);
-    const code = payload.code.trim();
-    const name = payload.name?.trim() || code;
-    if (!code) {
-      throw new BadRequestException("请输入交易码");
-    }
+    const code = normalizeBusinessCode(
+      payload.code,
+      "交易码",
+      INPUT_LIMITS.transactionCode,
+    );
+    const name =
+      normalizeOptionalDisplayText(
+        payload.name,
+        "交易名称",
+        INPUT_LIMITS.transactionName,
+      ) || code;
+    const description = normalizeOptionalLongText(
+      payload.description,
+      "交易说明",
+      INPUT_LIMITS.transactionDescription,
+    );
     const count = await this.transactionRepo.count({
       where: scopedWhere({ projectId }),
     });
@@ -119,7 +136,7 @@ export class ApiTransactionService {
         projectId,
         code,
         name,
-        description: payload.description?.trim() || undefined,
+        description: description || undefined,
         sortOrder: count,
         ...auditFieldsForCreate(),
       }),
@@ -143,14 +160,25 @@ export class ApiTransactionService {
     payload: SaveApiTransactionDto,
   ) {
     const transaction = await this.requireTransaction(projectId, transactionId);
-    const code = payload.code.trim();
-    const name = payload.name?.trim() || code;
-    if (!code) {
-      throw new BadRequestException("请输入交易码");
-    }
+    const code = normalizeBusinessCode(
+      payload.code,
+      "交易码",
+      INPUT_LIMITS.transactionCode,
+    );
+    const name =
+      normalizeOptionalDisplayText(
+        payload.name,
+        "交易名称",
+        INPUT_LIMITS.transactionName,
+      ) || code;
+    const description = normalizeOptionalLongText(
+      payload.description,
+      "交易说明",
+      INPUT_LIMITS.transactionDescription,
+    );
     transaction.code = code;
     transaction.name = name;
-    transaction.description = payload.description?.trim() || undefined;
+    transaction.description = description || undefined;
     await this.transactionRepo.save({
       ...transaction,
       ...auditFieldsForUpdate(),

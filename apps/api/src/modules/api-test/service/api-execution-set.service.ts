@@ -22,9 +22,14 @@ import type { ListApiExecutionSetsDto } from "@api-test/dto/list-api-execution-s
 import { toPublicApiExecutionSet } from "@common/http/public-response.util";
 import {
   DEFAULT_CASE_FORGE_PAGE_SIZE,
+  INPUT_LIMITS,
   normalizeCaseForgePageSize,
 } from "@case-forge/shared";
 import { sortCaseIdsByDependencies } from "@api-test/util/case-dependency-order.util";
+import {
+  normalizeOptionalLongText,
+  normalizeRequiredDisplayText,
+} from "@common/validation/input-validation.util";
 
 @Injectable()
 export class ApiExecutionSetService {
@@ -105,11 +110,21 @@ export class ApiExecutionSetService {
     transactionId: string,
     payload: SaveApiExecutionSetDto,
   ) {
+    const name = normalizeRequiredDisplayText(
+      payload.name,
+      "推送集名称",
+      INPUT_LIMITS.executionSetName,
+    );
+    const description = normalizeOptionalLongText(
+      payload.description,
+      "推送集说明",
+      INPUT_LIMITS.executionSetDescription,
+    );
     const entity = this.setRepo.create({
       projectId,
       transactionId,
-      name: payload.name.trim(),
-      description: payload.description?.trim(),
+      name,
+      description,
       enabled: payload.enabled ?? true,
       ...auditFieldsForCreate(),
     });
@@ -123,8 +138,17 @@ export class ApiExecutionSetService {
     payload: SaveApiExecutionSetDto,
   ) {
     const existing = await this.requireSet(projectId, transactionId, setId);
-    existing.name = payload.name.trim();
-    existing.description = payload.description?.trim();
+    existing.name = normalizeRequiredDisplayText(
+      payload.name,
+      "推送集名称",
+      INPUT_LIMITS.executionSetName,
+    );
+    existing.description =
+      normalizeOptionalLongText(
+        payload.description,
+        "推送集说明",
+        INPUT_LIMITS.executionSetDescription,
+      ) || undefined;
     if (payload.enabled !== undefined) existing.enabled = payload.enabled;
     return toPublicApiExecutionSet(
       await this.setRepo.save({ ...existing, ...auditFieldsForUpdate() }),

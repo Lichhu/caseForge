@@ -11,6 +11,11 @@ import {
   MaxLength,
   Min,
 } from "class-validator";
+import {
+  DISPLAY_NAME_HINT,
+  INPUT_LIMITS,
+  SAFE_DISPLAY_NAME_PATTERN,
+} from "@case-forge/shared";
 
 export class SaveServicePropertyDto {
   @ApiProperty({ example: "management_non_accounting" })
@@ -25,13 +30,16 @@ export class SaveServicePropertyDto {
   @ApiProperty({ example: "管理类非涉账" })
   @IsString()
   @IsNotEmpty()
-  @MaxLength(120)
+  @MaxLength(INPUT_LIMITS.servicePropertyName)
+  @Matches(SAFE_DISPLAY_NAME_PATTERN, {
+    message: `显示名称${DISPLAY_NAME_HINT}`,
+  })
   name: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  @MaxLength(1000)
+  @MaxLength(INPUT_LIMITS.servicePropertyDescription)
   description?: string;
 
   @ApiProperty({ type: [String] })

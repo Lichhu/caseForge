@@ -279,19 +279,47 @@
         <a-form-item label="需求编号" required>
           <a-input
             v-model:value="createForm.requirementNo"
-            maxlength="64"
+            :maxlength="INPUT_LIMITS.requirementCode"
+            show-count
             placeholder="XQ2026-0818-01"
+            @update:value="
+              (value: string) =>
+                (createForm.requirementNo = normalizeBusinessCodeInput(
+                  value,
+                  INPUT_LIMITS.requirementCode,
+                ))
+            "
           />
         </a-form-item>
         <a-form-item label="需求名称" required>
-          <a-input v-model:value="createForm.title" maxlength="120" placeholder="请输入需求名称" />
+          <a-input
+            v-model:value="createForm.title"
+            :maxlength="INPUT_LIMITS.projectTitle"
+            show-count
+            placeholder="请输入需求名称"
+            @update:value="
+              (value: string) =>
+                (createForm.title = normalizeDisplayTextInput(
+                  value,
+                  INPUT_LIMITS.projectTitle,
+                ))
+            "
+          />
         </a-form-item>
         <a-form-item label="项目描述">
           <a-textarea
             v-model:value="createForm.description"
-            maxlength="800"
+            :maxlength="INPUT_LIMITS.projectDescription"
+            show-count
             :rows="3"
             placeholder="可选，补充需求说明"
+            @update:value="
+              (value: string) =>
+                (createForm.description = normalizeLongTextInput(
+                  value,
+                  INPUT_LIMITS.projectDescription,
+                ))
+            "
           />
         </a-form-item>
       </a-form>
@@ -309,7 +337,7 @@
         <a-form-item label="需求编号" required>
           <a-input
             v-model:value="editForm.requirementNo"
-            maxlength="64"
+            :maxlength="INPUT_LIMITS.requirementCode"
             placeholder="XQ2026-0818-01"
             disabled
           />
@@ -317,12 +345,33 @@
         <a-form-item label="需求名称" required>
           <a-input
             v-model:value="editForm.title"
-            maxlength="120"
+            :maxlength="INPUT_LIMITS.projectTitle"
+            show-count
             placeholder="请输入需求名称"
+            @update:value="
+              (value: string) =>
+                (editForm.title = normalizeDisplayTextInput(
+                  value,
+                  INPUT_LIMITS.projectTitle,
+                ))
+            "
           />
         </a-form-item>
         <a-form-item label="项目描述">
-          <a-textarea v-model:value="editForm.description" maxlength="800" :rows="4" placeholder="请输入项目描述" />
+          <a-textarea
+            v-model:value="editForm.description"
+            :maxlength="INPUT_LIMITS.projectDescription"
+            show-count
+            :rows="4"
+            placeholder="请输入项目描述"
+            @update:value="
+              (value: string) =>
+                (editForm.description = normalizeLongTextInput(
+                  value,
+                  INPUT_LIMITS.projectDescription,
+                ))
+            "
+          />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -352,7 +401,15 @@ import {
   SearchOutlined,
 } from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
-import { PROJECT_PAGE_SIZE_OPTIONS } from '@case-forge/shared';
+import {
+  INPUT_LIMITS,
+  PROJECT_PAGE_SIZE_OPTIONS,
+  REQUIREMENT_CODE_PATTERN,
+  normalizeBusinessCodeInput,
+  normalizeDisplayTextInput,
+  normalizeLongTextInput,
+  validateDisplayText,
+} from '@case-forge/shared';
 import { useCaseForgeStore } from '@/stores/caseForge';
 import { useApiTestStore } from '@/stores/apiTest';
 import type { ProjectListItem } from '@/api/client';
@@ -583,8 +640,6 @@ const editForm = ref({
   description: '',
 });
 
-const REQUIREMENT_NO_PATTERN = /^XQ\d{4}-\d{4}-\d{2}$/i;
-
 const selectedProjectIdSet = computed(() => new Set(selectedProjectIds.value));
 
 const activeProjectId = computed(() =>
@@ -745,11 +800,14 @@ function onNewProject() {
 }
 
 function isValidRequirementNo(value: string) {
-  return REQUIREMENT_NO_PATTERN.test(value.trim());
+  return REQUIREMENT_CODE_PATTERN.test(value.trim());
 }
 
 async function submitCreateProject() {
-  const requirementNo = createForm.value.requirementNo.trim();
+  const requirementNo = normalizeBusinessCodeInput(
+    createForm.value.requirementNo,
+    INPUT_LIMITS.requirementCode,
+  );
   const title = createForm.value.title.trim();
   if (!requirementNo) {
     message.warning('请输入需求编号');
@@ -761,6 +819,14 @@ async function submitCreateProject() {
   }
   if (!title) {
     message.warning('请输入需求名称');
+    return Promise.reject();
+  }
+  const invalidTitle = validateDisplayText(title, {
+    label: '需求名称',
+    maxLength: INPUT_LIMITS.projectTitle,
+  });
+  if (invalidTitle) {
+    message.warning(invalidTitle);
     return Promise.reject();
   }
   if (creating.value) {
@@ -924,6 +990,14 @@ async function submitEditProject() {
   const title = editForm.value.title.trim();
   if (!title) {
     message.warning('请输入需求名称');
+    return Promise.reject();
+  }
+  const invalidTitle = validateDisplayText(title, {
+    label: '需求名称',
+    maxLength: INPUT_LIMITS.projectTitle,
+  });
+  if (invalidTitle) {
+    message.warning(invalidTitle);
     return Promise.reject();
   }
   if (saving.value || !editingProjectId.value) {

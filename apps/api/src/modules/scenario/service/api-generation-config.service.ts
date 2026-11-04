@@ -12,6 +12,11 @@ import { In, Repository } from "typeorm";
 import type { SaveServicePropertyDto } from "../dto/save-service-property.dto";
 import { ApiServicePropertyEntity } from "../entity/api-service-property.entity";
 import { ScenarioEntity } from "../entity/scenario.entity";
+import { INPUT_LIMITS } from "@case-forge/shared";
+import {
+  normalizeOptionalLongText,
+  normalizeRequiredDisplayText,
+} from "@common/validation/input-validation.util";
 
 @Injectable()
 export class ApiGenerationConfigService {
@@ -82,13 +87,28 @@ export class ApiGenerationConfigService {
   async create(dto: SaveServicePropertyDto) {
     await this.assertCanEdit();
     const code = dto.code.trim();
+    if (!/^[a-z][a-z0-9_]*$/.test(code)) {
+      throw new BadRequestException(
+        "服务属性编码只能使用小写字母、数字和下划线，且不能以数字开头",
+      );
+    }
+    const name = normalizeRequiredDisplayText(
+      dto.name,
+      "显示名称",
+      INPUT_LIMITS.servicePropertyName,
+    );
+    const description = normalizeOptionalLongText(
+      dto.description,
+      "服务属性说明",
+      INPUT_LIMITS.servicePropertyDescription,
+    );
     await this.ensureCodeUnique(code);
     await this.validateScenarioIds(dto.scenarioIds);
     const row = await this.propertyRepo.save(
       this.propertyRepo.create({
         code,
-        name: dto.name.trim(),
-        description: dto.description?.trim() || null,
+        name,
+        description: description || null,
         scenarioIds: [...new Set(dto.scenarioIds)],
         sortOrder: dto.sortOrder ?? 0,
         isActive: dto.isActive ?? true,
@@ -102,12 +122,27 @@ export class ApiGenerationConfigService {
     const row = await this.propertyRepo.findOne({ where: { id } });
     if (!row) throw new NotFoundException("服务属性不存在");
     const code = dto.code.trim();
+    if (!/^[a-z][a-z0-9_]*$/.test(code)) {
+      throw new BadRequestException(
+        "服务属性编码只能使用小写字母、数字和下划线，且不能以数字开头",
+      );
+    }
+    const name = normalizeRequiredDisplayText(
+      dto.name,
+      "显示名称",
+      INPUT_LIMITS.servicePropertyName,
+    );
+    const description = normalizeOptionalLongText(
+      dto.description,
+      "服务属性说明",
+      INPUT_LIMITS.servicePropertyDescription,
+    );
     if (code !== row.code) await this.ensureCodeUnique(code, id);
     await this.validateScenarioIds(dto.scenarioIds);
     Object.assign(row, {
       code,
-      name: dto.name.trim(),
-      description: dto.description?.trim() || null,
+      name,
+      description: description || null,
       scenarioIds: [...new Set(dto.scenarioIds)],
       sortOrder: dto.sortOrder ?? row.sortOrder,
       isActive: dto.isActive ?? row.isActive,

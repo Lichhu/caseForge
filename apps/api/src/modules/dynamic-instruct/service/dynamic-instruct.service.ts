@@ -32,7 +32,12 @@ import {
   toPublicTestPointSummary,
 } from "@common/http/public-response.util";
 import { touchProjectUpdatedAt } from "@common/project/touch-project.util";
-import { normalizeCaseForgePageSize } from "@case-forge/shared";
+import { INPUT_LIMITS, normalizeCaseForgePageSize } from "@case-forge/shared";
+import {
+  normalizeOptionalDisplayText,
+  normalizeOptionalLongText,
+  normalizeRequiredDisplayText,
+} from "@common/validation/input-validation.util";
 
 const TEST_POINT_STATUS_ORDER_SQL = `
   CASE COALESCE(instruct.status, '待编辑')
@@ -243,16 +248,49 @@ export class DynamicInstructService {
   /** 新增单条测试要点 */
   async createTestPoint(dto: CreateDynamicTestPointDto) {
     await findOwnedProject(this.projectRepo, dto.projectId);
+    const system =
+      normalizeOptionalDisplayText(
+        dto.system,
+        "系统名称",
+        INPUT_LIMITS.systemName,
+      ) || "新系统";
+    const featureModule =
+      normalizeOptionalDisplayText(
+        dto.featureModule,
+        "功能模块",
+        INPUT_LIMITS.featureModule,
+      ) || "新功能模块";
+    const testPoint =
+      normalizeOptionalDisplayText(
+        dto.testPoint,
+        "测试要点",
+        INPUT_LIMITS.testPoint,
+      ) || "新测试要点";
     const saved = await this.testPointRepo.save(
       this.testPointRepo.create({
         projectId: dto.projectId,
         structDocId: dto.structDocId,
-        system: dto.system?.trim() || "新系统",
-        systemDesc: dto.systemDesc?.trim() || "",
-        featureModule: dto.featureModule?.trim() || "新功能模块",
-        featureDesc: dto.featureDesc?.trim() || "",
-        testPoint: dto.testPoint?.trim() || "新测试要点",
-        testPointDesc: dto.testPointDesc?.trim() || "",
+        system,
+        systemDesc:
+          normalizeOptionalLongText(
+            dto.systemDesc,
+            "系统说明",
+            INPUT_LIMITS.testPointDescription,
+          ) || "",
+        featureModule,
+        featureDesc:
+          normalizeOptionalLongText(
+            dto.featureDesc,
+            "功能模块说明",
+            INPUT_LIMITS.testPointDescription,
+          ) || "",
+        testPoint,
+        testPointDesc:
+          normalizeOptionalLongText(
+            dto.testPointDesc,
+            "测试要点说明",
+            INPUT_LIMITS.testPointDescription,
+          ) || "",
       }),
     );
     await touchProjectUpdatedAt(this.projectRepo, dto.projectId);
@@ -277,22 +315,49 @@ export class DynamicInstructService {
     assertOwned(testPoint, "测试要点");
 
     if (dto.system !== undefined) {
-      testPoint.system = dto.system.trim();
+      testPoint.system = normalizeRequiredDisplayText(
+        dto.system,
+        "系统名称",
+        INPUT_LIMITS.systemName,
+      );
     }
     if (dto.systemDesc !== undefined) {
-      testPoint.systemDesc = dto.systemDesc.trim();
+      testPoint.systemDesc =
+        normalizeOptionalLongText(
+          dto.systemDesc,
+          "系统说明",
+          INPUT_LIMITS.testPointDescription,
+        ) || "";
     }
     if (dto.featureModule !== undefined) {
-      testPoint.featureModule = dto.featureModule.trim();
+      testPoint.featureModule = normalizeRequiredDisplayText(
+        dto.featureModule,
+        "功能模块",
+        INPUT_LIMITS.featureModule,
+      );
     }
     if (dto.featureDesc !== undefined) {
-      testPoint.featureDesc = dto.featureDesc.trim();
+      testPoint.featureDesc =
+        normalizeOptionalLongText(
+          dto.featureDesc,
+          "功能模块说明",
+          INPUT_LIMITS.testPointDescription,
+        ) || "";
     }
     if (dto.testPoint !== undefined) {
-      testPoint.testPoint = dto.testPoint.trim();
+      testPoint.testPoint = normalizeRequiredDisplayText(
+        dto.testPoint,
+        "测试要点",
+        INPUT_LIMITS.testPoint,
+      );
     }
     if (dto.testPointDesc !== undefined) {
-      testPoint.testPointDesc = dto.testPointDesc.trim();
+      testPoint.testPointDesc =
+        normalizeOptionalLongText(
+          dto.testPointDesc,
+          "测试要点说明",
+          INPUT_LIMITS.testPointDescription,
+        ) || "";
     }
 
     if (

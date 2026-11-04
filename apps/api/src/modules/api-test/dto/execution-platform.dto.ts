@@ -7,11 +7,24 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Matches,
+  MaxLength,
 } from "class-validator";
+import {
+  DISPLAY_NAME_HINT,
+  INPUT_LIMITS,
+  SAFE_DISPLAY_NAME_PATTERN,
+} from "@case-forge/shared";
 
 export class SaveApiEnvironmentServiceDto {
   @ApiProperty()
   @IsString()
+  @MaxLength(INPUT_LIMITS.environmentServiceName, {
+    message: `服务名不能超过 ${INPUT_LIMITS.environmentServiceName} 个字符`,
+  })
+  @Matches(SAFE_DISPLAY_NAME_PATTERN, {
+    message: `服务名${DISPLAY_NAME_HINT}`,
+  })
   name!: string;
 
   @ApiPropertyOptional({
@@ -19,26 +32,31 @@ export class SaveApiEnvironmentServiceDto {
   })
   @IsOptional()
   @IsString()
+  @MaxLength(INPUT_LIMITS.serverAddress)
   serverAddress?: string;
 
   @ApiPropertyOptional({ description: "数据库 JDBC 连接串" })
   @IsOptional()
   @IsString()
+  @MaxLength(INPUT_LIMITS.serverAddress)
   jdbcUrl?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(512)
   remoteConnection?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(512)
   objectStorage?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(INPUT_LIMITS.environmentRemark)
   remark?: string;
 
   @ApiPropertyOptional({ enum: ["http", "tcp"] })
@@ -54,16 +72,19 @@ export class SaveApiEnvironmentServiceDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(512)
   baseUrl?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(256)
   pathPrefix?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(INPUT_LIMITS.databaseHost)
   host?: string;
 
   @ApiPropertyOptional()
@@ -74,6 +95,7 @@ export class SaveApiEnvironmentServiceDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(32)
   encoding?: string;
 
   @ApiPropertyOptional()
@@ -113,11 +135,18 @@ export class ReorderEnvironmentServiceDto {
 export class SaveApiExecutionSetDto {
   @ApiProperty()
   @IsString()
+  @MaxLength(INPUT_LIMITS.executionSetName, {
+    message: `推送集名称不能超过 ${INPUT_LIMITS.executionSetName} 个字符`,
+  })
+  @Matches(SAFE_DISPLAY_NAME_PATTERN, {
+    message: `推送集名称${DISPLAY_NAME_HINT}`,
+  })
   name!: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(INPUT_LIMITS.executionSetDescription)
   description?: string;
 
   @ApiPropertyOptional()

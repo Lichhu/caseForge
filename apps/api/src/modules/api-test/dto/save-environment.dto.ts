@@ -5,11 +5,24 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Matches,
+  MaxLength,
 } from "class-validator";
+import {
+  DISPLAY_NAME_HINT,
+  INPUT_LIMITS,
+  SAFE_DISPLAY_NAME_PATTERN,
+} from "@case-forge/shared";
 
 export class SaveApiEnvironmentDto {
   @ApiProperty()
   @IsString()
+  @MaxLength(INPUT_LIMITS.environmentName, {
+    message: `环境名称不能超过 ${INPUT_LIMITS.environmentName} 个字符`,
+  })
+  @Matches(SAFE_DISPLAY_NAME_PATTERN, {
+    message: `环境名称${DISPLAY_NAME_HINT}`,
+  })
   name!: string;
 
   @ApiPropertyOptional({ enum: ["global", "system", "personal"] })
@@ -20,6 +33,7 @@ export class SaveApiEnvironmentDto {
   @ApiPropertyOptional({ description: "连接地址由环境服务配置，环境层可留空" })
   @IsOptional()
   @IsString()
+  @MaxLength(512)
   baseUrl?: string;
 
   @ApiPropertyOptional()

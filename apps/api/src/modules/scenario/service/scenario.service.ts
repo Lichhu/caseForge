@@ -14,6 +14,7 @@ import {
 import { PromptEntity } from "@scenario/entity/prompt.entity";
 import { ScenarioEntity } from "@scenario/entity/scenario.entity";
 import {
+  INPUT_LIMITS,
   normalizeScenarioScope,
   SCENARIO_SCOPE_CASE,
   type ScenarioScope,
@@ -28,6 +29,11 @@ import {
   scopedWhereWithSystem,
 } from "@common/audit/user-scope";
 import { toPublicScenario } from "@common/http/public-response.util";
+import {
+  normalizeOptionalDisplayText,
+  normalizeOptionalLongText,
+  normalizeRequiredDisplayText,
+} from "@common/validation/input-validation.util";
 
 /**
  * 场景服务：场景的增删改查及下属提示词的同步保存
@@ -46,10 +52,7 @@ export class ScenarioService {
   /** 按归属列出系统预置与当前用户维护的场景及其提示词 */
   async listScenarios(scope: ScenarioScope = SCENARIO_SCOPE_CASE) {
     const rows = await this.scenarioRepo.find({
-      where:
-        scope === "api"
-          ? { scope }
-          : scopedWhereWithSystem({ scope }),
+      where: scope === "api" ? { scope } : scopedWhereWithSystem({ scope }),
       relations: ["prompts"],
       order: {
         updatedAt: "DESC",
@@ -103,10 +106,15 @@ export class ScenarioService {
   async createScenario(dto: SaveScenarioDto) {
     const scope = normalizeScenarioScope(dto.scope, SCENARIO_SCOPE_CASE);
     if (scope === "api") await this.assertDispatcher();
-    await this.ensureScenarioNameUnique(dto.name.trim(), scope);
+    const name = normalizeRequiredDisplayText(
+      dto.name,
+      "场景名称",
+      INPUT_LIMITS.scenarioName,
+    );
+    await this.ensureScenarioNameUnique(name, scope);
     const scenario = await this.scenarioRepo.save(
       this.scenarioRepo.create({
-        name: dto.name.trim(),
+        name,
         description: dto.description?.trim() || "",
         category: dto.category.trim(),
         generationKey: dto.generationKey?.trim() || undefined,
@@ -128,11 +136,16 @@ export class ScenarioService {
    */
   async updateScenario(id: string, dto: SaveScenarioDto) {
     const scenario = await this.getEditableScenario(id);
-    await this.ensureScenarioNameUnique(dto.name.trim(), scenario.scope, id);
+    const name = normalizeRequiredDisplayText(
+      dto.name,
+      "场景名称",
+      INPUT_LIMITS.scenarioName,
+    );
+    await this.ensureScenarioNameUnique(name, scenario.scope, id);
     await this.scenarioRepo.save(
       this.scenarioRepo.create({
         ...scenario,
-        name: dto.name.trim(),
+        name,
         description: dto.description?.trim() || "",
         category: dto.category.trim(),
         generationKey:
@@ -213,8 +226,18 @@ export class ScenarioService {
       this.promptRepo.create({
         id: prompt.id,
         scenarioId,
-        name: prompt.name.trim(),
-        content: prompt.content,
+        name:
+          normalizeOptionalDisplayText(
+            prompt.name,
+            "提示词名称",
+            INPUT_LIMITS.promptName,
+          ) || "",
+        content:
+          normalizeOptionalLongText(
+            prompt.content,
+            "提示词内容",
+            INPUT_LIMITS.promptContent,
+          ) || "",
         tags: prompt.tags ?? [],
         usageCount: prompt.usageCount ?? 0,
         sortOrder: prompt.sortOrder ?? index + 1,

@@ -28,6 +28,11 @@ import { CreateRequirementDto } from "../dto/create-requirement.dto";
 import { UpdateRequirementDto } from "../dto/update-requirement.dto";
 import { UpdateDispatcherDto } from "../dto/update-dispatcher.dto";
 import { ApiRequirementMemberEntity } from "../entity/api-requirement-member.entity";
+import { INPUT_LIMITS } from "@case-forge/shared";
+import {
+  normalizeRequiredDisplayText,
+  normalizeRequirementCode,
+} from "@common/validation/input-validation.util";
 
 /** 需求平台对外返回结构 */
 export interface PublicRequirement {
@@ -215,16 +220,22 @@ export class RequirementPlatformService {
   async create(dto: CreateRequirementDto): Promise<PublicRequirement> {
     const userName = getScopedUserName();
     await this.assertRequirementViewer();
-    const projectCode = dto.projectCode.trim();
-    const projectName = dto.projectName.trim();
-    const applicationName = dto.applicationName.trim();
-    const versionName = dto.versionName.trim();
-    if (!projectCode || !projectName || !applicationName || !versionName) {
-      throw new BadRequestException("需求编号、需求名、需求版本和所属应用必填");
-    }
-    if (versionName.length > 255) {
-      throw new BadRequestException("需求版本不能超过 255 个字符");
-    }
+    const projectCode = normalizeRequirementCode(dto.projectCode);
+    const projectName = normalizeRequiredDisplayText(
+      dto.projectName,
+      "需求名",
+      INPUT_LIMITS.requirementName,
+    );
+    const applicationName = normalizeRequiredDisplayText(
+      dto.applicationName,
+      "归属应用",
+      INPUT_LIMITS.applicationName,
+    );
+    const versionName = normalizeRequiredDisplayText(
+      dto.versionName,
+      "需求版本",
+      INPUT_LIMITS.requirementVersion,
+    );
     await this.assertCodeAvailable(projectCode);
     const deletedRow = await this.requirementRepo.findOne({
       where: { projectCode },
@@ -287,32 +298,34 @@ export class RequirementPlatformService {
     const row = await this.findRequirement(id);
     await this.assertRequirementEditor(row);
     if (dto.projectCode !== undefined) {
-      const code = dto.projectCode.trim();
-      if (!code) throw new BadRequestException("需求编号必填");
-      await this.assertCodeAvailable(code, id, row.claimedProjectId ?? undefined);
+      const code = normalizeRequirementCode(dto.projectCode);
+      await this.assertCodeAvailable(
+        code,
+        id,
+        row.claimedProjectId ?? undefined,
+      );
       row.projectCode = code;
     }
     if (dto.projectName !== undefined) {
-      const name = dto.projectName.trim();
-      if (!name) throw new BadRequestException("需求名必填");
-      row.projectName = name;
+      row.projectName = normalizeRequiredDisplayText(
+        dto.projectName,
+        "需求名",
+        INPUT_LIMITS.requirementName,
+      );
     }
     if (dto.versionName !== undefined) {
-      const versionName = dto.versionName.trim();
-      if (!versionName) {
-        throw new BadRequestException("需求版本必填");
-      }
-      if (versionName.length > 255) {
-        throw new BadRequestException("需求版本不能超过 255 个字符");
-      }
-      row.versionName = versionName;
+      row.versionName = normalizeRequiredDisplayText(
+        dto.versionName,
+        "需求版本",
+        INPUT_LIMITS.requirementVersion,
+      );
     }
     if (dto.applicationName !== undefined) {
-      const applicationName = dto.applicationName.trim();
-      if (!applicationName) {
-        throw new BadRequestException("归属应用必填");
-      }
-      row.applicationName = applicationName;
+      row.applicationName = normalizeRequiredDisplayText(
+        dto.applicationName,
+        "归属应用",
+        INPUT_LIMITS.applicationName,
+      );
     }
     await this.requirementRepo.save(row);
     if (row.claimedProjectId) {

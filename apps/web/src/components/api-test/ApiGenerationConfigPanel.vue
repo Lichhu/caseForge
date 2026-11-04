@@ -75,7 +75,10 @@
           <a-input
             v-model:value="form.code"
             :readonly="!canEdit"
+            :maxlength="64"
+            show-count
             placeholder="management_non_accounting"
+            @update:value="updateFormCode"
           />
         </label>
         <label>
@@ -83,7 +86,10 @@
           <a-input
             v-model:value="form.name"
             :readonly="!canEdit"
+            :maxlength="INPUT_LIMITS.servicePropertyName"
+            show-count
             placeholder="管理类非涉账"
+            @update:value="updateFormName"
           />
         </label>
         <label>
@@ -100,7 +106,10 @@
           <a-input
             v-model:value="form.description"
             :readonly="!canEdit"
+            :maxlength="INPUT_LIMITS.servicePropertyDescription"
+            show-count
             placeholder="说明该服务属性适用的业务范围"
+            @update:value="updateFormDescription"
           />
         </label>
         <label class="service-property-enabled">
@@ -194,6 +203,12 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { message, Modal } from "ant-design-vue";
 import { PlusOutlined } from "@ant-design/icons-vue";
+import {
+  INPUT_LIMITS,
+  normalizeDisplayTextInput,
+  normalizeLongTextInput,
+  validateDisplayText,
+} from "@case-forge/shared";
 import type { ScenarioLibraryItem } from "@/api/client";
 import {
   createApiGenerationServiceProperty,
@@ -351,10 +366,46 @@ function activePromptCount(scenario: ScenarioLibraryItem) {
   return scenario.prompts.filter((prompt) => prompt.isActive).length;
 }
 
+function updateFormCode(value: string) {
+  if (!form.value) return;
+  form.value.code = value
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "")
+    .slice(0, 64);
+}
+
+function updateFormName(value: string) {
+  if (!form.value) return;
+  form.value.name = normalizeDisplayTextInput(
+    value,
+    INPUT_LIMITS.servicePropertyName,
+  );
+}
+
+function updateFormDescription(value: string) {
+  if (!form.value) return;
+  form.value.description = normalizeLongTextInput(
+    value,
+    INPUT_LIMITS.servicePropertyDescription,
+  );
+}
+
 function buildPayload() {
   if (!form.value) return null;
   if (!form.value.code.trim() || !form.value.name.trim()) {
     message.warning("请填写服务属性编码和显示名称");
+    return null;
+  }
+  if (!/^[a-z][a-z0-9_]*$/.test(form.value.code)) {
+    message.warning("服务属性编码只能使用小写字母、数字和下划线，且不能以数字开头");
+    return null;
+  }
+  const nameIssue = validateDisplayText(form.value.name, {
+    label: "显示名称",
+    maxLength: INPUT_LIMITS.servicePropertyName,
+  });
+  if (nameIssue) {
+    message.warning(nameIssue);
     return null;
   }
   return {

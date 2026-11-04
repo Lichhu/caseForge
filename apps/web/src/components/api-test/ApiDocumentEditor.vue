@@ -433,9 +433,36 @@
               :disabled="!isChannelComplete(channel)"
               @change="toggleChannel(channel.id, $event.target.checked)"
             />
-            <a-input v-model:value="channel.name" placeholder="渠道名称" />
-            <a-input v-model:value="channel.clientCd" placeholder="clientCd" />
-            <a-input v-model:value="channel.serviceCd" placeholder="serviceCd" />
+            <a-input
+              v-model:value="channel.name"
+              :maxlength="INPUT_LIMITS.environmentName"
+              placeholder="渠道名称"
+              @update:value="
+                (value: string) =>
+                  (channel.name = normalizeDisplayTextInput(
+                    value,
+                    INPUT_LIMITS.environmentName,
+                  ))
+              "
+            />
+            <a-input
+              v-model:value="channel.clientCd"
+              :maxlength="64"
+              placeholder="clientCd"
+              @update:value="
+                (value: string) =>
+                  (channel.clientCd = normalizeBusinessCodeInput(value, 64))
+              "
+            />
+            <a-input
+              v-model:value="channel.serviceCd"
+              :maxlength="64"
+              placeholder="serviceCd"
+              @update:value="
+                (value: string) =>
+                  (channel.serviceCd = normalizeBusinessCodeInput(value, 64))
+              "
+            />
               <a-button type="text" danger aria-label="删除渠道" @click="removeChannel(channel.id)">
                 <template #icon><DeleteOutlined /></template>
               </a-button>
@@ -469,7 +496,20 @@
   <a-modal v-model:open="stepEditOpen" title="编辑步骤" :width="1080" :footer="null" :z-index="NESTED_OVERLAY_Z_INDEX" wrap-class-name="step-editor-modal">
     <div class="case-step-name-field">
       <span>步骤名称</span>
-      <a-input v-model:value="stepEdit.name" size="small" placeholder="步骤名称" />
+      <a-input
+        v-model:value="stepEdit.name"
+        size="small"
+        :maxlength="INPUT_LIMITS.stepName"
+        show-count
+        placeholder="步骤名称"
+        @update:value="
+          (value: string) =>
+            (stepEdit.name = normalizeDisplayTextInput(
+              value,
+              INPUT_LIMITS.stepName,
+            ))
+        "
+      />
     </div>
     <div class="case-step-detail-tabs">
       <button v-for="tab in stepEditTabs" :key="tab.key" type="button" :class="['case-editor-main-tab', { active: stepEditTab === tab.key }]" @click="stepEditTab = tab.key">{{ tab.label }}</button>
@@ -642,7 +682,22 @@
         </div>
         <div class="case-step-response-list">
           <a-table :data-source="stepEdit.exports" :pagination="false" size="small" row-key="rowId">
-            <a-table-column title="变量名" key="name"><template #default="{ record }"><a-input v-model:value="record.name" placeholder="accessToken" /></template></a-table-column>
+            <a-table-column title="变量名" key="name">
+              <template #default="{ record }">
+                <a-input
+                  v-model:value="record.name"
+                  :maxlength="INPUT_LIMITS.dataFunctionName"
+                  placeholder="accessToken"
+                  @update:value="
+                    (value: string) =>
+                      (record.name = normalizeLanguageIdentifierInput(
+                        value,
+                        INPUT_LIMITS.dataFunctionName,
+                      ))
+                  "
+                />
+              </template>
+            </a-table-column>
             <a-table-column title="来源" key="source" :width="110"><template #default="{ record }"><a-select v-model:value="record.source" size="small" :options="exportSourceOptions" :get-popup-container="popupContainer" :dropdown-style="nestedDropdownStyle" /></template></a-table-column>
             <a-table-column title="提取表达式" key="expression"><template #default="{ record }"><a-input v-model:value="record.expression" placeholder="json:$.Transaction... | xml:/Transaction/./." /></template></a-table-column>
             <a-table-column title="引用" key="reference" :width="160"><template #default="{ record }"><code v-if="record.name">{{ variableReference(record.name) }}</code></template></a-table-column>
@@ -673,7 +728,20 @@
     <a-form layout="vertical">
       <a-form-item label="来源"><a-select v-model:value="libraryDebugExportSource" :options="libraryDebugExportSourceOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 11 }" @change="onLibraryDebugExportSourceChange" /></a-form-item>
       <a-form-item label="字段路径"><a-select v-model:value="libraryDebugExportPath" show-search :options="libraryDebugExportPathOptions" :get-popup-container="popupContainer" :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 11 }" placeholder="选择字段" /></a-form-item>
-      <a-form-item label="变量名"><a-input v-model:value="libraryDebugExportName" placeholder="accessToken" /></a-form-item>
+      <a-form-item label="变量名">
+        <a-input
+          v-model:value="libraryDebugExportName"
+          :maxlength="INPUT_LIMITS.dataFunctionName"
+          placeholder="accessToken"
+          @update:value="
+            (value: string) =>
+              (libraryDebugExportName = normalizeLanguageIdentifierInput(
+                value,
+                INPUT_LIMITS.dataFunctionName,
+              ))
+          "
+        />
+      </a-form-item>
     </a-form>
   </a-modal>
   <a-modal v-model:open="stepDebugResultOpen" title="步骤调试结果" :width="760" :z-index="NESTED_OVERLAY_Z_INDEX + 10" :footer="null">
@@ -708,6 +776,7 @@
       <textarea
         v-model="exampleMessage"
         class="example-message-expand-input"
+        :maxlength="INPUT_LIMITS.exampleMessage"
         placeholder="可选。填写后将作为 AI 生成案例的报文样例参考。"
         spellcheck="false"
         @focus="rememberExampleCursor"
@@ -754,7 +823,15 @@ import { IMMERSIVE_OVERLAY_Z_INDEX, NESTED_OVERLAY_Z_INDEX } from '@/constants/o
 import { useApiTestStore } from '@/stores/apiTest';
 import type { ScenarioLibraryItem } from '@/api/client';
 import type { ApiCaseRequest, ApiCaseStep, ApiDocGenerationProfile } from '@case-forge/shared';
-import { isDbStep } from '@case-forge/shared';
+import {
+  INPUT_LIMITS,
+  SAFE_LANGUAGE_IDENTIFIER_PATTERN,
+  isDbStep,
+  normalizeBusinessCodeInput,
+  normalizeDisplayTextInput,
+  normalizeLanguageIdentifierInput,
+  validateDisplayText,
+} from '@case-forge/shared';
 import * as XLSX from 'xlsx';
 import {
   parseApiDocTableText,
@@ -1041,7 +1118,7 @@ async function editLibraryStep(row: ApiStepLibraryRow) {
 async function onLibraryEnvironmentChange(id: string) { stepEdit.serviceId = ''; stepEdit.address = ''; if (projectId.value) await apiStore.refreshEnvironmentServices(projectId.value, id); }
 function onLibraryServiceChange(id: string) { const service = (apiStore.environmentServices[stepEdit.environmentId] ?? []).find((row) => row.id === id); if (!service) return; stepEdit.targetName = service.name; stepEdit.address = service.serverAddress || service.baseUrl || (service.host && service.port ? `${service.host}:${service.port}` : ''); stepEdit.protocol = service.transport === 'tcp' ? 'socket' : 'http'; }
 function addLibraryExport() { stepEdit.exports.push({ rowId: randomUuid(), name: '', source: 'body', expression: '', required: true }); }
-async function saveLibraryStep() { if (!stepEdit.name.trim() || !stepEdit.address.trim()) return message.warning('请填写步骤名称并选择环境地址'); try { const body = stepEdit.bodyFormat === 'json' ? JSON.parse(stepEdit.body || '{}') : stepEdit.body; const toRecord = (rows: KeyValueRow[]) => Object.fromEntries(rows.filter((row) => row.key.trim()).map((row) => [row.key.trim(), row.value])); const step: ApiCaseStep = { id: randomUuid(), name: stepEdit.name.trim(), target: { name: stepEdit.targetName, address: stepEdit.address, environmentId: stepEdit.environmentId || undefined, environmentServiceId: stepEdit.serviceId || undefined }, request: { method: stepEdit.protocol === 'socket' ? 'POST' : stepEdit.method, path: stepEdit.protocol === 'socket' ? '' : stepEdit.path || '/', transport: stepEdit.protocol === 'socket' ? 'tcp' : 'http', contentType: stepEdit.bodyFormat === 'json' ? 'application/json' : stepEdit.bodyFormat === 'xml' ? 'application/xml' : 'text/plain', encoding: stepEdit.encoding, query: stepEdit.protocol === 'http' ? toRecord(stepEdit.queryRows) : undefined, headers: toRecord(stepEdit.headerRows), body, bodyText: stepEdit.bodyFormat === 'json' ? stepEdit.body : undefined }, expected: buildExpectedFromRows(stepEdit.assertionRows), exports: stepEdit.exports.filter((item) => item.name.trim()).map(({ name, source, expression, required }) => ({ name: name.trim(), source, expression: source === 'status' ? undefined : expression.trim(), required })) }; await saveStepLibrary({ name: step.name, step }, editingStepId.value || undefined); stepEditOpen.value = false; await refreshStepLibrary(); } catch { message.error('请求报文格式不正确'); } }
+async function saveLibraryStep() { if (!stepEdit.name.trim() || !stepEdit.address.trim()) return message.warning('请填写步骤名称并选择环境地址'); const nameIssue = validateDisplayText(stepEdit.name, { label: '步骤名称', maxLength: INPUT_LIMITS.stepName }); if (nameIssue) return message.warning(nameIssue); const invalidExport = stepEdit.exports.map((item) => item.name.trim()).filter(Boolean).find((name) => !SAFE_LANGUAGE_IDENTIFIER_PATTERN.test(name)); if (invalidExport) return message.warning(`变量名「${invalidExport}」仅支持中英文、数字和下划线，且不能以数字开头`); try { const body = stepEdit.bodyFormat === 'json' ? JSON.parse(stepEdit.body || '{}') : stepEdit.body; const toRecord = (rows: KeyValueRow[]) => Object.fromEntries(rows.filter((row) => row.key.trim()).map((row) => [row.key.trim(), row.value])); const step: ApiCaseStep = { id: randomUuid(), name: stepEdit.name.trim(), target: { name: stepEdit.targetName, address: stepEdit.address, environmentId: stepEdit.environmentId || undefined, environmentServiceId: stepEdit.serviceId || undefined }, request: { method: stepEdit.protocol === 'socket' ? 'POST' : stepEdit.method, path: stepEdit.protocol === 'socket' ? '' : stepEdit.path || '/', transport: stepEdit.protocol === 'socket' ? 'tcp' : 'http', contentType: stepEdit.bodyFormat === 'json' ? 'application/json' : stepEdit.bodyFormat === 'xml' ? 'application/xml' : 'text/plain', encoding: stepEdit.encoding, query: stepEdit.protocol === 'http' ? toRecord(stepEdit.queryRows) : undefined, headers: toRecord(stepEdit.headerRows), body, bodyText: stepEdit.bodyFormat === 'json' ? stepEdit.body : undefined }, expected: buildExpectedFromRows(stepEdit.assertionRows), exports: stepEdit.exports.filter((item) => item.name.trim()).map(({ name, source, expression, required }) => ({ name: name.trim(), source, expression: source === 'status' ? undefined : expression.trim(), required })) }; await saveStepLibrary({ name: step.name, step }, editingStepId.value || undefined); stepEditOpen.value = false; await refreshStepLibrary(); } catch { message.error('请求报文格式不正确'); } }
 async function runLibraryDebug() {
   if (!projectId.value || !transactionId.value) return null;
   if (!stepEdit.address.trim()) { message.warning('请先选择环境地址'); return null; }

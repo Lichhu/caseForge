@@ -2,7 +2,20 @@
   <div class="api-step-editor">
     <div class="case-step-name-field">
       <span>步骤名称</span>
-      <a-input v-model:value="editor.name" size="small" placeholder="步骤名称" />
+      <a-input
+        v-model:value="editor.name"
+        size="small"
+        :maxlength="INPUT_LIMITS.stepName"
+        show-count
+        placeholder="步骤名称"
+        @update:value="
+          (value: string) =>
+            (editor.name = normalizeDisplayTextInput(
+              value,
+              INPUT_LIMITS.stepName,
+            ))
+        "
+      />
     </div>
     <div class="case-step-detail-tabs">
       <button
@@ -262,7 +275,20 @@
         <div class="case-step-response-list">
           <a-table :data-source="editor.exports" :pagination="false" size="small" row-key="rowId">
             <a-table-column title="变量名 *" key="name">
-              <template #default="{ record }"><a-input v-model:value="record.name" placeholder="accessToken" /></template>
+              <template #default="{ record }">
+                <a-input
+                  v-model:value="record.name"
+                  :maxlength="INPUT_LIMITS.dataFunctionName"
+                  placeholder="accessToken"
+                  @update:value="
+                    (value: string) =>
+                      (record.name = normalizeLanguageIdentifierInput(
+                        value,
+                        INPUT_LIMITS.dataFunctionName,
+                      ))
+                  "
+                />
+              </template>
             </a-table-column>
             <a-table-column title="来源" key="source" :width="110">
               <template #default="{ record }">
@@ -420,7 +446,18 @@
           />
         </a-form-item>
         <a-form-item label="变量名">
-          <a-input v-model:value="debugExportName" placeholder="accessToken" />
+          <a-input
+            v-model:value="debugExportName"
+            :maxlength="INPUT_LIMITS.dataFunctionName"
+            placeholder="accessToken"
+            @update:value="
+              (value: string) =>
+                (debugExportName = normalizeLanguageIdentifierInput(
+                  value,
+                  INPUT_LIMITS.dataFunctionName,
+                ))
+            "
+          />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -468,7 +505,14 @@ import type {
   ApiHttpCaseStep,
   ApiTransport,
 } from "@case-forge/shared";
-import { isHttpStep } from "@case-forge/shared";
+import {
+  INPUT_LIMITS,
+  SAFE_LANGUAGE_IDENTIFIER_PATTERN,
+  isHttpStep,
+  normalizeDisplayTextInput,
+  normalizeLanguageIdentifierInput,
+  validateDisplayText,
+} from "@case-forge/shared";
 import {
   debugRunCase,
   generateAssertions,
@@ -1109,12 +1153,25 @@ function targetPayload() {
 
 function buildStep(): ApiHttpCaseStep | null {
   const name = editor.name.trim();
-  if (!name) {
-    message.warning("请填写步骤名称");
+  const nameIssue = validateDisplayText(name, {
+    label: "步骤名称",
+    maxLength: INPUT_LIMITS.stepName,
+  });
+  if (nameIssue) {
+    message.warning(nameIssue);
     return null;
   }
   if (editor.exports.some((item) => !item.name.trim())) {
     message.warning("变量提取的变量名不能为空");
+    return null;
+  }
+  const invalidExport = editor.exports
+    .map((item) => item.name.trim())
+    .find((item) => !SAFE_LANGUAGE_IDENTIFIER_PATTERN.test(item));
+  if (invalidExport) {
+    message.warning(
+      `变量名「${invalidExport}」仅支持中英文、数字和下划线，且不能以数字开头`,
+    );
     return null;
   }
   let request: ApiCaseRequest;

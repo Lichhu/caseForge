@@ -85,11 +85,37 @@
         <div class="case-add-grid">
           <div class="case-add-field">
             <label class="case-add-label">案例</label>
-            <a-input v-model:value="caseForm.caseName" size="small" placeholder="案例名称" />
+            <a-input
+              v-model:value="caseForm.caseName"
+              size="small"
+              :maxlength="INPUT_LIMITS.caseName"
+              show-count
+              placeholder="案例名称"
+              @update:value="
+                (value: string) =>
+                  (caseForm.caseName = normalizeDisplayTextInput(
+                    value,
+                    INPUT_LIMITS.caseName,
+                  ))
+              "
+            />
           </div>
           <div class="case-add-field">
             <label class="case-add-label">案例标题</label>
-            <a-input v-model:value="caseForm.caseTitle" size="small" placeholder="案例标题" />
+            <a-input
+              v-model:value="caseForm.caseTitle"
+              size="small"
+              :maxlength="INPUT_LIMITS.caseName"
+              show-count
+              placeholder="案例标题"
+              @update:value="
+                (value: string) =>
+                  (caseForm.caseTitle = normalizeDisplayTextInput(
+                    value,
+                    INPUT_LIMITS.caseName,
+                  ))
+              "
+            />
           </div>
           <div class="case-add-field">
             <label class="case-add-label">性质</label>
@@ -105,7 +131,16 @@
               v-model:value="caseForm.caseCondition"
               size="small"
               :rows="2"
+              :maxlength="INPUT_LIMITS.caseText"
+              show-count
               placeholder="前置条件"
+              @update:value="
+                (value: string) =>
+                  (caseForm.caseCondition = normalizeLongTextInput(
+                    value,
+                    INPUT_LIMITS.caseText,
+                  ))
+              "
             />
           </div>
           <div class="case-add-field">
@@ -114,7 +149,16 @@
               v-model:value="caseForm.caseStep"
               size="small"
               :rows="3"
+              :maxlength="INPUT_LIMITS.caseText"
+              show-count
               placeholder="测试步骤"
+              @update:value="
+                (value: string) =>
+                  (caseForm.caseStep = normalizeLongTextInput(
+                    value,
+                    INPUT_LIMITS.caseText,
+                  ))
+              "
             />
           </div>
           <div class="case-add-field">
@@ -123,7 +167,16 @@
               v-model:value="caseForm.caseExpected"
               size="small"
               :rows="3"
+              :maxlength="INPUT_LIMITS.caseText"
+              show-count
               placeholder="预期结果"
+              @update:value="
+                (value: string) =>
+                  (caseForm.caseExpected = normalizeLongTextInput(
+                    value,
+                    INPUT_LIMITS.caseText,
+                  ))
+              "
             />
           </div>
         </div>
@@ -142,7 +195,14 @@ import type {
   CasePriority,
   NewCaseRowInput,
 } from '@case-forge/shared';
-import { DEFAULT_CASE_NATURE, DEFAULT_CASE_PRIORITY } from '@case-forge/shared';
+import {
+  DEFAULT_CASE_NATURE,
+  DEFAULT_CASE_PRIORITY,
+  INPUT_LIMITS,
+  normalizeDisplayTextInput,
+  normalizeLongTextInput,
+  validateDisplayText,
+} from '@case-forge/shared';
 import { IMMERSIVE_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 
 const props = defineProps<{
@@ -157,9 +217,9 @@ const emit = defineEmits<{
 }>();
 
 const PATH_FIELD_LIMITS = {
-  system: 120,
-  module: 120,
-  requirement: 4000,
+  system: INPUT_LIMITS.systemName,
+  module: INPUT_LIMITS.featureModule,
+  requirement: INPUT_LIMITS.testPoint,
 } as const;
 
 const pathForm = reactive({
@@ -348,8 +408,40 @@ async function handleOk() {
     message.warning('请填写测试要点');
     return Promise.reject(new Error('invalid'));
   }
+  const pathIssue =
+    validateDisplayText(pathForm.system, {
+      label: '系统',
+      maxLength: INPUT_LIMITS.systemName,
+    }) ||
+    validateDisplayText(pathForm.module, {
+      label: '功能模块',
+      maxLength: INPUT_LIMITS.featureModule,
+    }) ||
+    validateDisplayText(pathForm.requirement, {
+      label: '测试要点',
+      maxLength: INPUT_LIMITS.testPoint,
+    });
+  if (pathIssue) {
+    message.warning(pathIssue);
+    return Promise.reject(new Error('invalid'));
+  }
   if (!caseForm.caseName.trim() && !caseForm.caseTitle.trim()) {
     message.warning('请填写案例或案例标题');
+    return Promise.reject(new Error('invalid'));
+  }
+  const caseIssue =
+    validateDisplayText(caseForm.caseName, {
+      label: '案例',
+      maxLength: INPUT_LIMITS.caseName,
+      required: false,
+    }) ||
+    validateDisplayText(caseForm.caseTitle, {
+      label: '案例标题',
+      maxLength: INPUT_LIMITS.caseName,
+      required: false,
+    });
+  if (caseIssue) {
+    message.warning(caseIssue);
     return Promise.reject(new Error('invalid'));
   }
   emit('submit', {

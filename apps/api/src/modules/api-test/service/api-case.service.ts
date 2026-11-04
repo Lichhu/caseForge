@@ -34,6 +34,8 @@ import {
 import { toPublicApiCase } from "@common/http/public-response.util";
 import {
   DEFAULT_CASE_FORGE_PAGE_SIZE,
+  INPUT_LIMITS,
+  SAFE_LANGUAGE_IDENTIFIER_PATTERN,
   detectDbSqlKind,
   isDbStep,
   isHttpStep,
@@ -64,6 +66,13 @@ import {
 } from "@api-test/util/api-case-large-payload.util";
 import { buildCaseRequestFromProfile } from "@api-test/util/api-doc-technical-profile.util";
 import { parseEndpointsFromSmpData } from "@api-test/util/smp-doc.parser";
+import {
+  normalizeOptionalBusinessCode,
+  normalizeOptionalDisplayText,
+  normalizeOptionalLongText,
+  normalizeRequiredDisplayText,
+} from "@common/validation/input-validation.util";
+import { compactCasePayloadStorage } from "@api-test/util/api-case-payload-storage.util";
 
 @Injectable()
 export class ApiCaseService {
@@ -144,7 +153,7 @@ export class ApiCaseService {
     payload: SaveApiCaseDto,
   ) {
     this.validateCasePayload(payload);
-    const caseData = normalizeCasePayload(payload);
+    const caseData = this.normalizeCaseInput(normalizeCasePayload(payload));
     const endpoint = await this.requireEndpoint(
       projectId,
       caseData.endpointId,
@@ -198,6 +207,7 @@ export class ApiCaseService {
       },
       ...auditFieldsForCreate(),
     });
+    Object.assign(entity, compactCasePayloadStorage(entity));
     const saved = await this.caseRepo.save(entity);
     return toPublicApiCase(
       (await this.caseRepo.findOne({
@@ -214,7 +224,7 @@ export class ApiCaseService {
     payload: SaveApiCaseDto,
   ) {
     this.validateCasePayload(payload);
-    const caseData = normalizeCasePayload(payload);
+    const caseData = this.normalizeCaseInput(normalizeCasePayload(payload));
     const existing = await this.caseRepo.findOne({
       where: scopedWhere({ projectId, id: caseId }),
     });
@@ -261,10 +271,9 @@ export class ApiCaseService {
         : {}),
       ...(payload.exports !== undefined ? { exports: payload.exports } : {}),
     };
-    const saved = await this.caseRepo.save({
-      ...existing,
-      ...auditFieldsForUpdate(),
-    });
+    Object.assign(existing, compactCasePayloadStorage(existing));
+    Object.assign(existing, auditFieldsForUpdate());
+    const saved = await this.caseRepo.save(existing);
     return toPublicApiCase(
       (await this.caseRepo.findOne({
         where: scopedWhere({ projectId, id: saved.id }),
@@ -286,10 +295,9 @@ export class ApiCaseService {
       ...existing.metadata,
       lastDebugRun: snapshot,
     };
-    await this.caseRepo.save({
-      ...existing,
-      ...auditFieldsForUpdate(),
-    });
+    Object.assign(existing, compactCasePayloadStorage(existing));
+    Object.assign(existing, auditFieldsForUpdate());
+    await this.caseRepo.save(existing);
   }
 
   async deleteCase(projectId: string, caseId: string) {
@@ -535,7 +543,8 @@ export class ApiCaseService {
     });
     if (!endpoint || !job.snapshot)
       throw new BadRequestException("没有可生成案例的接口端点");
-    const caseActionName = transaction.name || transaction.code || endpoint.name;
+    const caseActionName =
+      transaction.name || transaction.code || endpoint.name;
     const tasks = await this.scenarioRepo.find({
       where: { jobId: job.id },
       order: { createdAt: "ASC" },
@@ -1151,6 +1160,16 @@ export class ApiCaseService {
     if (new Set(exportNames).size !== exportNames.length) {
       throw new BadRequestException("同一案例内共享变量名不能重复");
     }
+    const invalidExportName = exportNames.find(
+      (name) =>
+        Array.from(name).length > INPUT_LIMITS.dataFunctionName ||
+        !SAFE_LANGUAGE_IDENTIFIER_PATTERN.test(name),
+    );
+    if (invalidExportName) {
+      throw new BadRequestException(
+        `变量名「${invalidExportName}」仅支持中英文、数字和下划线，且不能以数字开头`,
+      );
+    }
 
     this.validateDbSteps(payload.steps);
 
@@ -1172,6 +1191,53 @@ export class ApiCaseService {
     ) {
       throw new BadRequestException("TCP 案例必须配置请求报文体");
     }
+  }
+
+  private normalizeCaseInput(payload: SaveApiCaseDto): SaveApiCaseDto {
+    return {
+      ...payload,
+      title: normalizeRequiredDisplayText(
+        payload.title,
+        "案例名称",
+        INPUT_LIMITS.caseName,
+      ),
+      caseNo: normalizeOptionalBusinessCode(
+        payload.caseNo,
+        "案例编号",
+        INPUT_LIMITS.caseNo,
+      ),
+      owner: normalizeOptionalDisplayText(
+        payload.owner,
+        "负责人",
+        INPUT_LIMITS.caseOwner,
+      ),
+      description:
+        normalizeOptionalLongText(
+          payload.description,
+          "案例描述",
+          INPUT_LIMITS.caseText,
+        ) || "",
+      remark:
+        normalizeOptionalLongText(
+          payload.remark,
+          "备注",
+          INPUT_LIMITS.caseText,
+        ) || "",
+      transactionCode:
+        normalizeOptionalLongText(
+          payload.transactionCode,
+          "交易码",
+          INPUT_LIMITS.transactionCode,
+        ) || undefined,
+      steps: payload.steps?.map((step) => ({
+        ...step,
+        name: normalizeRequiredDisplayText(
+          step.name,
+          "步骤名称",
+          INPUT_LIMITS.stepName,
+        ),
+      })),
+    };
   }
 
   /**

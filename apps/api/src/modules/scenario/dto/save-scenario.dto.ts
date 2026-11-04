@@ -9,6 +9,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   ValidateNested,
 } from "class-validator";
@@ -16,6 +17,10 @@ import {
   SCENARIO_SCOPE_API,
   SCENARIO_SCOPE_CASE,
   type ScenarioScope,
+  BUSINESS_CODE_PATTERN,
+  DISPLAY_NAME_HINT,
+  INPUT_LIMITS,
+  SAFE_DISPLAY_NAME_PATTERN,
 } from "@case-forge/shared";
 
 /** 场景下单个提示词的保存结构 */
@@ -27,12 +32,15 @@ export class SavePromptDto {
 
   @ApiProperty({ example: "接口超时重试" })
   @IsString()
-  @MaxLength(120)
+  @MaxLength(INPUT_LIMITS.promptName)
+  @Matches(SAFE_DISPLAY_NAME_PATTERN, {
+    message: `提示词名称${DISPLAY_NAME_HINT}`,
+  })
   name: string;
 
   @ApiProperty({ example: "覆盖超时、重试、幂等与日志记录。" })
   @IsString()
-  @MaxLength(4000)
+  @MaxLength(INPUT_LIMITS.promptContent)
   content: string;
 
   @ApiPropertyOptional({ type: [String], example: ["api", "timeout"] })
@@ -67,7 +75,11 @@ export class SavePromptDto {
 /** 保存场景：名称、类别、描述及嵌套提示词列表 */
 export class SaveScenarioDto {
   @ApiProperty({ example: "接口测试" })
-  @MaxLength(120)
+  @IsString()
+  @MaxLength(INPUT_LIMITS.scenarioName)
+  @Matches(SAFE_DISPLAY_NAME_PATTERN, {
+    message: `场景名称${DISPLAY_NAME_HINT}`,
+  })
   name: string;
 
   @ApiPropertyOptional({
@@ -75,17 +87,24 @@ export class SaveScenarioDto {
   })
   @IsOptional()
   @IsString()
+  @MaxLength(INPUT_LIMITS.testPointDescription)
   description?: string;
 
   @ApiProperty({ example: "banking" })
   @IsString()
-  @MaxLength(64)
+  @MaxLength(INPUT_LIMITS.dataFunctionName)
+  @Matches(BUSINESS_CODE_PATTERN, {
+    message: "场景类别仅支持字母、数字、点、下划线和连字符",
+  })
   category: string;
 
   @ApiPropertyOptional({ example: "pagination" })
   @IsOptional()
   @IsString()
-  @MaxLength(64)
+  @MaxLength(INPUT_LIMITS.dataFunctionName)
+  @Matches(BUSINESS_CODE_PATTERN, {
+    message: "生成标识仅支持字母、数字、点、下划线和连字符",
+  })
   generationKey?: string;
 
   @ApiPropertyOptional({ example: true })

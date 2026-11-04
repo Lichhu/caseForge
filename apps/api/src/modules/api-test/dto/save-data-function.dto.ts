@@ -7,13 +7,21 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min,
 } from "class-validator";
+import {
+  INPUT_LIMITS,
+  SAFE_LANGUAGE_IDENTIFIER_PATTERN,
+} from "@case-forge/shared";
 
 export class SaveDatabaseConnectionDto {
-  @IsString() @IsNotEmpty() @MaxLength(128) name: string;
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(INPUT_LIMITS.databaseConnectionName)
+  name: string;
   @IsString()
   @IsNotEmpty()
   @IsIn([
@@ -31,20 +39,41 @@ export class SaveDatabaseConnectionDto {
     "DM8",
   ])
   type: string;
-  @IsString() @IsNotEmpty() host: string;
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(INPUT_LIMITS.databaseHost)
+  host: string;
   @IsInt() @Min(1) @Max(65535) port: number;
-  @IsOptional() @IsString() databaseName?: string;
-  @IsString() @IsNotEmpty() username: string;
-  @IsOptional() @IsString() password?: string;
+  @IsOptional()
+  @IsString()
+  @MaxLength(INPUT_LIMITS.databaseName)
+  databaseName?: string;
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(INPUT_LIMITS.databaseUsername)
+  username: string;
+  @IsOptional()
+  @IsString()
+  @MaxLength(INPUT_LIMITS.databasePassword)
+  password?: string;
   @IsOptional() @IsBoolean() readonly?: boolean;
 }
 
 export class SaveDataFunctionDto {
-  @IsString() @IsNotEmpty() @MaxLength(64) name: string;
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(INPUT_LIMITS.dataFunctionName)
+  @Matches(SAFE_LANGUAGE_IDENTIFIER_PATTERN, {
+    message: "函数名称仅支持中英文、数字和下划线，且不能以数字开头",
+  })
+  name: string;
   @IsArray() @IsString({ each: true }) params: string[];
   @IsIn(["template", "sql"]) type: "template" | "sql";
   @IsObject() config: Record<string, unknown>;
-  @IsOptional() @IsString() @MaxLength(500) description?: string;
+  @IsOptional()
+  @IsString()
+  @MaxLength(INPUT_LIMITS.dataFunctionDescription)
+  description?: string;
 }
 
 export class PreviewDataFunctionDto extends SaveDataFunctionDto {

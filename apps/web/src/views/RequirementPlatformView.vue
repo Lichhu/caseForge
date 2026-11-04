@@ -20,8 +20,13 @@ import type {
   RequirementStatus,
 } from "@case-forge/shared";
 import {
+  INPUT_LIMITS,
+  REQUIREMENT_CODE_PATTERN,
   REQUIREMENT_STATUS_LABELS,
   REQUIREMENT_VERSION_NAMES,
+  normalizeBusinessCodeInput,
+  normalizeDisplayTextInput,
+  validateDisplayText,
 } from "@case-forge/shared";
 import {
   claimRequirement,
@@ -350,26 +355,47 @@ async function handleSync() {
   }
 }
 
+function updateCreateVersion(value?: string) {
+  createForm.value.versionName = value
+    ? normalizeDisplayTextInput(value, INPUT_LIMITS.requirementVersion)
+    : undefined;
+}
+
 async function confirmCreate() {
   const { projectCode, projectName, versionName, applicationName } =
     createForm.value;
-  const trimmedVersionName = versionName?.trim();
-  if (
-    !projectCode.trim() ||
-    !projectName.trim() ||
-    !trimmedVersionName ||
-    !applicationName
-  ) {
-    message.warning("需求编号、需求名、需求版本和所属应用必填");
+  const code = normalizeBusinessCodeInput(
+    projectCode,
+    INPUT_LIMITS.requirementCode,
+  );
+  const name = projectName.trim();
+  const trimmedVersionName = versionName?.trim() ?? "";
+  const selectedApplication = applicationName ?? "";
+  if (!REQUIREMENT_CODE_PATTERN.test(code)) {
+    message.warning("需求编号格式须为 XQxxxx-xxxx-xx");
+    return;
+  }
+  const invalid =
+    validateDisplayText(name, {
+      label: "需求名",
+      maxLength: INPUT_LIMITS.requirementName,
+    }) ||
+    validateDisplayText(trimmedVersionName, {
+      label: "需求版本",
+      maxLength: INPUT_LIMITS.requirementVersion,
+    }) ||
+    (!selectedApplication ? "归属应用不能为空" : null);
+  if (invalid) {
+    message.warning(invalid);
     return;
   }
   createSubmitting.value = true;
   try {
     await createRequirement({
-      projectCode,
-      projectName,
+      projectCode: code,
+      projectName: name,
       versionName: trimmedVersionName,
-      applicationName,
+      applicationName: selectedApplication,
     });
     createVisible.value = false;
     createForm.value = {
@@ -514,13 +540,39 @@ async function openEdit(row: RequirementPlatformItem) {
   editVisible.value = true;
 }
 
+function updateEditVersion(value?: string) {
+  editForm.value.versionName = value
+    ? normalizeDisplayTextInput(value, INPUT_LIMITS.requirementVersion)
+    : "";
+}
+
 async function confirmEdit() {
-  const code = editForm.value.projectCode.trim();
+  const code = normalizeBusinessCodeInput(
+    editForm.value.projectCode,
+    INPUT_LIMITS.requirementCode,
+  );
   const name = editForm.value.projectName.trim();
   const applicationName = editForm.value.applicationName.trim();
   const versionName = editForm.value.versionName.trim();
-  if (!code || !name || !applicationName || !versionName) {
-    message.warning("需求编号、需求名、需求版本和归属应用必填");
+  if (!REQUIREMENT_CODE_PATTERN.test(code)) {
+    message.warning("需求编号格式须为 XQxxxx-xxxx-xx");
+    return;
+  }
+  const invalid =
+    validateDisplayText(name, {
+      label: "需求名",
+      maxLength: INPUT_LIMITS.requirementName,
+    }) ||
+    validateDisplayText(versionName, {
+      label: "需求版本",
+      maxLength: INPUT_LIMITS.requirementVersion,
+    }) ||
+    validateDisplayText(applicationName, {
+      label: "归属应用",
+      maxLength: INPUT_LIMITS.applicationName,
+    });
+  if (invalid) {
+    message.warning(invalid);
     return;
   }
   editSubmitting.value = true;
@@ -895,22 +947,49 @@ onMounted(async () => {
       @ok="confirmCreate"
     >
       <a-form layout="vertical">
-        <a-form-item label="需求编号" required
+        <a-form-item
+          label="需求编号"
+          required
+          extra="格式：XQxxxx-xxxx-xx，如 XQ2026-0818-01"
           ><a-input
             v-model:value="createForm.projectCode"
+            :maxlength="INPUT_LIMITS.requirementCode"
+            show-count
             placeholder="XQ2026-0818-01"
+            @update:value="
+              (value: string) =>
+                (createForm.projectCode = normalizeBusinessCodeInput(
+                  value,
+                  INPUT_LIMITS.requirementCode,
+                ))
+            "
         /></a-form-item>
-        <a-form-item label="需求名" required
+        <a-form-item
+          label="需求名"
+          required
+          :extra="`最多 ${INPUT_LIMITS.requirementName} 个字符，仅支持中英文、数字、空格及常用标点`"
           ><a-input
             v-model:value="createForm.projectName"
+            :maxlength="INPUT_LIMITS.requirementName"
+            show-count
             placeholder="请输入需求名"
+            @update:value="
+              (value: string) =>
+                (createForm.projectName = normalizeDisplayTextInput(
+                  value,
+                  INPUT_LIMITS.requirementName,
+                ))
+            "
         /></a-form-item>
         <a-form-item label="需求版本" required>
           <a-auto-complete
             v-model:value="createForm.versionName"
             allow-clear
             :options="requirementVersionOptions"
-            :maxlength="255"
+            :maxlength="INPUT_LIMITS.requirementVersion"
+            @update:value="
+              updateCreateVersion
+            "
             placeholder="选择或输入需求版本"
           />
         </a-form-item>
@@ -938,18 +1017,45 @@ onMounted(async () => {
       @ok="confirmEdit"
     >
       <a-form layout="vertical">
-        <a-form-item label="需求编号" required
-          ><a-input v-model:value="editForm.projectCode" maxlength="64"
+        <a-form-item
+          label="需求编号"
+          required
+          extra="格式：XQxxxx-xxxx-xx"
+          ><a-input
+            v-model:value="editForm.projectCode"
+            :maxlength="INPUT_LIMITS.requirementCode"
+            show-count
+            @update:value="
+              (value: string) =>
+                (editForm.projectCode = normalizeBusinessCodeInput(
+                  value,
+                  INPUT_LIMITS.requirementCode,
+                ))
+            "
         /></a-form-item>
-        <a-form-item label="需求名" required
-          ><a-input v-model:value="editForm.projectName" maxlength="120"
+        <a-form-item
+          label="需求名"
+          required
+          :extra="`最多 ${INPUT_LIMITS.requirementName} 个字符`"
+          ><a-input
+            v-model:value="editForm.projectName"
+            :maxlength="INPUT_LIMITS.requirementName"
+            show-count
+            @update:value="
+              (value: string) =>
+                (editForm.projectName = normalizeDisplayTextInput(
+                  value,
+                  INPUT_LIMITS.requirementName,
+                ))
+            "
         /></a-form-item>
         <a-form-item label="需求版本" required>
           <a-auto-complete
             v-model:value="editForm.versionName"
             allow-clear
             :options="editVersionOptions"
-            :maxlength="255"
+            :maxlength="INPUT_LIMITS.requirementVersion"
+            @update:value="updateEditVersion"
             placeholder="选择或输入需求版本"
           />
         </a-form-item>

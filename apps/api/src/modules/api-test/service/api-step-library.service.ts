@@ -12,6 +12,11 @@ import {
 } from "@common/audit/request-context";
 import { ApiStepLibraryEntity } from "../entity/api-step-library.entity";
 import { ApiTestLibraryAccessService } from "./api-test-library-access.service";
+import {
+  INPUT_LIMITS,
+  SAFE_LANGUAGE_IDENTIFIER_PATTERN,
+} from "@case-forge/shared";
+import { normalizeRequiredDisplayText } from "@common/validation/input-validation.util";
 
 @Injectable()
 export class ApiStepLibraryService {
@@ -33,9 +38,31 @@ export class ApiStepLibraryService {
   }
 
   async save(input: { name: string; step: ApiCaseStep }, id?: string) {
-    if (!input.name?.trim()) throw new BadRequestException("请填写步骤名称");
+    const name = normalizeRequiredDisplayText(
+      input.name,
+      "步骤名称",
+      INPUT_LIMITS.stepName,
+    );
     const step = input.step;
     if (!step) throw new BadRequestException("步骤内容不完整");
+    step.name = normalizeRequiredDisplayText(
+      step.name || name,
+      "步骤名称",
+      INPUT_LIMITS.stepName,
+    );
+    const invalidExportName = (step.exports ?? [])
+      .map((item) => item.name.trim())
+      .find(
+        (item) =>
+          !item ||
+          Array.from(item).length > INPUT_LIMITS.dataFunctionName ||
+          !SAFE_LANGUAGE_IDENTIFIER_PATTERN.test(item),
+      );
+    if (invalidExportName !== undefined) {
+      throw new BadRequestException(
+        `变量名「${invalidExportName}」仅支持中英文、数字和下划线，且不能以数字开头`,
+      );
+    }
     // SQL 步骤没有请求报文，改判连接与 SQL 是否齐全
     const incomplete = isDbStep(step)
       ? !step.db?.connectionId || !step.db.sql?.trim()
@@ -44,8 +71,8 @@ export class ApiStepLibraryService {
     if (!id)
       return this.repo.save(
         this.repo.create({
-          name: input.name.trim(),
-          step: input.step,
+          name,
+          step,
           ...auditFieldsForCreate(),
         }),
       );
@@ -54,8 +81,8 @@ export class ApiStepLibraryService {
     });
     if (!row) throw new NotFoundException("步骤不存在");
     await this.access.assertCanManage(row.createdBy, "步骤");
-    row.name = input.name.trim();
-    row.step = input.step;
+    row.name = name;
+    row.step = step;
     return this.repo.save({ ...row, ...auditFieldsForUpdate() });
   }
 

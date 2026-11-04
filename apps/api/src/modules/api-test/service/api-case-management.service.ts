@@ -25,6 +25,11 @@ import { ApiTransactionEntity } from "../entity/api-transaction.entity";
 import { ListManagedCasesDto } from "../dto/list-managed-cases.dto";
 import { UpdatePreproductionCaseDto } from "../dto/update-preproduction-case.dto";
 import { UpdatePreproductionStepDto } from "../dto/update-preproduction-step.dto";
+import {
+  compactCasePayloadStorage,
+  restoreCasePayloadStorage,
+  type CasePayloadStorageShape,
+} from "../util/api-case-payload-storage.util";
 
 // 准生产快照把版本字段拆成独立列，优先比较生成序号，兼容日期编码与 V+数字编码。
 export function managedVersion(alias: string) {
@@ -178,10 +183,12 @@ export class ApiCaseManagementService {
   }
 
   private publicRow(row: JoinedCase) {
-    const snapshot = row.snapshot ?? {
-      request: {},
-      expected: {},
-    };
+    const snapshot = restoreCasePayloadStorage(
+      row.snapshot ?? {
+        request: {},
+        expected: {},
+      },
+    );
     return {
       id: row.id,
       sourceCaseId: row.id,
@@ -401,8 +408,11 @@ export class ApiCaseManagementService {
       snapshot.request = step.request;
       snapshot.expected = step.expected;
     }
-    row.snapshot = snapshot;
-    await this.cases.save({ ...row, ...auditFieldsForUpdate() });
+    row.snapshot = compactCasePayloadStorage(
+      snapshot as unknown as CasePayloadStorageShape,
+    ) as unknown as ApiPreproductionCaseEntity["snapshot"];
+    Object.assign(row, auditFieldsForUpdate());
+    await this.cases.save(row);
     return this.publicRow(row);
   }
 
@@ -443,8 +453,11 @@ export class ApiCaseManagementService {
     }
 
     snapshot.steps = steps;
-    row.snapshot = snapshot;
-    await this.cases.save({ ...row, ...auditFieldsForUpdate() });
+    row.snapshot = compactCasePayloadStorage(
+      snapshot as unknown as CasePayloadStorageShape,
+    ) as unknown as ApiPreproductionCaseEntity["snapshot"];
+    Object.assign(row, auditFieldsForUpdate());
+    await this.cases.save(row);
     return this.publicRow(row);
   }
 
@@ -470,7 +483,11 @@ export class ApiCaseManagementService {
       row.snapshot = { ...row.snapshot, remark };
     }
 
-    await this.cases.save({ ...row, ...auditFieldsForUpdate() });
+    row.snapshot = compactCasePayloadStorage(
+      row.snapshot as unknown as CasePayloadStorageShape,
+    ) as unknown as ApiPreproductionCaseEntity["snapshot"];
+    Object.assign(row, auditFieldsForUpdate());
+    await this.cases.save(row);
     return this.publicRow(row);
   }
 

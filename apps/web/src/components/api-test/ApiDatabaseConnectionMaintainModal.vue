@@ -35,13 +35,70 @@
               class="db-connection-grid"
               :class="{ 'permission-locked': Boolean(activeId) && !canManageActive }"
             >
-              <a-form-item label="连接名称" required><a-input v-model:value="form.name" /></a-form-item>
+              <a-form-item label="连接名称" required>
+                <a-input
+                  v-model:value="form.name"
+                  :maxlength="INPUT_LIMITS.databaseConnectionName"
+                  show-count
+                  @update:value="
+                    (value: string) =>
+                      (form.name = normalizeDisplayTextInput(
+                        value,
+                        INPUT_LIMITS.databaseConnectionName,
+                      ))
+                  "
+                />
+              </a-form-item>
               <a-form-item label="数据库类型" required><a-select v-model:value="form.type" :options="typeOptions" /></a-form-item>
-              <a-form-item label="主机" required><a-input v-model:value="form.host" /></a-form-item>
+              <a-form-item label="主机" required>
+                <a-input
+                  v-model:value="form.host"
+                  :maxlength="INPUT_LIMITS.databaseHost"
+                  show-count
+                  @update:value="
+                    (value: string) =>
+                      (form.host = normalizeLongTextInput(
+                        value,
+                        INPUT_LIMITS.databaseHost,
+                      ))
+                  "
+                />
+              </a-form-item>
               <a-form-item label="端口" required><a-input-number v-model:value="form.port" :min="1" :max="65535" style="width: 100%" /></a-form-item>
-              <a-form-item :label="databaseLabel" :required="databaseRequired"><a-input v-model:value="form.database" /></a-form-item>
-              <a-form-item label="用户名" required><a-input v-model:value="form.username" /></a-form-item>
-              <a-form-item label="密码" required><a-input-password v-model:value="form.password" /></a-form-item>
+              <a-form-item :label="databaseLabel" :required="databaseRequired">
+                <a-input
+                  v-model:value="form.database"
+                  :maxlength="INPUT_LIMITS.databaseName"
+                  show-count
+                  @update:value="
+                    (value: string) =>
+                      (form.database = normalizeLongTextInput(
+                        value,
+                        INPUT_LIMITS.databaseName,
+                      ))
+                  "
+                />
+              </a-form-item>
+              <a-form-item label="用户名" required>
+                <a-input
+                  v-model:value="form.username"
+                  :maxlength="INPUT_LIMITS.databaseUsername"
+                  show-count
+                  @update:value="
+                    (value: string) =>
+                      (form.username = normalizeLongTextInput(
+                        value,
+                        INPUT_LIMITS.databaseUsername,
+                      ))
+                  "
+                />
+              </a-form-item>
+              <a-form-item label="密码" required>
+                <a-input-password
+                  v-model:value="form.password"
+                  :maxlength="INPUT_LIMITS.databasePassword"
+                />
+              </a-form-item>
               <a-form-item label="只读连接"><a-switch v-model:checked="form.readonly" /></a-form-item>
             </div>
           </a-form>
@@ -64,6 +121,12 @@
 import { computed, reactive, ref, watch } from 'vue';
 import { ApiOutlined, DatabaseOutlined, DeleteOutlined } from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
+import {
+  INPUT_LIMITS,
+  normalizeDisplayTextInput,
+  normalizeLongTextInput,
+  validateDisplayText,
+} from '@case-forge/shared';
 import { IMMERSIVE_OVERLAY_Z_INDEX, NESTED_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import { createDatabaseConnection, deleteDatabaseConnection, listDatabaseConnections, testDatabaseConnection, updateDatabaseConnection } from '@/api/apiTestClient';
 import LibraryEditorFooter from './LibraryEditorFooter.vue';
@@ -122,6 +185,11 @@ function createConnection() { activeId.value = ''; Object.assign(form, { id: '',
 async function saveConnection() {
   if (!canManageActive.value) return;
   if (!form.name.trim() || !form.host.trim() || !form.username.trim() || (databaseRequired.value && !form.database.trim())) return message.warning('请完整填写连接信息');
+  const issue = validateDisplayText(form.name, {
+    label: '连接名称',
+    maxLength: INPUT_LIMITS.databaseConnectionName,
+  });
+  if (issue) return message.warning(issue);
   const payload = { name: form.name, type: form.type, host: form.host, port: form.port, databaseName: form.database, username: form.username, password: form.password || undefined, readonly: form.readonly };
   const saved = activeId.value ? await updateDatabaseConnection(props.projectId, activeId.value, payload) : await createDatabaseConnection(props.projectId, payload);
   activeId.value = saved.id; await loadConnections(); message.success('已保存');
