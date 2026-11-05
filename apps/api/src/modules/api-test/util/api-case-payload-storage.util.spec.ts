@@ -1,4 +1,5 @@
 import type { ApiCaseStep, ApiHttpCaseStep } from "@case-forge/shared";
+import { ApiPreproductionCaseEntity } from "../entity/api-preproduction-case.entity";
 import {
   REQUEST_STORED_IN_STEPS_KEY,
   compactCasePayloadStorage,
@@ -93,5 +94,16 @@ describe("api-case-payload-storage", () => {
     });
 
     expect(compacted.request.bodyText).toBe(bodyText);
+  });
+
+  it("ignores partial entities that did not select snapshot fields", () => {
+    expect(
+      restoreCasePayloadStorage(
+        undefined as unknown as ReturnType<typeof compactCasePayloadStorage>,
+      ),
+    ).toBeUndefined();
+
+    const partialEntity = new ApiPreproductionCaseEntity();
+    expect(() => partialEntity.restoreLargePayload()).not.toThrow();
   });
 });

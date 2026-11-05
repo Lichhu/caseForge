@@ -132,6 +132,7 @@ export class ApiPreproductionCaseEntity extends SoftDeletableEntity {
   @BeforeInsert()
   @BeforeUpdate()
   compactLargePayload() {
+    if (!this.snapshot) return;
     this.snapshot = compactCasePayloadStorage(
       this.snapshot as unknown as CasePayloadStorageShape,
     ) as unknown as ApiPreproductionCaseSnapshot;
@@ -139,6 +140,7 @@ export class ApiPreproductionCaseEntity extends SoftDeletableEntity {
 
   @AfterLoad()
   restoreLargePayload() {
+    if (!this.snapshot) return;
     this.snapshot = restoreCasePayloadStorage(
       this.snapshot as unknown as CasePayloadStorageShape,
     ) as unknown as ApiPreproductionCaseSnapshot;

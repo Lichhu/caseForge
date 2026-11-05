@@ -58,6 +58,7 @@ function mainHttpStep(steps?: ApiCaseStep[]) {
 export function compactCasePayloadStorage<T extends CasePayloadStorageShape>(
   input: T,
 ): T {
+  if (!input?.request || !input.expected) return input;
   const compactedSteps = input.steps?.map((step) =>
     isHttpStep(step)
       ? { ...step, request: withoutLargeBodyText(step.request) }
@@ -101,6 +102,7 @@ export function compactCasePayloadStorage<T extends CasePayloadStorageShape>(
 export function restoreCasePayloadStorage<T extends CasePayloadStorageShape>(
   input: T,
 ): T {
+  if (!input?.request || !input.expected) return input;
   if (!input.metadata?.[REQUEST_STORED_IN_STEPS_KEY]) return input;
   const mainStep = mainHttpStep(input.steps);
   if (!mainStep) return input;

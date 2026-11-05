@@ -160,6 +160,7 @@ export class ApiTestCaseEntity extends SoftDeletableEntity {
   @BeforeInsert()
   @BeforeUpdate()
   compactLargePayload() {
+    if (!this.request || !this.expected) return;
     const compacted = compactCasePayloadStorage(
       this as unknown as CasePayloadStorageShape,
     );
@@ -171,6 +172,7 @@ export class ApiTestCaseEntity extends SoftDeletableEntity {
 
   @AfterLoad()
   restoreLargePayload() {
+    if (!this.request || !this.expected) return;
     const restored = restoreCasePayloadStorage(
       this as unknown as CasePayloadStorageShape,
     );
