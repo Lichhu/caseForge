@@ -51,6 +51,7 @@ export const INPUT_LIMITS = {
   transactionName: 256,
   transactionDescription: 2000,
   scenarioName: 120,
+  scenarioCategory: 64,
   promptName: 120,
   promptContent: 4000,
   systemName: 120,

@@ -111,12 +111,17 @@ export class ScenarioService {
       "场景名称",
       INPUT_LIMITS.scenarioName,
     );
+    const category = normalizeRequiredDisplayText(
+      dto.category,
+      "场景类别",
+      INPUT_LIMITS.scenarioCategory,
+    );
     await this.ensureScenarioNameUnique(name, scope);
     const scenario = await this.scenarioRepo.save(
       this.scenarioRepo.create({
         name,
         description: dto.description?.trim() || "",
-        category: dto.category.trim(),
+        category,
         generationKey: dto.generationKey?.trim() || undefined,
         scope,
         isActive: dto.isActive ?? true,
@@ -141,13 +146,18 @@ export class ScenarioService {
       "场景名称",
       INPUT_LIMITS.scenarioName,
     );
+    const category = normalizeRequiredDisplayText(
+      dto.category,
+      "场景类别",
+      INPUT_LIMITS.scenarioCategory,
+    );
     await this.ensureScenarioNameUnique(name, scenario.scope, id);
     await this.scenarioRepo.save(
       this.scenarioRepo.create({
         ...scenario,
         name,
         description: dto.description?.trim() || "",
-        category: dto.category.trim(),
+        category,
         generationKey:
           dto.generationKey !== undefined
             ? dto.generationKey.trim() || scenario.generationKey

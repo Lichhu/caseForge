@@ -92,9 +92,9 @@ export class SaveScenarioDto {
 
   @ApiProperty({ example: "banking" })
   @IsString()
-  @MaxLength(INPUT_LIMITS.dataFunctionName)
-  @Matches(BUSINESS_CODE_PATTERN, {
-    message: "场景类别仅支持字母、数字、点、下划线和连字符",
+  @MaxLength(INPUT_LIMITS.scenarioCategory)
+  @Matches(SAFE_DISPLAY_NAME_PATTERN, {
+    message: `场景类别${DISPLAY_NAME_HINT}`,
   })
   category: string;
 
