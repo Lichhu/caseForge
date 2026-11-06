@@ -1,6 +1,8 @@
 node_modules
 dist
 **/dist
+apps/api/caseforge-api-dist
+apps/web/caseforge-web-dist
 .turbo
 .DS_Store
 *.local

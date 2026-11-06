@@ -677,7 +677,7 @@ const selectionIndeterminate = computed(
   () => selectedFilteredCount.value > 0 && selectedFilteredCount.value < currentPageProjectIds.value.length,
 );
 
-let searchTimer: ReturnType<typeof setTimeout> | null = null;
+let searchTimer: number | null = null;
 
 const skipKeywordWatch = ref(true);
 

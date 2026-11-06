@@ -6,7 +6,7 @@
 
 | 组件 | 进程 | 说明 |
 | --- | --- | --- |
-| 前端 `apps/web/dist` | **PM2 cluster `caseforge-web`** | Express + compression，默认 `:8080` |
+| 前端 `apps/web/caseforge-web-dist` | **PM2 cluster `caseforge-web`** | Express + compression，默认 `:8080` |
 | 后端 `apps/api` | **PM2 fork `caseforge-api`** | NestJS，`:34550`（仅本机，由 web 反代） |
 | 压缩 / 缓存 | **Express** | Gzip；`/assets` 一年强缓存；`index.html` 不缓存 |
 | API 反代 | **Express** | `/api`、`/docs` → `127.0.0.1:34550` |
@@ -173,7 +173,7 @@ pm2 restart caseforge-api
 | --- | --- | --- |
 | `PORT` | `8080` | 前端对外端口（改 `ecosystem.config.js` 中 caseforge-web.env） |
 | `API_TARGET` | `http://127.0.0.1:34550` | 后端 API 地址 |
-| `DIST_DIR` | `../apps/web/dist` | 相对 deploy 目录的前端构建产物路径 |
+| `DIST_DIR` | `../apps/web/caseforge-web-dist` | 相对 deploy 目录的前端构建产物路径 |
 | `CASE_GENERATE_CONCURRENCY` | `4` | AI 并发上限（caseforge-api） |
 
 若需监听 80 端口，将 `PORT` 改为 `80`（CentOS 上需 root 或 `setcap` 授权）。

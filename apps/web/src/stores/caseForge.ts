@@ -95,7 +95,7 @@ type DynamicWorkspaceLoadOptions = {
 
 let inFlightDynamicWorkspaceLoad: Promise<void> | null = null;
 let inFlightTestPointsRefresh: Promise<void> | null = null;
-let generateQueuePollTimer: ReturnType<typeof setInterval> | null = null;
+let generateQueuePollTimer: number | null = null;
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => {
@@ -124,7 +124,7 @@ interface State {
   selectedNodeId: string;
   workspaceStage: WorkspaceStage;
   loading: boolean;
-  structuringPollTimer: ReturnType<typeof setInterval> | null;
+  structuringPollTimer: number | null;
   structuringPollProjectId: string | null;
   scenarios: ScenarioLibraryItem[];
   testPoints: TestPointSummaryItem[];
@@ -925,7 +925,7 @@ export const useCaseForgeStore = defineStore("caseForge", {
     },
     stopStructuringPoll() {
       if (this.structuringPollTimer) {
-        clearInterval(this.structuringPollTimer);
+        window.clearInterval(this.structuringPollTimer);
         this.structuringPollTimer = null;
       }
       this.structuringPollProjectId = null;
@@ -934,7 +934,7 @@ export const useCaseForgeStore = defineStore("caseForge", {
       this.stopStructuringPoll();
       this.structuringPollProjectId = projectId;
       void this.pollStructDocStatus(projectId);
-      this.structuringPollTimer = setInterval(() => {
+      this.structuringPollTimer = window.setInterval(() => {
         if (
           typeof document !== "undefined" &&
           document.visibilityState === "hidden"

@@ -195,14 +195,14 @@ const {
   deleteScenario,
 } = useScenarioLibrary(props.scope);
 const editingScenarioId = ref('');
-const scenarioNameSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const promptSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const scenarioNameSaveTimers = new Map<string, number>();
+const promptSaveTimers = new Map<string, number>();
 const scenarioNameLastSaved = new Map<string, string>();
 const promptContentLastSaved = new Map<string, string>();
 const promptStableKeys = new Map<string, string>();
 type ScenarioSaveUiState = 'idle' | 'saving' | 'saved' | 'error';
 const scenarioSaveUi = ref<ScenarioSaveUiState>('idle');
-let scenarioSavedFadeTimer: ReturnType<typeof setTimeout> | undefined;
+let scenarioSavedFadeTimer: number | undefined;
 const promptEditScenarioId = ref('');
 
 function clipText(value: string, maxLength: number) {
@@ -240,7 +240,7 @@ watch(open, async (isOpen) => {
     await flushPendingScenarioSaves();
     scenarioSaveUi.value = 'idle';
     if (scenarioSavedFadeTimer) {
-      clearTimeout(scenarioSavedFadeTimer);
+      window.clearTimeout(scenarioSavedFadeTimer);
       scenarioSavedFadeTimer = undefined;
     }
     configureAppMessage();
@@ -365,9 +365,9 @@ function isScenarioDirty(scenario: ScenarioLibraryItem) {
 function markScenarioAutoSaved() {
   scenarioSaveUi.value = 'saved';
   if (scenarioSavedFadeTimer) {
-    clearTimeout(scenarioSavedFadeTimer);
+    window.clearTimeout(scenarioSavedFadeTimer);
   }
-  scenarioSavedFadeTimer = setTimeout(() => {
+  scenarioSavedFadeTimer = window.setTimeout(() => {
     if (scenarioSaveUi.value === 'saved') {
       scenarioSaveUi.value = 'idle';
     }
@@ -406,8 +406,8 @@ function syncScenarioSaveSnapshots(scenarioId: string) {
 }
 
 function clearScenarioAutoSaveTimers() {
-  scenarioNameSaveTimers.forEach((timer) => clearTimeout(timer));
-  promptSaveTimers.forEach((timer) => clearTimeout(timer));
+  scenarioNameSaveTimers.forEach((timer) => window.clearTimeout(timer));
+  promptSaveTimers.forEach((timer) => window.clearTimeout(timer));
   scenarioNameSaveTimers.clear();
   promptSaveTimers.clear();
 }
@@ -418,11 +418,11 @@ function handleScenarioNameInput(item: ScenarioLibraryItem, value: string) {
     scenarioSaveUi.value = 'idle';
   }
   if (scenarioNameSaveTimers.has(item.id)) {
-    clearTimeout(scenarioNameSaveTimers.get(item.id)!);
+    window.clearTimeout(scenarioNameSaveTimers.get(item.id)!);
   }
   scenarioNameSaveTimers.set(
     item.id,
-    setTimeout(() => {
+    window.setTimeout(() => {
       scenarioNameSaveTimers.delete(item.id);
       void flushScenarioNameSave(item);
     }, SCENARIO_AUTO_SAVE_DELAY_MS),
@@ -431,7 +431,7 @@ function handleScenarioNameInput(item: ScenarioLibraryItem, value: string) {
 
 async function flushScenarioNameSave(item: ScenarioLibraryItem) {
   if (scenarioNameSaveTimers.has(item.id)) {
-    clearTimeout(scenarioNameSaveTimers.get(item.id)!);
+    window.clearTimeout(scenarioNameSaveTimers.get(item.id)!);
     scenarioNameSaveTimers.delete(item.id);
   }
   const name = clipText(item.name.trim(), FIELD_LIMITS.scenarioName);
@@ -476,11 +476,11 @@ function handlePromptContentInput(promptId: string, value: string) {
   if (!scenarioId) return;
   const timerKey = promptSaveKey(scenarioId, promptId);
   if (promptSaveTimers.has(timerKey)) {
-    clearTimeout(promptSaveTimers.get(timerKey)!);
+    window.clearTimeout(promptSaveTimers.get(timerKey)!);
   }
   promptSaveTimers.set(
     timerKey,
-    setTimeout(() => {
+    window.setTimeout(() => {
       promptSaveTimers.delete(timerKey);
       const scenario = scenarios.value.find((item) => item.id === scenarioId);
       const prompt = scenario?.prompts.find((item) => item.id === promptId);
@@ -659,7 +659,7 @@ async function flushPromptSave(
 ) {
   const timerKey = promptSaveKey(scenarioId, prompt.id);
   if (promptSaveTimers.has(timerKey)) {
-    clearTimeout(promptSaveTimers.get(timerKey)!);
+    window.clearTimeout(promptSaveTimers.get(timerKey)!);
     promptSaveTimers.delete(timerKey);
   }
   const scenario = scenarios.value.find((item) => item.id === scenarioId);

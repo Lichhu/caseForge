@@ -1553,7 +1553,7 @@ const syncingForm = ref(false);
 const debugRunningCaseKey = ref<string | null>(null);
 const generatingAssertionsCaseKey = ref<string | null>(null);
 
-let assertionPollTimer: ReturnType<typeof setInterval> | null = null;
+let assertionPollTimer: number | null = null;
 interface AssertionPollTarget {
   jobId: string;
   caseKey: string;
@@ -3897,14 +3897,14 @@ function startAssertionPoll(jobId: string, caseKey: string, caseId?: string) {
   assertionPollTarget = { jobId, caseKey, caseId };
   if (assertionPollTimer) return;
   void syncAssertionPoll();
-  assertionPollTimer = setInterval(() => {
+  assertionPollTimer = window.setInterval(() => {
     void syncAssertionPoll();
   }, ASSERTION_POLL_INTERVAL_MS);
 }
 
 function stopAssertionPoll() {
   if (assertionPollTimer) {
-    clearInterval(assertionPollTimer);
+    window.clearInterval(assertionPollTimer);
     assertionPollTimer = null;
   }
   assertionPollTarget = null;

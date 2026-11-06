@@ -319,7 +319,7 @@ async function loadList() {
   }
 }
 
-let searchTimer: ReturnType<typeof setTimeout> | undefined;
+let searchTimer: number | undefined;
 watch(statusFilter, (status) => {
   if (status === "pending_dispatch") {
     ownerFilter.value = "";
@@ -330,8 +330,8 @@ watch(statusFilter, (status) => {
 
 watch([statusFilter, keyword, ownerFilter, applicationFilter], () => {
   page.value = 1;
-  if (searchTimer) clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => void loadList(), keyword.value ? 300 : 0);
+  if (searchTimer) window.clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(() => void loadList(), keyword.value ? 300 : 0);
 });
 
 function handlePaginationChange(current: number, size: number) {

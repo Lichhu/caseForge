@@ -94,7 +94,7 @@ interface CaseGeneratePollTarget {
   notifyOnComplete: boolean;
 }
 
-let caseGeneratePollTimer: ReturnType<typeof setInterval> | null = null;
+let caseGeneratePollTimer: number | null = null;
 const caseGeneratePollTargets = new Map<string, CaseGeneratePollTarget>();
 
 function isTerminalCaseGeneratePhase(phase: string) {

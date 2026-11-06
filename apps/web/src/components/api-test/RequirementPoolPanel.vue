@@ -247,11 +247,11 @@ async function loadMembers() {
   }
 }
 
-let searchTimer: ReturnType<typeof setTimeout> | undefined;
+let searchTimer: number | undefined;
 function handleSearch(value: string) {
   search.value = value;
-  if (searchTimer) clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => void loadCandidates(value), 250);
+  if (searchTimer) window.clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(() => void loadCandidates(value), 250);
 }
 
 async function loadCandidates(keyword: string) {
@@ -319,7 +319,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  if (searchTimer) clearTimeout(searchTimer);
+  if (searchTimer) window.clearTimeout(searchTimer);
 });
 </script>
 

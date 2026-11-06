@@ -24,7 +24,7 @@ module.exports = {
       name: 'caseforge-api-sit',
       // 以 apps/api 为工作目录，env 加载与 dist 路径解析都依赖此目录
       cwd: path.join(__dirname, 'apps/api'),
-      script: 'dist/bootstrap.js',
+      script: 'caseforge-api-dist/bootstrap.js',
 
       // 达梦 dmdb 驱动在建连「消息加密」时使用了 OpenSSL 3.0 默认禁用的
       // legacy 算法（Node 17+ 报 error:0308010C ...::unsupported），

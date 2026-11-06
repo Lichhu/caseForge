@@ -110,7 +110,7 @@ const expandedJobId = ref('');
 const detailLoading = ref(false);
 const retryingScenarioId = ref('');
 const versionDetail = ref<ApiCaseGenerateVersionDetail | null>(null);
-let pollTimer: ReturnType<typeof setInterval> | null = null;
+let pollTimer: number | null = null;
 
 const hasActiveJob = computed(() =>
   history.value.some((h) => h.status === 'queued' || h.status === 'running'),
@@ -180,14 +180,14 @@ function confirmDelete(item: ApiCaseGenerateHistoryItem) {
 
 function startPoll() {
   stopPoll();
-  pollTimer = setInterval(async () => {
+  pollTimer = window.setInterval(async () => {
     await loadHistory(true);
   }, 5000);
 }
 
 function stopPoll() {
   if (pollTimer) {
-    clearInterval(pollTimer);
+    window.clearInterval(pollTimer);
     pollTimer = null;
   }
 }

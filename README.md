@@ -49,6 +49,7 @@ caseForge/
 - `node_modules/`
 - `.pnpm-store/`
 - `apps/*/node_modules/`
-- `apps/*/dist/`
+- `apps/api/caseforge-api-dist/`
+- `apps/web/caseforge-web-dist/`
 - `packages/*/dist/`
 - `apps/api/.data/`

@@ -34,7 +34,7 @@ function resolveLargePayloadPath() {
   const candidates = [
     join(__dirname, "../assets", LARGE_PAYLOAD_FILE),
     join(apiRoot, "src/modules/api-test/assets", LARGE_PAYLOAD_FILE),
-    join(apiRoot, "dist/modules/api-test/assets", LARGE_PAYLOAD_FILE),
+    join(apiRoot, "caseforge-api-dist/modules/api-test/assets", LARGE_PAYLOAD_FILE),
   ];
   const matched = candidates.find((path) => existsSync(path));
   if (!matched) {

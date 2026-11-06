@@ -52,6 +52,7 @@ export default defineConfig({
     holdUntilCrawlEnd: true,
   },
   build: {
+    outDir: "caseforge-web-dist",
     // antd 全量注册体积较大但可缓存，内网工具无需进一步拆分，调高阈值避免警告
     chunkSizeWarningLimit: 1600,
     rollupOptions: {

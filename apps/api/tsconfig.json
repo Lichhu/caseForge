@@ -9,7 +9,7 @@
     "esModuleInterop": true,
     "target": "ES2021",
     "sourceMap": true,
-    "outDir": "./dist",
+    "outDir": "./caseforge-api-dist",
     "baseUrl": "./",
     "incremental": true,
     "skipLibCheck": true,

@@ -172,7 +172,7 @@ async function flushAutoSave(options?: { notify?: boolean }) {
 }
 
 const previewHtml = ref('');
-let previewRenderTimer: ReturnType<typeof setTimeout> | undefined;
+let previewRenderTimer: number | undefined;
 
 function renderPreviewNow() {
   previewHtml.value = md.render(editorText.value || '');
@@ -189,9 +189,9 @@ watch(editorText, () => {
     return;
   }
   if (previewRenderTimer !== undefined) {
-    clearTimeout(previewRenderTimer);
+    window.clearTimeout(previewRenderTimer);
   }
-  previewRenderTimer = setTimeout(() => {
+  previewRenderTimer = window.setTimeout(() => {
     previewRenderTimer = undefined;
     renderPreviewNow();
   }, 280);

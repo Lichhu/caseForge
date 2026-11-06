@@ -1004,7 +1004,7 @@ let optionsSequence = 0;
 let selectionSequence = 0;
 let executionValidationSequence = 0;
 let runSetRequestSequence = 0;
-let loadTimer: ReturnType<typeof setTimeout> | undefined;
+let loadTimer: number | undefined;
 const projectId = ref<string>();
 const transactionId = ref<string>();
 const applicationFilter = ref<string[]>([]);
@@ -1023,7 +1023,7 @@ const runSetsLoading = ref(false);
 const runSetPage = ref(1);
 const runSetPageSize = ref(10);
 const runSetKeyword = ref("");
-let runSetFilterTimer: ReturnType<typeof setTimeout> | undefined;
+let runSetFilterTimer: number | undefined;
 const attachRunSets = ref<ApiPreproductionRunSet[]>([]);
 const runSetDetailOpen = ref(false);
 const runSetDetail = ref<ApiPreproductionRunSet | null>(null);
@@ -1275,8 +1275,8 @@ watch([runSetPage, runSetPageSize], ([page], [previousPage, previousSize]) => {
 });
 watch(runSetKeyword, () => {
   if (viewMode.value !== "sets") return;
-  if (runSetFilterTimer) clearTimeout(runSetFilterTimer);
-  runSetFilterTimer = setTimeout(() => {
+  if (runSetFilterTimer) window.clearTimeout(runSetFilterTimer);
+  runSetFilterTimer = window.setTimeout(() => {
     runSetFilterTimer = undefined;
     if (runSetPage.value !== 1) {
       runSetPage.value = 1;
@@ -2086,7 +2086,7 @@ function onCaseUpdated(updated: ManagedCaseRow) {
 
 async function loadCases() {
   if (running.value) return;
-  if (loadTimer) clearTimeout(loadTimer);
+  if (loadTimer) window.clearTimeout(loadTimer);
   const sequence = ++requestSequence;
   loading.value = true;
   loadError.value = "";
@@ -2170,8 +2170,8 @@ watch(
     requestSequence += 1; // 筛选变化后立即使旧请求失效
     cases.value = [];
     loading.value = true;
-    if (loadTimer) clearTimeout(loadTimer);
-    loadTimer = setTimeout(() => void loadCases(), 0);
+    if (loadTimer) window.clearTimeout(loadTimer);
+    loadTimer = window.setTimeout(() => void loadCases(), 0);
   },
 );
 async function exportSelected() {
@@ -2521,8 +2521,8 @@ onBeforeUnmount(() => {
   requestSequence += 1;
   optionsSequence += 1;
   selectionSequence += 1;
-  if (loadTimer) clearTimeout(loadTimer);
-  if (runSetFilterTimer) clearTimeout(runSetFilterTimer);
+  if (loadTimer) window.clearTimeout(loadTimer);
+  if (runSetFilterTimer) window.clearTimeout(runSetFilterTimer);
   tableResizeObserver?.disconnect();
   window.removeEventListener("beforeunload", preventUnload);
 });
