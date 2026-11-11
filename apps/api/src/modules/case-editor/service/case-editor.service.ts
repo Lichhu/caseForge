@@ -102,6 +102,12 @@ export class CaseEditorService {
         manager,
         flattenCaseTreeForPersist(input.tree, context),
       );
+      // 案例树只是当前 run 的可重建快照，旧 run 的树直接物理删除，
+      // 避免 case_tree / case_node_metadata 随生成次数无限膨胀。
+      await manager.delete(CaseTreeEntity, {
+        projectId: input.projectId,
+        caseEditorId: Not(editorId),
+      });
       await manager.softDelete(CaseEditorEntity, {
         projectId: input.projectId,
         id: Not(editorId),
@@ -276,7 +282,7 @@ export class CaseEditorService {
     const plan = buildCaseTreeDiffPlan(existing, incoming);
 
     if (isFullTreeReplace(plan, existing.length)) {
-      await manager.softDelete(CaseTreeEntity, {
+      await manager.delete(CaseTreeEntity, {
         caseEditorId: context.caseEditorId,
       });
       await this.insertTreeBatch(manager, incoming);
@@ -308,7 +314,7 @@ export class CaseEditorService {
     for (let index = 0; index < ids.length; index += TREE_BATCH_CHUNK_SIZE) {
       const chunk = ids.slice(index, index + TREE_BATCH_CHUNK_SIZE);
       if (!chunk.length) continue;
-      await manager.softDelete(entity, { id: In(chunk), ...scope });
+      await manager.delete(entity, { id: In(chunk), ...scope });
     }
   }
 
@@ -323,7 +329,7 @@ export class CaseEditorService {
     ) {
       const chunk = caseTreeIds.slice(index, index + TREE_BATCH_CHUNK_SIZE);
       if (!chunk.length) continue;
-      await manager.softDelete(CaseNodeMetadataEntity, {
+      await manager.delete(CaseNodeMetadataEntity, {
         caseTreeId: In(chunk),
       });
     }

@@ -1,3 +1,4 @@
+import ExcelJS from "exceljs";
 import JSZip from "jszip";
 import { ApiReportService } from "./api-report.service";
 
@@ -48,23 +49,33 @@ describe("ApiReportService requirement report", () => {
     ],
   };
 
-  function buildService() {
+  function buildService(
+    options: {
+      runOverride?: typeof run;
+      casesOverride?: unknown[];
+    } = {},
+  ) {
     const executionService = {
-      getRunDetail: jest.fn().mockResolvedValue(run),
+      getRunDetail: jest.fn().mockResolvedValue(options.runOverride ?? run),
     };
     const caseRepo = {
-      find: jest.fn().mockResolvedValue([
-        {
-          id: "case-1",
-          caseNo: "TX-001-001",
-          title: "余额查询成功",
-          transactionCode: "TX-001",
-          description: "正常查询",
-          expected: { assertions: [] },
-          metadata: { scenarioKey: "positive_flow", scenarioName: "正向流程" },
-          polarity: "positive",
-        },
-      ]),
+      find: jest.fn().mockResolvedValue(
+        options.casesOverride ?? [
+          {
+            id: "case-1",
+            caseNo: "TX-001-001",
+            title: "余额查询成功",
+            transactionCode: "TX-001",
+            description: "正常查询",
+            expected: { assertions: [] },
+            metadata: {
+              scenarioKey: "positive_flow",
+              scenarioName: "正向流程",
+            },
+            polarity: "positive",
+          },
+        ],
+      ),
     };
     const endpointRepo = { find: jest.fn().mockResolvedValue([]) };
     const envRepo = {
@@ -130,6 +141,48 @@ describe("ApiReportService requirement report", () => {
     expect(result.selections).toEqual([{ transactionId, runId }]);
   });
 
+  it("恢复旧执行记录中被误存为步骤 ID 的测试环境", async () => {
+    const service = buildService({
+      runOverride: {
+        ...run,
+        environmentId: "step-1",
+      },
+      casesOverride: [
+        {
+          id: "case-1",
+          caseNo: "TX-001-001",
+          title: "余额查询成功",
+          transactionCode: "TX-001",
+          description: "正常查询",
+          expected: { assertions: [] },
+          steps: [
+            {
+              id: "step-1",
+              name: "正向流程",
+              target: {
+                name: "测试环境",
+                address: "https://example.test",
+                environmentId: "env-1",
+              },
+              request: { method: "POST", path: "/query" },
+              expected: {},
+              exports: [],
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = await service.exportRequirementReport(projectId, "html", [
+      { transactionId, runId },
+    ]);
+    const html = result.buffer.toString("utf-8");
+
+    expect(html).toMatch(
+      new RegExp(`<td class="mono">${runId}</td>\\s*<td>测试环境</td>`),
+    );
+  });
+
   it("rejects an execution history that belongs to another transaction", async () => {
     const service = buildService();
     const executionService = (service as any).executionService;
@@ -154,6 +207,42 @@ describe("ApiReportService requirement report", () => {
 
     expect(result.fileName).toBe(`REQ-001_TX-001_${runId}.xlsx`);
     expect(result.buffer.subarray(0, 2).toString()).toBe("PK");
+  });
+
+  it("writes Socket resCode/resText to the Excel return columns", async () => {
+    const socketRun = {
+      ...run,
+      items: [
+        {
+          ...run.items[0],
+          requestSnapshot: {
+            transport: "tcp",
+            target: "127.0.0.1:60030",
+            body: "<Transaction />",
+          },
+          responseSnapshot: {
+            status: -1,
+            headers: {},
+            body: `<Transaction><Header><sysHeader><bizResCode>CIC024</bizResCode><bizResText>上送参数不能为空</bizResText><resCode>000000</resCode><resText>交易成功</resText></sysHeader></Header></Transaction>`,
+          },
+        },
+      ],
+    } as unknown as typeof run;
+    const service = buildService({ runOverride: socketRun });
+
+    const result = await service.exportRequirementReport(projectId, "xlsx", [
+      { transactionId, runId },
+    ]);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(
+      result.buffer as unknown as Parameters<typeof workbook.xlsx.load>[0],
+    );
+    const sheet = workbook.getWorksheet("执行案例")!;
+
+    expect(sheet.getRow(1).getCell(8).value).toBe("返回码");
+    expect(sheet.getRow(1).getCell(9).value).toBe("返回信息");
+    expect(sheet.getRow(2).getCell(8).value).toBe("000000");
+    expect(sheet.getRow(2).getCell(9).value).toBe("交易成功");
   });
 
   it("builds a PDF with a summary page and per-history case sections", async () => {

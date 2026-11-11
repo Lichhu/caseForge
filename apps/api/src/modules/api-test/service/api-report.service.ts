@@ -20,6 +20,7 @@ import {
   type ReportAssertionMeta,
   type ReportCaseMeta,
 } from "@api-test/util/api-report-html.util";
+import { resolveReportReturnInfo } from "@api-test/util/api-report-return.util";
 import { ApiTestCaseEntity } from "@api-test/entity/api-test-case.entity";
 import { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
 import { ApiTransactionEntity } from "@api-test/entity/api-transaction.entity";
@@ -31,6 +32,7 @@ import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { auditFieldsForCreate } from "@common/audit/request-context";
 import { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
 import { ApiExecutionService } from "./api-execution.service";
+import { isHttpStep } from "@case-forge/shared";
 import {
   buildRiskAnalysisRows,
   buildRiskClassificationPrompt,
@@ -686,7 +688,7 @@ export class ApiReportService {
     run: RunDetail,
     selectedTransaction?: ApiTransactionEntity,
   ): Promise<Partial<ApiReportContext>> {
-    const [env, transaction, project] = await Promise.all([
+    const [initialEnv, transaction, project] = await Promise.all([
       run.environmentId
         ? this.envRepo.findOne({
             where: { id: run.environmentId },
@@ -719,9 +721,32 @@ export class ApiReportService {
             "transactionCode",
             "description",
             "expected",
+            "steps",
           ],
         })
       : [];
+
+    let env = initialEnv;
+    if (!env) {
+      const casesById = new Map(cases.map((item) => [item.id, item]));
+      const steps = (run.items ?? [])
+        .map((item) => casesById.get(item.caseId))
+        .flatMap((item) => item?.steps ?? [])
+        .filter(isHttpStep);
+      const fallbackEnvironmentId =
+        steps.find((step) => step.id === run.environmentId)?.target
+          ?.environmentId ||
+        steps.find((step) => step.target?.environmentId)?.target?.environmentId;
+      if (
+        fallbackEnvironmentId &&
+        fallbackEnvironmentId !== run.environmentId
+      ) {
+        env = await this.envRepo.findOne({
+          where: { id: fallbackEnvironmentId },
+          select: ["id", "name"],
+        });
+      }
+    }
 
     const caseMeta: Record<string, ReportCaseMeta> = {};
     const transactionCodes = new Set<string>();
@@ -786,7 +811,8 @@ export class ApiReportService {
       { header: "状态", key: "status", width: 12 },
       { header: "耗时(ms)", key: "duration", width: 12 },
       { header: "URL", key: "url", width: 40 },
-      { header: "HTTP", key: "http", width: 8 },
+      { header: "返回码", key: "returnCode", width: 12 },
+      { header: "返回信息", key: "returnMessage", width: 32 },
       { header: "断言摘要", key: "assertions", width: 48 },
     ];
     sheet.getRow(1).font = { bold: true };
@@ -796,13 +822,18 @@ export class ApiReportService {
         for (const [index, step] of steps.entries()) {
           const stepAssertions = step.assertions ?? [];
           const failedAssertions = stepAssertions.filter((a) => !a.passed);
+          const returnInfo = resolveReportReturnInfo({
+            requestSnapshot: step.request,
+            responseSnapshot: step.response,
+          });
           sheet.addRow({
             title: item.caseTitle,
             step: `步骤${index + 1}：${step.stepName ?? "未命名步骤"}`,
             status: formatRunItemStatus(step.status ?? item.status),
             duration: step.durationMs ?? "",
             url: String(step.request?.url ?? ""),
-            http: step.response?.status ?? "",
+            returnCode: returnInfo.code,
+            returnMessage: returnInfo.message,
             assertions: failedAssertions.length
               ? failedAssertions.map((a) => a.name).join("; ")
               : stepAssertions.length
@@ -813,13 +844,15 @@ export class ApiReportService {
         continue;
       }
       const failedAssertions = item.assertions.filter((a) => !a.passed);
+      const returnInfo = resolveReportReturnInfo(item);
       sheet.addRow({
         title: item.caseTitle,
         step: "—",
         status: formatRunItemStatus(item.status),
         duration: item.durationMs,
         url: String(item.requestSnapshot.url ?? ""),
-        http: item.responseSnapshot?.status ?? "",
+        returnCode: returnInfo.code,
+        returnMessage: returnInfo.message,
         assertions: failedAssertions.length
           ? failedAssertions.map((a) => a.name).join("; ")
           : "全部通过",
@@ -875,7 +908,8 @@ export class ApiReportService {
       { header: "状态", key: "status", width: 12 },
       { header: "耗时(ms)", key: "duration", width: 12 },
       { header: "URL", key: "url", width: 40 },
-      { header: "HTTP", key: "http", width: 8 },
+      { header: "返回码", key: "returnCode", width: 12 },
+      { header: "返回信息", key: "returnMessage", width: 32 },
       { header: "断言摘要", key: "assertions", width: 48 },
     ];
     sheet.getRow(1).font = { bold: true };
@@ -886,6 +920,10 @@ export class ApiReportService {
           for (const [index, step] of steps.entries()) {
             const stepAssertions = step.assertions ?? [];
             const failedAssertions = stepAssertions.filter((a) => !a.passed);
+            const returnInfo = resolveReportReturnInfo({
+              requestSnapshot: step.request,
+              responseSnapshot: step.response,
+            });
             sheet.addRow({
               transactionCode: entry.transaction.code,
               runId: entry.run.id,
@@ -894,7 +932,8 @@ export class ApiReportService {
               status: formatRunItemStatus(step.status ?? item.status),
               duration: step.durationMs ?? "",
               url: String(step.request?.url ?? ""),
-              http: step.response?.status ?? "",
+              returnCode: returnInfo.code,
+              returnMessage: returnInfo.message,
               assertions: failedAssertions.length
                 ? failedAssertions.map((a) => a.name).join("; ")
                 : stepAssertions.length
@@ -905,6 +944,7 @@ export class ApiReportService {
           continue;
         }
         const failedAssertions = item.assertions.filter((a) => !a.passed);
+        const returnInfo = resolveReportReturnInfo(item);
         sheet.addRow({
           transactionCode: entry.transaction.code,
           runId: entry.run.id,
@@ -913,7 +953,8 @@ export class ApiReportService {
           status: formatRunItemStatus(item.status),
           duration: item.durationMs,
           url: String(item.requestSnapshot.url ?? ""),
-          http: item.responseSnapshot?.status ?? "",
+          returnCode: returnInfo.code,
+          returnMessage: returnInfo.message,
           assertions: failedAssertions.length
             ? failedAssertions.map((a) => a.name).join("; ")
             : "全部通过",

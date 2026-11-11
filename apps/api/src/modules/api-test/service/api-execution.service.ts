@@ -140,9 +140,7 @@ export class ApiExecutionService {
     private readonly preproductionCaseRepo?: Repository<ApiPreproductionCaseEntity>,
   ) {}
 
-  private toExecutableCase(
-    row: ApiPreproductionCaseEntity,
-  ): ApiTestCaseEntity {
+  private toExecutableCase(row: ApiPreproductionCaseEntity): ApiTestCaseEntity {
     const snapshot = row.snapshot;
     return {
       id: row.id,
@@ -299,7 +297,8 @@ export class ApiExecutionService {
         caseId: In([...rerunCaseIds]),
       });
       existing.environmentId = env.id;
-      existing.environmentServiceId = input.environmentServiceId;
+      existing.environmentServiceId =
+        env.environmentServiceId ?? input.environmentServiceId;
       existing.executionSetId = input.executionSetId ?? existing.executionSetId;
       existing.transactionId = input.transactionId ?? existing.transactionId;
       existing.status = "running";
@@ -316,7 +315,8 @@ export class ApiExecutionService {
         this.runRepo.create({
           projectId: input.projectId,
           environmentId: env.id,
-          environmentServiceId: input.environmentServiceId,
+          environmentServiceId:
+            env.environmentServiceId ?? input.environmentServiceId,
           executionSetId: input.executionSetId,
           transactionId: input.transactionId,
           versionCode: formatRunVersionCode(new Date()),
@@ -1782,6 +1782,9 @@ export class ApiExecutionService {
 
 export function environmentFromStep(step: ApiHttpCaseStep): RuntimeEnvironment {
   const address = step.target?.address?.trim() ?? "";
+  const environmentId = step.target?.environmentId?.trim() || step.id;
+  const environmentServiceId =
+    step.target?.environmentServiceId?.trim() || undefined;
   const transport =
     step.request.transport ?? (step.request.framing ? "tcp" : "http");
   if (transport === "tcp") {
@@ -1792,11 +1795,12 @@ export function environmentFromStep(step: ApiHttpCaseStep): RuntimeEnvironment {
       );
     }
     return {
-      id: step.id,
+      id: environmentId,
       baseUrl: "",
       headers: step.target?.headers ?? {},
       variables: {},
       secrets: {},
+      environmentServiceId,
       services: [
         {
           id: step.id,
@@ -1814,11 +1818,12 @@ export function environmentFromStep(step: ApiHttpCaseStep): RuntimeEnvironment {
       `步骤「${step.name}」的 HTTP 地址必须以 http:// 或 https:// 开头`,
     );
   return {
-    id: step.id,
+    id: environmentId,
     baseUrl: address,
     headers: step.target?.headers ?? {},
     variables: {},
     secrets: {},
+    environmentServiceId,
   };
 }
 

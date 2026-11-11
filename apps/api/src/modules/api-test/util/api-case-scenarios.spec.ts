@@ -1,8 +1,10 @@
 import {
   assertScenarioCoverage,
+  buildRequiredFieldScenario,
   buildScenarioPrompts,
   extractFieldsByRequirement,
   extractRequestFieldPaths,
+  mergeRequiredFieldScenario,
   parseScenarioAiResult,
   scenariosForProperty,
   validateScenarioAiResult,
@@ -41,14 +43,18 @@ describe("parseScenarioAiResult", () => {
             description:
               "系统用户在省份列表查询场景中执行分页查询时传入非法页码，预期接口拒绝处理并返回参数错误，用于验证页码校验规则是否正确。",
             polarity: "negative",
-            changes: [{ path: "Transaction/Body/request/bizBody/pageNum", value: "-1" }],
+            changes: [
+              { path: "Transaction/Body/request/bizBody/pageNum", value: "-1" },
+            ],
             expected: "接口返回参数错误",
           },
         ],
       }),
     );
 
-    expect(result?.cases[0].description).toContain("系统用户在省份列表查询场景");
+    expect(result?.cases[0].description).toContain(
+      "系统用户在省份列表查询场景",
+    );
     expect(result?.cases[0].description).toContain("用于验证页码校验规则");
   });
 
@@ -60,7 +66,9 @@ describe("parseScenarioAiResult", () => {
           {
             title: "反向-客户号为空",
             polarity: "negative",
-            changes: [{ path: "Transaction/Body/request/bizBody/custNo", value: "" }],
+            changes: [
+              { path: "Transaction/Body/request/bizBody/custNo", value: "" },
+            ],
             expected: "接口提示客户号不能为空",
           },
         ],
@@ -403,9 +411,9 @@ describe("all_fields_empty scenario", () => {
 
   it("is not part of the default service-property mapping", () => {
     for (const property of properties) {
-      expect(scenariosForProperty(property).map((item) => item.key)).not.toContain(
-        "all_fields_empty",
-      );
+      expect(
+        scenariosForProperty(property).map((item) => item.key),
+      ).not.toContain("all_fields_empty");
     }
   });
 
@@ -512,6 +520,8 @@ describe("required_fields scenario", () => {
     expect(prompt).toContain("必填字段：逐个生成反向案例");
     expect(prompt).toContain("全部非必填字段置为空值");
     expect(prompt).toContain("至少传其一");
+    expect(prompt).toContain("即使所有字段都是必填");
+    expect(prompt).toContain("不得判定为不适用");
   });
 
   it("uses the configured database prompt instead of the built-in rule", () => {
@@ -710,5 +720,95 @@ describe("required_fields scenario", () => {
         requiredOnlyDoc,
       ),
     ).not.toThrow();
+  });
+
+  it("keeps the scenario applicable when every field is required", () => {
+    const requiredOnlyDoc = [
+      "请求报文",
+      "----",
+      "节点路径 | 节点代码 | 节点名称 | 节点类型 | 数据类型 | 长度 | 是否必填 | 描述",
+      "Transaction/Body/request/bizBody | addressId | 地址编号 | 单节点 | VARCHAR2 | 50 | Y |",
+      "Transaction/Body/request/bizBody | building | 楼栋 | 单节点 | VARCHAR2 | 50 | Y |",
+    ].join("\n");
+
+    const result = buildRequiredFieldScenario(requiredOnlyDoc, "地址查询");
+
+    expect(result.applicable).toBe(true);
+    expect(result.reason).toContain("无非必填字段");
+    expect(result.cases).toHaveLength(2);
+    expect(result.cases.every((item) => item.polarity === "negative")).toBe(
+      true,
+    );
+    expect(() =>
+      assertScenarioCoverage("required_fields", result, requiredOnlyDoc),
+    ).not.toThrow();
+  });
+
+  it("adds the optional-empty positive case only when optional fields exist", () => {
+    const result = buildRequiredFieldScenario(doc, "客户查询");
+
+    expect(result.applicable).toBe(true);
+    expect(
+      result.cases.filter((item) => item.polarity === "negative"),
+    ).toHaveLength(2);
+    const positive = result.cases.filter(
+      (item) => item.polarity === "positive",
+    );
+    expect(positive).toHaveLength(1);
+    expect(positive[0].changes).toEqual([
+      { path: "Transaction/Body/request/bizBody/MOBILE_NO", value: "" },
+    ]);
+  });
+
+  it("replaces an AI not-applicable result when required fields exist", () => {
+    const merged = mergeRequiredFieldScenario(
+      {
+        applicable: false,
+        reason: "没有非必填字段，无法生成正向案例",
+        cases: [],
+      },
+      buildRequiredFieldScenario(doc, "客户查询"),
+    );
+
+    expect(merged.applicable).toBe(true);
+    expect(merged.cases.length).toBeGreaterThan(0);
+    expect(() =>
+      assertScenarioCoverage("required_fields", merged, doc),
+    ).not.toThrow();
+  });
+
+  it("fills required-field cases the AI missed", () => {
+    const merged = mergeRequiredFieldScenario(
+      {
+        applicable: true,
+        reason: "只生成了客户号缺失",
+        cases: [
+          {
+            title: "客户号为空",
+            polarity: "negative",
+            changes: [
+              {
+                path: "Transaction/Body/request/bizBody/CUST_ID",
+                value: "",
+              },
+            ],
+          },
+        ],
+      },
+      buildRequiredFieldScenario(doc, "客户查询"),
+    );
+
+    expect(merged.applicable).toBe(true);
+    expect(
+      merged.cases.some((item) =>
+        item.changes.some(
+          (change) =>
+            change.path === "Transaction/Body/request/bizHeader/transaction_sn",
+        ),
+      ),
+    ).toBe(true);
+    expect(merged.cases.some((item) => item.polarity === "positive")).toBe(
+      true,
+    );
   });
 });

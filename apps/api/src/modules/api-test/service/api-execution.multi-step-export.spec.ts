@@ -11,7 +11,12 @@ describe("多步骤案例变量提取", () => {
         {
           id: "step-1",
           name: "步骤 1",
-          target: { name: "测试环境", address: "http://example.test" },
+          target: {
+            name: "测试环境",
+            address: "http://example.test",
+            environmentId: "env-1",
+            environmentServiceId: "svc-1",
+          },
           request: {
             method: "POST",
             path: "/first",
@@ -116,7 +121,8 @@ describe("多步骤案例变量提取", () => {
     runRepo.findOne.mockImplementation(async () => ({
       id: "run-1",
       projectId: "p1",
-      environmentId: "step-1",
+      environmentId: "env-1",
+      environmentServiceId: "svc-1",
       versionCode: "20261022-120000",
       status: "completed",
       totalCount: 1,
@@ -134,6 +140,12 @@ describe("多步骤案例变量提取", () => {
 
     expect(result.errorCount).toBe(0);
     expect(result.passedCount).toBe(1);
+    expect(runRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        environmentId: "env-1",
+        environmentServiceId: "svc-1",
+      }),
+    );
     expect(runItemRepo.save).toHaveBeenCalledWith([
       expect.objectContaining({ status: "passed" }),
     ]);

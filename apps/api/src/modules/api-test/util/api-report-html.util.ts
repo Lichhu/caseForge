@@ -6,6 +6,7 @@ import {
   prettyPrintXml,
   unescapeLiteralXmlEscapes,
 } from "@case-forge/shared";
+import { resolveReportReturnInfo } from "./api-report-return.util";
 
 export interface ReportAssertionMeta {
   type: string;
@@ -335,8 +336,7 @@ function buildCaseHeaderRow(
       <div style="width:8%;color:${color};">结果</div>
       <div style="width:7%;">耗时</div>
     </div>`;
-  const httpStatus = item.responseSnapshot?.status;
-  const returnMessage = item.responseSnapshot?.error ?? "";
+  const returnInfo = resolveReportReturnInfo(item);
   const row = `
     <div class="testcase-tr">
       <div style="width:5%;">${index}</div>
@@ -344,8 +344,8 @@ function buildCaseHeaderRow(
       <div style="width:10%;">${escapeHtml(meta?.transactionCode || "—")}</div>
       <div style="width:19%;">${escapeHtml(item.caseTitle)}</div>
       <div style="width:16%;">${escapeHtml(meta?.description || "")}</div>
-      <div style="width:10%;">${escapeHtml(httpStatus ?? "")}</div>
-      <div style="width:10%;">${escapeHtml(returnMessage)}</div>
+      <div style="width:10%;">${escapeHtml(returnInfo.code)}</div>
+      <div style="width:10%;">${escapeHtml(returnInfo.message)}</div>
       <div style="width:8%;color:${color};">${resultLabel(item.status)}</div>
       <div style="width:7%;">${item.durationMs}ms</div>
     </div>`;

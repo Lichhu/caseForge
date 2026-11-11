@@ -49,8 +49,10 @@ import { ApiTestRunItemEntity } from "@api-test/entity/api-test-run-item.entity"
 import { ApiTestRunEntity } from "@api-test/entity/api-test-run.entity";
 import type { ApiCaseRequest, ApiCaseStep } from "@case-forge/shared";
 import {
+  buildRequiredFieldScenario,
   buildScenarioPrompts,
   assertScenarioCoverage,
+  mergeRequiredFieldScenario,
   parseScenarioAiResult,
   validateScenarioAiResult,
 } from "@api-test/util/api-case-scenarios.util";
@@ -690,14 +692,24 @@ export class ApiCaseService {
           },
           job.snapshot.structuredMarkdown,
         );
+        const finalResult =
+          task.scenarioKey === "required_fields"
+            ? mergeRequiredFieldScenario(
+                result,
+                buildRequiredFieldScenario(
+                  job.snapshot.structuredMarkdown,
+                  caseActionName,
+                ),
+              )
+            : result;
         assertScenarioCoverage(
           task.scenarioKey,
-          result,
+          finalResult,
           job.snapshot.structuredMarkdown,
         );
-        task.result = result;
-        task.applicableReason = result.reason;
-        if (!result.applicable) {
+        task.result = finalResult;
+        task.applicableReason = finalResult.reason;
+        if (!finalResult.applicable) {
           task.status = "not_applicable";
           task.resultCount = 0;
         } else {
@@ -706,7 +718,7 @@ export class ApiCaseService {
             endpoint,
             transaction.code,
             task,
-            result.cases,
+            finalResult.cases,
           );
           task.status = "completed";
           task.resultCount = count;

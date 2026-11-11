@@ -17,15 +17,8 @@ export const API_CASE_SCENARIOS = {
 export type ApiCaseScenarioKey = keyof typeof API_CASE_SCENARIOS;
 
 const SERVICE_SCENARIOS: Record<ApiServiceProperty, ApiCaseScenarioKey[]> = {
-  query_non_accounting: [
-    "positive_flow",
-    "pagination",
-  ],
-  query_accounting: [
-    "positive_flow",
-    "pagination",
-    "precision",
-  ],
+  query_non_accounting: ["positive_flow", "pagination"],
+  query_accounting: ["positive_flow", "pagination", "precision"],
   management_non_accounting: [
     "positive_flow",
     "required_fields",
@@ -135,17 +128,18 @@ function requiredFlagIndex(structuredMarkdown: string) {
   return index >= 0 ? index : 6;
 }
 
-/**
- * 按「是否必填」列拆分请求字段路径；条件必填等无法判定的字段不计入任何一侧
- */
-export function extractFieldsByRequirement(structuredMarkdown: string): {
-  required: string[];
-  optional: string[];
-} {
+interface RequestFieldRow {
+  path: string;
+  code: string;
+  name: string;
+  flag: string;
+}
+
+/** 解析请求报文表格的字段路径、代码、名称与「是否必填」标记 */
+function requestFieldRows(structuredMarkdown: string): RequestFieldRow[] {
   const flagIndex = requiredFlagIndex(structuredMarkdown);
   const seen = new Set<string>();
-  const required: string[] = [];
-  const optional: string[] = [];
+  const rows: RequestFieldRow[] = [];
   for (const line of requestFieldLines(structuredMarkdown).slice(1)) {
     const cells = parseTableCells(line);
     const path = (cells[0] ?? "").replace(/\/$/, "");
@@ -155,11 +149,123 @@ export function extractFieldsByRequirement(structuredMarkdown: string): {
     const key = field.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    const flag = (cells[flagIndex] ?? "").replace(/[\s*]/g, "");
-    if (OPTIONAL_FLAG_PATTERN.test(flag)) optional.push(field);
-    else if (REQUIRED_FLAG_PATTERN.test(flag)) required.push(field);
+    rows.push({
+      path: field,
+      code,
+      name: (cells[2] ?? "").trim() || code,
+      flag: (cells[flagIndex] ?? "").replace(/[\s*]/g, ""),
+    });
   }
-  return { required, optional };
+  return rows;
+}
+
+/**
+ * 按「是否必填」列拆分请求字段路径；条件必填等无法判定的字段不计入任何一侧
+ */
+export function extractFieldsByRequirement(structuredMarkdown: string): {
+  required: string[];
+  optional: string[];
+} {
+  const rows = requestFieldRows(structuredMarkdown);
+  return {
+    required: rows
+      .filter((row) => REQUIRED_FLAG_PATTERN.test(row.flag))
+      .map((row) => row.path),
+    optional: rows
+      .filter((row) => OPTIONAL_FLAG_PATTERN.test(row.flag))
+      .map((row) => row.path),
+  };
+}
+
+/**
+ * 必填参数检验的确定性基线：
+ * - 只要求存在必填字段即可适用，逐字段生成「置空」反向案例；
+ * - 存在非必填字段时才追加 1 条「非必填全部为空」正向案例；
+ * - 全部字段都标为必填时不得判定为不适用。
+ */
+export function buildRequiredFieldScenario(
+  structuredMarkdown: string,
+  actionName: string,
+): ScenarioAiResult {
+  const rows = requestFieldRows(structuredMarkdown);
+  const required = rows.filter((row) => REQUIRED_FLAG_PATTERN.test(row.flag));
+  const optional = rows.filter((row) => OPTIONAL_FLAG_PATTERN.test(row.flag));
+  if (!required.length && !optional.length) {
+    return {
+      applicable: false,
+      reason:
+        "请求报文未标注可判定的必填或非必填字段，无法生成必填参数检验案例",
+      cases: [],
+    };
+  }
+
+  const cases: ScenarioAiCase[] = required.map((row) => ({
+    title: `反向-${actionName}-必填字段${row.name}为空`,
+    description: `系统用户在${actionName}业务场景中执行交易操作时，将必填字段${row.name}（${row.code}）置为空值，其余字段保持合法取值，预期接口返回参数校验失败并指明缺失字段，用于验证必填字段校验规则是否正确。`,
+    polarity: "negative",
+    changes: [{ path: row.path, value: "" }],
+    expected: `接口应返回参数校验失败并指明缺失字段${row.name}，不得处理成功`,
+  }));
+  if (optional.length) {
+    cases.push({
+      title: `正向-${actionName}-非必填字段全部为空`,
+      description: `系统用户在${actionName}业务场景中执行交易操作时，将全部非必填字段置为空值，必填字段取合法值，预期接口正常处理，用于验证非必填字段可缺省。`,
+      polarity: "positive",
+      changes: optional.map((row) => ({ path: row.path, value: "" })),
+      expected: "接口应正常处理并返回正确业务结果",
+    });
+  }
+
+  return {
+    applicable: true,
+    reason: optional.length
+      ? `检测到 ${required.length} 个必填字段和 ${optional.length} 个非必填字段，按规则生成必填校验案例`
+      : `检测到 ${required.length} 个必填字段且无非必填字段，仅生成必填字段反向案例`,
+    cases,
+  };
+}
+
+/**
+ * 用确定性基线补齐 AI 结果：
+ * - AI 判定不适用但存在必填字段时，直接采用基线；
+ * - AI 适用时补上遗漏的必填字段反向案例和非必填正向案例。
+ */
+export function mergeRequiredFieldScenario(
+  ai: ScenarioAiResult,
+  baseline: ScenarioAiResult,
+): ScenarioAiResult {
+  if (!baseline.applicable) return ai;
+  if (!ai.applicable) return baseline;
+
+  const cases = [...ai.cases];
+  const negativePaths = new Set<string>();
+  let hasPositive = false;
+  for (const item of cases) {
+    if (item.polarity === "positive") hasPositive = true;
+    if (item.polarity !== "negative") continue;
+    for (const change of item.changes) {
+      negativePaths.add(change.path.toLowerCase());
+    }
+  }
+  for (const item of baseline.cases) {
+    if (item.polarity === "negative") {
+      const path = item.changes[0]?.path.toLowerCase();
+      if (path && !negativePaths.has(path)) {
+        cases.push(item);
+        negativePaths.add(path);
+      }
+      continue;
+    }
+    if (!hasPositive) {
+      cases.push(item);
+      hasPositive = true;
+    }
+  }
+  return {
+    applicable: true,
+    reason: ai.reason || baseline.reason,
+    cases,
+  };
 }
 
 export function buildScenarioPrompts(input: {
@@ -184,8 +290,7 @@ export function buildScenarioPrompts(input: {
     'polarity 只能取英文枚举值 "positive"（正向案例）或 "negative"（反向案例），不得输出「正向」「反向」等中文取值。',
     "changes.path 必须使用请求字段完整路径；不得编造请求字段。",
     `场景规则：${
-      input.scenarioPromptText?.trim() ||
-      scenarioRule(input.scenarioKey)
+      input.scenarioPromptText?.trim() || scenarioRule(input.scenarioKey)
     }`,
     `交易码：${input.transactionCode}`,
     `服务属性：${input.serviceProperty}`,
@@ -292,9 +397,7 @@ export function assertScenarioCoverage(
     scenarioKey === "pagination" &&
     (result.cases.length !== 4 || positive !== 4)
   ) {
-    throw new Error(
-      "分页场景必须生成 4 条正向案例（单页、多页、单条、多条）",
-    );
+    throw new Error("分页场景必须生成 4 条正向案例（单页、多页、单条、多条）");
   }
   if (scenarioKey === "all_fields_empty" && result.cases.length !== 1) {
     throw new Error("全字段空值场景必须生成 1 条案例");
@@ -390,9 +493,11 @@ function scenarioRule(key: string) {
       ].join(" ");
     case "required_fields":
       return [
+        "只要请求字段中存在标注为必填的字段，本场景即适用；即使所有字段都是必填、没有非必填字段，也必须逐个生成必填字段反向案例，不得判定为不适用。",
+        "判定不适用仅限：请求报文没有可解析字段，或所有字段的必填标注都无法判定。",
         "按「是否必填」列判定必填与非必填字段；标注为条件必填或留空等无法判定的字段直接忽略，不得臆测。",
         "必填字段：逐个生成反向案例，仅将该字段置为空值、其余字段保留示例报文原值，预期接口返回参数校验失败并指明缺失字段。",
-        "非必填字段：生成 1 条正向案例，将全部非必填字段置为空值、必填字段取合法值，预期接口正常处理，验证非必填字段可缺省。",
+        "非必填字段：生成 1 条正向案例，将全部非必填字段置为空值、必填字段取合法值，预期接口正常处理，验证非必填字段可缺省；不存在非必填字段时跳过该正向案例即可。",
         "业务规则要求多个非必填查询条件至少传其一时，补充 1 条全部条件均为空的反向案例和 1 条仅传单个条件的正向案例。",
         "每条案例的预期结果须写明校验维度（必填缺失报错 / 非必填可空成功）；忽略参数名称错误等非必填性维度的校验。",
       ].join(" ");

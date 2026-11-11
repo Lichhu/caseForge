@@ -61,6 +61,60 @@ describe("environmentFromStep TCP 地址解析", () => {
       BadRequestException,
     );
   });
+
+  it("保留步骤绑定的执行环境和服务 ID", () => {
+    const step = makeTcpStep("socket2://32.114.71.6:60030");
+    step.target = {
+      ...step.target!,
+      environmentId: "env-1",
+      environmentServiceId: "svc-1",
+    };
+
+    const env = environmentFromStep(step);
+
+    expect(env).toMatchObject({
+      id: "env-1",
+      environmentServiceId: "svc-1",
+    });
+  });
+});
+
+describe("environmentFromStep HTTP 环境映射", () => {
+  it("执行记录使用真实环境 ID，而不是步骤 ID", () => {
+    const env = environmentFromStep({
+      id: "step-1",
+      name: "正向流程",
+      target: {
+        name: "测试环境",
+        address: "http://example.test",
+        environmentId: "env-1",
+        environmentServiceId: "svc-1",
+      },
+      request: { method: "POST", path: "/query" },
+      expected: {},
+      exports: [],
+    });
+
+    expect(env).toMatchObject({
+      id: "env-1",
+      baseUrl: "http://example.test",
+      environmentServiceId: "svc-1",
+    });
+  });
+
+  it("未绑定环境的旧步骤仍以步骤 ID 兜底", () => {
+    const env = environmentFromStep({
+      id: "step-legacy",
+      name: "旧步骤",
+      target: { name: "旧地址", address: "http://example.test" },
+      request: { method: "POST", path: "/query" },
+      expected: {},
+      exports: [],
+    });
+
+    expect(env.id).toBe("step-legacy");
+    expect(env.environmentServiceId).toBeUndefined();
+  });
 });
 
 describe("parseServerAddress", () => {

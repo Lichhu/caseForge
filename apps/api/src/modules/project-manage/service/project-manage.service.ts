@@ -562,6 +562,8 @@ export class ProjectManageService {
     manager: EntityManager,
     projectId: string,
   ): Promise<void> {
+    // 案例树是可重建快照，随项目删除直接物理清理（metadata 由外键级联删除）。
+    await manager.delete(CaseTreeEntity, { projectId });
     await manager.softDelete(CaseEditorEntity, { projectId });
     await manager.softDelete(StructDocEntity, { projectId });
   }
