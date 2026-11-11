@@ -80,7 +80,7 @@ export class AuthService {
 
     const data = await this.readValidateResponse(response);
     const userName =
-      typeof data.userName === "string" ? data.userName.trim() : "";
+      typeof data?.body?.content === "string" ? data?.body?.content.trim() : "";
     if (!isValidUserName(userName)) {
       throw new UnauthorizedException("统一认证未返回有效用户信息");
     }
@@ -143,13 +143,13 @@ export class AuthService {
 
   private async readValidateResponse(
     response: Response,
-  ): Promise<Record<string, unknown>> {
+  ): Promise<Record<string, any>> {
     try {
-      const data = (await response.json()) as unknown;
+      const data = (await response.json()) as any;
       if (!data || typeof data !== "object" || Array.isArray(data)) {
         throw new Error("响应不是对象");
       }
-      return data as Record<string, unknown>;
+      return data as Record<string, any>;
     } catch {
       throw new BadGatewayException("统一认证校验响应格式无效");
     }
