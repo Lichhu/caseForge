@@ -1,0 +1,11 @@
+{
+  "name": "Socket 交易失败示例",
+  "description": "错误码示例：resCode/resText 会直接显示在导出报告的返回码/返回信息列",
+  "match": {
+    "bodyIncludes": "QryZxReportId"
+  },
+  "response": {
+    "encoding": "GBK",
+    "body": "<Transaction><Header><sysHeader><serviceCd>QryZxReportId</serviceCd><operation>QryZxReportId</operation><bizResCode>CIC024</bizResCode><bizResText>上送参数[凭证种类:VOUTYPE]不能为空</bizResText><resCode>CIC024</resCode><resText>上送参数[凭证种类:VOUTYPE]不能为空</resText><msgDate>20261109</msgDate><msgTime>14:22:49.418</msgTime></sysHeader></Header><Body><response><bizHeader><ReturnCode>CIC024</ReturnCode><ReturnStatus>F</ReturnStatus><ReturnMessage>上送参数不能为空</ReturnMessage></bizHeader></response></Body></Transaction>"
+  }
+}

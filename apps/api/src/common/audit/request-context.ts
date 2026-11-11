@@ -1,7 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 const DEFAULT_USER = "system";
-const EMPTY_USER = "";
 
 const storage = new AsyncLocalStorage<{ userName: string }>();
 
@@ -13,35 +12,6 @@ export class RequestContext {
 
   static getUserName() {
     return storage.getStore()?.userName ?? DEFAULT_USER;
-  }
-}
-
-/** 解析请求中的用户名（路径 > 请求头 > query，缺省 system） */
-export function resolveUserNameFromRequest(input: {
-  path?: string;
-  header?: string | string[];
-  query?: string | string[];
-}) {
-  if (input.path?.trim()) {
-    return decodeUserName(input.path.trim());
-  }
-
-  const rawHeader = Array.isArray(input.header)
-    ? input.header[0]
-    : input.header;
-  const rawQuery = Array.isArray(input.query) ? input.query[0] : input.query;
-  const raw = (rawHeader || rawQuery || "").trim();
-  if (!raw) {
-    return EMPTY_USER;
-  }
-  return decodeUserName(raw);
-}
-
-function decodeUserName(raw: string) {
-  try {
-    return decodeURIComponent(raw).trim();
-  } catch {
-    return raw.trim();
   }
 }
 

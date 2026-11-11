@@ -1,0 +1,11 @@
+{
+  "name": "Socket 交易成功示例",
+  "description": "按请求报文中的 operation 匹配；响应会按配置补长度前缀并用 GBK 编码",
+  "match": {
+    "bodyIncludes": "enterOnline005"
+  },
+  "response": {
+    "encoding": "GBK",
+    "body": "<Transaction><Header><sysHeader><serviceCd>enterOnline005-025</serviceCd><operation>enterOnline005</operation><bizResCode>000000</bizResCode><bizResText>交易成功</bizResText><resCode>000000</resCode><resText>交易成功</resText><msgDate>20261109</msgDate><msgTime>14:22:49.418</msgTime></sysHeader></Header><Body><response><bizHeader><ReturnCode>000000</ReturnCode><ReturnStatus>S</ReturnStatus><ReturnMessage>交易成功</ReturnMessage></bizHeader></response></Body></Transaction>"
+  }
+}

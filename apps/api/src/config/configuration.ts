@@ -7,6 +7,23 @@ import { AppConfig } from "./app-config.types";
 export default (): AppConfig => ({
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: Number(process.env.PORT ?? 34550),
+  auth: {
+    appId: process.env.AUTH_SSO_APP_ID ?? "",
+    ticketValidateUrl:
+      process.env.AUTH_SSO_TICKET_VALIDATE_URL ??
+      "http://36.114.30.180:12001/api/ticket/validate",
+    jwtSecret: process.env.AUTH_JWT_SECRET ?? "",
+    jwtIssuer: process.env.AUTH_JWT_ISSUER ?? "caseforge",
+    jwtAudience: process.env.AUTH_JWT_AUDIENCE ?? "caseforge-web",
+    sessionDurationMs: Number(
+      process.env.AUTH_SESSION_DURATION_MS ?? 7 * 24 * 60 * 60 * 1000,
+    ),
+    cookieName: process.env.AUTH_COOKIE_NAME ?? "caseforge_auth",
+    cookieSecure: process.env.AUTH_COOKIE_SECURE === "true",
+    ticketValidateTimeoutMs: Number(
+      process.env.AUTH_TICKET_VALIDATE_TIMEOUT_MS ?? 10000,
+    ),
+  },
   typeOrm: {
     host: process.env.TYPEORM_HOST ?? "localhost",
     port: Number(process.env.TYPEORM_PORT ?? 3306),

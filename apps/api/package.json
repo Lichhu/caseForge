@@ -21,6 +21,9 @@
     "seed:api-test": "cross-env NODE_ENV=local ts-node -r tsconfig-paths/register scripts/seed-api-test-demo.ts",
     "seed:api-scenarios": "cross-env NODE_ENV=local ts-node -r tsconfig-paths/register scripts/seed-api-scenarios.ts",
     "seed:requirements": "cross-env NODE_ENV=local ts-node -r tsconfig-paths/register scripts/seed-requirement-demo.ts",
+    "mock:http": "ts-node scripts/mock-services/http-mock-server.ts",
+    "mock:tcp": "ts-node scripts/mock-services/tcp-mock-server.ts",
+    "mock:services": "ts-node scripts/mock-services/index.ts",
     "db:indexes": "echo '请在 MySQL 中执行: source apps/api/scripts/add-database-indexes.sql'",
     "db:platform": "echo '请在 MySQL 中执行: source apps/api/scripts/add-project-platform-column.sql'"
   },

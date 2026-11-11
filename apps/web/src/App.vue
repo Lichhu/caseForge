@@ -2,7 +2,13 @@
   <a-config-provider :theme="caseForgeTheme" :locale="zhCN">
     <a-app>
       <div
-        v-if="isPlatformRoute"
+        v-if="isLoginRoute"
+        class="login-route-layout"
+      >
+        <router-view />
+      </div>
+      <div
+        v-else-if="isPlatformRoute"
         class="platform-layout"
         :class="`platform-layout--${current.id}`"
       >
@@ -33,6 +39,7 @@ const isPlatformRoute = computed(
     route.name === 'preproduction-management' ||
     route.name === 'case-management',
 );
+const isLoginRoute = computed(() => route.name === 'login-required');
 const current = computed(() => getPlatformByRoute(route));
 
 watch(

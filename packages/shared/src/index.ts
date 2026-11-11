@@ -164,3 +164,4 @@ export * from './scenario-scope';
 export * from './struct-doc';
 
 export * from "./api-case-management";
+export * from "./auth";

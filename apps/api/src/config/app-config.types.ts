@@ -6,6 +6,23 @@
 export interface AppConfig {
   nodeEnv: string;
   port: number;
+  /** 统一认证与本地 JWT 登录态配置 */
+  auth: {
+    /** 统一认证平台分配的 appid */
+    appId: string;
+    /** 票据校验接口，由后端以 JSON 请求体调用 */
+    ticketValidateUrl: string;
+    /** JWT HS256 签名密钥，生产环境必须显式配置 */
+    jwtSecret: string;
+    jwtIssuer: string;
+    jwtAudience: string;
+    /** 本地登录态有效期（毫秒） */
+    sessionDurationMs: number;
+    cookieName: string;
+    /** HTTP 环境保持 false；切换 HTTPS 后应设为 true */
+    cookieSecure: boolean;
+    ticketValidateTimeoutMs: number;
+  };
   typeOrm: {
     host: string;
     port: number;

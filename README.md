@@ -26,6 +26,24 @@ pnpm dev
 
 如果没有配置大模型 Key，后端会使用本地规则生成器，便于先完成业务流程联调。配置 `OPENAI_API_KEY` 后，需求结构化和案例生成都会优先调用真实模型；`OPENAI_STRUCTURE_MODEL` 可单独指定结构化模型。
 
+## 没有下游服务时如何调试接口案例
+
+仓库内置了一套本地 HTTP / Socket Mock 服务，不需要真实下游服务即可调试接口案例：
+
+```bash
+pnpm --filter @case-forge/api mock:services
+```
+
+默认地址：
+
+- HTTP：`http://127.0.0.1:18080`
+- Socket：`127.0.0.1:16030`（GBK）
+
+把 CaseForge 环境里的服务地址改成上述地址即可。fixture 格式、分帧/编码配置和常见问题见
+[`apps/api/scripts/mock-services/README.md`](apps/api/scripts/mock-services/README.md)。
+
+> 当前 CaseForge 执行链路支持 HTTP 和 TCP；MQ 还没有真正的发送/消费执行，需要先补执行适配。
+
 ## Monorepo 目录
 
 ```text

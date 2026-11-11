@@ -19,6 +19,7 @@ import { AiWorkflowModule } from "./common/ai-workflow";
 import { NotifyModule } from "./common/notify";
 import { TypeormModule } from "./common/typeorm";
 import { TestPlatformModule } from "./common/test-platform";
+import { AuthModule } from "@auth/index";
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { TestPlatformModule } from "./common/test-platform";
       envFilePath: getNestEnvFilePaths(),
     }),
     TypeormModule,
+    AuthModule,
     TestPlatformModule,
     MinioStorageModule,
     AiWorkflowModule,
@@ -40,6 +42,7 @@ import { TestPlatformModule } from "./common/test-platform";
     ApiTestModule,
     RequirementPlatformModule,
   ],
+  providers: [UserContextMiddleware],
 })
 /** CaseForge API 根模块 */
 export class AppModule implements NestModule {

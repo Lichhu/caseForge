@@ -21,6 +21,7 @@
       "@config/*" : ["src/config/*"],
       "@constant/*": ["src/constant/*"],
       "@common/*": ["src/common/*"],
+      "@auth/*": ["src/modules/auth/*"],
       "@minio/*": ["src/common/minio/*"],
       "@case-editor/*": ["src/modules/case-editor/*"],
       "@dynamic-instruct/*": ["src/modules/dynamic-instruct/*"],

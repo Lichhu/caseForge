@@ -8,6 +8,7 @@ apps/web/caseforge-web-dist
 *.local
 coverage
 apps/api/.data
+apps/api/scripts/mock-services/mock.config.json
 apps/web/.vite
 .pnpm-store
 information/*

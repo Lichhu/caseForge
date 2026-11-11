@@ -1,23 +1,36 @@
-import { Injectable, NestMiddleware, UnauthorizedException } from "@nestjs/common";
+import {
+  Inject,
+  Injectable,
+  NestMiddleware,
+  UnauthorizedException,
+} from "@nestjs/common";
 import { NextFunction, Request, Response } from "express";
-import { RequestContext, resolveUserNameFromRequest } from "./request-context";
+import { AuthService } from "@auth/service/auth.service";
+import { RequestContext } from "./request-context";
 import { extractAndRewriteUserNamePath } from "./user-name-path.util";
 
-/** 从路径 / 请求头 / query 解析用户名，重写路径并注入请求上下文 */
+/** 校验本地 JWT Cookie，并将当前用户注入请求上下文。 */
 @Injectable()
 export class UserContextMiddleware implements NestMiddleware {
+  constructor(@Inject(AuthService) private readonly authService: AuthService) {}
+
   use(req: Request, _res: Response, next: NextFunction) {
-    const pathUserName =
-      (req as Request & { pathUserName?: string }).pathUserName ??
-      extractAndRewriteUserNamePath(req);
-    const userName = resolveUserNameFromRequest({
-      path: pathUserName,
-      header: req.headers["x-user-name"],
-      query: req.query.userName as string | string[] | undefined,
-    });
-    if (!userName) {
-      return next(new UnauthorizedException("缺少用户身份，请通过带 userName 的入口链接进入"));
+    if (isAuthRoute(req.originalUrl ?? req.url)) {
+      return next();
     }
-    RequestContext.run(userName, () => next());
+
+    (req as Request & { pathUserName?: string }).pathUserName ??=
+      extractAndRewriteUserNamePath(req);
+
+    try {
+      const session = this.authService.readSession(req.headers.cookie);
+      RequestContext.run(session.user.userName, () => next());
+    } catch {
+      next(new UnauthorizedException("登录状态无效或已过期"));
+    }
   }
+}
+
+function isAuthRoute(url: string) {
+  return /^\/api\/v1\/auth(?:\/|$)/.test(url.split("?")[0] ?? "");
 }

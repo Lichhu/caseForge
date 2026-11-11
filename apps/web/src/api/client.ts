@@ -1,6 +1,7 @@
 import axios from "axios";
-import { getApiRoot, getUserApiBaseUrl } from "@/utils/apiPath";
-import { getUserName } from "@/utils/userContext";
+import { getApiRoot } from "@/utils/apiPath";
+import { clearAuthSessionCache } from "@/auth/sessionStorage";
+import { redirectToSsoLogin } from "@/utils/ssoLogin";
 import type {
   CaseExcelRow,
   CaseExcelRowListPage,
@@ -23,24 +24,34 @@ import {
 
 export const http = axios.create({
   timeout: 60000,
+  withCredentials: true,
 });
 
+let authenticationRedirectStarted = false;
+
 http.interceptors.request.use((config) => {
-  config.headers = config.headers ?? {};
-  const userName = getUserName();
-  if (userName) {
-    config.headers["X-User-Name"] = userName;
-    config.baseURL = getUserApiBaseUrl();
-  } else {
-    delete config.headers["X-User-Name"];
-    config.baseURL = getApiRoot();
-  }
+  config.baseURL = getApiRoot();
   return config;
 });
 
 http.interceptors.response.use(
   (response) => response,
   (error) => {
+    if (
+      error?.response?.status === 401 &&
+      !isAuthenticationRequest(error?.config?.url)
+    ) {
+      clearAuthSessionCache();
+      if (!authenticationRedirectStarted) {
+        authenticationRedirectStarted = true;
+        const returnPath = `${window.location.pathname}${window.location.search}`;
+        if (!redirectToSsoLogin(returnPath)) {
+          window.location.assign(
+            `/login-required?redirect=${encodeURIComponent(returnPath)}`,
+          );
+        }
+      }
+    }
     const data = error?.response?.data;
     const backendMessage =
       typeof data?.message === "string"
@@ -54,6 +65,14 @@ http.interceptors.response.use(
     return Promise.reject(error);
   },
 );
+
+function isAuthenticationRequest(url: unknown) {
+  return (
+    typeof url === "string" &&
+    (/^\/auth\/me(?:\?|$)/.test(url) ||
+      /^\/auth\/logout(?:\?|$)/.test(url))
+  );
+}
 
 export interface ProjectListItem extends CaseForgeProject {
   runCount: number;

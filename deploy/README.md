@@ -14,7 +14,7 @@
 > ⚠️ **API 必须 fork 单实例**，禁止对 `caseforge-api` 使用 cluster。  
 > AI 案例生成是单进程内存队列，多实例会导致任务重复、并发失效。
 
-访问地址：`http://<服务器IP>:8080/case-forge?userName=你的用户名`
+访问地址：`http://<服务器IP>:8080/case-forge`。未登录时会进入统一认证流程。
 
 ---
 
@@ -125,7 +125,7 @@ pm2 save
 ```bash
 curl -s http://127.0.0.1:8080/health
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8080/api/v1/...
-# 浏览器打开 http://<IP>:8080/case-forge?userName=system
+# 浏览器打开 http://<IP>:8080/case-forge，并按统一认证流程登录
 ```
 
 大报文案例需要数据库允许更大的单条 SQL 包。首次部署时使用管理员账号执行：
@@ -175,6 +175,12 @@ pm2 restart caseforge-api
 | `API_TARGET` | `http://127.0.0.1:34550` | 后端 API 地址 |
 | `DIST_DIR` | `../apps/web/caseforge-web-dist` | 相对 deploy 目录的前端构建产物路径 |
 | `CASE_GENERATE_CONCURRENCY` | `4` | AI 并发上限（caseforge-api） |
+| `AUTH_SSO_APP_ID` | 无 | 统一认证平台分配的应用标识 |
+| `AUTH_SSO_TICKET_VALIDATE_URL` | `http://36.114.30.180:12001/api/ticket/validate` | 票据校验接口 |
+| `AUTH_JWT_SECRET` | 无 | JWT HS256 签名密钥，至少 32 字节，生产环境必须设置 |
+| `AUTH_SESSION_DURATION_MS` | `604800000` | 本地登录态有效期，默认一周 |
+| `AUTH_COOKIE_SECURE` | `false` | 当前 HTTP 部署保持 `false`；启用 HTTPS 后改为 `true` |
+| `VITE_SSO_LOGIN_URL` | 无 | 统一认证登录入口，前端构建时注入；可用 `{returnUrl}` 占位符 |
 
 若需监听 80 端口，将 `PORT` 改为 `80`（CentOS 上需 root 或 `setcap` 授权）。
 

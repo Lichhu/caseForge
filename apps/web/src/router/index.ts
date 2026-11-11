@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
-import { getUserName } from "@/utils/userContext";
+import { useAuthStore } from "@/stores/auth";
 
 const CaseForgeDashboardView = () =>
   import("@/views/CaseForgeDashboardView.vue");
@@ -7,6 +7,7 @@ const ApiTestDashboardView = () => import("@/views/ApiTestDashboardView.vue");
 const RequirementPlatformView = () =>
   import("@/views/RequirementPlatformView.vue");
 const CaseManagementView = () => import("@/views/CaseManagementView.vue");
+const LoginRequiredView = () => import("@/views/LoginRequiredView.vue");
 
 const router = createRouter({
   history: createWebHistory(),
@@ -29,6 +30,12 @@ const router = createRouter({
     },
     { path: "/api-test/cases", redirect: "/api-test/preproduction" },
     {
+      path: "/login-required",
+      name: "login-required",
+      component: LoginRequiredView,
+      meta: { title: "统一认证登录" },
+    },
+    {
       path: "/api-test/preproduction",
       name: "preproduction-management",
       component: CaseManagementView,
@@ -43,11 +50,24 @@ const router = createRouter({
   ],
 });
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   if (typeof to.query.userName !== "undefined") {
     const query = { ...to.query };
     delete query.userName;
     return { path: to.path, query, hash: to.hash, replace: true };
+  }
+  if (to.name === "login-required") {
+    return true;
+  }
+
+  const auth = useAuthStore();
+  await auth.restore();
+  if (!auth.isAuthenticated) {
+    return {
+      name: "login-required",
+      query: { redirect: to.fullPath },
+      replace: true,
+    };
   }
   return true;
 });

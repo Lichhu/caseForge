@@ -1,0 +1,23 @@
+{
+  "http": {
+    "host": "127.0.0.1",
+    "port": 18080,
+    "encoding": "utf8",
+    "fixtures": "./fixtures/http"
+  },
+  "tcp": {
+    "host": "127.0.0.1",
+    "port": 16030,
+    "encoding": "GBK",
+    "requestFraming": {
+      "type": "length-prefix",
+      "width": 4
+    },
+    "responseFraming": {
+      "type": "length-prefix",
+      "width": 4
+    },
+    "closeAfterResponse": false,
+    "fixtures": "./fixtures/socket"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "HTTP 交易成功示例",
+  "description": "同一路径的兜底成功响应；没有 bodyIncludes 时放在最后",
+  "match": {
+    "method": "POST",
+    "path": "/txn/demo"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "resCode": "000000",
+      "resText": "交易成功",
+      "data": {
+        "customerNo": "5021278002"
+      }
+    }
+  }
+}

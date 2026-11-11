@@ -12,6 +12,7 @@ export function getAppConfig(configService: ConfigService): AppConfig {
   return {
     nodeEnv: configService.get<string>("nodeEnv", "development"),
     port: configService.get<number>("port", 34550),
+    auth: configService.get<AppConfig["auth"]>("auth")!,
     typeOrm: configService.get<AppConfig["typeOrm"]>("typeOrm")!,
     typeOrmTest: configService.get<AppConfig["typeOrmTest"]>("typeOrmTest")!,
     minio: configService.get<AppConfig["minio"]>("minio")!,

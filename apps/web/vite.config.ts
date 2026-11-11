@@ -1,42 +1,9 @@
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { fileURLToPath, URL } from "node:url";
 
-const DEV_USER_NAME = process.env.VITE_DEV_USER_NAME || "system";
-
-/** 开发环境启动地址默认附带 userName，与 initUserContext 一致 */
-function devUserNameUrlPlugin(): Plugin {
-  return {
-    name: "dev-user-name-url",
-    configureServer(server) {
-      const appendUserName = (href: string) => {
-        const url = new URL(href);
-        if (!url.searchParams.has("userName")) {
-          url.searchParams.set("userName", DEV_USER_NAME);
-        }
-        return url.toString();
-      };
-
-      const originalPrintUrls = server.printUrls;
-      server.printUrls = (urls) => {
-        const resolved = urls ?? server.resolvedUrls;
-        if (!resolved?.local?.length) {
-          originalPrintUrls?.(urls);
-          return;
-        }
-        resolved.local.forEach((url) => {
-          server.config.logger.info(`  ➜  Local:   ${appendUserName(url)}`);
-        });
-        (resolved.network ?? []).forEach((url) => {
-          server.config.logger.info(`  ➜  Network: ${appendUserName(url)}`);
-        });
-      };
-    },
-  };
-}
-
 export default defineConfig({
-  plugins: [vue(), devUserNameUrlPlugin()],
+  plugins: [vue()],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
@@ -70,7 +37,7 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     port: 33550,
-    open: `/case-forge?userName=${encodeURIComponent(DEV_USER_NAME)}`,
+    open: "/case-forge",
     // 仅代理真实 API（/api/v1/...），避免前端路由 /api-test 被误转发到 Nest
     proxy: {
       "/api/v1": {

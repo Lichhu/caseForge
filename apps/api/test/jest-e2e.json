@@ -16,6 +16,7 @@
     "^@constant/(.*)$": "<rootDir>/src/constant/$1",
     "^@minio/(.*)$": "<rootDir>/src/common/minio/$1",
     "^@common/(.*)$": "<rootDir>/src/common/$1",
+    "^@auth/(.*)$": "<rootDir>/src/modules/auth/$1",
     "^@case-editor/(.*)$": "<rootDir>/src/modules/case-editor/$1",
     "^@dynamic-instruct/(.*)$": "<rootDir>/src/modules/dynamic-instruct/$1",
     "^@project-manage/(.*)$": "<rootDir>/src/modules/project-manage/$1",
