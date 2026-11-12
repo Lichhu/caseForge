@@ -665,7 +665,7 @@
           </div>
         </div>
         <div v-if="libraryAssertionError" class="case-assertion-error">{{ libraryAssertionError }}</div>
-        <AssertionRowsEditor v-model:rows="stepEdit.assertionRows" :protocol="stepEdit.protocol" :project-id="projectId" class="case-debug-assertion-editor" />
+        <AssertionRowsEditor v-model:rows="stepEdit.assertionRows" :protocol="stepEdit.protocol" :project-id="projectId" :variable-options="libraryVariableOptions" class="case-debug-assertion-editor" />
       </div>
     </div>
 

@@ -33,6 +33,7 @@ import { auditFieldsForCreate } from "@common/audit/request-context";
 import { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
 import { ApiExecutionService } from "./api-execution.service";
 import { isHttpStep } from "@case-forge/shared";
+import type { AssertionValueSource } from "@case-forge/shared";
 import {
   buildRiskAnalysisRows,
   buildRiskClassificationPrompt,
@@ -58,6 +59,12 @@ function sanitizeReportToken(value: string) {
     .replace(/[\u0000-\u001F\u007F]/g, "_")
     .replace(/[\\/:*?"<>|]/g, "_")
     .replace(/\s+/g, " ");
+}
+
+/** PDF 失败断言补充期望值来源，便于追溯 SQL 查询 / 共享变量。 */
+function formatExpectedSourceSuffix(source?: AssertionValueSource) {
+  if (!source?.label) return "";
+  return `；来源：${source.label}`;
 }
 
 function buildExportFileName(
@@ -791,6 +798,20 @@ export class ApiReportService {
     };
   }
 
+  /** 断言期望值来源摘要：去重后拼接，供报告明细列展示。 */
+  private formatExpectedSource(
+    assertions: Array<{ expectedSource?: AssertionValueSource }>,
+  ) {
+    const labels = [
+      ...new Set(
+        assertions
+          .map((assertion) => assertion.expectedSource?.label?.trim())
+          .filter((label): label is string => Boolean(label)),
+      ),
+    ];
+    return labels.length ? labels.join("; ") : "—";
+  }
+
   private async toExcel(run: RunDetail) {
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "CaseForge";
@@ -813,6 +834,7 @@ export class ApiReportService {
       { header: "URL", key: "url", width: 40 },
       { header: "返回码", key: "returnCode", width: 12 },
       { header: "返回信息", key: "returnMessage", width: 32 },
+      { header: "期望值来源", key: "expectedSource", width: 40 },
       { header: "断言摘要", key: "assertions", width: 48 },
     ];
     sheet.getRow(1).font = { bold: true };
@@ -834,6 +856,7 @@ export class ApiReportService {
             url: String(step.request?.url ?? ""),
             returnCode: returnInfo.code,
             returnMessage: returnInfo.message,
+            expectedSource: this.formatExpectedSource(stepAssertions),
             assertions: failedAssertions.length
               ? failedAssertions.map((a) => a.name).join("; ")
               : stepAssertions.length
@@ -853,6 +876,7 @@ export class ApiReportService {
         url: String(item.requestSnapshot.url ?? ""),
         returnCode: returnInfo.code,
         returnMessage: returnInfo.message,
+        expectedSource: this.formatExpectedSource(item.assertions),
         assertions: failedAssertions.length
           ? failedAssertions.map((a) => a.name).join("; ")
           : "全部通过",
@@ -910,6 +934,7 @@ export class ApiReportService {
       { header: "URL", key: "url", width: 40 },
       { header: "返回码", key: "returnCode", width: 12 },
       { header: "返回信息", key: "returnMessage", width: 32 },
+      { header: "期望值来源", key: "expectedSource", width: 40 },
       { header: "断言摘要", key: "assertions", width: 48 },
     ];
     sheet.getRow(1).font = { bold: true };
@@ -934,6 +959,7 @@ export class ApiReportService {
               url: String(step.request?.url ?? ""),
               returnCode: returnInfo.code,
               returnMessage: returnInfo.message,
+              expectedSource: this.formatExpectedSource(stepAssertions),
               assertions: failedAssertions.length
                 ? failedAssertions.map((a) => a.name).join("; ")
                 : stepAssertions.length
@@ -955,6 +981,7 @@ export class ApiReportService {
           url: String(item.requestSnapshot.url ?? ""),
           returnCode: returnInfo.code,
           returnMessage: returnInfo.message,
+          expectedSource: this.formatExpectedSource(item.assertions),
           assertions: failedAssertions.length
             ? failedAssertions.map((a) => a.name).join("; ")
             : "全部通过",
@@ -1037,7 +1064,7 @@ export class ApiReportService {
           const failed = item.assertions.filter((a) => !a.passed);
           for (const assertion of failed.slice(0, 3)) {
             doc.text(
-              `  - ${assertion.name}：期望 ${JSON.stringify(assertion.expected)}，实际 ${JSON.stringify(assertion.actual)}`,
+              `  - ${assertion.name}：期望 ${JSON.stringify(assertion.expected)}，实际 ${JSON.stringify(assertion.actual)}${formatExpectedSourceSuffix(assertion.expectedSource)}`,
             );
           }
         }
@@ -1179,7 +1206,7 @@ export class ApiReportService {
             );
             for (const assertion of failed.slice(0, 3)) {
               doc.text(
-                `  - ${assertion.name}：期望 ${JSON.stringify(assertion.expected)}，实际 ${JSON.stringify(assertion.actual)}`,
+                `  - ${assertion.name}：期望 ${JSON.stringify(assertion.expected)}，实际 ${JSON.stringify(assertion.actual)}${formatExpectedSourceSuffix(assertion.expectedSource)}`,
               );
             }
           }

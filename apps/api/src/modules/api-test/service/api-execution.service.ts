@@ -27,6 +27,7 @@ import {
   extractExportValue,
   exportValueToString,
 } from "@api-test/util/assertion-runner.util";
+import { collectExpectedSource } from "@api-test/util/assertion-source.util";
 import type {
   ApiCaseExpected,
   ApiCaseRequest,
@@ -34,6 +35,8 @@ import type {
   ApiHttpCaseStep,
   ApiRunItemStatus,
   ApiCaseStep,
+  AssertionResult,
+  AssertionValueSource,
 } from "@case-forge/shared";
 import {
   DB_STEP_SNAPSHOT_MAX_ROWS,
@@ -338,6 +341,7 @@ export class ApiExecutionService {
     let error = preservedItems.filter((item) => item.status === "error").length;
 
     const sharedVars: Record<string, string> = {};
+    const sharedVarSources: Record<string, string> = {};
     await this.runWithConcurrency(
       cases,
       orderedFlow ? 1 : concurrency,
@@ -351,11 +355,13 @@ export class ApiExecutionService {
             ...buildRuntimeVariables(caseEnv.variables, caseEnv.secrets),
             ...sharedVars,
           },
+          varSources: { ...sharedVarSources },
           encoding: testCase.metadata?.debugEncoding ?? input.encoding,
           environmentId: input.environmentId,
           environmentServiceId: input.environmentServiceId,
           cache: executionCache,
         });
+        item.caseNo = testCase.caseNo;
         items.push(item);
         // 多步骤案例的提取已在各自步骤完成后处理；metadata.exports 是主步骤
         // 导出字段的兼容副本，不能再用步骤汇总快照重复提取并覆盖案例状态。
@@ -370,8 +376,9 @@ export class ApiExecutionService {
           );
           const text = exportValueToString(value);
           if (text !== "") {
-            sharedVars[`${testCase.caseNo ?? testCase.id}.${binding.name}`] =
-              text;
+            const key = `${testCase.caseNo ?? testCase.id}.${binding.name}`;
+            sharedVars[key] = text;
+            sharedVarSources[key] = `案例「${testCase.title}」`;
           } else if (binding.required) {
             item.status = "error";
             item.responseSnapshot = {
@@ -514,6 +521,8 @@ export class ApiExecutionService {
     testCase: ApiTestCaseEntity;
     env: RuntimeEnvironment;
     vars: Record<string, string>;
+    /** 变量名 -> 来源描述，用于执行结果追溯 SQL/前置步骤 */
+    varSources?: Record<string, string>;
     encoding?: string;
     environmentId?: string;
     environmentServiceId?: string;
@@ -545,6 +554,7 @@ export class ApiExecutionService {
     testCase: ApiTestCaseEntity;
     env: RuntimeEnvironment;
     vars: Record<string, string>;
+    varSources?: Record<string, string>;
     encoding?: string;
     caseContext: DataFunctionContext;
     lockSession: DbStepLockSession;
@@ -555,6 +565,7 @@ export class ApiExecutionService {
   }) {
     const steps = input.testCase.steps ?? [];
     const vars = { ...input.vars };
+    const varSources = { ...(input.varSources ?? {}) };
     const stepResults: Array<Record<string, unknown>> = [];
     let final: ApiTestRunItemEntity | undefined;
     const caseStarted = Date.now();
@@ -580,6 +591,7 @@ export class ApiExecutionService {
                 testCase: input.testCase,
                 step,
                 vars,
+                varSources,
                 caseContext: input.caseContext,
                 encoding: input.encoding,
                 environmentId: input.environmentId,
@@ -613,6 +625,11 @@ export class ApiExecutionService {
       let groupPassed = true;
       for (const { step, result, extracted, startedAt } of outcomes) {
         Object.assign(vars, extracted);
+        for (const name of Object.keys(extracted)) {
+          varSources[name] = isDbStep(step)
+            ? `SQL 步骤「${step.name}」`
+            : `步骤「${step.name}」`;
+        }
         stepResults.push({
           stepId: step.id,
           stepName: step.name,
@@ -654,6 +671,7 @@ export class ApiExecutionService {
     testCase: ApiTestCaseEntity;
     step: ApiHttpCaseStep;
     vars: Record<string, string>;
+    varSources?: Record<string, string>;
     caseContext: DataFunctionContext;
     encoding?: string;
     environmentId?: string;
@@ -681,6 +699,7 @@ export class ApiExecutionService {
       testCase: stepCase,
       env: environmentFromStep(input.step),
       vars: input.vars,
+      varSources: input.varSources,
       caseContext: input.caseContext,
       encoding: input.encoding,
       ignoreSslVerify,
@@ -1022,6 +1041,7 @@ export class ApiExecutionService {
     testCase: ApiTestCaseEntity;
     env: RuntimeEnvironment;
     vars: Record<string, string>;
+    varSources?: Record<string, string>;
     encoding?: string;
     caseContext?: DataFunctionContext;
     ignoreSslVerify?: boolean;
@@ -1035,10 +1055,11 @@ export class ApiExecutionService {
       substituted,
       input.caseContext,
     )) as ApiCaseRequest;
-    const expected = await this.resolveExpected({
+    const { expected, sources } = await this.resolveExpected({
       projectId: input.testCase.projectId,
       expected: input.testCase.expected,
       vars: input.vars,
+      varSources: input.varSources,
       caseContext: input.caseContext,
       request,
     });
@@ -1047,31 +1068,90 @@ export class ApiExecutionService {
     });
     const transport = request.transport ?? (request.framing ? "tcp" : "http");
     if (transport === "tcp") {
-      return this.executeTcpCase({ ...input, testCase, request });
+      return this.executeTcpCase({
+        ...input,
+        testCase,
+        request,
+        expectedSources: sources,
+      });
     }
-    return this.executeHttpCase({ ...input, testCase, request });
+    return this.executeHttpCase({
+      ...input,
+      testCase,
+      request,
+      expectedSources: sources,
+    });
   }
 
   /**
    * 断言期望值支持 ${共享变量} 与数据函数调用（如取数据库值作比较基准）。
    * 函数参数中的 $. 路径相对本步骤实际发出的请求报文解析，与请求报文中的函数参数语义一致。
+   *
+   * 解析前的模板和变量来源会一并保留，执行结果里可追溯期望值来自哪个 SQL / 步骤。
    */
   private async resolveExpected(input: {
     projectId: string;
     expected: ApiCaseExpected | undefined;
     vars: Record<string, string>;
+    varSources?: Record<string, string>;
     caseContext?: DataFunctionContext;
     request: unknown;
-  }): Promise<ApiCaseExpected> {
-    const expected = input.expected ?? {};
-    if (!JSON.stringify(expected).includes("${")) return expected;
-    const substituted = substituteDeep(expected, input.vars) as ApiCaseExpected;
-    return (await this.dataFunctionService.resolveDeep(
+  }): Promise<{
+    expected: ApiCaseExpected;
+    sources: Array<AssertionValueSource | undefined>;
+  }> {
+    const original = input.expected ?? {};
+    const originalJson = JSON.stringify(original);
+    if (!originalJson.includes("${") && !originalJson.includes("{{")) {
+      return { expected: original, sources: [] };
+    }
+    const substituted = substituteDeep(original, input.vars) as ApiCaseExpected;
+    const expected = (await this.dataFunctionService.resolveDeep(
       input.projectId,
       substituted,
       input.caseContext,
       input.request,
     )) as ApiCaseExpected;
+    const functions = await this.describeExpectedFunctions(original);
+    const sources = (original.assertions ?? []).map((assertion) =>
+      collectExpectedSource({
+        template: assertion.expected,
+        variableSources: input.varSources,
+        functions,
+      }),
+    );
+    return { expected, sources };
+  }
+
+  /** 只在期望值里确实引用了数据函数时查询函数元数据，避免每次执行都多查一次库。 */
+  private async describeExpectedFunctions(
+    expected: ApiCaseExpected,
+  ): Promise<Map<string, { type?: string; description?: string }>> {
+    const callPattern = /\$\{[A-Z][A-Z0-9_-]*\(/;
+    if (
+      !(expected.assertions ?? []).some(
+        (assertion) =>
+          typeof assertion.expected === "string" &&
+          callPattern.test(assertion.expected),
+      )
+    ) {
+      return new Map();
+    }
+    const describe = (
+      this.dataFunctionService as unknown as {
+        describeFunctions?: () => Promise<
+          Array<{ name: string; type: string; description: string }>
+        >;
+      }
+    ).describeFunctions;
+    if (!describe) return new Map();
+    const rows = await describe.call(this.dataFunctionService);
+    return new Map(
+      rows.map((row) => [
+        row.name,
+        { type: row.type, description: row.description },
+      ]),
+    );
   }
 
   private async executeHttpCase(input: {
@@ -1080,6 +1160,7 @@ export class ApiExecutionService {
     env: RuntimeEnvironment;
     vars: Record<string, string>;
     request: ApiCaseRequest;
+    expectedSources?: Array<AssertionValueSource | undefined>;
     encoding?: string;
     ignoreSslVerify?: boolean;
   }) {
@@ -1163,6 +1244,7 @@ export class ApiExecutionService {
         bodySize: responseBuffer.length,
         durationMs,
         polarity: input.testCase.polarity,
+        expectedSources: input.expectedSources,
       });
       const status: ApiRunItemStatus = isAllPassed(assertions)
         ? "passed"
@@ -1210,6 +1292,7 @@ export class ApiExecutionService {
     env: RuntimeEnvironment;
     vars: Record<string, string>;
     request: ApiCaseRequest;
+    expectedSources?: Array<AssertionValueSource | undefined>;
     encoding?: string;
   }) {
     const service = this.resolveRuntimeService(input.env, "tcp");
@@ -1262,6 +1345,7 @@ export class ApiExecutionService {
         bodySize: responseText.length,
         durationMs,
         polarity: input.testCase.polarity,
+        expectedSources: input.expectedSources,
       });
       const status: ApiRunItemStatus = isAllPassed(assertions)
         ? "passed"
@@ -1333,6 +1417,7 @@ export class ApiExecutionService {
           input.environmentServiceId,
         )) as RuntimeEnvironment);
     const vars = buildRuntimeVariables(env.variables, env.secrets);
+    const varSources: Record<string, string> = {};
     let caseContext: DataFunctionContext | undefined;
     if (input.caseId) {
       const debugCase = await this.caseRepo.findOne({
@@ -1350,6 +1435,7 @@ export class ApiExecutionService {
         projectId: input.projectId,
         steps: input.prerequisiteSteps,
         vars,
+        varSources,
         encoding: input.encoding,
         caseContext,
         environmentId: input.target?.environmentId ?? input.environmentId,
@@ -1365,10 +1451,11 @@ export class ApiExecutionService {
       substituted,
       caseContext ?? SAMPLE_CONTEXT,
     )) as ApiCaseRequest;
-    const expected = await this.resolveExpected({
+    const { expected, sources } = await this.resolveExpected({
       projectId: input.projectId,
       expected: input.expected,
       vars,
+      varSources,
       caseContext: caseContext ?? SAMPLE_CONTEXT,
       request,
     });
@@ -1402,6 +1489,7 @@ export class ApiExecutionService {
         env,
         vars,
         expected,
+        expectedSources: sources,
         polarity: input.polarity,
         encoding: input.encoding,
       });
@@ -1411,6 +1499,7 @@ export class ApiExecutionService {
       env,
       vars,
       expected,
+      expectedSources: sources,
       polarity: input.polarity,
       encoding: input.encoding,
       ignoreSslVerify: sslOverride,
@@ -1425,6 +1514,7 @@ export class ApiExecutionService {
     projectId: string;
     steps: ApiCaseStep[];
     vars: Record<string, string>;
+    varSources?: Record<string, string>;
     encoding?: string;
     caseContext?: DataFunctionContext;
     environmentId?: string;
@@ -1457,6 +1547,11 @@ export class ApiExecutionService {
         const text = exportValueToString(value);
         if (text !== "") {
           input.vars[binding.name] = text;
+          if (input.varSources) {
+            input.varSources[binding.name] = isDbStep(step)
+              ? `SQL 步骤「${step.name}」`
+              : `步骤「${step.name}」`;
+          }
         } else if (binding.required) {
           throw new BadRequestException(
             `前置步骤「${step.name}」的共享变量「${binding.name}」提取失败`,
@@ -1470,6 +1565,7 @@ export class ApiExecutionService {
     projectId: string;
     step: ApiHttpCaseStep;
     vars: Record<string, string>;
+    varSources?: Record<string, string>;
     encoding?: string;
     caseContext?: DataFunctionContext;
     environmentId?: string;
@@ -1540,6 +1636,7 @@ export class ApiExecutionService {
     env: RuntimeEnvironment;
     vars: Record<string, string>;
     expected?: ApiCaseExpected;
+    expectedSources?: Array<AssertionValueSource | undefined>;
     polarity?: "positive" | "negative";
     encoding?: string;
     ignoreSslVerify?: boolean;
@@ -1607,6 +1704,7 @@ export class ApiExecutionService {
         bodySize: responseBuffer.length,
         durationMs,
         polarity: input.polarity,
+        expectedSources: input.expectedSources,
       });
       return {
         statusCode: response.status,
@@ -1639,6 +1737,7 @@ export class ApiExecutionService {
     env: RuntimeEnvironment;
     vars: Record<string, string>;
     expected?: ApiCaseExpected;
+    expectedSources?: Array<AssertionValueSource | undefined>;
     polarity?: "positive" | "negative";
     encoding?: string;
   }): Promise<DebugRunResult> {
@@ -1679,6 +1778,7 @@ export class ApiExecutionService {
         bodySize: responseText.length,
         durationMs,
         polarity: input.polarity,
+        expectedSources: input.expectedSources,
       });
       return {
         statusCode: -1,
@@ -2133,11 +2233,5 @@ export interface DebugRunResult {
   bodySize: number;
   durationMs: number;
   error?: string;
-  assertions: Array<{
-    name: string;
-    passed: boolean;
-    expected: unknown;
-    actual: unknown;
-    message?: string;
-  }>;
+  assertions: AssertionResult[];
 }

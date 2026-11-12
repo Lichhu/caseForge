@@ -6,6 +6,7 @@ import {
   prettyPrintXml,
   unescapeLiteralXmlEscapes,
 } from "@case-forge/shared";
+import type { AssertionValueSource } from "@case-forge/shared";
 import { resolveReportReturnInfo } from "./api-report-return.util";
 
 export interface ReportAssertionMeta {
@@ -53,6 +54,8 @@ interface HtmlRunItem {
     expected?: unknown;
     actual?: unknown;
     message?: string;
+    /** 期望值来源，展示 SQL 查询 / 共享变量出处 */
+    expectedSource?: AssertionValueSource;
   }>;
 }
 
@@ -170,6 +173,13 @@ const REPORT_STYLES = `
       font-weight: bolder;
     }
     .assertion-tr { color: #6d7585; }
+    .assertion-source-expression {
+      margin-top: 2px;
+      color: #98a2b3;
+      font-size: 11px;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      word-break: break-all;
+    }
     .testcase-detail { border-top: 1px solid #dcdcdc; }
     .step-bar {
       display: flex;
@@ -441,27 +451,33 @@ function buildAssertionSection(
   const header = `
     <div class="step-bar">断言检查</div>
     <div class="testcase-tr testcase-head assertion-tr">
-      <div style="width:6%;">#</div>
-      <div style="width:18%;">描述</div>
-      <div style="width:10%;">类型</div>
-      <div style="width:8%;">比较符</div>
-      <div style="width:28%;">表达式</div>
-      <div style="width:18%;">比较值</div>
-      <div style="width:12%;">结果</div>
+      <div style="width:4%;">#</div>
+      <div style="width:14%;">描述</div>
+      <div style="width:8%;">类型</div>
+      <div style="width:7%;">比较符</div>
+      <div style="width:19%;">表达式</div>
+      <div style="width:14%;">比较值</div>
+      <div style="width:24%;">数据来源</div>
+      <div style="width:10%;">结果</div>
     </div>`;
   const rows = assertions
     .map((assertion, idx) => {
       const def = meta?.assertionMeta[assertion.name];
       const color = assertion.passed ? PASS_COLOR : FAIL_COLOR;
+      const source = assertion.expectedSource;
+      const sourceText = source
+        ? `<div>${escapeHtml(source.label)}</div>${source.expression ? `<div class="assertion-source-expression">${escapeHtml(source.expression)}</div>` : ""}`
+        : `<div>—</div>`;
       return `
     <div class="testcase-tr assertion-tr">
-      <div style="width:6%;">${idx + 1}</div>
-      <div style="width:18%;">${escapeHtml(assertion.name)}</div>
-      <div style="width:10%;">${escapeHtml(def?.type ?? "—")}</div>
-      <div style="width:8%;">${escapeHtml(def?.operator ?? "eq")}</div>
-      <div style="width:28%;" class="mono">${escapeHtml(def?.expression ?? "—")}</div>
-      <div style="width:18%;" class="mono">${escapeHtml(stringifyValue(assertion.expected))}</div>
-      <div style="width:12%;color:${color};">${assertion.passed ? "Pass" : "Fail"}</div>
+      <div style="width:4%;">${idx + 1}</div>
+      <div style="width:14%;">${escapeHtml(assertion.name)}</div>
+      <div style="width:8%;">${escapeHtml(def?.type ?? "—")}</div>
+      <div style="width:7%;">${escapeHtml(def?.operator ?? "eq")}</div>
+      <div style="width:19%;" class="mono">${escapeHtml(def?.expression ?? "—")}</div>
+      <div style="width:14%;" class="mono">${escapeHtml(stringifyValue(assertion.expected))}</div>
+      <div style="width:24%;">${sourceText}</div>
+      <div style="width:10%;color:${color};">${assertion.passed ? "Pass" : "Fail"}</div>
     </div>`;
     })
     .join("");

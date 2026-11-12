@@ -61,12 +61,36 @@
             @click="rememberExpectedCursor(index, $event)"
             @keyup="rememberExpectedCursor(index, $event)"
           />
+          <a-tooltip
+            v-if="showsExpectedField(row.type) && variableOptions.length"
+            :title="
+              hasAvailableVariable
+                ? '插入变量（前序步骤提取或跨案例引用的共享变量）'
+                : '没有可用的共享变量（同一并发组内提取的变量不可引用）'
+            "
+            :get-popup-container="popupContainer"
+            :overlay-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 1 }"
+          >
+            <span class="assertion-expected-action">
+              <a-button
+                type="text"
+                size="small"
+                class="assertion-expected-var-btn"
+                aria-label="插入变量"
+                :disabled="!hasAvailableVariable"
+                @click="openVariableInsert(index)"
+              >
+                <LinkOutlined />
+              </a-button>
+            </span>
+          </a-tooltip>
           <a-button
             v-if="showsExpectedField(row.type) && projectId"
             type="text"
             size="small"
             class="assertion-expected-fn-btn"
             title="插入数据函数（如取数据库值作比较基准）"
+            aria-label="插入数据函数"
             @click="openFunctionInsert(index)"
           >
             <CodeOutlined />
@@ -128,11 +152,33 @@
       <p class="function-usage-hint">执行与调试时先解析函数调用（如 SQL 函数取数据库值），再与响应实际值比较。</p>
     </a-form>
   </a-modal>
+  <a-modal
+    v-model:open="variableInsertOpen"
+    title="插入变量"
+    :z-index="NESTED_OVERLAY_Z_INDEX + 10"
+    ok-text="插入"
+    @ok="insertVariableExpression"
+  >
+    <a-form layout="vertical">
+      <a-form-item label="变量" required>
+        <a-select
+          v-model:value="insertVariableName"
+          :options="variableOptions"
+          :get-popup-container="popupContainer"
+          :dropdown-style="{ zIndex: NESTED_OVERLAY_Z_INDEX + 11 }"
+          show-search
+          placeholder="选择变量"
+        />
+      </a-form-item>
+      <div class="function-expression-preview"><span>引用预览</span><code>{{ variableInsertPreview }}</code></div>
+      <p class="function-usage-hint">执行与调试时先替换共享变量、再解析数据函数，最后与响应实际值比较。</p>
+    </a-form>
+  </a-modal>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue';
-import { CodeOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons-vue';
+import { CodeOutlined, LinkOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons-vue';
 import { message } from 'ant-design-vue';
 import { NESTED_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import { listDataFunctions, type ApiDataFunctionRow } from '@/api/apiTestClient';
@@ -147,6 +193,7 @@ import {
   filterAssertionTypeOptions,
   showsExpectedField,
   type AssertionRow,
+  type AssertionVariableOption,
 } from '@/utils/assertionRows.util';
 
 const popupContainer = () => document.body;
@@ -156,6 +203,10 @@ const props = defineProps<{
   hint?: string;
   /** 提供后期望值列显示「插入数据函数」入口 */
   projectId?: string;
+  /** 期望值可插入的共享变量；不传则不显示「插入变量」入口 */
+  variableOptions?: AssertionVariableOption[];
+  /** 变量引用语法：dollar 为 ${变量名}（案例），brace 为 {{变量名}}（步骤库） */
+  variableFormat?: 'dollar' | 'brace';
 }>();
 
 const rows = defineModel<AssertionRow[]>('rows', { required: true });
@@ -200,6 +251,18 @@ const insertFunctionArgs = ref<string[]>([]);
 const insertRowIndex = ref(-1);
 const insertFunctionField = ref('');
 const expectedCursor = reactive({ index: -1, start: 0, end: 0 });
+const variableOptions = computed<AssertionVariableOption[]>(
+  () => props.variableOptions ?? [],
+);
+const hasAvailableVariable = computed(() =>
+  variableOptions.value.some((item) => !item.disabled),
+);
+const variableInsertOpen = ref(false);
+const insertVariableName = ref('');
+const variableInsertPreview = computed(() => {
+  const name = insertVariableName.value || '变量名';
+  return props.variableFormat === 'brace' ? `{{${name}}}` : `\${${name}}`;
+});
 const selectedInsertFunction = computed(() =>
   insertFunctions.value.find((item) => item.name === insertFunctionName.value),
 );
@@ -226,6 +289,36 @@ function rememberExpectedCursor(index: number, event: Event) {
   expectedCursor.index = index;
   expectedCursor.start = input.selectionStart ?? 0;
   expectedCursor.end = input.selectionEnd ?? 0;
+}
+
+/** 期望值按最近一次记录的光标位置插入，没有光标记录时追加到末尾 */
+function insertExpectedText(index: number, text: string) {
+  const row = rows.value[index];
+  if (!row) return;
+  const current = row.expected ?? '';
+  const at =
+    expectedCursor.index === index
+      ? { start: expectedCursor.start, end: expectedCursor.end }
+      : { start: current.length, end: current.length };
+  updateRow(
+    index,
+    'expected',
+    `${current.slice(0, at.start)}${text}${current.slice(at.end)}`,
+  );
+  expectedCursor.index = -1;
+}
+
+function openVariableInsert(index: number) {
+  insertRowIndex.value = index;
+  insertVariableName.value =
+    variableOptions.value.find((item) => !item.disabled)?.value ?? '';
+  variableInsertOpen.value = true;
+}
+
+function insertVariableExpression() {
+  if (!insertVariableName.value) return message.warning('请选择变量');
+  insertExpectedText(insertRowIndex.value, variableInsertPreview.value);
+  variableInsertOpen.value = false;
 }
 
 async function openFunctionInsert(index: number) {
@@ -258,18 +351,7 @@ function insertFunctionExpression() {
   const index = insertRowIndex.value;
   const row = rows.value[index];
   if (!row) return;
-  const expression = functionInsertPreview.value;
-  const current = row.expected ?? '';
-  const at =
-    expectedCursor.index === index
-      ? { start: expectedCursor.start, end: expectedCursor.end }
-      : { start: current.length, end: current.length };
-  updateRow(
-    index,
-    'expected',
-    `${current.slice(0, at.start)}${expression}${current.slice(at.end)}`,
-  );
-  expectedCursor.index = -1;
+  insertExpectedText(index, functionInsertPreview.value);
   functionInsertOpen.value = false;
 }
 </script>
@@ -300,7 +382,7 @@ function insertFunctionExpression() {
 .assertion-rows-head,
 .assertion-row {
   display: grid;
-  grid-template-columns: minmax(88px, 1fr) 118px 78px minmax(96px, 1.1fr) minmax(72px, 0.9fr) 64px;
+  grid-template-columns: minmax(88px, 1fr) 118px 78px minmax(96px, 1.1fr) minmax(112px, 0.9fr) 64px;
   align-items: center;
   gap: 0;
 }
@@ -336,7 +418,7 @@ function insertFunctionExpression() {
 
 .assertion-row {
   border-bottom: 1px solid #f2f4f7;
-  min-width: 720px;
+  min-width: 760px;
 }
 
 .assertion-row:last-child {
@@ -395,6 +477,12 @@ function insertFunctionExpression() {
   min-width: 0;
 }
 
+.assertion-expected-action {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.assertion-expected-var-btn,
 .assertion-expected-fn-btn {
   flex-shrink: 0;
   width: 22px;
@@ -403,9 +491,14 @@ function insertFunctionExpression() {
   color: #667085;
 }
 
+.assertion-expected-var-btn:hover,
 .assertion-expected-fn-btn:hover {
   color: #7f1d1d;
   background: #fef2f2;
+}
+
+.assertion-expected-var-btn:disabled {
+  color: #d0d5dd;
 }
 
 .function-option-name { font-weight: 500; }

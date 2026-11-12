@@ -196,6 +196,8 @@ export interface ApiRunItemRow {
   id: string;
   caseId: string;
   caseTitle: string;
+  /** 执行当时的案例编号，旧执行记录可能为空 */
+  caseNo?: string | null;
   status: ApiRunItemStatus;
   durationMs: number;
   requestSnapshot: Record<string, unknown>;

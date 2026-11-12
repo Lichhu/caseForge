@@ -3,6 +3,7 @@ import type {
   ApiCaseExpected,
   ApiCaseExport,
   AssertionResult,
+  AssertionValueSource,
 } from "@case-forge/shared";
 import { isDbExportSource } from "@case-forge/shared";
 import { JSONPath } from "jsonpath-plus";
@@ -19,6 +20,8 @@ export interface AssertionRunInput {
   /** 响应耗时（毫秒），预留用于未来 duration 断言类型 */
   durationMs: number;
   polarity?: "positive" | "negative";
+  /** 与 expected.assertions 同序的期望值来源，用于执行结果追溯 SQL/共享变量 */
+  expectedSources?: Array<AssertionValueSource | undefined>;
 }
 
 export function extractResponseValue(
@@ -242,6 +245,7 @@ function evaluateJmespath(body: unknown, expression: string): unknown {
 function runSingleAssertion(
   assertion: ApiAssertion,
   input: AssertionRunInput,
+  expectedSource?: AssertionValueSource,
 ): AssertionResult {
   const name =
     assertion.description ||
@@ -400,6 +404,7 @@ function runSingleAssertion(
     passed,
     expected: expectedDisplay,
     actual,
+    ...(expectedSource ? { expectedSource } : {}),
     message: passed ? undefined : "断言未通过",
   };
 }
@@ -422,7 +427,9 @@ export function runAssertions(input: AssertionRunInput): AssertionResult[] {
       },
     ];
   }
-  return assertions.map((a) => runSingleAssertion(a, input));
+  return assertions.map((a, index) =>
+    runSingleAssertion(a, input, input.expectedSources?.[index]),
+  );
 }
 
 export function isAllPassed(assertions: AssertionResult[]) {

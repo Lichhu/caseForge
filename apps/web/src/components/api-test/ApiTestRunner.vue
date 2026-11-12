@@ -287,6 +287,9 @@
                               {{ record.caseTitle || '未命名案例' }}
                             </span>
                           </template>
+                          <template v-else-if="column.key === 'caseNo'">
+                            <span class="exec-run-case-no" :title="runItemCaseNo(record)">{{ runItemCaseNo(record) }}</span>
+                          </template>
                           <template v-else-if="column.key === 'status'">
                             <span class="exec-run-status-pill" :class="`exec-run-status-pill--${record.status}`">
                               {{ runItemStatusLabel(record.status) }}
@@ -503,7 +506,7 @@ import type { ApiCaseRequest, ApiCaseStep } from '@case-forge/shared';
 import ApiEnvironmentMaintainModal from '@/components/api-test/ApiEnvironmentMaintainModal.vue';
 import ApiRunSnapshotTabs from '@/components/api-test/ApiRunSnapshotTabs.vue';
 import { useApiTestStore } from '@/stores/apiTest';
-import type { ApiRunDetail, ApiTestCaseRow } from '@/api/apiTestClient';
+import type { ApiRunDetail, ApiRunItemRow, ApiTestCaseRow } from '@/api/apiTestClient';
 import { listAllApiCases, listApiCases } from '@/api/apiTestClient';
 
 const apiStore = useApiTestStore();
@@ -643,6 +646,13 @@ const itemColumns = [
       onClick: () => toggleRunItemExpand(record.id),
     }),
   },
+  {
+    title: '案例编号',
+    dataIndex: 'caseNo',
+    key: 'caseNo',
+    width: 168,
+    ellipsis: true,
+  },
   { title: '状态', dataIndex: 'status', key: 'status', width: 96 },
   { title: '耗时', dataIndex: 'durationMs', key: 'durationMs', width: 88, align: 'right' as const },
   { title: '操作', key: 'actions', width: 96, align: 'center' as const },
@@ -684,6 +694,17 @@ function runItemSteps(record: { requestSnapshot?: unknown }): RunStepSnapshot[] 
   const snapshot = record.requestSnapshot as { steps?: unknown } | null | undefined;
   const steps = snapshot?.steps;
   return Array.isArray(steps) ? (steps as RunStepSnapshot[]) : [];
+}
+
+/** 执行记录里的案例编号：优先用执行时落库的编号，旧记录回退到当前执行列表 */
+const runnerCaseNoById = computed(
+  () => new Map(apiStore.runnerCases.map((item) => [item.id, item.caseNo ?? ''])),
+);
+
+function runItemCaseNo(record: ApiRunItemRow) {
+  return (
+    record.caseNo?.trim() || runnerCaseNoById.value.get(record.caseId) || '—'
+  );
 }
 
 function onLinkedExpand(expanded: boolean, record: { id: string }) {
@@ -2023,6 +2044,12 @@ onActivated(() => {
 .exec-run-case-title {
   color: #344054;
   font-weight: 500;
+}
+
+.exec-run-case-no {
+  color: #667085;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .exec-run-duration {
