@@ -1,8 +1,16 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
 export interface AuthTokenClaims {
   sub: string;
   userName: string;
+  /** 会话唯一标识，对应 JWT jti，用于串联登录、退出和代登录事件。 */
+  jti?: string;
+  /** 代登录时保留的原始操作人。 */
+  actorUserName?: string;
+  /** 原始操作人本地登录态到期时间（秒）。 */
+  actorExpiresAt?: number;
+  /** 当前代登录开始时间（秒）。 */
+  impersonationStartedAt?: number;
   iss: string;
   aud: string;
   iat: number;
@@ -16,12 +24,19 @@ export interface SignAuthTokenInput {
   audience: string;
   nowMs?: number;
   durationMs: number;
+  /** 自定义会话 ID；不传时自动生成 UUID。 */
+  sessionId?: string;
+  actorUserName?: string;
+  actorExpiresAtSeconds?: number;
+  impersonationStartedAtSeconds?: number;
 }
 
 export interface SignedAuthToken {
   token: string;
   issuedAt: Date;
   expiresAt: Date;
+  /** 写入 JWT jti 的会话 ID。 */
+  sessionId: string;
 }
 
 export interface VerifyAuthTokenInput {
@@ -43,10 +58,28 @@ export function signAuthToken(input: SignAuthTokenInput): SignedAuthToken {
     throw new Error("JWT 有效期必须大于 0");
   }
 
+  const sessionId = input.sessionId ?? randomUUID();
   const header = encodeJson({ alg: "HS256", typ: "JWT" });
+  if (
+    input.actorUserName &&
+    (!Number.isInteger(input.actorExpiresAtSeconds) ||
+      (input.actorExpiresAtSeconds as number) < expiresAtSeconds ||
+      !Number.isInteger(input.impersonationStartedAtSeconds) ||
+      (input.impersonationStartedAtSeconds as number) > issuedAtSeconds)
+  ) {
+    throw new Error("代登录 JWT 声明无效");
+  }
   const payload = encodeJson({
     sub: input.userName,
     userName: input.userName,
+    jti: sessionId,
+    ...(input.actorUserName
+      ? {
+          actorUserName: input.actorUserName,
+          actorExpiresAt: input.actorExpiresAtSeconds,
+          impersonationStartedAt: input.impersonationStartedAtSeconds,
+        }
+      : {}),
     iss: input.issuer,
     aud: input.audience,
     iat: issuedAtSeconds,
@@ -61,6 +94,7 @@ export function signAuthToken(input: SignAuthTokenInput): SignedAuthToken {
     token: `${signingInput}.${signature}`,
     issuedAt: new Date(issuedAtSeconds * 1000),
     expiresAt: new Date(expiresAtSeconds * 1000),
+    sessionId,
   };
 }
 
@@ -92,10 +126,14 @@ export function verifyAuthToken(input: VerifyAuthTokenInput): AuthTokenClaims {
   const payload = decodeJsonObject(encodedPayload);
   const sub = payload.sub;
   const userName = payload.userName;
+  const sessionId = typeof payload.jti === "string" ? payload.jti : undefined;
   const issuer = payload.iss;
   const audience = payload.aud;
   const issuedAt = payload.iat;
   const expiresAt = payload.exp;
+  const actorUserName = payload.actorUserName;
+  const actorExpiresAt = payload.actorExpiresAt;
+  const impersonationStartedAt = payload.impersonationStartedAt;
   if (
     typeof sub !== "string" ||
     typeof userName !== "string" ||
@@ -113,6 +151,21 @@ export function verifyAuthToken(input: VerifyAuthTokenInput): AuthTokenClaims {
 
   const nowSeconds = Math.floor((input.nowMs ?? Date.now()) / 1000);
   const clockSkewSeconds = input.clockSkewSeconds ?? 30;
+  const hasImpersonationClaims =
+    actorUserName !== undefined ||
+    actorExpiresAt !== undefined ||
+    impersonationStartedAt !== undefined;
+  if (
+    hasImpersonationClaims &&
+    (typeof actorUserName !== "string" ||
+      actorUserName.length === 0 ||
+      !Number.isInteger(actorExpiresAt) ||
+      (actorExpiresAt as number) < (expiresAt as number) ||
+      !Number.isInteger(impersonationStartedAt) ||
+      (impersonationStartedAt as number) > (issuedAt as number))
+  ) {
+    throw new Error("JWT 代登录声明无效");
+  }
   if ((issuedAt as number) > nowSeconds + clockSkewSeconds) {
     throw new Error("JWT 签发时间无效");
   }
@@ -123,6 +176,14 @@ export function verifyAuthToken(input: VerifyAuthTokenInput): AuthTokenClaims {
   return {
     sub,
     userName,
+    ...(sessionId ? { jti: sessionId } : {}),
+    ...(hasImpersonationClaims
+      ? {
+          actorUserName: actorUserName as string,
+          actorExpiresAt: actorExpiresAt as number,
+          impersonationStartedAt: impersonationStartedAt as number,
+        }
+      : {}),
     iss: issuer,
     aud: audience,
     iat: issuedAt as number,
@@ -162,7 +223,9 @@ function encodeJson(value: Record<string, unknown>) {
 }
 
 function decodeJsonObject(segment: string): Record<string, unknown> {
-  const value = JSON.parse(decodeBase64Url(segment).toString("utf8")) as unknown;
+  const value = JSON.parse(
+    decodeBase64Url(segment).toString("utf8"),
+  ) as unknown;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("JWT 内容不是对象");
   }

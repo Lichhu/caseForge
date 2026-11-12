@@ -1,7 +1,12 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 import type { AuthSession } from "@case-forge/shared";
-import { fetchCurrentUser, logoutCurrentUser } from "@/api/auth";
+import {
+  exitImpersonation,
+  fetchCurrentUser,
+  logoutCurrentUser,
+  switchImpersonationUser,
+} from "@/api/auth";
 import {
   clearAuthSessionCache,
   readAuthSessionCache,
@@ -46,6 +51,16 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
+  async function switchUser(userName: string, reason?: string) {
+    session.value = await switchImpersonationUser(userName, reason);
+    writeAuthSessionCache(session.value);
+  }
+
+  async function exitImpersonatedSession() {
+    session.value = await exitImpersonation();
+    writeAuthSessionCache(session.value);
+  }
+
   function clearLocalSession() {
     session.value = null;
     clearAuthSessionCache();
@@ -60,6 +75,8 @@ export const useAuthStore = defineStore("auth", () => {
     refresh,
     restore,
     logout,
+    switchUser,
+    exitImpersonatedSession,
     clearLocalSession,
   };
 });

@@ -21,6 +21,15 @@ export function readAuthSessionCache(): AuthSession | null {
         : "";
     const expiresAt =
       typeof value.expiresAt === "string" ? Date.parse(value.expiresAt) : NaN;
+    const impersonatedBy =
+      typeof value.impersonatedBy === "string"
+        ? value.impersonatedBy.trim()
+        : "";
+    const impersonationStartedAt =
+      typeof value.impersonationStartedAt === "string" &&
+      Number.isFinite(Date.parse(value.impersonationStartedAt))
+        ? new Date(value.impersonationStartedAt).toISOString()
+        : undefined;
     if (!userName || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
       clearAuthSessionCache();
       return null;
@@ -28,6 +37,15 @@ export function readAuthSessionCache(): AuthSession | null {
     return {
       user: { userName },
       expiresAt: new Date(expiresAt).toISOString(),
+      canImpersonate: value.canImpersonate === true,
+      ...(impersonatedBy
+        ? {
+            impersonatedBy,
+            ...(impersonationStartedAt
+              ? { impersonationStartedAt }
+              : {}),
+          }
+        : {}),
     };
   } catch {
     clearAuthSessionCache();

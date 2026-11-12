@@ -18,6 +18,44 @@ export default (): AppConfig => ({
     sessionDurationMs: Number(
       process.env.AUTH_SESSION_DURATION_MS ?? 7 * 24 * 60 * 60 * 1000,
     ),
+    impersonationDurationMs: Number(
+      process.env.AUTH_IMPERSONATION_DURATION_MS ?? 8 * 60 * 60 * 1000,
+    ),
+    impersonationAdminUsers: (
+      process.env.AUTH_IMPERSONATION_ADMIN_USERS ?? "system"
+    )
+      .split(",")
+      .map((userName) => userName.trim())
+      .filter(Boolean),
+    auditAdminUsers: (process.env.AUTH_AUDIT_ADMIN_USERS ?? "system")
+      .split(",")
+      .map((userName) => userName.trim())
+      .filter(Boolean),
+    auditMaxQueryDays: Number(process.env.AUTH_AUDIT_MAX_QUERY_DAYS ?? 31),
+    auditMaxExportRows: Number(
+      process.env.AUTH_AUDIT_MAX_EXPORT_ROWS ?? 100000,
+    ),
+    auditRetentionDays: Number(process.env.AUTH_AUDIT_RETENTION_DAYS ?? 180),
+    auditArchiveRetentionDays: Number(
+      process.env.AUTH_AUDIT_ARCHIVE_RETENTION_DAYS ?? 730,
+    ),
+    auditSummaryIntervalMs: Number(
+      process.env.AUTH_AUDIT_SUMMARY_INTERVAL_MS ?? 5 * 60 * 1000,
+    ),
+    auditPartitionIntervalMs: Number(
+      process.env.AUTH_AUDIT_PARTITION_INTERVAL_MS ?? 6 * 60 * 60 * 1000,
+    ),
+    auditExportDir:
+      process.env.AUTH_AUDIT_EXPORT_DIR ?? ".data/auth-audit-exports",
+    auditExportRetentionDays: Number(
+      process.env.AUTH_AUDIT_EXPORT_RETENTION_DAYS ?? 7,
+    ),
+    auditExportWarnBytes: Number(
+      process.env.AUTH_AUDIT_EXPORT_WARN_BYTES ?? 5 * 1024 * 1024 * 1024,
+    ),
+    auditPartitionAheadMonths: Number(
+      process.env.AUTH_AUDIT_PARTITION_AHEAD_MONTHS ?? 6,
+    ),
     cookieName: process.env.AUTH_COOKIE_NAME ?? "caseforge_auth",
     cookieSecure: process.env.AUTH_COOKIE_SECURE === "true",
     ticketValidateTimeoutMs: Number(

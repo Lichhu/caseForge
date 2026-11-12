@@ -20,6 +20,8 @@ export class HttpAccessLogMiddleware implements NestMiddleware {
     }
 
     const userName = RequestContext.getUserName();
+    const actorUserName = RequestContext.getActorUserName();
+    const requestId = RequestContext.getRequestId();
     const ip =
       (req.headers["x-forwarded-for"] as string | undefined)
         ?.split(",")[0]
@@ -37,7 +39,9 @@ export class HttpAccessLogMiddleware implements NestMiddleware {
           : "";
 
       this.logger.verbose(
-        `${method} ${path} ${status} ${durationMs}ms user=${userName} ip=${ip}${size}`,
+        `${method} ${path} ${status} ${durationMs}ms user=${userName}${
+          actorUserName !== userName ? ` actor=${actorUserName}` : ""
+        } ip=${ip}${size}${requestId ? ` req=${requestId}` : ""}`,
       );
     });
 

@@ -24,7 +24,11 @@ export class UserContextMiddleware implements NestMiddleware {
 
     try {
       const session = this.authService.readSession(req.headers.cookie);
-      RequestContext.run(session.user.userName, () => next());
+      RequestContext.run(
+        session.user.userName,
+        () => next(),
+        session.impersonatedBy,
+      );
     } catch {
       next(new UnauthorizedException("登录状态无效或已过期"));
     }

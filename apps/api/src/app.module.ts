@@ -3,7 +3,7 @@
  */
 import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
 import { UserContextMiddleware } from "./common/audit/user-context.middleware";
-import { HttpAccessLogMiddleware } from "./common/http";
+import { HttpAccessLogMiddleware, RequestIdMiddleware } from "./common/http";
 import { ConfigModule } from "@nestjs/config";
 import configuration from "@config/configuration";
 import { getNestEnvFilePaths } from "@config/load-env";
@@ -20,6 +20,8 @@ import { NotifyModule } from "./common/notify";
 import { TypeormModule } from "./common/typeorm";
 import { TestPlatformModule } from "./common/test-platform";
 import { AuthModule } from "@auth/index";
+import { AuthAuditAdminModule } from "@auth/auth-audit-admin.module";
+import { ImpersonationModule } from "@auth/impersonation.module";
 
 @Module({
   imports: [
@@ -30,6 +32,8 @@ import { AuthModule } from "@auth/index";
     }),
     TypeormModule,
     AuthModule,
+    AuthAuditAdminModule,
+    ImpersonationModule,
     TestPlatformModule,
     MinioStorageModule,
     AiWorkflowModule,
@@ -48,7 +52,7 @@ import { AuthModule } from "@auth/index";
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer
-      .apply(UserContextMiddleware, HttpAccessLogMiddleware)
+      .apply(RequestIdMiddleware, UserContextMiddleware, HttpAccessLogMiddleware)
       .forRoutes("*");
   }
 }

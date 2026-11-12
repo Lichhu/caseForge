@@ -165,3 +165,4 @@ export * from './struct-doc';
 
 export * from "./api-case-management";
 export * from "./auth";
+export * from "./auth-audit";

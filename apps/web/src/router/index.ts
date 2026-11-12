@@ -1,4 +1,8 @@
 import { createRouter, createWebHistory } from "vue-router";
+import {
+  rememberPlatform,
+  resolvePlatformFromPath,
+} from "@/constants/platform";
 import { useAuthStore } from "@/stores/auth";
 
 const CaseForgeDashboardView = () =>
@@ -7,6 +11,7 @@ const ApiTestDashboardView = () => import("@/views/ApiTestDashboardView.vue");
 const RequirementPlatformView = () =>
   import("@/views/RequirementPlatformView.vue");
 const CaseManagementView = () => import("@/views/CaseManagementView.vue");
+const AuthAuditView = () => import("@/views/AuthAuditView.vue");
 const LoginRequiredView = () => import("@/views/LoginRequiredView.vue");
 
 const router = createRouter({
@@ -29,6 +34,12 @@ const router = createRouter({
       meta: { platform: "api-test", title: "智能接口测试平台" },
     },
     { path: "/api-test/cases", redirect: "/api-test/preproduction" },
+    {
+      path: "/system/auth-audit",
+      name: "auth-audit",
+      component: AuthAuditView,
+      meta: { platform: "case-forge", title: "登录审计", requiresAudit: true },
+    },
     {
       path: "/login-required",
       name: "login-required",
@@ -69,10 +80,17 @@ router.beforeEach(async (to) => {
       replace: true,
     };
   }
+  if (to.meta.requiresAudit && !auth.session?.canAudit) {
+    return { path: "/case-forge", replace: true };
+  }
   return true;
 });
 
 router.afterEach((to) => {
+  const platform = resolvePlatformFromPath(to.path);
+  if (platform) {
+    rememberPlatform(platform.id);
+  }
   const title = (to.meta.title as string) || "CaseForge";
   document.title = title;
 });

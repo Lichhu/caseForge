@@ -52,6 +52,33 @@ describe("UserContextMiddleware", () => {
     expect(readSession).toHaveBeenCalledWith("caseforge_auth=valid-token");
   });
 
+  it("keeps the original actor while running as the impersonated user", () => {
+    readSession.mockReturnValue({
+      user: { userName: "alice" },
+      expiresAt: "2026-11-13T00:00:00.000Z",
+      canImpersonate: true,
+      impersonatedBy: "system",
+    });
+    const next = jest.fn(() => {
+      const { RequestContext } = jest.requireActual("./request-context");
+      expect(RequestContext.getUserName()).toBe("alice");
+      expect(RequestContext.getActorUserName()).toBe("system");
+    });
+
+    middleware.use(
+      {
+        headers: { cookie: "caseforge_auth=valid-token" },
+        query: {},
+        url: "/api/v1/case-forge",
+        originalUrl: "/api/v1/case-forge",
+      } as never,
+      {} as never,
+      next,
+    );
+
+    expect(next).toHaveBeenCalledWith();
+  });
+
   it("keeps authentication routes public", () => {
     const next = run({}, "/api/v1/auth/sso/callback?ticket=ticket-value");
     expect(next).toHaveBeenCalledWith();

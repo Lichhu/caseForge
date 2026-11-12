@@ -18,6 +18,32 @@ export interface AppConfig {
     jwtAudience: string;
     /** 本地登录态有效期（毫秒） */
     sessionDurationMs: number;
+    /** 单次代登录最长有效期（毫秒） */
+    impersonationDurationMs: number;
+    /** 允许切换账号的原始登录账号 */
+    impersonationAdminUsers: string[];
+    /** 允许查询/导出登录审计的管理员账号 */
+    auditAdminUsers: string[];
+    /** 登录审计交互查询允许的最大时间范围（天） */
+    auditMaxQueryDays: number;
+    /** 单次登录审计导出允许的最大行数 */
+    auditMaxExportRows: number;
+    /** 登录审计在线保留天数，超过后进入归档 */
+    auditRetentionDays: number;
+    /** 登录审计归档保留天数，超过后删除分区 */
+    auditArchiveRetentionDays: number;
+    /** 日汇总任务执行间隔（毫秒），0 表示关闭定时任务 */
+    auditSummaryIntervalMs: number;
+    /** 分区维护任务执行间隔（毫秒），0 表示关闭定时任务 */
+    auditPartitionIntervalMs: number;
+    /** 登录审计导出文件落盘目录 */
+    auditExportDir: string;
+    /** 导出文件保留天数，超期由维护任务清理 */
+    auditExportRetentionDays: number;
+    /** 导出目录占用告警阈值（字节） */
+    auditExportWarnBytes: number;
+    /** 分区维护时预创建的未来月份数 */
+    auditPartitionAheadMonths: number;
     cookieName: string;
     /** HTTP 环境保持 false；切换 HTTPS 后应设为 true */
     cookieSecure: boolean;

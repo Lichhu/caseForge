@@ -34,6 +34,7 @@ export class SchemaPatchService implements OnModuleInit {
     await this.backfillLegacyApiRequirements();
     await this.migrateLegacyRequirementStatusToTesting();
     await this.ensureNotifyMessageTable();
+    await this.ensureAuthAuditTables();
     await migrateStructDocProjectIndex(this.dataSource);
     await ensureCaseEditorUtf8mb4TextColumns(this.dataSource, this.logger);
     await applyApiTestSchemaMigrations(this.dataSource);
@@ -515,6 +516,129 @@ export class SchemaPatchService implements OnModuleInit {
     this.logger.log("notify_message 表已创建");
   }
 
+  /** 登录审计原始表、日汇总表、导出任务表和归档表。 */
+  private async ensureAuthAuditTables() {
+    await this.dataSource.query(`
+      CREATE TABLE IF NOT EXISTS auth_event_log (
+        id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+        occurred_at DATETIME(3) NOT NULL COMMENT '事件发生时间，统一使用 UTC',
+        event_type VARCHAR(32) CHARACTER SET ascii NOT NULL,
+        user_name VARCHAR(255) NULL COMMENT '登录或操作的目标账号',
+        actor_user_name VARCHAR(255) NULL COMMENT '原始操作人，代登录时为 system',
+        client_ip VARBINARY(16) NULL COMMENT 'IPv4/IPv6 规范化二进制地址',
+        session_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+        request_id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+        source_app VARCHAR(64) CHARACTER SET ascii NULL COMMENT 'SSO、本地 JWT 等来源',
+        user_agent VARCHAR(512) NULL,
+        failure_code VARCHAR(64) CHARACTER SET ascii NULL,
+        reason VARCHAR(200) NULL COMMENT '代登录原因或失败说明摘要',
+        metadata JSON NULL COMMENT '扩展字段，不参与索引',
+        PRIMARY KEY (occurred_at, id),
+        KEY idx_auth_event_user_time (user_name, occurred_at, id),
+        KEY idx_auth_event_ip_time (client_ip, occurred_at, id),
+        KEY idx_auth_event_type_time (event_type, occurred_at, id),
+        KEY idx_auth_event_request (request_id, occurred_at),
+        KEY idx_auth_event_session (session_id, occurred_at, id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        COMMENT='统一认证与代登录审计原始事件'
+    `);
+
+    await this.dataSource.query(`
+      CREATE TABLE IF NOT EXISTS auth_event_log_archive LIKE auth_event_log
+    `);
+
+    await this.dataSource.query(`
+      CREATE TABLE IF NOT EXISTS auth_event_daily_stat (
+        stat_date DATE NOT NULL COMMENT 'UTC 日期',
+        event_type VARCHAR(32) CHARACTER SET ascii NOT NULL,
+        event_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+          ON UPDATE CURRENT_TIMESTAMP(3),
+        PRIMARY KEY (stat_date, event_type)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        COMMENT='认证审计日汇总'
+    `);
+
+    await this.dataSource.query(`
+      CREATE TABLE IF NOT EXISTS auth_audit_export (
+        id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
+        status ENUM('pending','running','completed','failed') NOT NULL DEFAULT 'pending',
+        query_from DATETIME(3) NOT NULL,
+        query_to DATETIME(3) NOT NULL,
+        filters JSON NULL,
+        total_rows INT UNSIGNED NOT NULL DEFAULT 0,
+        file_name VARCHAR(255) NULL,
+        file_path VARCHAR(500) NULL,
+        error_message VARCHAR(1000) NULL,
+        requested_by VARCHAR(255) NOT NULL,
+        created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        started_at DATETIME(3) NULL,
+        finished_at DATETIME(3) NULL,
+        KEY idx_auth_audit_export_status_created (status, created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        COMMENT='登录审计异步导出任务'
+    `);
+
+    await this.ensureAuthAuditPartitioning();
+  }
+
+  /** 按月分区；首次启动时直接改造，后续由维护任务预建未来分区。 */
+  private async ensureAuthAuditPartitioning() {
+    const partitions: Array<{
+      PARTITION_NAME: string | null;
+      PARTITION_DESCRIPTION: string | null;
+    }> = await this.dataSource.query(
+      `SELECT PARTITION_NAME, PARTITION_DESCRIPTION
+       FROM information_schema.PARTITIONS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'auth_event_log'
+       ORDER BY PARTITION_ORDINAL_POSITION`,
+    );
+    if (partitions.some((row) => row.PARTITION_NAME)) {
+      return;
+    }
+
+    const now = new Date();
+    const currentMonth = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+    );
+    const definitions: string[] = [];
+    for (let offset = 0; offset <= 6; offset += 1) {
+      const monthStart = new Date(
+        Date.UTC(
+          currentMonth.getUTCFullYear(),
+          currentMonth.getUTCMonth() + offset,
+          1,
+        ),
+      );
+      const boundary = new Date(
+        Date.UTC(
+          monthStart.getUTCFullYear(),
+          monthStart.getUTCMonth() + 1,
+          1,
+        ),
+      );
+      const name = `p${monthStart.getUTCFullYear()}${String(
+        monthStart.getUTCMonth() + 1,
+      ).padStart(2, "0")}`;
+      definitions.push(
+        `PARTITION ${name} VALUES LESS THAN ('${formatUtcDateTime(boundary)}')`,
+      );
+    }
+    definitions.push("PARTITION p_future VALUES LESS THAN (MAXVALUE)");
+
+    try {
+      await this.dataSource.query(
+        `ALTER TABLE auth_event_log PARTITION BY RANGE COLUMNS (occurred_at) (${definitions.join(
+          ", ",
+        )})`,
+      );
+      this.logger.log("auth_event_log 已启用按月分区");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`auth_event_log 分区初始化失败，将在维护任务中重试: ${message}`);
+    }
+  }
+
   /**
    * 修复历史数据：createEnvironment 等方法曾误用 auditFieldsForUpdate()，
    * 导致 createdBy 回退为 'system' 而非实际用户。用 modifiedBy 修复 createdBy。
@@ -545,4 +669,8 @@ export class SchemaPatchService implements OnModuleInit {
       }
     }
   }
+}
+
+function formatUtcDateTime(value: Date) {
+  return value.toISOString().slice(0, 19).replace("T", " ");
 }

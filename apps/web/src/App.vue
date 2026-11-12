@@ -37,7 +37,8 @@ const isPlatformRoute = computed(
     route.name === 'api-test' ||
     route.name === 'requirement-platform' ||
     route.name === 'preproduction-management' ||
-    route.name === 'case-management',
+    route.name === 'case-management' ||
+    route.name === 'auth-audit',
 );
 const isLoginRoute = computed(() => route.name === 'login-required');
 const current = computed(() => getPlatformByRoute(route));
