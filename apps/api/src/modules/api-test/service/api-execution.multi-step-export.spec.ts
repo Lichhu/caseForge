@@ -7,6 +7,7 @@ describe("多步骤案例变量提取", () => {
       id: "case-1",
       projectId: "p1",
       title: "等额本金验证",
+      caseNo: "PCBS03901001-C01",
       steps: [
         {
           id: "step-1",
@@ -147,7 +148,7 @@ describe("多步骤案例变量提取", () => {
       }),
     );
     expect(runItemRepo.save).toHaveBeenCalledWith([
-      expect.objectContaining({ status: "passed" }),
+      expect.objectContaining({ status: "passed", caseNo: "PCBS03901001-C01" }),
     ]);
   });
 });

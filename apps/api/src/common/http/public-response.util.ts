@@ -298,6 +298,7 @@ export function toPublicApiRunItem(item: ApiTestRunItemEntity) {
     id: item.id,
     caseId: item.caseId,
     caseTitle: item.caseTitle,
+    caseNo: item.caseNo ?? null,
     status: item.status,
     durationMs: item.durationMs,
     requestSnapshot: item.requestSnapshot,

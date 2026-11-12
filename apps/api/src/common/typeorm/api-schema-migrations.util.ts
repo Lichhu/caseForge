@@ -725,6 +725,14 @@ async function ensureRunnerPlatformColumns(runner: Queryable) {
       "ALTER TABLE api_test_run ADD COLUMN versionCode VARCHAR(32) NULL",
     );
   }
+  if (
+    (await tableExists(runner, "api_test_run_item")) &&
+    !(await columnExists(runner, "api_test_run_item", "caseNo"))
+  ) {
+    await runner.query(
+      "ALTER TABLE api_test_run_item ADD COLUMN caseNo VARCHAR(64) NULL AFTER caseTitle",
+    );
+  }
 }
 
 async function ensureExecutionPlatformTables(runner: Queryable) {

@@ -383,12 +383,24 @@ export interface ApiEndpointPayload {
   tags?: string[];
 }
 
+/** 断言期望值的数据来源，用于执行结果里追溯变量/SQL 查询。 */
+export interface AssertionValueSource {
+  /** data_function：数据函数；variable：共享变量；mixed：两者混用 */
+  kind: "data_function" | "variable" | "mixed";
+  /** 面向用户的来源摘要，如「SQL 查询函数 GET_CUST_NO」「orderNo（SQL 步骤「查询订单」）」 */
+  label: string;
+  /** 解析前的原始期望值模板，如 "${GET_CUST_NO($.custNo)}" */
+  expression?: string;
+}
+
 export interface AssertionResult {
   name: string;
   passed: boolean;
   expected: unknown;
   actual: unknown;
   message?: string;
+  /** 期望值解析前的来源信息；纯字面量断言没有该字段 */
+  expectedSource?: AssertionValueSource;
 }
 
 /** 案例最近一次调试执行快照，存入 metadata.lastDebugRun */

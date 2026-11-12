@@ -904,6 +904,7 @@
                     v-model:rows="form.assertionRows"
                     :protocol="form.protocol"
                     :project-id="projectId"
+                    :variable-options="sharedVariableOptions"
                     class="case-debug-assertion-editor"
                   />
                 </div>

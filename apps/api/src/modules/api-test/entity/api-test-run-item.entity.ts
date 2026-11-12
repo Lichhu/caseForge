@@ -34,6 +34,9 @@ export class ApiTestRunItemEntity extends SoftDeletableEntity {
   @Column()
   caseTitle: string;
 
+  @Column({ length: 64, nullable: true })
+  caseNo?: string;
+
   @Column({ length: 16 })
   status: ApiRunItemStatus;
 

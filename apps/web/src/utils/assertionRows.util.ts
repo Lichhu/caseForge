@@ -15,6 +15,14 @@ export interface AssertionRow {
   expected: string;
 }
 
+/** 断言期望值「插入变量」的候选：来自前序步骤导出或跨案例引用 */
+export interface AssertionVariableOption {
+  value: string;
+  label: string;
+  /** 同一并发组内提取的变量不可引用 */
+  disabled?: boolean;
+}
+
 export const ASSERTION_TYPE_OPTIONS: Array<{
   value: AssertionType;
   label: string;

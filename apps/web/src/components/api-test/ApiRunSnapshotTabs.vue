@@ -94,6 +94,29 @@
             <div>
               <span>期望值</span>
               <pre>{{ formatRunSnapshotField(assertion.expected) }}</pre>
+              <div
+                v-if="assertion.expectedSource"
+                class="exec-run-assertion-source"
+              >
+                <span class="exec-run-assertion-source-label">数据来源</span>
+                <a-tooltip
+                  :title="
+                    assertion.expectedSource.expression ||
+                    assertion.expectedSource.label
+                  "
+                >
+                  <span class="exec-run-assertion-source-value">
+                    {{ assertion.expectedSource.label }}
+                  </span>
+                </a-tooltip>
+                <code
+                  v-if="assertion.expectedSource.expression"
+                  class="exec-run-assertion-source-expression"
+                  :title="assertion.expectedSource.expression"
+                >
+                  {{ assertion.expectedSource.expression }}
+                </code>
+              </div>
             </div>
             <div>
               <span>实际值</span>
@@ -108,6 +131,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import type { AssertionValueSource } from '@case-forge/shared';
 import {
   formatRunSnapshotField,
   splitRunSnapshotForDisplay,
@@ -118,15 +142,22 @@ export interface RunSnapshotAssertion {
   passed: boolean;
   expected?: unknown;
   actual?: unknown;
+  expectedSource?: AssertionValueSource;
 }
 
-const props = defineProps<{
-  requestSnapshot?: unknown;
-  responseSnapshot?: unknown;
-  assertions?: RunSnapshotAssertion[];
-  showSnapshots?: boolean;
-  dense?: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    requestSnapshot?: unknown;
+    responseSnapshot?: unknown;
+    assertions?: RunSnapshotAssertion[];
+    showSnapshots?: boolean;
+    dense?: boolean;
+  }>(),
+  {
+    // Boolean prop 未传入时 Vue 会转换为 false，这里显式默认展示快照
+    showSnapshots: true,
+  },
+);
 
 const requestParts = computed(() => splitSnapshot(props.requestSnapshot));
 const responseParts = computed(() => splitSnapshot(props.responseSnapshot));
@@ -343,6 +374,48 @@ function splitSnapshot(value: unknown) {
 .exec-run-assertion-item.failed .exec-run-assertion-values > div:last-child pre {
   border-color: #fecdca;
   background: #fef3f2;
+}
+
+.exec-run-assertion-source {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin-top: 6px;
+  color: #667085;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.exec-run-assertion-source-label {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #f2f4f7;
+  color: #475467;
+}
+
+.exec-run-assertion-source-value {
+  min-width: 0;
+  overflow: hidden;
+  color: #175cd3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exec-run-assertion-source-expression {
+  flex-basis: 100%;
+  min-width: 0;
+  overflow: hidden;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #f9fafb;
+  color: #667085;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .exec-run-status-pill {

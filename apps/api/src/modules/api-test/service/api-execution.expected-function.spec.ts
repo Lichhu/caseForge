@@ -43,16 +43,23 @@ function buildService() {
       return walk(value);
     },
   );
+  const describeFunctions = jest.fn().mockResolvedValue([
+    {
+      name: "DB_BALANCE",
+      type: "sql",
+      description: "按账号查询余额",
+    },
+  ]);
   const service = new ApiExecutionService(
     caseRepo as never,
     runRepo as never,
     runItemRepo as never,
     environmentService as never,
     {} as never,
-    { resolveDeep } as never,
+    { resolveDeep, describeFunctions } as never,
     {} as never,
   );
-  return { service, resolveDeep };
+  return { service, resolveDeep, describeFunctions };
 }
 
 function mockFetch(body: unknown, status = 200) {
@@ -93,6 +100,11 @@ describe("断言期望值数据函数解析", () => {
       expect(result.assertions).toHaveLength(1);
       expect(result.assertions[0].passed).toBe(true);
       expect(result.assertions[0].expected).toBe("42.00");
+      expect(result.assertions[0].expectedSource).toEqual({
+        kind: "data_function",
+        label: "SQL 查询函数 DB_BALANCE（按账号查询余额）",
+        expression: "${DB_BALANCE($.acctNo)}",
+      });
       // 期望值解析调用携带已解析请求作为 $. 参数取值根
       const expectedCall = resolveDeep.mock.calls.find(([, value]) =>
         JSON.stringify(value).includes("${DB_BALANCE"),

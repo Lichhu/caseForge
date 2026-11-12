@@ -326,6 +326,23 @@ export class ApiDataFunctionService {
       : publicRows;
     return allRows.map((row) => this.publicFunction(row, isDispatcher));
   }
+  /**
+   * 执行结果溯源用：只读地返回函数名、类型与介绍。
+   * 与 listFunctions 不同，这里不会补建内置函数，避免执行链路产生副作用。
+   */
+  async describeFunctions(): Promise<
+    Array<{ name: string; type: string; description: string }>
+  > {
+    const rows = await this.functionRepo.find({
+      order: { updatedAt: "DESC" },
+    });
+    return this.uniqueByName(rows).map((row) => ({
+      name: row.name,
+      type: row.type,
+      description: row.description ?? "",
+    }));
+  }
+
   async saveFunction(
     projectId: string,
     body: SaveDataFunctionDto,

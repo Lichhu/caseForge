@@ -256,6 +256,8 @@
           v-model:rows="editor.assertionRows"
           :protocol="editor.protocol"
           :project-id="editorProjectId"
+          :variable-options="sharedVariableOptions"
+          variable-format="brace"
           class="case-debug-assertion-editor"
         />
       </div>
