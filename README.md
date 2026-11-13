@@ -51,7 +51,7 @@ caseForge/
 ├─ apps/
 │  ├─ api/              # NestJS 后端服务
 │  │  ├─ src/           # API、业务服务、AI 生成流程
-│  │  ├─ prisma/        # 后续数据库模型
+│  │  ├─ typeorm/        # 后续数据库模型
 │  │  └─ env/           # 环境变量示例
 │  └─ web/              # Vue 3 前端工作台
 │     └─ src/           # 页面、组件、状态管理、样式

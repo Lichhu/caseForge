@@ -10,7 +10,7 @@
  *   pnpm install --frozen-lockfile
  *   pnpm --filter @case-forge/shared build
  *   pnpm --filter @case-forge/api build
- *   pm2 start ecosystem.config.sit.js
+ *   pm2 start ecosystem.sit.config.js
  *   pm2 save && pm2 startup
  *
  * 其余环境变量（数据库 / MinIO / AI 接口等）从
