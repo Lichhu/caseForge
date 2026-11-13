@@ -6,6 +6,7 @@ import type {
 } from "@case-forge/shared";
 import { Logger } from "@nestjs/common";
 import { fetchTextFromUrl } from "@common/ai-workflow/util/workflow-input.util";
+import { AI_CHAT_SCENES } from "@common/ai-workflow/ai-chat-scenes";
 import type { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
 import type { ApiEndpointEntity } from "@api-test/entity/api-endpoint.entity";
 import {
@@ -213,7 +214,9 @@ export async function generateCasesWithPlan(
     `接口案例生成提示词${scenarioLabel}：总长 ${prompt.length}，字段 ${readiness.fieldCount} 个，场景 ${scenario.scenarioTextChars}${scenario.truncated ? "（已截断）" : ""}`,
   );
 
-  const { text } = await aiWorkflow.runWithAiChat(prompt);
+  const { text } = await aiWorkflow.runWithAiChat(prompt, undefined, {
+    scene: AI_CHAT_SCENES.API_CASE_PLAN,
+  });
   const items = aiWorkflow.parseJsonArray<AiCasePlanItem>(text) ?? [];
   if (!items.length) {
     throw new Error("AI 未返回可解析的案例计划 JSON");
@@ -486,7 +489,9 @@ export async function generateAssertionsFromResponse(
     );
   };
 
-  const first = await aiWorkflow.runWithAiChat(prompt);
+  const first = await aiWorkflow.runWithAiChat(prompt, undefined, {
+    scene: AI_CHAT_SCENES.API_ASSERTION,
+  });
   const assertions = parseAssertions(first.text);
   if (assertions.length) return assertions;
 
@@ -496,7 +501,9 @@ export async function generateAssertionsFromResponse(
     "上一次输出是空数组或未包含有效断言。请根据响应信息至少生成一条可执行断言。",
     "只输出非空 JSON 数组；每条断言必须包含有效的 type 和 operator。",
   ].join("\n");
-  const retry = await aiWorkflow.runWithAiChat(retryPrompt);
+  const retry = await aiWorkflow.runWithAiChat(retryPrompt, undefined, {
+    scene: AI_CHAT_SCENES.API_ASSERTION,
+  });
   const retriedAssertions = parseAssertions(retry.text);
   if (!retriedAssertions.length) {
     throw new Error("AI 两次均未生成有效断言（返回空数组或格式无效）");
