@@ -146,7 +146,7 @@ git pull   # 或替换部署目录
 pnpm install --frozen-lockfile
 pnpm --filter @case-forge/shared build
 pnpm --filter @case-forge/web build
-pnpm --filter @case-forge/api build
+pnpm --filter @case-forge/api build && pm2 restart caseforge-api && pm2 logs caseforge-api
 
 pm2 reload caseforge-api
 pm2 reload caseforge-web
