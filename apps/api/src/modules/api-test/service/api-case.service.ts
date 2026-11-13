@@ -9,6 +9,7 @@ import {
 import { InjectRepository } from "@nestjs/typeorm";
 import { DataSource, Repository, In } from "typeorm";
 import { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
+import { AI_CHAT_SCENES } from "@common/ai-workflow/ai-chat-scenes";
 import {
   auditFieldsForCreate,
   auditFieldsForUpdate,
@@ -666,7 +667,13 @@ export class ApiCaseService {
         );
         const partialResults = [];
         for (const prompt of prompts) {
-          const { text } = await this.aiWorkflow.runWithAiChat(prompt.prompt);
+          const { text } = await this.aiWorkflow.runWithAiChat(
+            prompt.prompt,
+            undefined,
+            {
+              scene: AI_CHAT_SCENES.API_SCENARIO_CASES,
+            },
+          );
           const parsed = parseScenarioAiResult(text);
           if (!parsed) throw new Error("AI 返回内容无法解析为场景结果 JSON");
           partialResults.push(

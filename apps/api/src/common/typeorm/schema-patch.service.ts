@@ -35,6 +35,7 @@ export class SchemaPatchService implements OnModuleInit {
     await this.migrateLegacyRequirementStatusToTesting();
     await this.ensureNotifyMessageTable();
     await this.ensureAuthAuditTables();
+    await this.ensureAiTokenUsageTable();
     await migrateStructDocProjectIndex(this.dataSource);
     await ensureCaseEditorUtf8mb4TextColumns(this.dataSource, this.logger);
     await applyApiTestSchemaMigrations(this.dataSource);
@@ -637,6 +638,43 @@ export class SchemaPatchService implements OnModuleInit {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(`auth_event_log 分区初始化失败，将在维护任务中重试: ${message}`);
     }
+  }
+
+  /** 本地/生产库未开 synchronize 时，补齐 ai_token_usage 表 */
+  private async ensureAiTokenUsageTable() {
+    const rows: Array<{ Tables_in_db?: string }> = await this.dataSource.query(
+      "SHOW TABLES LIKE 'ai_token_usage'",
+    );
+    if (rows.length > 0) {
+      return;
+    }
+
+    this.logger.warn("检测到缺少 ai_token_usage 表，正在自动执行 schema 补丁…");
+    await this.dataSource.query(`
+      CREATE TABLE ai_token_usage (
+        id CHAR(36) NOT NULL PRIMARY KEY,
+        scene VARCHAR(64) NOT NULL DEFAULT 'unknown' COMMENT '调用场景',
+        model VARCHAR(100) NOT NULL DEFAULT '' COMMENT '模型名称',
+        promptTokens INT NOT NULL DEFAULT 0 COMMENT '输入 token',
+        completionTokens INT NOT NULL DEFAULT 0 COMMENT '输出 token',
+        totalTokens INT NOT NULL DEFAULT 0 COMMENT '总 token',
+        usageSource ENUM('provider','estimated','none') NOT NULL DEFAULT 'provider' COMMENT 'token 数据来源',
+        inputChars INT NOT NULL DEFAULT 0 COMMENT '输入字符数',
+        outputChars INT NOT NULL DEFAULT 0 COMMENT '输出字符数',
+        durationMs INT NOT NULL DEFAULT 0 COMMENT '调用耗时（毫秒）',
+        attempt INT NOT NULL DEFAULT 1 COMMENT '第几次尝试',
+        success TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否成功',
+        errorMessage VARCHAR(1000) NULL COMMENT '失败原因',
+        bizType VARCHAR(50) NULL COMMENT '业务对象类型',
+        bizId VARCHAR(64) NULL COMMENT '业务对象 id',
+        createdBy VARCHAR(255) NULL DEFAULT 'system' COMMENT '触发用户',
+        createdAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+        INDEX idx_ai_token_usage_created (createdAt),
+        INDEX idx_ai_token_usage_scene_created (scene, createdAt),
+        INDEX idx_ai_token_usage_model_created (model, createdAt)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    this.logger.log("ai_token_usage 表已创建");
   }
 
   /**

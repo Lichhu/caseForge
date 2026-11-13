@@ -11,6 +11,9 @@ import {
   fetchWorkflowFileContents,
   buildStructRequirementPrompt,
 } from "@common/ai-workflow/util/workflow-input.util";
+import { extractAiChatUsage } from "@common/ai-workflow/util/ai-usage.util";
+import { AI_CHAT_SCENES } from "@common/ai-workflow/ai-chat-scenes";
+import { AiTokenUsageService } from "./ai-token-usage.service";
 import { sanitizeStructuredMarkdown } from "@struct-doc/util/struct-doc.parser";
 
 /**
@@ -123,6 +126,16 @@ export interface AiChatResult {
   rawResponse: unknown;
 }
 
+/** AI Chat 调用附加信息（用于 token 用量统计） */
+export interface AiChatCallOptions {
+  /** 调用场景，建议使用 AI_CHAT_SCENES 中的常量 */
+  scene?: string;
+  /** 业务对象类型，如 struct_doc */
+  bizType?: string;
+  /** 业务对象 id */
+  bizId?: string;
+}
+
 /** 需求结构化返回结果 */
 export interface StructRequirementResult {
   markdown: string;
@@ -137,6 +150,7 @@ export class AiWorkflowService {
   constructor(
     @Inject(AI_WORKFLOW_CONFIG)
     private readonly config: AiWorkflowModuleConfig,
+    private readonly tokenUsage: AiTokenUsageService,
   ) {}
 
   /** 是否可用于需求文档结构化（需 require-skill 与 AI Chat） */
@@ -233,7 +247,9 @@ export class AiWorkflowService {
       requireText,
       requireFileName,
     );
-    const { text, rawResponse } = await this.runWithAiChat(prompt);
+    const { text, rawResponse } = await this.runWithAiChat(prompt, undefined, {
+      scene: AI_CHAT_SCENES.STRUCT_REQUIREMENT,
+    });
     if (!text.trim()) {
       throw new Error("AI Chat 未返回结构化 Markdown 内容");
     }
@@ -255,7 +271,9 @@ export class AiWorkflowService {
     }
 
     const prompt = buildCaseGenerateSummaryPrompt(structuredMarkdown);
-    const { text, rawResponse } = await this.runWithAiChat(prompt);
+    const { text, rawResponse } = await this.runWithAiChat(prompt, undefined, {
+      scene: AI_CHAT_SCENES.CASE_SUMMARY,
+    });
     if (!text.trim()) {
       throw new Error("AI Chat 未返回需求总结");
     }
@@ -274,16 +292,19 @@ export class AiWorkflowService {
   async runWithAiChat(
     input: string,
     model = this.config.aiChat.model,
+    options?: AiChatCallOptions,
   ): Promise<AiChatResult> {
     const url = this.resolveAiChatUrl();
     if (!url) {
       throw new Error("AI Chat URL 未配置");
     }
 
+    const scene = options?.scene?.trim() || AI_CHAT_SCENES.UNKNOWN;
     const startedAt = Date.now();
     const inputChars = input.length;
+    const modelName = model?.trim() || this.config.aiChat.model;
     const requestBody = {
-      model: model?.trim() || this.config.aiChat.model,
+      model: modelName,
       temperature: 0.3,
       n: 1,
       stream: false,
@@ -328,17 +349,53 @@ export class AiWorkflowService {
         if (!text.trim()) {
           throw new Error("AI Chat 返回内容为空");
         }
+        const durationMs = Date.now() - startedAt;
+        const usage = extractAiChatUsage(result, input, text);
         this.logger.log(
-          `AI Chat 完成 durationMs=${Date.now() - startedAt} inputChars=${inputChars} outputChars=${text.length} attempt=${attempt + 1}`,
+          `AI Chat 完成 scene=${scene} model=${modelName} durationMs=${durationMs} inputChars=${inputChars} outputChars=${text.length} promptTokens=${usage.promptTokens} completionTokens=${usage.completionTokens} totalTokens=${usage.totalTokens} usageSource=${usage.source} attempt=${attempt + 1}`,
         );
+        // 用量统计属于旁路能力：异步落库，不阻塞也不影响本次 AI 结果返回
+        void this.tokenUsage.record({
+          scene,
+          model: modelName,
+          promptTokens: usage.promptTokens,
+          completionTokens: usage.completionTokens,
+          totalTokens: usage.totalTokens,
+          usageSource: usage.source,
+          inputChars,
+          outputChars: text.length,
+          durationMs,
+          attempt: attempt + 1,
+          success: true,
+          bizType: options?.bizType,
+          bizId: options?.bizId,
+        });
         return { text, rawResponse: result };
       } catch (error) {
         lastError = error as Error;
         const isTimeout =
           lastError.name === "TimeoutError" || lastError.name === "AbortError";
+        const durationMs = Date.now() - startedAt;
         this.logger.warn(
-          `AI Chat 第 ${attempt + 1} 次调用${isTimeout ? "超时" : "失败"} durationMs=${Date.now() - startedAt} inputChars=${inputChars}: ${lastError.message}`,
+          `AI Chat 第 ${attempt + 1} 次调用${isTimeout ? "超时" : "失败"} scene=${scene} durationMs=${durationMs} inputChars=${inputChars}: ${lastError.message}`,
         );
+        // 失败记录同样异步写入，避免影响重试节奏
+        void this.tokenUsage.record({
+          scene,
+          model: modelName,
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          usageSource: "none",
+          inputChars,
+          outputChars: 0,
+          durationMs,
+          attempt: attempt + 1,
+          success: false,
+          errorMessage: lastError.message,
+          bizType: options?.bizType,
+          bizId: options?.bizId,
+        });
       }
     }
 
@@ -351,10 +408,20 @@ export class AiWorkflowService {
   async runWithAiChatJsonArray<T>(
     input: string,
     model = this.config.aiChat.model,
-    options?: { context?: string },
+    options?: {
+      context?: string;
+      scene?: string;
+      bizType?: string;
+      bizId?: string;
+    },
   ): Promise<T[]> {
     const contextLabel = options?.context?.trim() || "AI JSON 解析";
-    const { text } = await this.runWithAiChat(input, model);
+    const callOptions: AiChatCallOptions = {
+      scene: options?.scene ?? AI_CHAT_SCENES.UNKNOWN,
+      bizType: options?.bizType,
+      bizId: options?.bizId,
+    };
+    const { text } = await this.runWithAiChat(input, model, callOptions);
     let parsed = this.parseJsonArray<T>(text);
     if (parsed?.length) {
       this.logger.log(
@@ -374,7 +441,7 @@ export class AiWorkflowService {
       "你上一次的输出无法被解析为 JSON 数组。",
       "请仅输出 JSON 数组正文，不要使用 markdown 代码块，不要输出解释文字或 thinking 标签。",
     ].join("\n");
-    const retry = await this.runWithAiChat(retryPrompt, model);
+    const retry = await this.runWithAiChat(retryPrompt, model, callOptions);
     parsed = this.parseJsonArray<T>(retry.text);
     if (parsed?.length) {
       this.logger.log(

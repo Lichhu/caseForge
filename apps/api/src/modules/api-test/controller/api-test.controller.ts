@@ -79,6 +79,7 @@ import { ListApiExecutionSetsDto } from "@api-test/dto/list-api-execution-sets.d
 import { ListPreproductionRunSetsDto } from "@api-test/dto/list-preproduction-run-sets.dto";
 import { UpdatePreproductionRunSetDto } from "@api-test/dto/update-preproduction-run-set.dto";
 import { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
+import { AI_CHAT_SCENES } from "@common/ai-workflow/ai-chat-scenes";
 import { ApiAssertionGenerateQueueService } from "@api-test/service/api-assertion-generate-queue.service";
 import { ApiDataFunctionService } from "@api-test/service/api-data-function.service";
 import { ApiStepLibraryService } from "@api-test/service/api-step-library.service";
@@ -675,6 +676,8 @@ export class ApiTestController {
           : "可使用 JavaScript 标准内置对象。",
         "只输出完整函数代码，不要 Markdown 代码块、解释或依赖第三方库。",
       ].join("\n"),
+      undefined,
+      { scene: AI_CHAT_SCENES.API_DATA_FUNCTION_SCRIPT },
     );
     return { script: text.trim().replace(/^```\w*\s*|\s*```$/g, "") };
   }

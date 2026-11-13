@@ -31,6 +31,7 @@ import { ApiRequirementEntity } from "@requirement-platform/entity/api-requireme
 import { CaseProjectEntity } from "@project-manage/entity/project.entity";
 import { auditFieldsForCreate } from "@common/audit/request-context";
 import { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
+import { AI_CHAT_SCENES } from "@common/ai-workflow/ai-chat-scenes";
 import { ApiExecutionService } from "./api-execution.service";
 import { isHttpStep } from "@case-forge/shared";
 import type { AssertionValueSource } from "@case-forge/shared";
@@ -605,7 +606,10 @@ export class ApiReportService {
         const rows = await this.aiWorkflow.runWithAiChatJsonArray<unknown>(
           buildRiskClassificationPrompt(chunk),
           undefined,
-          { context: "项目类报告风险分类" },
+          {
+            context: "项目类报告风险分类",
+            scene: AI_CHAT_SCENES.API_REPORT_RISK,
+          },
         );
         classifications.push(...validateRiskClassifications(chunk, rows));
       }

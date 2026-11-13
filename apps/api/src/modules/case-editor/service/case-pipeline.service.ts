@@ -11,6 +11,7 @@ import { BadRequestException, Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { mapWithConcurrency } from "@common/util/concurrency.util";
 import { AiWorkflowService } from "@common/ai-workflow/service/ai-workflow.service";
+import { AI_CHAT_SCENES } from "@common/ai-workflow/ai-chat-scenes";
 import {
   buildStructRequirementPrompt,
   fetchTextFromUrl,
@@ -783,7 +784,13 @@ export class CasePipelineService {
       }
 
       const chatPrompt = buildStructRequirementPrompt(skillText, prompt);
-      const { text } = await this.aiWorkflow.runWithAiChat(chatPrompt);
+      const { text } = await this.aiWorkflow.runWithAiChat(
+        chatPrompt,
+        undefined,
+        {
+          scene: AI_CHAT_SCENES.CASE_MARKDOWN,
+        },
+      );
       return text ? sanitizeStructuredMarkdown(text) : null;
     } catch (error) {
       this.logger.warn(
@@ -940,7 +947,7 @@ export class CasePipelineService {
       const cases = await this.aiWorkflow.runWithAiChatJsonArray<JsonCaseItem>(
         promote,
         model,
-        { context: `测试要点：${testPoint}` },
+        { context: `测试要点：${testPoint}`, scene: AI_CHAT_SCENES.CASE_JSON },
       );
       if (!cases.length) {
         throw new BadRequestException(
