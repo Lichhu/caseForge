@@ -628,6 +628,10 @@ export class RequirementPlatformService {
     if (requirement.status !== "pending_dispatch") {
       throw new BadRequestException("当前需求状态不可分发");
     }
+    // 历史脏数据可能出现「状态待分发但已关联项目」的情况，重新分发会破坏项目与需求的关联
+    if (requirement.claimedProjectId) {
+      throw new BadRequestException("需求已关联接口项目，无法重新分发");
+    }
     const candidate = await this.sysUserRepo.findOne({
       where: { userName: dispatchedTo, status: "0", delFlag: "0" },
     });
