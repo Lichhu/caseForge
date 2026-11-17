@@ -321,10 +321,10 @@ async function loadList() {
 
 let searchTimer: number | undefined;
 watch(statusFilter, (status) => {
+  // 切换到「待分发」时清理归属人筛选（该状态还没有归属人）；
+  // 其他状态不再自动把归属人改成当前用户，否则看起来像状态筛选失效/数据变少。
   if (status === "pending_dispatch") {
     ownerFilter.value = "";
-  } else if (!ownerFilter.value) {
-    ownerFilter.value = currentUser;
   }
 });
 

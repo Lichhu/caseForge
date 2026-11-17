@@ -3,7 +3,9 @@ import { RequirementSyncService } from "./requirement-sync.service";
 describe("RequirementSyncService versionName", () => {
   it("copies b_project.version_name for new and existing requirements", async () => {
     const requirementRepo = {
-      find: jest.fn().mockResolvedValue([{ projectCode: "REQ-OLD" }]),
+      find: jest
+        .fn()
+        .mockResolvedValue([{ projectCode: "REQ-OLD", versionName: null }]),
       update: jest.fn().mockResolvedValue(undefined),
       create: jest.fn((value) => value),
       save: jest.fn(async (value) => value),
@@ -59,5 +61,48 @@ describe("RequirementSyncService versionName", () => {
       }),
     );
     expect(smpClient.selectServiceInfoList).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not overwrite a locally maintained version for existing requirements", async () => {
+    const requirementRepo = {
+      find: jest
+        .fn()
+        .mockResolvedValue([{ projectCode: "REQ-OLD", versionName: "客户定制版本 V3" }]),
+      update: jest.fn().mockResolvedValue(undefined),
+      create: jest.fn((value) => value),
+      save: jest.fn(async (value) => value),
+    };
+    const projectRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    };
+    const sourceProjectRepo = {
+      find: jest.fn().mockResolvedValue([
+        {
+          id: "1",
+          projectCode: "REQ-OLD",
+          projectName: "已有需求",
+          versionName: "项目类版本",
+          demandStatus: "SIT测试",
+        },
+      ]),
+    };
+    const service = new RequirementSyncService(
+      requirementRepo as never,
+      projectRepo as never,
+      sourceProjectRepo as never,
+      { selectServiceInfoList: jest.fn() } as never,
+      { get: jest.fn() } as never,
+    );
+
+    const result = await service.sync("scheduled");
+
+    expect(result.added).toBe(0);
+    expect(requirementRepo.update).toHaveBeenCalledWith(
+      { projectCode: "REQ-OLD" },
+      {
+        sourceUpdatedAt: expect.any(Date),
+      },
+    );
+    expect(requirementRepo.create).not.toHaveBeenCalled();
   });
 });

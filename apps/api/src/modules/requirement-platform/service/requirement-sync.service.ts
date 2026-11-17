@@ -125,7 +125,8 @@ export class RequirementSyncService implements OnModuleInit, OnModuleDestroy {
           Boolean(project.projectCode?.trim()),
       );
 
-      const existingCodes = await this.collectExcludedCodes();
+      const { codes: existingCodes, localByCode } =
+        await this.collectExcludedRequirements();
 
       let added = 0;
       let skipped = 0;
@@ -133,13 +134,17 @@ export class RequirementSyncService implements OnModuleInit, OnModuleDestroy {
         const projectCode = project.projectCode!.trim();
         const versionName = project.versionName?.trim() || null;
         if (existingCodes.has(projectCode)) {
-          await this.requirementRepo.update(
-            { projectCode },
-            {
-              versionName,
-              sourceUpdatedAt: new Date(),
-            },
-          );
+          const local = localByCode.get(projectCode);
+          if (local) {
+            // 只补齐缺失的版本；已有人工维护/客户定制版本时不再用源库值覆盖，避免定时同步刷掉本地数据
+            await this.requirementRepo.update(
+              { projectCode },
+              {
+                ...(local.versionName?.trim() ? {} : { versionName }),
+                sourceUpdatedAt: new Date(),
+              },
+            );
+          }
           continue;
         }
         if (!(await this.passSmpCheck(projectCode))) {
@@ -174,18 +179,23 @@ export class RequirementSyncService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** 收集排除集合：本地需求表已有 code + 接口测试项目已用需求编号 */
-  private async collectExcludedCodes(): Promise<Set<string>> {
+  /** 收集排除集合：本地需求表已有 code + 接口测试项目已用需求编号，并返回本地需求快照 */
+  private async collectExcludedRequirements(): Promise<{
+    codes: Set<string>;
+    localByCode: Map<string, { versionName?: string | null }>;
+  }> {
     const localRows = await this.requirementRepo.find({
-      select: ["projectCode"],
+      select: ["projectCode", "versionName"],
     });
     const projectRows = await this.projectRepo.find({
       where: { platform: "api-test" },
       select: ["requirementNo"],
     });
     const codes = new Set<string>();
+    const localByCode = new Map<string, { versionName?: string | null }>();
     for (const row of localRows) {
       codes.add(row.projectCode);
+      localByCode.set(row.projectCode, row);
     }
     for (const row of projectRows) {
       const requirementNo = row.requirementNo?.trim();
@@ -193,7 +203,7 @@ export class RequirementSyncService implements OnModuleInit, OnModuleDestroy {
         codes.add(requirementNo);
       }
     }
-    return codes;
+    return { codes, localByCode };
   }
 
   /** SMP serviceList 有数据才算满足条件；单条失败仅跳过并记日志 */

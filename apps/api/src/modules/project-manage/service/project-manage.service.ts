@@ -185,15 +185,25 @@ export class ProjectManageService {
     }
 
     if (platform === "api-test" && requirementStatus !== "all") {
+      // 项目与需求有两条关联来源：认领时回写 claimedProjectId，历史/同步数据只有相同的需求编号。
+      // 只按 claimedProjectId 关联会漏掉后一种；而原先的 OR NOT EXISTS 会让没有关联需求的项目
+      // 同时出现在所有状态页签里，导致筛选失效。
+      // 另外，项目已存在但需求仍停在待分发/待受理属于历史脏数据，按「测试中」展示，避免项目凭空消失。
+      const requirementStatuses =
+        requirementStatus === "testing"
+          ? ["testing", "pending_dispatch", "pending_claim"]
+          : [requirementStatus];
       query.andWhere(
-        `(EXISTS (
-          SELECT 1 FROM api_requirement req WHERE req.claimedProjectId = project.id
-            AND req.deleted_at IS NULL AND req.status = :requirementStatus
-        ) OR NOT EXISTS (
-          SELECT 1 FROM api_requirement req WHERE req.claimedProjectId = project.id
-            AND req.deleted_at IS NULL
-        ))`,
-        { requirementStatus },
+        `EXISTS (
+          SELECT 1 FROM api_requirement req
+          WHERE req.deleted_at IS NULL
+            AND (
+              req.claimedProjectId = project.id
+              OR (project.requirementNo IS NOT NULL AND req.projectCode = project.requirementNo)
+            )
+            AND req.status IN (:...requirementStatuses)
+        )`,
+        { requirementStatuses },
       );
     }
 
