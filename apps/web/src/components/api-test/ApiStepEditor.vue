@@ -1034,6 +1034,19 @@ function buildRequest(): ApiCaseRequest {
     editor.bodyFormat === "json"
       ? JSON.parse(editor.body || "{}")
       : editor.body;
+  // 准生产/步骤库调试没有请求元数据编辑器，需沿用步骤原有的 TCP 分帧；
+  // 缺失 framing 时后端会按裸报文发送并立即半关闭连接，网关会直接 RST。
+  const framing =
+    editor.protocol === "socket"
+      ? (originalStep.value?.request.framing ??
+        (editor.bodyFormat === "xml"
+          ? {
+              type: "length-prefix" as const,
+              width: 8,
+              encoding: editor.encoding,
+            }
+          : undefined))
+      : undefined;
   return {
     method: editor.protocol === "socket" ? "POST" : editor.method,
     path: editor.protocol === "socket" ? "" : editor.path || "/",
@@ -1045,6 +1058,7 @@ function buildRequest(): ApiCaseRequest {
           ? "application/xml"
           : "text/plain",
     encoding: editor.encoding,
+    framing,
     query: editor.protocol === "http" ? toRecord(editor.queryRows) : undefined,
     headers: toRecord(editor.headerRows),
     body,
