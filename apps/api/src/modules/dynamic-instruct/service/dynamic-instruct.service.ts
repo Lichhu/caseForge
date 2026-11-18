@@ -440,10 +440,46 @@ export class DynamicInstructService {
       }),
     );
 
-    await this.promptSelectionRepo.softDelete({ testPointId });
-    if (promptIds.length) {
+    // uk_case_test_point_prompt 只包含 (testPointId, promptId)，不含 deleted_at；
+    // MySQL 不支持部分唯一索引，软删除行仍会占用唯一键。重新勾选同一提示词时
+    // 必须恢复原行而不是再次插入，否则会触发 Duplicate entry。
+    const promptIdSet = new Set(promptIds);
+    const existingSelections = await this.promptSelectionRepo.find({
+      where: { testPointId },
+      withDeleted: true,
+    });
+    const selectionByPromptId = new Map(
+      existingSelections.map((selection) => [selection.promptId, selection]),
+    );
+
+    const removedSelectionIds = existingSelections
+      .filter(
+        (selection) =>
+          !selection.deletedAt && !promptIdSet.has(selection.promptId),
+      )
+      .map((selection) => selection.id);
+    if (removedSelectionIds.length) {
+      await this.promptSelectionRepo.softDelete({
+        id: In(removedSelectionIds),
+      });
+    }
+
+    const restorePromptIds = promptIds.filter(
+      (promptId) => selectionByPromptId.get(promptId)?.deletedAt,
+    );
+    if (restorePromptIds.length) {
+      await this.promptSelectionRepo.restore({
+        testPointId,
+        promptId: In(restorePromptIds),
+      });
+    }
+
+    const newPromptIds = promptIds.filter(
+      (promptId) => !selectionByPromptId.has(promptId),
+    );
+    if (newPromptIds.length) {
       await this.promptSelectionRepo.save(
-        promptIds.map((promptId) =>
+        newPromptIds.map((promptId) =>
           this.promptSelectionRepo.create({
             testPointId,
             promptId,
