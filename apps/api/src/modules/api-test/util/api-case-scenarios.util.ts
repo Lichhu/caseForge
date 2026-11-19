@@ -284,7 +284,7 @@ export function buildScenarioPrompts(input: {
     "先判断场景是否适用；不适用时 cases 返回空数组并说明原因。",
     "适用时仅返回字段修改计划，不返回完整请求报文。",
     "只输出一个 JSON 对象：{applicable,reason,cases:[{title,description,polarity,changes:[{path,value}],expected}]}。",
-    "title 必须简要描述“业务场景 + 业务规则或被测条件”，不得只写字段名，不得包含案例编号；示例：反向-省份列表查询-分页参数非法。",
+    "title 必须简要描述“业务场景 + 业务规则或被测条件”，并以当前交易的业务名称或操作对象开头，不得只写字段名或场景名，不得包含案例编号；示例：省份列表查询-反向-分页参数非法。",
     "description 必须描述用例设计目标，建议格式：{角色}在{业务场景}中执行{交易或操作}时，{输入或触发条件}，预期{结果}，用于验证{业务规则}是否正确。",
     "文档未提供角色时使用“系统用户”，不得编造角色；description 不得为空，不得只写错误码或重复 title。",
     'polarity 只能取英文枚举值 "positive"（正向案例）或 "negative"（反向案例），不得输出「正向」「反向」等中文取值。',
@@ -557,6 +557,80 @@ export function parseScenarioAiResult(text: string): ScenarioAiResult | null {
   } catch {
     return null;
   }
+}
+
+export interface ScenarioCaseTitleInput {
+  scenarioKey: string;
+  scenarioName: string;
+  actionName: string;
+  transactionCode: string;
+  serviceProperty: string;
+  structuredMarkdown: string;
+  polarity: "positive" | "negative";
+  caseHint: string;
+}
+
+/** 仅让 AI 生成案例名称，请求报文变化仍由确定性规则控制 */
+export function buildScenarioCaseTitlePrompt(input: ScenarioCaseTitleInput) {
+  const basic = extractApiDocSection(input.structuredMarkdown, "基础信息");
+  const service = extractApiDocSection(input.structuredMarkdown, "服务信息");
+  return [
+    '你正在为银行接口测试案例命名，只输出一个 JSON 对象：{"title":"案例名称"}。',
+    `场景：${input.scenarioName}`,
+    `交易名称：${input.actionName}`,
+    `交易码：${input.transactionCode}`,
+    `服务属性：${input.serviceProperty}`,
+    `服务名称：${getApiDocFieldValue(basic, "服务名称(中)") || getApiDocFieldValue(basic, "服务名称")}`,
+    `功能描述：${getApiDocFieldValue(service, "功能描述")}`,
+    `业务规则：${getApiDocFieldValue(service, "业务规则")}`,
+    `本案例：${input.caseHint}`,
+    "命名要求：",
+    "1. 标题必须以交易名称开头，格式为「正向/反向-交易名称-具体业务动作或被测条件」；",
+    "2. 用 12～40 个汉字说明本案例在做什么，不得只写「正向流程」「全字段空值」等场景名；",
+    "3. 正向案例体现正常成功路径，反向案例体现具体校验规则；",
+    "4. 不得包含案例编号、字段路径、引号、换行或其他解释。",
+    input.polarity === "positive"
+      ? "示例：正向-客户信息查询-合法客户号查询成功"
+      : "示例：反向-客户信息查询-全部必填字段置空被拒绝",
+  ].join("\n");
+}
+
+export function parseScenarioCaseTitle(text: string): string | null {
+  const fenced = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
+  const start = fenced.indexOf("{");
+  const end = fenced.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    const value = JSON.parse(fenced.slice(start, end + 1)) as {
+      title?: unknown;
+    };
+    const title = String(value.title ?? "").trim();
+    return title || null;
+  } catch {
+    return null;
+  }
+}
+
+export function normalizeScenarioCaseTitle(
+  title: string,
+  actionName: string,
+  scenarioName: string,
+  polarity: "positive" | "negative",
+): string | null {
+  const cleaned = title
+    .replace(/^案例名称\s*[:：]\s*/, "")
+    .replace(/^["'“”「」]+|["'“”「」]+$/g, "")
+    .replace(/\s+/g, "")
+    .trim();
+  if (!cleaned || cleaned === scenarioName) return null;
+  const action = actionName.trim();
+  const withAction =
+    action && !cleaned.includes(action) ? `${action}-${cleaned}` : cleaned;
+  const prefix = polarity === "negative" ? "反向" : "正向";
+  return withAction.startsWith(prefix) ? withAction : `${prefix}-${withAction}`;
 }
 
 function normalizeCaseDescription(

@@ -1,10 +1,13 @@
 import {
   assertScenarioCoverage,
+  buildScenarioCaseTitlePrompt,
   buildRequiredFieldScenario,
   buildScenarioPrompts,
   extractFieldsByRequirement,
   extractRequestFieldPaths,
   mergeRequiredFieldScenario,
+  normalizeScenarioCaseTitle,
+  parseScenarioCaseTitle,
   parseScenarioAiResult,
   scenariosForProperty,
   validateScenarioAiResult,
@@ -810,5 +813,57 @@ describe("required_fields scenario", () => {
     expect(merged.cases.some((item) => item.polarity === "positive")).toBe(
       true,
     );
+  });
+});
+
+describe("scenario case title generation", () => {
+  it("asks AI for a transaction-specific title and parses it", () => {
+    const prompt = buildScenarioCaseTitlePrompt({
+      scenarioKey: "positive_flow",
+      scenarioName: "正向流程",
+      actionName: "客户信息查询",
+      transactionCode: "TX001",
+      serviceProperty: "query_non_accounting",
+      structuredMarkdown: "",
+      polarity: "positive",
+      caseHint: "使用合法请求参数执行正常交易",
+    });
+    expect(prompt).toContain("标题必须以交易名称开头");
+    expect(prompt).toContain("正向-客户信息查询-合法客户号查询成功");
+    expect(
+      parseScenarioCaseTitle(
+        '```json\n{"title":"正向-客户信息查询-查询成功"}\n```',
+      ),
+    ).toBe("正向-客户信息查询-查询成功");
+  });
+
+  it("normalizes missing action name and polarity prefixes", () => {
+    expect(
+      normalizeScenarioCaseTitle(
+        "查询成功返回客户信息",
+        "客户信息查询",
+        "正向流程",
+        "positive",
+      ),
+    ).toBe("正向-客户信息查询-查询成功返回客户信息");
+    expect(
+      normalizeScenarioCaseTitle(
+        "反向-客户信息查询-全字段空值",
+        "客户信息查询",
+        "全字段空值校验",
+        "negative",
+      ),
+    ).toBe("反向-客户信息查询-全字段空值");
+  });
+
+  it("rejects a title that only repeats the scenario name", () => {
+    expect(
+      normalizeScenarioCaseTitle(
+        "全字段空值校验",
+        "客户信息查询",
+        "全字段空值校验",
+        "negative",
+      ),
+    ).toBeNull();
   });
 });
