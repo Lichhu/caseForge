@@ -78,7 +78,7 @@ describe("normalizeCasePayload", () => {
 });
 
 describe("ApiCaseService positive flow generation", () => {
-  it("uses the example message without calling aiChat", async () => {
+  it("uses the example message and the AI-generated case title", async () => {
     const job = {
       id: "job-1",
       projectId: "project-1",
@@ -105,7 +105,11 @@ describe("ApiCaseService positive flow generation", () => {
       findOne: jest.fn().mockResolvedValue(job),
       save: jest.fn().mockResolvedValue(job),
     };
-    const aiWorkflow = { runWithAiChat: jest.fn() };
+    const aiWorkflow = {
+      runWithAiChat: jest.fn().mockResolvedValue({
+        text: '{"title":"正向-TX001-正常交易成功"}',
+      }),
+    };
     const service = new ApiCaseService(
       {} as never,
       { findOne: jest.fn().mockResolvedValue({ id: "endpoint-1" }) } as never,
@@ -135,7 +139,7 @@ describe("ApiCaseService positive flow generation", () => {
       jobId: job.id,
     });
 
-    expect(aiWorkflow.runWithAiChat).not.toHaveBeenCalled();
+    expect(aiWorkflow.runWithAiChat).toHaveBeenCalledTimes(1);
     expect((service as any).persistScenarioCases).toHaveBeenCalledWith(
       job,
       { id: "endpoint-1" },
@@ -143,7 +147,7 @@ describe("ApiCaseService positive flow generation", () => {
       task,
       [
         {
-          title: "正向流程",
+          title: "正向-TX001-正常交易成功",
           description:
             "系统用户执行TX001正常交易时，使用合法请求参数并遵循示例报文，预期接口处理成功并返回正确业务结果，用于验证核心业务流程是否符合预期。",
           polarity: "positive",
@@ -159,6 +163,7 @@ describe("ApiCaseService large payload case generation", () => {
   function buildService(
     job: Record<string, unknown>,
     extraTasks: Record<string, unknown>[] = [],
+    aiTitle?: string,
   ) {
     const task = {
       id: "scenario-1",
@@ -184,10 +189,15 @@ describe("ApiCaseService large payload case generation", () => {
         findOne: jest.fn().mockResolvedValue({
           id: job.transactionId,
           code: "TX001",
+          name: "客户信息查询",
         }),
       } as never,
       {} as never,
-      { runWithAiChat: jest.fn() } as never,
+      {
+        runWithAiChat: jest.fn().mockResolvedValue({
+          text: aiTitle ? JSON.stringify({ title: aiTitle }) : "",
+        }),
+      } as never,
       {} as never,
       generateJobRepo as never,
       scenarioRepo as never,
@@ -311,7 +321,7 @@ describe("ApiCaseService large payload case generation", () => {
         changes: Array<{ path: string; value: string }>;
       }>;
       expect(plans).toHaveLength(1);
-      expect(plans[0].title).toBe("全字段空值");
+      expect(plans[0].title).toBe("反向-客户信息查询-全字段空值");
       expect(plans[0].polarity).toBe("negative");
       expect(plans[0].changes).toEqual([
         {
@@ -336,5 +346,109 @@ describe("ApiCaseService large payload case generation", () => {
       expect(persistSpy).toHaveBeenCalledTimes(1);
       expect(emptyTask.status).toBe("not_applicable");
     });
+
+    it("uses the AI-generated title for the all-fields-empty case", async () => {
+      const job = {
+        ...buildJob(),
+        snapshot: {
+          profile: { exampleMessage: '{"amount":"1"}' },
+          structuredMarkdown: markdown,
+        },
+      };
+      const { service, persistSpy } = buildService(
+        job,
+        [buildEmptyTask(job)],
+        "反向-客户信息查询-全部字段为空被校验拒绝",
+      );
+
+      await service.runQueuedGenerateJob({
+        projectId: job.projectId,
+        transactionId: job.transactionId,
+        jobId: job.id,
+      });
+
+      const plans = persistSpy.mock.calls[1][4] as Array<{ title: string }>;
+      expect(plans[0].title).toBe("反向-客户信息查询-全部字段为空被校验拒绝");
+    });
+  });
+});
+
+describe("ApiCaseService scenario title personalization", () => {
+  it("prefixes AI-generated titles with the current transaction name", async () => {
+    const job = {
+      id: "job-2",
+      projectId: "project-1",
+      transactionId: "transaction-2",
+      status: "running",
+      snapshot: {
+        profile: { exampleMessage: '{"amount":"1"}' },
+        structuredMarkdown: "",
+      },
+    };
+    const task = {
+      id: "scenario-2",
+      jobId: job.id,
+      scenarioKey: "accounting_business",
+      scenarioName: "业务场景",
+      status: "pending",
+      attemptCount: 0,
+    };
+    const scenarioRepo = {
+      find: jest.fn().mockResolvedValue([task]),
+      save: jest.fn().mockResolvedValue(task),
+    };
+    const generateJobRepo = {
+      findOne: jest.fn().mockResolvedValue(job),
+      save: jest.fn().mockResolvedValue(job),
+    };
+    const aiWorkflow = {
+      runWithAiChat: jest.fn().mockResolvedValue({
+        text: JSON.stringify({
+          applicable: true,
+          reason: "存在利率字段",
+          cases: [
+            {
+              title: "利率超界校验",
+              description: "验证利率超界时接口拒绝处理。",
+              polarity: "positive",
+              changes: [],
+              expected: "接口拒绝处理",
+            },
+          ],
+        }),
+      }),
+    };
+    const service = new ApiCaseService(
+      {} as never,
+      { findOne: jest.fn().mockResolvedValue({ id: "endpoint-1" }) } as never,
+      {} as never,
+      {
+        findOne: jest.fn().mockResolvedValue({
+          id: job.transactionId,
+          code: "TX002",
+          name: "客户信息查询",
+        }),
+      } as never,
+      {} as never,
+      aiWorkflow as never,
+      {} as never,
+      generateJobRepo as never,
+      scenarioRepo as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const persistSpy = jest
+      .spyOn(service as never, "persistScenarioCases" as never)
+      .mockResolvedValue(1 as never);
+
+    await service.runQueuedGenerateJob({
+      projectId: job.projectId,
+      transactionId: job.transactionId,
+      jobId: job.id,
+    });
+
+    const plans = persistSpy.mock.calls[0][4] as Array<{ title: string }>;
+    expect(plans[0].title).toBe("客户信息查询-利率超界校验");
   });
 });

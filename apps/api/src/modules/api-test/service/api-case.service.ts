@@ -51,11 +51,15 @@ import { ApiTestRunEntity } from "@api-test/entity/api-test-run.entity";
 import type { ApiCaseRequest, ApiCaseStep } from "@case-forge/shared";
 import {
   buildRequiredFieldScenario,
+  buildScenarioCaseTitlePrompt,
   buildScenarioPrompts,
   assertScenarioCoverage,
   mergeRequiredFieldScenario,
+  normalizeScenarioCaseTitle,
+  parseScenarioCaseTitle,
   parseScenarioAiResult,
   validateScenarioAiResult,
+  type ScenarioAiResult,
 } from "@api-test/util/api-case-scenarios.util";
 import { assembleBodyFromExample } from "@api-test/util/api-case-body-assembler.util";
 import { extractRequestFieldPaths } from "@api-test/util/api-case-scenarios.util";
@@ -567,12 +571,23 @@ export class ApiCaseService {
       await this.scenarioRepo.save(task);
       try {
         if (task.scenarioKey === "positive_flow") {
+          const title = await this.generateScenarioCaseTitle({
+            scenarioKey: task.scenarioKey,
+            scenarioName: task.scenarioName,
+            actionName: caseActionName,
+            transactionCode: transaction.code,
+            serviceProperty: job.snapshot.profile.serviceProperty,
+            structuredMarkdown: job.snapshot.structuredMarkdown,
+            polarity: "positive",
+            caseHint: "使用示例报文中的合法参数执行正常交易，验证核心流程成功",
+            fallbackTitle: `正向-${caseActionName}-正常交易`,
+          });
           const result = {
             applicable: true,
             reason: "沿用示例报文生成正向流程案例",
             cases: [
               {
-                title: "正向流程",
+                title,
                 description: `系统用户执行${caseActionName}正常交易时，使用合法请求参数并遵循示例报文，预期接口处理成功并返回正确业务结果，用于验证核心业务流程是否符合预期。`,
                 polarity: "positive" as const,
                 changes: [],
@@ -615,12 +630,24 @@ export class ApiCaseService {
             await this.scenarioRepo.save(task);
             continue;
           }
+          const title = await this.generateScenarioCaseTitle({
+            scenarioKey: task.scenarioKey,
+            scenarioName: task.scenarioName,
+            actionName: caseActionName,
+            transactionCode: transaction.code,
+            serviceProperty: job.snapshot.profile.serviceProperty,
+            structuredMarkdown: job.snapshot.structuredMarkdown,
+            polarity: "negative",
+            caseHint:
+              "请求报文全部字段置为空值，验证接口拒绝处理并返回明确参数校验错误",
+            fallbackTitle: `反向-${caseActionName}-全字段空值`,
+          });
           const result = {
             applicable: true,
             reason: "请求报文每个字段均置为空值，验证接口校验能力",
             cases: [
               {
-                title: "全字段空值",
+                title,
                 description: `系统用户执行${caseActionName}交易时，请求报文中全部业务字段置为空值，预期接口拒绝处理并返回明确参数校验错误，用于验证全字段空值校验规则是否正确。`,
                 polarity: "negative" as const,
                 changes: fieldPaths.map((path) => ({ path, value: "" })),
@@ -709,14 +736,18 @@ export class ApiCaseService {
                 ),
               )
             : result;
+        const personalizedResult = personalizeScenarioCaseTitles(
+          finalResult,
+          caseActionName,
+        );
         assertScenarioCoverage(
           task.scenarioKey,
-          finalResult,
+          personalizedResult,
           job.snapshot.structuredMarkdown,
         );
-        task.result = finalResult;
-        task.applicableReason = finalResult.reason;
-        if (!finalResult.applicable) {
+        task.result = personalizedResult;
+        task.applicableReason = personalizedResult.reason;
+        if (!personalizedResult.applicable) {
           task.status = "not_applicable";
           task.resultCount = 0;
         } else {
@@ -725,7 +756,7 @@ export class ApiCaseService {
             endpoint,
             transaction.code,
             task,
-            finalResult.cases,
+            personalizedResult.cases,
           );
           task.status = "completed";
           task.resultCount = count;
@@ -758,6 +789,43 @@ export class ApiCaseService {
     }
     await this.refreshScenarioSummary(job.id);
     return { count: createdCount, cases: [] };
+  }
+
+  /** 标题由 AI 生成；调用失败或结果不可用时回退到带交易名的默认标题。 */
+  private async generateScenarioCaseTitle(input: {
+    scenarioKey: string;
+    scenarioName: string;
+    actionName: string;
+    transactionCode: string;
+    serviceProperty: string;
+    structuredMarkdown: string;
+    polarity: "positive" | "negative";
+    caseHint: string;
+    fallbackTitle: string;
+  }) {
+    try {
+      const { text } = await this.aiWorkflow.runWithAiChat(
+        buildScenarioCaseTitlePrompt(input),
+        undefined,
+        { scene: AI_CHAT_SCENES.API_SCENARIO_CASES },
+      );
+      const parsed = parseScenarioCaseTitle(text);
+      return (
+        (parsed &&
+          normalizeScenarioCaseTitle(
+            parsed,
+            input.actionName,
+            input.scenarioName,
+            input.polarity,
+          )) ||
+        input.fallbackTitle
+      );
+    } catch (error) {
+      this.logger.warn(
+        `AI 生成案例名称失败，使用默认标题「${input.fallbackTitle}」：${(error as Error).message}`,
+      );
+      return input.fallbackTitle;
+    }
   }
 
   private async persistScenarioCases(
@@ -1335,6 +1403,23 @@ export class ApiCaseService {
     }
     return transaction;
   }
+}
+
+/** 让 AI 生成的案例标题带上当前交易名称，避免不同交易出现同名案例。 */
+function personalizeScenarioCaseTitles(
+  result: ScenarioAiResult,
+  actionName: string,
+): ScenarioAiResult {
+  const action = actionName.trim();
+  if (!action || !result.applicable) return result;
+  return {
+    ...result,
+    cases: result.cases.map((item) => {
+      const title = item.title.trim();
+      if (!title || title.includes(action)) return item;
+      return { ...item, title: `${action}-${title}` };
+    }),
+  };
 }
 
 function cloneStep(step: ApiCaseStep): ApiCaseStep {
