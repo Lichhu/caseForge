@@ -98,5 +98,6 @@ export function formatRunItemStatus(status: string) {
   if (status === "passed") return "通过";
   if (status === "failed") return "失败";
   if (status === "error") return "错误";
+  if (status === "skipped") return "未执行";
   return status;
 }

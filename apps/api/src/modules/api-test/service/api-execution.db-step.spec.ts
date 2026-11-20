@@ -162,8 +162,15 @@ describe("SQL 步骤执行", () => {
     expect(final.status).toBe("error");
     expect((final.responseSnapshot as any).error).toContain("影响 0 行");
     const steps = (final.requestSnapshot as any).steps;
-    expect(steps).toHaveLength(1);
+    // 失败后停止执行，但剩余步骤保留为「未执行」，避免看起来丢步骤
+    expect(steps).toHaveLength(2);
     expect(steps[0].stepId).toBe("step-db");
+    expect(steps[1]).toMatchObject({
+      stepId: "step-http",
+      status: "skipped",
+      skipped: true,
+    });
+    expect(steps[1].response.error).toContain("未执行");
   });
 
   it("占位在案例开始执行 SQL 步骤时才抢，且带连接名标签", async () => {

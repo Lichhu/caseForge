@@ -265,7 +265,7 @@
                               executionContextItem.caseId
                             }}
                           </a-tag>
-                          点击案例名称或左侧按钮展开查看请求、响应与断言
+                          点击案例行或放大图标，直接查看请求、响应与断言
                         </span>
                       </div>
                       <a-table
@@ -276,10 +276,9 @@
                         :data-source="apiStore.activeRun.items"
                         :columns="itemColumns"
                         :pagination="false"
-                        :expanded-row-keys="expandedKeys"
                         :row-class-name="executionContextRowClass"
+                        :custom-row="runItemRow"
                         :scroll="{ y: 520 }"
-                        @expand="onExpand"
                       >
                         <template #bodyCell="{ column, record }">
                           <template v-if="column.key === 'caseTitle'">
@@ -300,6 +299,11 @@
                           </template>
                           <template v-else-if="column.key === 'actions'">
                             <span class="exec-run-item-actions">
+                              <a-tooltip title="放大查看">
+                                <a-button type="text" size="small" @click.stop="openItemDetail(record)">
+                                  <template #icon><ExpandOutlined /></template>
+                                </a-button>
+                              </a-tooltip>
                               <a-tooltip title="重新执行">
                                 <a-button type="text" size="small" :loading="rerunningItemId === record.id" @click.stop="onRerunItem(selectedHistoryRun.id, record.caseId)">
                                   <template #icon><RedoOutlined /></template>
@@ -312,39 +316,6 @@
                               </a-tooltip>
                             </span>
                           </template>
-                        </template>
-                        <template #expandedRowRender="{ record }">
-                          <div class="exec-run-expand">
-                            <div v-if="runItemSteps(record).length" class="exec-run-step-list">
-                              <div
-                                v-for="(step, index) in runItemSteps(record)"
-                                :key="String(step.stepId ?? index)"
-                                class="exec-run-step-block"
-                              >
-                                <div class="exec-run-step-head">
-                                  <span class="exec-run-step-index">步骤 {{ index + 1 }}</span>
-                                  <strong class="exec-run-step-name">{{ step.stepName || '未命名步骤' }}</strong>
-                                  <span v-if="step.parallelGroup" class="exec-run-parallel-pill">∥ 并行组 {{ step.parallelGroup }}</span>
-                                  <span class="exec-run-status-pill exec-run-status-pill--sm" :class="`exec-run-status-pill--${step.status}`">
-                                    {{ runItemStatusLabel(step.status || '') }}
-                                  </span>
-                                  <span class="exec-run-duration">{{ formatDuration(step.durationMs) }}</span>
-                                  <span class="exec-run-started">开始 {{ formatStepTime(step.startedAt) }}</span>
-                                </div>
-                                <ApiRunSnapshotTabs
-                                  :request-snapshot="step.request"
-                                  :response-snapshot="step.response"
-                                  :assertions="step.assertions ?? []"
-                                />
-                              </div>
-                            </div>
-                            <ApiRunSnapshotTabs
-                              v-else
-                              :request-snapshot="record.requestSnapshot"
-                              :response-snapshot="record.responseSnapshot"
-                              :assertions="record.assertions ?? []"
-                            />
-                          </div>
                         </template>
                       </a-table>
                       <a-empty
@@ -477,18 +448,97 @@
     >
       每条案例将使用案例中已指定的环境、地址和编码执行。
     </a-modal>
+
+    <a-modal
+      v-model:open="itemDetailOpen"
+      :width="'min(1800px, 97vw)'"
+      :footer="null"
+      centered
+      :mask-closable="true"
+      :destroy-on-close="true"
+      wrap-class-name="exec-detail-modal"
+    >
+      <template #title>
+        <div class="exec-detail-title">
+          <span class="exec-detail-title-name" :title="itemDetailRecord?.caseTitle">
+            {{ itemDetailRecord?.caseTitle || "执行详情" }}
+          </span>
+          <template v-if="itemDetailRecord">
+            <span
+              class="exec-run-status-pill exec-run-status-pill--sm"
+              :class="`exec-run-status-pill--${itemDetailRecord.status}`"
+            >
+              {{ runItemStatusLabel(itemDetailRecord.status) }}
+            </span>
+            <span class="exec-detail-title-meta">
+              {{ runItemCaseNo(itemDetailRecord) }} ·
+              {{ formatDuration(itemDetailRecord.durationMs) }}
+            </span>
+          </template>
+        </div>
+      </template>
+      <div v-if="itemDetailRecord" class="exec-detail-body">
+        <div v-if="itemDetailSteps.length" class="exec-detail-step-list">
+          <section
+            v-for="(step, index) in itemDetailSteps"
+            :id="detailStepAnchorId(step, index)"
+            :key="String(step.stepId ?? index)"
+            class="exec-detail-step"
+            :class="{
+              'is-focused':
+                Boolean(itemDetailFocusKey) &&
+                itemDetailFocusKey === detailStepKey(step, index),
+              'is-skipped': step.status === 'skipped',
+            }"
+          >
+            <header class="exec-detail-step-head">
+              <span class="exec-run-step-index">步骤 {{ index + 1 }}</span>
+              <strong class="exec-detail-step-name">
+                {{ step.stepName || "未命名步骤" }}
+              </strong>
+              <span v-if="step.parallelGroup" class="exec-run-parallel-pill">
+                ∥ 并行组 {{ step.parallelGroup }}
+              </span>
+              <span
+                class="exec-run-status-pill exec-run-status-pill--sm"
+                :class="`exec-run-status-pill--${step.status}`"
+              >
+                {{ runItemStatusLabel(step.status || "") }}
+              </span>
+              <span v-if="step.status !== 'skipped'" class="exec-detail-step-duration">
+                {{ formatDuration(step.durationMs) }}
+              </span>
+              <span v-if="step.status !== 'skipped'" class="exec-detail-step-started">
+                开始 {{ formatStepTime(step.startedAt) }}
+              </span>
+            </header>
+            <ApiRunSnapshotTabs
+              :request-snapshot="step.request"
+              :response-snapshot="step.response"
+              :assertions="step.assertions ?? []"
+            />
+          </section>
+        </div>
+        <ApiRunSnapshotTabs
+          v-else
+          :request-snapshot="itemDetailRecord.requestSnapshot"
+          :response-snapshot="itemDetailRecord.responseSnapshot"
+          :assertions="itemDetailRecord.assertions ?? []"
+        />
+      </div>
+    </a-modal>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onActivated, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, ref, watch } from 'vue';
 import { message } from 'ant-design-vue';
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
   DeleteOutlined,
-  DownOutlined,
   EditOutlined,
+  ExpandOutlined,
   InboxOutlined,
   InfoCircleOutlined,
   PlayCircleOutlined,
@@ -516,8 +566,10 @@ const envModalOpen = ref(false);
 const manageCasesOpen = ref(false);
 const runModalOpen = ref(false);
 const selectedCaseIds = ref<string[]>([]);
-const expandedKeys = ref<string[]>([]);
 const linkedExpandedKeys = ref<string[]>([]);
+const itemDetailOpen = ref(false);
+const itemDetailRecord = ref<ApiRunItemRow | null>(null);
+const itemDetailFocusKey = ref('');
 const expandedRunId = ref<string | null>(null);
 const rerunningRunId = ref<string | null>(null);
 const rerunningItemId = ref<string | null>(null);
@@ -631,21 +683,14 @@ watch(detailTab, async (tab) => {
   await apiStore.ensureRunnerRunsLoaded(projectId);
 });
 
-function toggleRunItemExpand(recordId: string) {
-  expandedKeys.value = expandedKeys.value.includes(recordId) ? [] : [recordId];
+function runItemRow(record: ApiRunItemRow) {
+  return {
+    class: 'exec-run-clickable-row',
+    onClick: () => openItemDetail(record),
+  };
 }
 
 const itemColumns = [
-  {
-    title: '案例',
-    dataIndex: 'caseTitle',
-    key: 'caseTitle',
-    ellipsis: true,
-    customCell: (record: { id: string }) => ({
-      class: 'exec-run-case-cell',
-      onClick: () => toggleRunItemExpand(record.id),
-    }),
-  },
   {
     title: '案例编号',
     dataIndex: 'caseNo',
@@ -653,9 +698,16 @@ const itemColumns = [
     width: 168,
     ellipsis: true,
   },
+  {
+    title: '案例',
+    dataIndex: 'caseTitle',
+    key: 'caseTitle',
+    ellipsis: true,
+    customCell: () => ({ class: 'exec-run-case-cell' }),
+  },
   { title: '状态', dataIndex: 'status', key: 'status', width: 96 },
   { title: '耗时', dataIndex: 'durationMs', key: 'durationMs', width: 88, align: 'right' as const },
-  { title: '操作', key: 'actions', width: 96, align: 'center' as const },
+  { title: '操作', key: 'actions', width: 128, align: 'center' as const },
 ];
 
 const linkedCaseColumns = [
@@ -694,6 +746,34 @@ function runItemSteps(record: { requestSnapshot?: unknown }): RunStepSnapshot[] 
   const snapshot = record.requestSnapshot as { steps?: unknown } | null | undefined;
   const steps = snapshot?.steps;
   return Array.isArray(steps) ? (steps as RunStepSnapshot[]) : [];
+}
+
+const itemDetailSteps = computed(() => {
+  const record = itemDetailRecord.value;
+  return record ? runItemSteps(record) : [];
+});
+
+function detailStepKey(step: RunStepSnapshot, index: number) {
+  return String(step.stepId ?? `index-${index}`);
+}
+
+function detailStepAnchorId(step: RunStepSnapshot, index: number) {
+  return `exec-detail-step-${detailStepKey(step, index)}`;
+}
+
+/** 打开大尺寸详情：步骤列表只做导航，完整内容统一在弹窗里看 */
+function openItemDetail(record: ApiRunItemRow, stepKey = '') {
+  itemDetailRecord.value = record;
+  itemDetailFocusKey.value = stepKey;
+  itemDetailOpen.value = true;
+  if (!stepKey) return;
+  void nextTick(() => {
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById(`exec-detail-step-${stepKey}`)
+        ?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
+  });
 }
 
 /** 执行记录里的案例编号：优先用执行时落库的编号，旧记录回退到当前执行列表 */
@@ -800,6 +880,7 @@ function runItemStatusLabel(status: string) {
   if (status === 'passed') return '通过';
   if (status === 'failed') return '失败';
   if (status === 'error') return '异常';
+  if (status === 'skipped') return '未执行';
   if (status === 'running') return '执行中';
   return status || '未执行';
 }
@@ -1111,7 +1192,6 @@ async function onRerunHistoryAsync(runId: string) {
     const run = await apiStore.rerunHistoricalRun(projectId, transactionId, runId, {});
     if (run) {
       expandedRunId.value = run.id;
-      expandedKeys.value = [];
     }
   } catch (error) {
     const responseMessage = (error as { response?: { data?: { message?: string } } })
@@ -1186,7 +1266,6 @@ async function onDeleteHistory(runId: string) {
     await apiStore.deleteRun(projectId, transactionId, runId);
     if (expandedRunId.value === runId) {
       expandedRunId.value = null;
-      expandedKeys.value = [];
     }
   } catch (error) {
     const responseMessage = (error as { response?: { data?: { message?: string } } })
@@ -1203,7 +1282,6 @@ async function toggleRunDetail(runId: string) {
     return;
   }
   expandedRunId.value = runId;
-  expandedKeys.value = [];
   const projectId = apiStore.activeProjectId;
   if (!projectId) return;
   if (apiStore.activeRun?.id === runId && apiStore.activeRun.items?.length) {
@@ -1222,7 +1300,6 @@ watch(
   () => {
     if (!apiStore.transactionRuns.length) {
       expandedRunId.value = null;
-      expandedKeys.value = [];
       return;
     }
     if (
@@ -1241,7 +1318,6 @@ watch(
   () => apiStore.runnerCaseIds,
   () => {
     expandedRunId.value = null;
-    expandedKeys.value = [];
     void ensureLinkedCasesLoaded();
   },
   { immediate: true },
@@ -1251,10 +1327,6 @@ async function loadRun(runId: string) {
   const projectId = apiStore.activeProjectId;
   if (!projectId) return;
   await apiStore.loadRun(projectId, runId);
-}
-
-function onExpand(expanded: boolean, record: { id: string }) {
-  expandedKeys.value = expanded ? [record.id] : [];
 }
 
 function executionContextRowClass(record: ApiRunDetail["items"][number]) {
@@ -1280,7 +1352,6 @@ async function restoreExecutionHistoryContext() {
   }
   detailTab.value = "result";
   expandedRunId.value = context.runId;
-  expandedKeys.value = [context.item.id];
   if (apiStore.activeRun?.id === context.runId) return;
   runDetailLoading.value = true;
   try {
@@ -2084,14 +2155,18 @@ onActivated(() => {
   color: #b42318;
 }
 
+.exec-run-status-pill--skipped {
+  background: #f2f4f7;
+  color: #667085;
+}
+
 .exec-run-status-pill--running {
   background: #eff6ff;
   color: #175cd3;
 }
 
-.exec-run-expand {
-  padding: 4px 0 8px;
-  overflow: visible;
+.exec-run-results-table :deep(.exec-run-clickable-row) {
+  cursor: pointer;
 }
 
 .linked-case-steps-tag {
@@ -2157,26 +2232,6 @@ onActivated(() => {
   font-size: 12px;
 }
 
-.exec-run-step-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.exec-run-step-block {
-  padding: 10px 12px;
-  border: 1px solid #eaecf0;
-  border-radius: 10px;
-  background: #fcfcfd;
-}
-
-.exec-run-step-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
 .exec-run-step-index {
   padding: 1px 8px;
   border-radius: 999px;
@@ -2186,13 +2241,119 @@ onActivated(() => {
   font-weight: 600;
 }
 
-.exec-run-step-name {
-  min-width: 0;
-  color: #1d2939;
-  font-size: 13px;
-}
 .exec-run-parallel-pill { padding: 1px 7px; border: 1px solid #efb7c1; border-radius: 4px; background: #fff5f5; color: #8b000f; font-size: 11px; }
-.exec-run-started { margin-left: auto; color: #667085; font-size: 12px; }
+
+/* 放大查看：几乎占满屏幕，避免报文只能挤在小块区域里看 */
+:global(.exec-detail-modal .ant-modal-content) {
+  padding: 0;
+  overflow: hidden;
+}
+
+:global(.exec-detail-modal .ant-modal-header) {
+  margin: 0;
+  padding: 13px 18px;
+  border-bottom: 1px solid #eaecf0;
+}
+
+:global(.exec-detail-modal .ant-modal-body) {
+  max-height: calc(100vh - 150px);
+  padding: 14px 18px 18px;
+  overflow: auto;
+}
+
+:global(.exec-detail-modal .ant-modal-close) {
+  top: 12px;
+  right: 12px;
+}
+
+.exec-detail-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding-right: 28px;
+}
+
+.exec-detail-title-name {
+  min-width: 0;
+  overflow: hidden;
+  color: #1d2939;
+  font-size: 15px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exec-detail-title-meta {
+  flex-shrink: 0;
+  color: #98a2b3;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.exec-detail-body {
+  min-height: 200px;
+}
+
+.exec-detail-step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.exec-detail-step {
+  padding: 14px 16px;
+  border: 1px solid #d0d5dd;
+  border-radius: 10px;
+  background: #fcfcfd;
+  box-shadow: 0 1px 3px rgb(16 24 40 / 5%);
+  scroll-margin-top: 6px;
+}
+
+.exec-detail-step.is-focused {
+  border-color: #e7b8c0;
+  box-shadow: 0 0 0 2px rgb(182 15 45 / 6%);
+}
+
+.exec-detail-step.is-skipped {
+  border-color: #d0d5dd;
+  background: #fafbfc;
+}
+
+.exec-detail-step.is-skipped .exec-detail-step-name {
+  color: #667085;
+  font-weight: 500;
+}
+
+.exec-detail-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eaecf0;
+}
+
+.exec-detail-step-name {
+  min-width: 0;
+  overflow: hidden;
+  color: #1d2939;
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exec-detail-step-duration {
+  color: #475467;
+  font-size: 12px;
+}
+
+.exec-detail-step-started {
+  margin-left: auto;
+  color: #667085;
+  font-size: 12px;
+}
 
 .exec-run-empty {
   flex-direction: column;

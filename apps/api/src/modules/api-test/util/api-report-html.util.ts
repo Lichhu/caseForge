@@ -235,11 +235,14 @@ function escapeHtml(value: unknown) {
 function resultLabel(status: string) {
   if (status === "passed") return "Pass";
   if (status === "failed") return "Fail";
+  if (status === "skipped") return "Skipped";
   return "Error";
 }
 
 function resultColor(status: string) {
-  return status === "passed" ? PASS_COLOR : FAIL_COLOR;
+  if (status === "passed") return PASS_COLOR;
+  if (status === "skipped") return "#667085";
+  return FAIL_COLOR;
 }
 
 function formatDateTime(value?: Date) {

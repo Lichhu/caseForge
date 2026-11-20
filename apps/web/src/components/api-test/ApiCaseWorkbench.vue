@@ -557,10 +557,12 @@
                       <a-button type="text" size="small" :disabled="isNewCase" title="调试历史" @click="selectStep(index); openDebugHistory()"><HistoryOutlined /></a-button>
                       <a-button type="text" danger size="small" :disabled="form.steps.length === 1" title="删除" @click="removeStep(index)"><DeleteOutlined /></a-button>
                     </div>
-                    <a-modal v-if="step.id === expandedStepId" v-model:open="stepEditModalOpen" title="编辑步骤" :width="1080" :footer="null" wrap-class-name="case-step-editor-modal" :z-index="NESTED_OVERLAY_Z_INDEX" @cancel="cancelStepEditor">
+                    <a-modal v-if="step.id === expandedStepId" v-model:open="stepEditModalOpen" title="编辑步骤" :width="executionResultContext ? 'min(1460px, 96vw)' : 1080" :footer="null" wrap-class-name="case-step-editor-modal" :z-index="NESTED_OVERLAY_Z_INDEX" @cancel="cancelStepEditor">
                       <template #title>
                         <div class="case-step-modal-title"><span class="case-step-modal-kicker">步骤 {{ activeStepIndex + 1 }}</span><strong>{{ form.stepName || '未命名步骤' }}</strong></div>
                       </template>
+                      <div class="case-step-modal-layout">
+                        <div class="case-step-modal-main">
                       <div class="case-step-name-field">
                         <span>步骤名称</span>
                         <a-input
@@ -973,6 +975,67 @@
                   <a-empty v-if="!form.exports.length" :description="form.stepKind === 'db' ? '从 SQL 查询结果中提取共享变量，后续步骤用 ${变量名} 引用' : '从本步骤请求/响应中提取共享变量，后续步骤用 ${变量名} 引用'" />
                 </div>
               </div>
+                        </div>
+                        <aside
+                          v-if="executionResultContext"
+                          class="case-step-modal-side"
+                        >
+                          <header class="case-step-modal-side-head">
+                            <div>
+                              <span>来自执行结果</span>
+                              <strong :title="executionResultContext.runVersionCode || executionResultContext.runId">
+                                {{ executionResultContext.runVersionCode || executionResultContext.runId }}
+                              </strong>
+                            </div>
+                            <span class="case-step-modal-side-count">
+                              {{ executionResultStepAssertions.length }} 条断言
+                            </span>
+                          </header>
+                          <p class="case-step-modal-side-meta">
+                            {{ executionResultStatusLabel(executionResultContext.item.status) }}
+                            · 案例耗时 {{ formatExecutionDuration(executionResultContext.item.durationMs) }}
+                            <template v-if="executionResultStepSnapshot?.status">
+                              · 步骤{{ executionResultStepStatusLabel(executionResultStepSnapshot.status) }}
+                            </template>
+                          </p>
+                          <div
+                            v-if="executionResultStepAssertions.length"
+                            class="case-step-modal-side-list"
+                          >
+                            <article
+                              v-for="(assertion, index) in executionResultStepAssertions"
+                              :key="`${assertion.name}-${index}`"
+                              class="case-step-modal-assertion"
+                              :class="{ failed: !assertion.passed }"
+                            >
+                              <header>
+                                <span
+                                  class="case-step-modal-assertion-pill"
+                                  :class="{ failed: !assertion.passed }"
+                                >
+                                  {{ assertion.passed ? "通过" : "失败" }}
+                                </span>
+                                <strong :title="assertion.name">
+                                  {{ assertion.name || `断言 ${index + 1}` }}
+                                </strong>
+                              </header>
+                              <div class="case-step-modal-assertion-values">
+                                <div>
+                                  <span>期望值</span>
+                                  <code>{{ formatRunSnapshotField(assertion.expected) }}</code>
+                                </div>
+                                <div>
+                                  <span>实际值</span>
+                                  <code>{{ formatRunSnapshotField(assertion.actual) }}</code>
+                                </div>
+                              </div>
+                            </article>
+                          </div>
+                          <div v-else class="case-step-modal-side-empty">
+                            该步骤在本次执行中没有断言记录
+                          </div>
+                        </aside>
+                      </div>
                       <div class="case-step-modal-footer">
                         <a-button
                           :loading="debugRunning || dbStepPreviewRunning"
@@ -1027,13 +1090,9 @@
                 </a-button>
               </a-space>
             </header>
-            <ApiRunSnapshotTabs
-              :request-snapshot="executionResultContext.item.requestSnapshot"
-              :response-snapshot="executionResultContext.item.responseSnapshot"
-              :assertions="executionResultContext.item.assertions"
-              :show-snapshots="false"
-              dense
-            />
+            <p class="case-execution-result-hint">
+              该步骤的断言比对已在「编辑步骤」弹窗左侧展示：点击步骤列表中的步骤即可查看。
+            </p>
           </section>
           </div>
 
@@ -1356,6 +1415,7 @@ import type {
   ApiCaseStep,
   ApiDbStepMode,
   ApiHttpCaseStep,
+  AssertionResult,
 } from '@case-forge/shared';
 import { copyText } from '@/utils/copyText';
 import type { ApiEnvironmentServiceRow, ApiTestCaseRow, DebugRunResult } from '@/api/apiTestClient';
@@ -1367,7 +1427,6 @@ import { debugRecordConnected, debugRecordProtocol } from '@/utils/debugRecordSt
 import KeyValueRowsEditor from '@/components/api-test/KeyValueRowsEditor.vue';
 import AssertionRowsEditor from '@/components/api-test/AssertionRowsEditor.vue';
 import ApiCaseExportModal from '@/components/api-test/ApiCaseExportModal.vue';
-import ApiRunSnapshotTabs from '@/components/api-test/ApiRunSnapshotTabs.vue';
 import { IMMERSIVE_OVERLAY_Z_INDEX, NESTED_OVERLAY_Z_INDEX } from '@/constants/overlay-z-index';
 import {
   assertionsToRows,
@@ -2215,6 +2274,51 @@ const executionResultContext = computed(() => {
   return context;
 });
 
+interface ExecutionStepSnapshot {
+  stepId?: string;
+  stepName?: string;
+  status?: string;
+  durationMs?: number;
+  assertions?: AssertionResult[];
+}
+
+/** 执行记录里的多步骤快照：用于把断言比对对应到当前编辑的步骤 */
+const executionResultStepSnapshot = computed<ExecutionStepSnapshot | null>(() => {
+  const context = executionResultContext.value;
+  if (!context) return null;
+  const snapshot = context.item.requestSnapshot as
+    | { steps?: unknown }
+    | null
+    | undefined;
+  const steps = Array.isArray(snapshot?.steps)
+    ? (snapshot.steps as ExecutionStepSnapshot[])
+    : [];
+  if (!steps.length) return null;
+  const step = form.steps[activeStepIndex.value];
+  const byId = step?.id
+    ? steps.find((item) => item.stepId === step.id)
+    : undefined;
+  if (byId) return byId;
+  const byName = steps.find(
+    (item) => item.stepName && item.stepName === form.stepName,
+  );
+  if (byName) return byName;
+  /* 旧执行记录可能没有 stepId，仅在这种情况下按顺序兜底 */
+  const legacy = steps[activeStepIndex.value];
+  return legacy && !legacy.stepId ? legacy : null;
+});
+
+const executionResultStepAssertions = computed<AssertionResult[]>(() => {
+  const context = executionResultContext.value;
+  if (!context) return [];
+  const snapshot = executionResultStepSnapshot.value;
+  if (snapshot) return snapshot.assertions ?? [];
+  // 单步骤案例没有 steps 快照，断言直接挂在执行记录上
+  const raw = context.item.requestSnapshot as { steps?: unknown } | undefined;
+  const hasSteps = Array.isArray(raw?.steps) && raw.steps.length > 0;
+  return hasSteps ? [] : (context.item.assertions ?? []);
+});
+
 function executionResultStatusLabel(status: string) {
   if (status === "passed") return "执行通过";
   if (status === "failed") return "执行失败";
@@ -2222,6 +2326,14 @@ function executionResultStatusLabel(status: string) {
   if (status === "skipped") return "执行跳过";
   if (status === "running") return "执行中";
   return status || "未知状态";
+}
+
+function executionResultStepStatusLabel(status?: string) {
+  if (status === "passed") return "通过";
+  if (status === "failed") return "失败";
+  if (status === "error") return "异常";
+  if (status === "skipped") return "未执行";
+  return status || "";
 }
 
 function formatExecutionDuration(durationMs?: number) {
@@ -4183,6 +4295,13 @@ function onBatchDelete() {
   font-size: 12px;
 }
 
+.case-execution-result-hint {
+  margin: 0;
+  color: #667085;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
 .api-case-panel .instruction-editor-body > .case-payload-block {
   flex: 0 0 auto;
   min-height: 0;
@@ -5949,6 +6068,206 @@ function onBatchDelete() {
 :global(.case-step-editor-modal .ant-modal-body) { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; padding: 20px 24px 0; }
 :global(.case-step-editor-modal .case-step-name-field),
 :global(.case-step-editor-modal .case-step-detail-tabs) { flex-shrink: 0; }
+
+.case-step-modal-layout {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 18px;
+}
+
+.case-step-modal-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.case-step-modal-side {
+  display: flex;
+  flex: 0 0 360px;
+  flex-direction: column;
+  min-height: 0;
+  order: -1;
+  padding-right: 18px;
+  border-right: 1px solid #eaecf0;
+}
+
+.case-step-modal-side-head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.case-step-modal-side-head > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.case-step-modal-side-head span {
+  color: #98a2b3;
+  font-size: 10px;
+}
+
+.case-step-modal-side-head strong {
+  overflow: hidden;
+  color: #8c1f3d;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.case-step-modal-side-count {
+  flex-shrink: 0;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #f2f4f7;
+  color: #475467 !important;
+  font-size: 11px !important;
+  line-height: 1.7;
+}
+
+.case-step-modal-side-meta {
+  flex-shrink: 0;
+  margin: 3px 0 10px;
+  color: #667085;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.case-step-modal-side-list {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 2px;
+  overflow-y: auto;
+}
+
+.case-step-modal-assertion {
+  padding: 8px 10px;
+  border: 1px solid #eaecf0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.case-step-modal-assertion.failed {
+  border-color: #fecdca;
+  background: #fffbfa;
+}
+
+.case-step-modal-assertion > header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.case-step-modal-assertion > header strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #344054;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.case-step-modal-assertion-pill {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #ecfdf3;
+  color: #027a48;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.7;
+}
+
+.case-step-modal-assertion-pill.failed {
+  background: #fef3f2;
+  color: #b42318;
+}
+
+.case-step-modal-assertion-values {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.case-step-modal-assertion-values > div {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 6px;
+  align-items: start;
+}
+
+.case-step-modal-assertion-values span {
+  color: #98a2b3;
+  font-size: 10.5px;
+  line-height: 1.7;
+}
+
+.case-step-modal-assertion-values code {
+  min-width: 0;
+  max-height: 150px;
+  padding: 3px 6px;
+  overflow: auto;
+  border: 1px solid #eaecf0;
+  border-radius: 4px;
+  background: #fbfcfe;
+  color: #1d2939;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.case-step-modal-assertion.failed
+  .case-step-modal-assertion-values
+  > div:last-child
+  code {
+  border-color: #fecdca;
+  background: #fef3f2;
+  color: #b42318;
+}
+
+.case-step-modal-side-empty {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 12px;
+  border: 1px dashed #e4e7ec;
+  border-radius: 8px;
+  color: #98a2b3;
+  font-size: 12px;
+  text-align: center;
+}
+
+@media (max-width: 1100px) {
+  .case-step-modal-layout {
+    flex-direction: column;
+  }
+
+  .case-step-modal-side {
+    flex: 0 0 auto;
+    max-height: 240px;
+    padding-top: 12px;
+    padding-right: 0;
+    border-top: 1px solid #eaecf0;
+    border-right: 0;
+  }
+}
+
 .case-step-detail-tabs { display: flex; margin-bottom: 12px; border-bottom: 1px solid #eaecf0; }
 .case-step-editor-modal :deep(.case-request-panel),
 .case-step-editor-modal :deep(.case-assertion-panel),

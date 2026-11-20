@@ -649,6 +649,13 @@ export class ApiExecutionService {
         final = outcomes.find(
           ({ result }) => result.status !== "passed",
         )?.result;
+        /*
+         * 失败后案例按设计停止执行，但结果快照要保留剩余步骤：
+         * 否则执行明细里只剩失败的那一步，看起来像步骤丢失。
+         */
+        for (const step of steps.slice(stepResults.length)) {
+          stepResults.push(buildSkippedStepSnapshot(step));
+        }
         break;
       }
     }
@@ -1981,6 +1988,37 @@ export function requestBodySnapshotFields(
     ...(typeof request.bodyText === "string"
       ? { bodyText: request.bodyText }
       : {}),
+  };
+}
+
+/**
+ * 失败中断后剩余步骤的快照：保留请求预览，响应标记未执行。
+ * 前端据此把步骤显示为「未执行」，而不是整步从执行明细里消失。
+ */
+export function buildSkippedStepSnapshot(step: ApiCaseStep) {
+  const request = isDbStep(step)
+    ? {
+        kind: "db",
+        mode: step.db?.mode,
+        connectionId: step.db?.connectionId,
+        sql: step.db?.sql,
+      }
+    : step.request;
+  return {
+    stepId: step.id,
+    stepName: step.name,
+    status: "skipped",
+    durationMs: 0,
+    startedAt: null,
+    request,
+    response: {
+      status: 0,
+      headers: {},
+      body: null,
+      error: "前置步骤未通过，本步骤未执行",
+    },
+    assertions: [],
+    skipped: true,
   };
 }
 
