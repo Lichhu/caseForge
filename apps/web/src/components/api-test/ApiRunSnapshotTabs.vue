@@ -162,15 +162,11 @@ function isCompactAssertionValue(value: unknown): boolean {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
-  gap: 12px;
+  gap: 20px;
 }
 
 .exec-run-assertions {
   min-width: 0;
-  overflow: hidden;
-  border: 1px solid #dfe3e8;
-  border-radius: 10px;
-  background: #fff;
 }
 
 .exec-run-assertions-head {
@@ -178,9 +174,8 @@ function isCompactAssertionValue(value: unknown): boolean {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
+  padding: 10px 0 8px;
   border-bottom: 1px solid #eaecf0;
-  background: #f8f9fb;
 }
 
 .exec-run-assertions-head > div:first-child {
@@ -220,29 +215,27 @@ function isCompactAssertionValue(value: unknown): boolean {
 }
 
 .exec-run-assertions-empty {
-  padding: 14px 12px;
+  padding: 10px 0;
   color: #98a2b3;
   font-size: 12px;
-  text-align: center;
 }
 
 .exec-run-assertion-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px;
+  padding: 8px 0 0;
 }
 
 .exec-run-assertion-item {
-  padding: 10px;
-  border: 1px solid #eaecf0;
+  padding: 9px 10px;
   border-radius: 8px;
-  background: #fff;
+  background: #fafbfc;
 }
 
 .exec-run-assertion-item.failed {
-  border-color: #fecdca;
-  background: #fffbfa;
+  background: #fff6f5;
+  box-shadow: inset 2px 0 0 #f97066;
 }
 
 .exec-run-assertion-head {
@@ -281,11 +274,10 @@ function isCompactAssertionValue(value: unknown): boolean {
 .exec-run-assertion-value pre {
   max-height: 160px;
   margin: 0;
-  padding: 8px 10px;
+  padding: 7px 9px;
   overflow: auto;
-  border: 1px solid #eaecf0;
   border-radius: 6px;
-  background: #fbfcfe;
+  background: #fff;
   color: #1d2939;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
@@ -298,9 +290,8 @@ function isCompactAssertionValue(value: unknown): boolean {
   display: block;
   padding: 5px 9px;
   overflow: hidden;
-  border: 1px solid #eaecf0;
   border-radius: 6px;
-  background: #fbfcfe;
+  background: #fff;
   color: #1d2939;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
@@ -312,7 +303,6 @@ function isCompactAssertionValue(value: unknown): boolean {
 .exec-run-assertion-item.failed
   .exec-run-assertion-value:last-child
   :is(pre, .exec-run-assertion-inline) {
-  border-color: #fecdca;
   background: #fef3f2;
 }
 

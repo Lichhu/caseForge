@@ -91,10 +91,7 @@
         </header>
         <div
           class="exec-snapshot-code"
-          :class="{
-            'is-collapsed': bodyCollapsed,
-            'has-toggle': bodyCollapsible,
-          }"
+          :class="{ 'is-collapsed': bodyCollapsed }"
         >
           <div class="exec-snapshot-code-view">
             <pre><code v-html="view.body.highlighted"></code></pre>
@@ -313,10 +310,6 @@ async function onCopyRaw() {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  overflow: hidden;
-  border: 1px solid #e4e7ec;
-  border-radius: 10px;
-  background: #fff;
 }
 
 .exec-snapshot-pane-head {
@@ -324,9 +317,8 @@ async function onCopyRaw() {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 9px 12px;
+  padding: 0 0 8px;
   border-bottom: 1px solid #eaecf0;
-  background: #f8f9fb;
 }
 
 .exec-snapshot-pane-title {
@@ -382,7 +374,7 @@ async function onCopyRaw() {
   min-width: 0;
   flex-direction: column;
   gap: 10px;
-  padding: 10px 12px 12px;
+  padding: 10px 0 0;
 }
 
 .exec-snapshot-placeholder {
@@ -489,9 +481,8 @@ async function onCopyRaw() {
   max-width: 100%;
   gap: 4px;
   padding: 0 6px;
-  border: 1px solid #eaecf0;
   border-radius: 4px;
-  background: #fcfcfd;
+  background: #f2f4f7;
   color: #475467;
   font-size: 11px;
   line-height: 1.65;
@@ -516,7 +507,6 @@ async function onCopyRaw() {
   gap: 6px;
   margin: 0;
   padding: 7px 10px;
-  border: 1px solid #fecdca;
   border-radius: 6px;
   background: #fef3f2;
   color: #b42318;
@@ -559,17 +549,12 @@ async function onCopyRaw() {
 .exec-snapshot-code-view {
   position: relative;
   overflow: hidden;
-  border: 1px solid #eaecf0;
   border-radius: 8px;
-  background: #fbfcfe;
+  background: #f8fafc;
 }
 
 .exec-snapshot-code.is-collapsed .exec-snapshot-code-view {
   max-height: 252px;
-}
-
-.exec-snapshot-code.has-toggle .exec-snapshot-code-view {
-  border-radius: 8px 8px 0 0;
 }
 
 .exec-snapshot-code-view pre {
@@ -591,20 +576,18 @@ async function onCopyRaw() {
   bottom: 0;
   left: 0;
   height: 48px;
-  background: linear-gradient(180deg, rgba(251, 252, 254, 0), #fbfcfe 80%);
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0), #f8fafc 80%);
   pointer-events: none;
 }
 
 .exec-snapshot-code-more {
   display: block;
   width: 100%;
-  margin-top: -1px;
-  padding: 5px 0;
-  border: 1px solid #eaecf0;
-  border-top: 0;
+  padding: 4px 0 5px;
+  border: 0;
   border-radius: 0 0 8px 8px;
-  background: #f8f9fb;
-  color: #475467;
+  background: #f8fafc;
+  color: #667085;
   cursor: pointer;
   font-size: 11.5px;
   line-height: 1.6;
@@ -612,28 +595,8 @@ async function onCopyRaw() {
 }
 
 .exec-snapshot-code-more:hover {
-  background: #eef2f6;
-  color: #1d2939;
-}
-
-.exec-snapshot-code-more {
-  display: block;
-  width: 100%;
-  padding: 5px 0;
-  border: 1px solid #eaecf0;
-  border-top: 0;
-  border-radius: 0 0 8px 8px;
-  background: #f8f9fb;
-  color: #475467;
-  cursor: pointer;
-  font-size: 11.5px;
-  line-height: 1.6;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.exec-snapshot-code-more:hover {
-  background: #eef2f6;
-  color: #1d2939;
+  background: #f2f4f7;
+  color: #8c1f3d;
 }
 
 .exec-snapshot-meta {
@@ -645,10 +608,11 @@ async function onCopyRaw() {
   width: 100%;
   align-items: center;
   gap: 6px;
-  padding: 6px 9px;
-  border: 1px solid #eaecf0;
-  border-radius: 8px;
-  background: #fcfcfd;
+  padding: 8px 0 6px;
+  border: 0;
+  border-top: 1px solid #eef2f6;
+  border-radius: 0;
+  background: transparent;
   color: #475467;
   cursor: pointer;
   font-size: 12px;
@@ -658,7 +622,7 @@ async function onCopyRaw() {
 }
 
 .exec-snapshot-meta-toggle:hover {
-  background: #f8f9fb;
+  background: #f8fafc;
 }
 
 .exec-snapshot-chevron {
@@ -694,7 +658,7 @@ async function onCopyRaw() {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding-top: 8px;
+  padding-top: 4px;
 }
 
 .exec-snapshot-group-head {
@@ -719,25 +683,17 @@ async function onCopyRaw() {
 
 .exec-snapshot-kv {
   margin: 0;
-  overflow: hidden;
-  border: 1px solid #eaecf0;
-  border-radius: 8px;
 }
 
 .exec-snapshot-kv-row {
   display: grid;
   grid-template-columns: minmax(88px, 32%) minmax(0, 1fr);
   gap: 10px;
-  padding: 4px 9px;
-  background: #fff;
+  padding: 5px 0;
 }
 
 .exec-snapshot-kv-row + .exec-snapshot-kv-row {
   border-top: 1px solid #f2f4f7;
-}
-
-.exec-snapshot-kv-row:nth-child(even) {
-  background: #fcfcfd;
 }
 
 .exec-snapshot-kv-row dt {
@@ -772,9 +728,8 @@ async function onCopyRaw() {
   max-height: 220px;
   padding: 7px 9px;
   overflow: auto;
-  border-left: 2px solid #e4e7ec;
-  border-radius: 4px;
-  background: #f9fafb;
+  border-radius: 6px;
+  background: #f8fafc;
   color: #344054;
   font-size: 11.5px;
 }
