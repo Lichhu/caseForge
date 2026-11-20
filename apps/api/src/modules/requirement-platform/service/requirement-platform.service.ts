@@ -81,7 +81,7 @@ export class RequirementPlatformService {
   ) {}
 
   /**
-   * 需求列表：人员池成员和分发人可见全量，其他用户不可见
+   * 需求列表：分发人、system 和人员池成员可见全量，其他用户不可见
    */
   async list(options: {
     page: number;
@@ -103,7 +103,7 @@ export class RequirementPlatformService {
     const userName = getScopedUserName();
     const isDispatcher = await this.isDispatcher(userName);
     const isMember = (await this.isPoolMember(userName)) && !isDispatcher;
-    if (!isDispatcher && !isMember) {
+    if (!isDispatcher && !isMember && !this.isSystemUser(userName)) {
       throw new ForbiddenException("仅人员池成员和分发人可查看需求数据");
     }
     const page = Math.max(1, Math.floor(options.page || 1));
@@ -215,6 +215,12 @@ export class RequirementPlatformService {
       page,
       size,
     };
+  }
+
+  /** 分发人与 system 可查看全部需求及其项目 */
+  async canViewAllRequirements(): Promise<boolean> {
+    const userName = getScopedUserName();
+    return this.isSystemUser(userName) || this.isDispatcher(userName);
   }
 
   async create(dto: CreateRequirementDto): Promise<PublicRequirement> {
@@ -460,7 +466,11 @@ export class RequirementPlatformService {
 
   private async assertRequirementViewer() {
     const user = getScopedUserName();
-    if (!(await this.isDispatcher(user)) && !(await this.isPoolMember(user))) {
+    if (
+      !(await this.isDispatcher(user)) &&
+      !(await this.isPoolMember(user)) &&
+      !this.isSystemUser(user)
+    ) {
       throw new ForbiddenException("仅人员池成员和分发人可查看需求数据");
     }
   }
@@ -781,6 +791,10 @@ export class RequirementPlatformService {
       throw new NotFoundException("需求不存在");
     }
     return requirement;
+  }
+
+  private isSystemUser(userName: string): boolean {
+    return userName === "system";
   }
 
   private async isDispatcher(userName: string): Promise<boolean> {

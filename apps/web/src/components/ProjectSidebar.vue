@@ -36,6 +36,9 @@
             <span v-if="project.applicationName">
               归属应用：{{ project.applicationName }}
             </span>
+            <span v-if="project.description">
+              备注：{{ project.description }}
+            </span>
             <span>{{ project.caseCount }} 条案例</span>
           </div>
         </template>
@@ -145,7 +148,13 @@
               active: project.id === activeProjectId,
               batch: deleteMode,
               'is-completed': isApiPlatform && project.requirementStatus === 'completed',
+              'is-foreign': isApiPlatform && !isOwnedApiProject(project),
             }"
+            :title="
+              isApiPlatform && !isOwnedApiProject(project)
+                ? '点击查看该需求的完成情况'
+                : undefined
+            "
             role="button"
             tabindex="0"
             @click="handleProjectClick(project.id)"
@@ -184,7 +193,7 @@
                 <span class="project-case-badge">{{ project.caseCount }} 个案例</span>
               </div>
               <div v-if="isApiPlatform && project.requirementCreatedAt" class="project-time-row">
-                <span class="project-time">创建于 {{ formatProjectTime(project.requirementCreatedAt) }}</span>
+                <span class="project-time">{{ projectTimeText(project) }}</span>
                 <button
                   v-if="project.requirementId && project.requirementStatus === 'testing'"
                   type="button"
@@ -204,9 +213,17 @@
                   恢复为测试中
                 </button>
               </div>
+              <div
+                v-if="isApiPlatform && project.description"
+                class="project-remark-row"
+              >
+                <a-tooltip :title="project.description" placement="topLeft">
+                  <span class="project-remark">备注：{{ project.description }}</span>
+                </a-tooltip>
+              </div>
             </div>
             <button
-              v-if="!deleteMode && !isApiPlatform"
+              v-if="!deleteMode && (!isApiPlatform || project.canEditRemark)"
               class="project-edit"
               :disabled="saving"
               aria-label="编辑项目"
@@ -327,14 +344,14 @@
 
     <a-modal
       v-model:open="editModalOpen"
-      title="编辑需求项目"
+      :title="isApiPlatform ? '编辑备注' : '编辑需求项目'"
       ok-text="保存"
       cancel-text="取消"
       :confirm-loading="saving"
       @ok="submitEditProject"
     >
       <a-form layout="vertical">
-        <a-form-item label="需求编号" required>
+        <a-form-item v-if="!isApiPlatform" label="需求编号" required>
           <a-input
             v-model:value="editForm.requirementNo"
             :maxlength="INPUT_LIMITS.requirementCode"
@@ -342,7 +359,7 @@
             disabled
           />
         </a-form-item>
-        <a-form-item label="需求名称" required>
+        <a-form-item v-if="!isApiPlatform" label="需求名称" required>
           <a-input
             v-model:value="editForm.title"
             :maxlength="INPUT_LIMITS.projectTitle"
@@ -357,13 +374,20 @@
             "
           />
         </a-form-item>
-        <a-form-item label="项目描述">
+        <a-form-item
+          :label="isApiPlatform ? '备注' : '项目描述'"
+          :extra="
+            isApiPlatform
+              ? '备注会展示在需求接口测试的项目列表中'
+              : undefined
+          "
+        >
           <a-textarea
             v-model:value="editForm.description"
             :maxlength="INPUT_LIMITS.projectDescription"
             show-count
             :rows="4"
-            placeholder="请输入项目描述"
+            :placeholder="isApiPlatform ? '请输入备注' : '请输入项目描述'"
             @update:value="
               (value: string) =>
                 (editForm.description = normalizeLongTextInput(
@@ -375,6 +399,10 @@
         </a-form-item>
       </a-form>
     </a-modal>
+    <RequirementProgressDrawer
+      v-model:open="requirementProgressOpen"
+      :requirement="requirementProgressRecord"
+    />
     <div
       class="project-sidebar-resizer"
       role="separator"
@@ -410,8 +438,13 @@ import {
   normalizeLongTextInput,
   validateDisplayText,
 } from '@case-forge/shared';
+import type {
+  RequirementPlatformItem,
+  RequirementStatus,
+} from '@case-forge/shared';
 import { useCaseForgeStore } from '@/stores/caseForge';
 import { useApiTestStore } from '@/stores/apiTest';
+import RequirementProgressDrawer from '@/components/RequirementProgressDrawer.vue';
 import type { ProjectListItem } from '@/api/client';
 import { setRequirementStatus } from '@/api/requirementPlatform';
 
@@ -646,6 +679,35 @@ const activeProjectId = computed(() =>
   isApiPlatform.value ? apiStore.activeProjectId : caseStore.activeProject?.id,
 );
 
+const requirementProgressOpen = ref(false);
+const requirementProgressRecord = ref<RequirementPlatformItem | null>(null);
+
+/** 分发人/system 可见他人项目，但项目工作台仍按创建人隔离，改为查看需求完成情况 */
+function isOwnedApiProject(project: ProjectListItem) {
+  if (!isApiPlatform.value) return true;
+  return project.isOwned !== false;
+}
+
+function openProjectRequirementProgress(project: ProjectListItem) {
+  if (!project.requirementId) {
+    message.info('该需求尚未关联需求记录，无法查看完成情况');
+    return;
+  }
+  requirementProgressRecord.value = {
+    id: project.requirementId,
+    projectCode: project.requirementNo?.trim() || '',
+    projectName: cleanProjectTitle(project.title),
+    applicationName: project.applicationName ?? null,
+    status: (project.requirementStatus || 'testing') as RequirementStatus,
+    claimedBy: project.requirementOwner ?? null,
+    claimedProjectId: project.id,
+    completedAt: project.requirementCompletedAt ?? null,
+    createdAt: project.requirementCreatedAt ?? project.createdAt,
+    updatedAt: project.requirementCreatedAt ?? project.updatedAt,
+  };
+  requirementProgressOpen.value = true;
+}
+
 const listPage = computed(() =>
   isApiPlatform.value ? apiStore.projectListPage : caseStore.projectListPage,
 );
@@ -873,6 +935,11 @@ function handleProjectClick(projectId: string) {
     return;
   }
   if (isApiPlatform.value) {
+    const project = projectList.value.find((item) => item.id === projectId);
+    if (project && !isOwnedApiProject(project)) {
+      openProjectRequirementProgress(project);
+      return;
+    }
     void apiStore.selectProject(projectId, false);
     return;
   }
@@ -988,17 +1055,19 @@ function openEditProject(project: ProjectListItem) {
 
 async function submitEditProject() {
   const title = editForm.value.title.trim();
-  if (!title) {
-    message.warning('请输入需求名称');
-    return Promise.reject();
-  }
-  const invalidTitle = validateDisplayText(title, {
-    label: '需求名称',
-    maxLength: INPUT_LIMITS.projectTitle,
-  });
-  if (invalidTitle) {
-    message.warning(invalidTitle);
-    return Promise.reject();
+  if (!isApiPlatform.value) {
+    if (!title) {
+      message.warning('请输入需求名称');
+      return Promise.reject();
+    }
+    const invalidTitle = validateDisplayText(title, {
+      label: '需求名称',
+      maxLength: INPUT_LIMITS.projectTitle,
+    });
+    if (invalidTitle) {
+      message.warning(invalidTitle);
+      return Promise.reject();
+    }
   }
   if (saving.value || !editingProjectId.value) {
     return Promise.reject();
@@ -1006,8 +1075,8 @@ async function submitEditProject() {
   saving.value = true;
   try {
     if (isApiPlatform.value) {
+      // 需求名称/编号由需求管理维护，这里只更新项目列表里的备注
       await apiStore.updateProjectInfo(editingProjectId.value, {
-        title,
         description: editForm.value.description.trim(),
       });
     } else {
@@ -1017,7 +1086,7 @@ async function submitEditProject() {
       });
     }
     editModalOpen.value = false;
-    message.success('项目信息已保存');
+    message.success(isApiPlatform.value ? '备注已保存' : '项目信息已保存');
   } catch (error) {
     message.error((error as Error)?.message || '保存失败');
     return Promise.reject();
@@ -1043,6 +1112,23 @@ function formatProjectTime(value?: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '-';
   return date.toLocaleString('zh-CN', { hour12: false });
+}
+
+/** 已完成展示完成时间，已打回展示打回时间，其他状态展示创建时间 */
+function projectTimeText(project: ProjectListItem) {
+  if (
+    project.requirementStatus === 'completed' &&
+    project.requirementCompletedAt
+  ) {
+    return `完成于 ${formatProjectTime(project.requirementCompletedAt)}`;
+  }
+  if (
+    project.requirementStatus === 'returned' &&
+    project.requirementReturnedAt
+  ) {
+    return `打回于 ${formatProjectTime(project.requirementReturnedAt)}`;
+  }
+  return `创建于 ${formatProjectTime(project.requirementCreatedAt)}`;
 }
 
 async function markRequirementCompleted(project: ProjectListItem) {
@@ -1674,6 +1760,28 @@ function projectMeta(project: { runCount: number; requirementNo?: string | null 
 
 .project-time {
   font-size: 10px;
+}
+
+.project-remark-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  margin-top: 2px;
+}
+
+.project-remark {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  color: #667085;
+  font-size: 11px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-item.active .project-remark {
+  color: #8f0b20;
 }
 
 .project-complete-btn {

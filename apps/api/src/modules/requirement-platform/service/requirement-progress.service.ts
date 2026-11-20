@@ -191,8 +191,10 @@ export class RequirementProgressService {
   }
 
   private async assertDispatcher() {
+    const userName = getScopedUserName();
+    if (userName === "system") return;
     const exists = await this.dispatcherRepo.exists({
-      where: { userName: getScopedUserName() },
+      where: { userName },
     });
     if (!exists) {
       throw new ForbiddenException("仅分发人可查看需求完成情况");

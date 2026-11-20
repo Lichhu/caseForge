@@ -460,22 +460,6 @@ export function formatRunSnapshotForDisplay(value: unknown): string {
   return JSON.stringify(beautifyPayloadValue(value), null, 2);
 }
 
-/** 将请求/响应快照拆成元信息与 Body，Body 单独完整展示 */
-export function splitRunSnapshotForDisplay(
-  snapshot: Record<string, unknown> | null | undefined,
-): { meta: string; body: string | null } {
-  if (!snapshot) return { meta: "—", body: null };
-  const { body, bodyText, ...rest } = snapshot;
-  const meta = JSON.stringify(beautifyPayloadValue(rest), null, 2);
-  const bodySource =
-    typeof bodyText === "string" && bodyText.length ? bodyText : body;
-  const bodyDisplay =
-    bodySource == null || bodySource === ""
-      ? null
-      : formatRunSnapshotField(bodySource);
-  return { meta, body: bodyDisplay };
-}
-
 /** 美化案例请求/预期 JSON：缩进 JSON，并格式化内嵌 XML 字符串 */
 export function beautifyCasePayloadJson(text: string): string {
   const parsed: unknown = JSON.parse(text.trim());

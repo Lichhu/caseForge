@@ -1359,7 +1359,7 @@ import type {
 } from '@case-forge/shared';
 import { copyText } from '@/utils/copyText';
 import type { ApiEnvironmentServiceRow, ApiTestCaseRow, DebugRunResult } from '@/api/apiTestClient';
-import { clearStepDebugRecords, listStepDebugRecords, listAllApiCases, getManagedCaseDetails, listDataFunctions, listDatabaseConnections, debugRunCase, debugManagedSqlStep, generateAssertions, getAssertionGenerateStatus, getAssertionGenerateResult } from '@/api/apiTestClient';
+import { clearStepDebugRecords, listStepDebugRecords, listAllApiCases, listDataFunctions, listDatabaseConnections, debugRunCase, debugManagedSqlStep, generateAssertions, getAssertionGenerateStatus, getAssertionGenerateResult } from '@/api/apiTestClient';
 import type { ApiDatabaseConnectionRow } from '@/api/apiTestClient';
 import { useApiTestStore } from '@/stores/apiTest';
 import { randomUuid } from '@/utils/randomUuid';
@@ -3746,36 +3746,20 @@ async function waitForAssertionResult(caseId: string, jobId: string) {
   }
 }
 
-type BatchAssertionUpdate = {
-  target: NonNullable<ApiHttpCaseStep["target"]>;
-  expected: ApiHttpCaseStep["expected"];
-};
-
+/**
+ * 断言生成结果保存到接口测试案例（api_test_case）。
+ * 注意：不能走 case-management/details，那是准生产案例（api_preprod_case）的数据源，
+ * 对接口测试案例会返回 400，导致整批任务在第一例后中断。
+ */
 async function persistBatchAssertionUpdates(
-  caseId: string,
-  updates: Map<string, BatchAssertionUpdate>,
+  row: ApiTestCaseRow,
+  steps: ApiCaseStep[],
 ) {
-  if (!updates.size) return false;
-  const [latest] = await getManagedCaseDetails([caseId]);
-  if (!latest) return false;
-  const latestSteps = caseStepRows(latest);
-  let changed = false;
-  const mergedSteps = latestSteps.map((step) => {
-    const update = updates.get(step.id);
-    if (!update || !isHttpStep(step)) return step;
-    changed = true;
-    return {
-      ...cloneJson(step),
-      target: update.target,
-      expected: update.expected,
-    };
-  });
-  if (!changed) return false;
   await apiStore.saveCase(
     projectId.value!,
     transactionId.value!,
-    caseSavePayload(latest, mergedSteps),
-    caseId,
+    caseSavePayload(row, steps),
+    row.id,
     { silent: true },
   );
   return true;
@@ -3827,7 +3811,7 @@ async function onBatchGenerateAssertions() {
         continue;
       }
       const nextSteps = cloneJson(steps);
-      const generatedUpdates = new Map<string, BatchAssertionUpdate>();
+      const generatedStepKeys: string[] = [];
       for (let stepIndex = 0; stepIndex < nextSteps.length; stepIndex += 1) {
         const step = nextSteps[stepIndex];
         const stepKey = batchStepKey(row.id, step.id);
@@ -3870,10 +3854,7 @@ async function onBatchGenerateAssertions() {
           if (!assertions.length) throw new Error('AI 未生成有效断言');
           step.target = target;
           step.expected = buildExpectedFromRows(assertionsToRows(assertions));
-          generatedUpdates.set(step.id, {
-            target,
-            expected: step.expected,
-          });
+          generatedStepKeys.push(stepKey);
           batchAssertionStatuses[stepKey] = 'success';
           batchAssertionProgress.success += 1;
         } catch (error) {
@@ -3884,11 +3865,25 @@ async function onBatchGenerateAssertions() {
           batchAssertionProgress.done += 1;
         }
       }
-      await persistBatchAssertionUpdates(row.id, generatedUpdates);
+      if (!generatedStepKeys.length) continue;
+      try {
+        await persistBatchAssertionUpdates(row, nextSteps);
+      } catch (error) {
+        /* 单个案例保存失败不应中断整批任务：回退成功计数并标记失败，继续后续案例 */
+        const reason = error instanceof Error ? error.message : '保存失败';
+        for (const key of generatedStepKeys) {
+          batchAssertionStatuses[key] = 'failed';
+          batchStepErrors[key] = `断言已生成，但保存失败：${reason}`;
+        }
+        batchAssertionProgress.success -= generatedStepKeys.length;
+        batchAssertionProgress.failed += generatedStepKeys.length;
+      }
     }
     message.success(`批量生成完成：成功 ${batchAssertionProgress.success}，失败 ${batchAssertionProgress.failed}`);
     await apiStore.refreshCases(projectId.value, transactionId.value);
     batchCasesStale.value = true;
+  } catch (error) {
+    message.error(`批量生成断言中断：${error instanceof Error ? error.message : '未知错误'}`);
   } finally {
     batchAssertionRunning.value = false;
   }
