@@ -1015,7 +1015,12 @@ const libraryFullRequestAddress = computed(() => {
   return query ? `${url}?${query}` : url;
 });
 const libraryCurlCommand = computed(() => {
-  const request = buildLibraryDebugRequest();
+  let request: ApiCaseRequest;
+  try {
+    request = buildLibraryDebugRequest();
+  } catch {
+    return '请求报文 JSON 格式不正确，修正后可生成 cURL';
+  }
   const parts = [`curl --request ${request.method || 'GET'}`, shellQuote(libraryFullRequestAddress.value || request.path || '/')];
   for (const [key, value] of Object.entries(request.headers ?? {})) parts.push(`--header ${shellQuote(`${key}: ${value}`)}`);
   if (request.body !== undefined && request.body !== null && request.body !== '') {

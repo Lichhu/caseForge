@@ -163,11 +163,15 @@ export function protocolToTransport(protocol: CaseProtocol): ApiTransport {
 }
 
 function inferBodyFormat(request: ApiCaseRequest): CaseBodyFormat {
+  /*
+   * 先按报文实际形态判断：历史数据里 contentType 常与实际报文不一致
+   * （例如 XML 报文被标成 application/json），按 JSON 解析会直接报错。
+   */
+  if (typeof request.body === "string" && looksLikeXml(request.body))
+    return "xml";
   if (request.contentType?.includes("xml")) return "xml";
   if (request.contentType?.includes("json")) return "json";
   if (request.contentType?.includes("text/plain")) return "text";
-  if (typeof request.body === "string" && looksLikeXml(request.body))
-    return "xml";
   if (request.body && typeof request.body === "object") return "json";
   if (typeof request.body === "string" && request.body.trim()) return "text";
   return "json";
@@ -324,6 +328,11 @@ export function splitRequestForEditor(request: ApiCaseRequest) {
   };
 }
 
+export interface MergeRequestOptions {
+  /** 报文 JSON 暂不合法时按原始文本保留，避免阻塞切换步骤等操作 */
+  tolerateInvalidJson?: boolean;
+}
+
 function parseBodyFromEditor(
   mode: RequestEditorMode,
   input: {
@@ -331,6 +340,7 @@ function parseBodyFromEditor(
     requestBodyJson: string;
     requestBodyXml: string;
   },
+  options?: MergeRequestOptions,
 ): unknown {
   if (mode.endsWith("-xml")) {
     return input.requestBodyXml;
@@ -338,32 +348,46 @@ function parseBodyFromEditor(
   if (mode.endsWith("-json")) {
     const text = input.requestBodyJson.trim();
     if (!text) return {};
-    return JSON.parse(text);
+    try {
+      return JSON.parse(text);
+    } catch {
+      /*
+       * 编辑中的报文可能还没写完整。切换步骤、折叠面板等操作也会走这里，
+       * 不能因为 JSON 暂时不合法就中断交互；原文本会随 bodyText 一起保留。
+       */
+      if (options?.tolerateInvalidJson) return text;
+      throw new Error("请求报文 JSON 格式不正确");
+    }
   }
   return input.requestBodyText;
 }
 
-export function mergeRequestFromEditor(input: {
-  mode: RequestEditorMode;
-  protocol: CaseProtocol;
-  bodyFormat: CaseBodyFormat;
-  httpMethod: HttpMethod;
-  httpPath: string;
-  headerRows: KeyValueRow[];
-  queryRows: KeyValueRow[];
-  socketEncoding: string;
-  requestBodyText: string;
-  requestBodyJson: string;
-  requestJson: string;
-  requestMetaJson: string;
-  requestTcpMeta: SocketRequestMeta | null;
-  requestBodyXml: string;
-}): ApiCaseRequest {
+export function mergeRequestFromEditor(
+  input: {
+    mode: RequestEditorMode;
+    protocol: CaseProtocol;
+    bodyFormat: CaseBodyFormat;
+    httpMethod: HttpMethod;
+    httpPath: string;
+    headerRows: KeyValueRow[];
+    queryRows: KeyValueRow[];
+    socketEncoding: string;
+    requestBodyText: string;
+    requestBodyJson: string;
+    requestJson: string;
+    requestMetaJson: string;
+    requestTcpMeta: SocketRequestMeta | null;
+    requestBodyXml: string;
+  },
+  options?: MergeRequestOptions,
+): ApiCaseRequest {
   const headers = keyValueRowsToRecord(input.headerRows);
   const contentType = defaultContentType(input.bodyFormat);
   const hasBody =
     input.protocol !== "http" || httpMethodHasBody(input.httpMethod);
-  const body = hasBody ? parseBodyFromEditor(input.mode, input) : undefined;
+  const body = hasBody
+    ? parseBodyFromEditor(input.mode, input, options)
+    : undefined;
   const bodyText =
     input.bodyFormat === "json" && hasBody ? input.requestBodyJson : undefined;
 

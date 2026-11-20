@@ -1391,6 +1391,7 @@ import {
   type CaseProtocol,
   type HttpMethod,
   type KeyValueRow,
+  type MergeRequestOptions,
   type SocketRequestMeta,
 } from '@/utils/casePayloadFormat.util';
 import { messagePathOptions } from '@/utils/messagePathOptions';
@@ -1661,7 +1662,12 @@ function shellQuote(value: string) {
 }
 
 const curlCommand = computed(() => {
-  const request = buildDebugRequest();
+  let request: ApiCaseRequest;
+  try {
+    request = buildDebugRequest();
+  } catch {
+    return '请求报文 JSON 格式不正确，修正后可生成 cURL';
+  }
   const parts = [`curl --request ${request.method || 'GET'}`, shellQuote(fullRequestAddress.value || request.path || '/')];
   for (const [key, value] of Object.entries(request.headers ?? {})) {
     parts.push(`--header ${shellQuote(`${key}: ${value}`)}`);
@@ -2495,7 +2501,7 @@ function openDbStepFunctionInsert() {
   void openFunctionInsert();
 }
 
-function currentStepFromForm(): ApiCaseStep {
+function currentStepFromForm(options?: MergeRequestOptions): ApiCaseStep {
   const existing = form.steps[activeStepIndex.value];
   const id = existing?.id ?? randomUuid();
   const name =
@@ -2532,7 +2538,7 @@ function currentStepFromForm(): ApiCaseStep {
           environmentServiceId: form.stepTargetServiceId || undefined,
         }
       : undefined,
-    request: buildDebugRequest(),
+    request: buildDebugRequest(options),
     expected: buildExpectedFromRows(form.assertionRows),
     exports: collectExportRows(),
     parallelWithPrevious:
@@ -2542,10 +2548,23 @@ function currentStepFromForm(): ApiCaseStep {
   };
 }
 
-function storeActiveStep() { if (form.steps.length) form.steps[activeStepIndex.value] = currentStepFromForm(); }
+function storeActiveStep() {
+  if (!form.steps.length) return;
+  /*
+   * 切换步骤/折叠面板时会先回存当前表单。编辑器里的 JSON 可能还没写完整，
+   * 这里按原始文本保留，避免 JSON.parse 抛错导致点击无响应、弹窗打不开。
+   */
+  form.steps[activeStepIndex.value] = currentStepFromForm({
+    tolerateInvalidJson: true,
+  });
+}
+function storeActiveStepStrict() {
+  if (!form.steps.length) return;
+  form.steps[activeStepIndex.value] = currentStepFromForm();
+}
 function loadStep(step: ApiCaseStep) {
   form.stepName = step.name;
-  form.exports = step.exports.map((item) => ({
+  form.exports = (step.exports ?? []).map((item) => ({
     rowId: randomUuid(),
     name: item.name,
     /* SQL 步骤来源必须是查询结果；老数据里残留的 body 这类来源归到「首行字段」 */
@@ -3375,7 +3394,8 @@ function buildSavePayload(): Record<string, unknown> | null {
     );
     return null;
   }
-  storeActiveStep();
+  /* 保存必须使用严格模式：报文 JSON 不合法时直接抛出，由调用方提示用户 */
+  storeActiveStepStrict();
   const lastHttpStep = [...form.steps].reverse().find(isHttpStep);
   const fallbackRequest = lastHttpStep?.request ?? mergeRequestFromEditor({
     mode: requestEditorMode.value,
@@ -3519,23 +3539,37 @@ async function pasteCase() {
   } catch { message.warning('没有可粘贴的案例'); }
 }
 
-function buildDebugRequest(): ApiCaseRequest {
-  return mergeRequestFromEditor({
-    mode: requestEditorMode.value,
-    protocol: form.protocol,
-    bodyFormat: form.bodyFormat,
-    httpMethod: form.httpMethod,
-    httpPath: form.httpPath,
-    headerRows: form.headerRows,
-    queryRows: form.queryRows,
-    socketEncoding: form.socketEncoding,
-    requestBodyText: form.requestBodyText,
-    requestBodyJson: form.requestBodyJson,
-    requestJson: form.requestJson,
-    requestMetaJson: form.requestMetaJson,
-    requestTcpMeta: form.requestTcpMeta,
-    requestBodyXml: form.requestBodyXml,
-  });
+function buildDebugRequest(options?: MergeRequestOptions): ApiCaseRequest {
+  return mergeRequestFromEditor(
+    {
+      mode: requestEditorMode.value,
+      protocol: form.protocol,
+      bodyFormat: form.bodyFormat,
+      httpMethod: form.httpMethod,
+      httpPath: form.httpPath,
+      headerRows: form.headerRows,
+      queryRows: form.queryRows,
+      socketEncoding: form.socketEncoding,
+      requestBodyText: form.requestBodyText,
+      requestBodyJson: form.requestBodyJson,
+      requestJson: form.requestJson,
+      requestMetaJson: form.requestMetaJson,
+      requestTcpMeta: form.requestTcpMeta,
+      requestBodyXml: form.requestBodyXml,
+    },
+    options,
+  );
+}
+
+function tryBuildDebugRequest(): ApiCaseRequest | null {
+  try {
+    return buildDebugRequest();
+  } catch (error) {
+    message.warning(
+      error instanceof Error ? error.message : '请求报文格式不正确',
+    );
+    return null;
+  }
 }
 
 const VARIABLE_REFERENCE_PATTERN = /\$\{\s*([a-zA-Z_][\w.-]*)\s*\}|\{\{?\s*([a-zA-Z_][\w.-]*)\s*\}?\}/g;
@@ -3584,12 +3618,13 @@ async function onDebugRun(showResult = true) {
     message.warning('请填写步骤环境地址');
     return;
   }
+  const request = tryBuildDebugRequest();
+  if (!request) return;
   const caseKey = activeCaseKey();
   const caseIdAtStart = isNewCase.value ? undefined : apiStore.activeCaseId || undefined;
   debugRunningCaseKey.value = caseKey;
   debugResult.value = null;
   debugResponseTab.value = 'expected';
-  const request = buildDebugRequest();
   try {
     const result = await debugRunCase(
       projectId.value,
@@ -3646,8 +3681,9 @@ async function onGenerateAssertions() {
   const caseIdAtStart = isNewCase.value ? undefined : apiStore.activeCaseId || undefined;
 
   assertionGenerateError.value = '';
+  const request = tryBuildDebugRequest();
+  if (!request) return;
   debugRunningCaseKey.value = caseKey;
-  const request = buildDebugRequest();
   try {
     const result = await debugRunCase(projectId.value, transactionId.value, {
       request,
