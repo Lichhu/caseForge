@@ -28,7 +28,7 @@ export class RequirementPlatformController {
     private readonly progressService: RequirementProgressService,
   ) {}
 
-  /** 需求列表（分发人全量；普通用户仅与自己相关的） */
+  /** 需求列表（分发人、system 与人员池成员可查看全量） */
   @Get("requirements")
   @ApiOperation({ summary: "需求平台列表" })
   async list(

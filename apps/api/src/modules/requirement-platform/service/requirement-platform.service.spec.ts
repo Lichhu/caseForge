@@ -272,6 +272,92 @@ describe("RequirementPlatformService", () => {
     expect(dispatcherRepo.softDelete).not.toHaveBeenCalled();
   });
 
+  it("treats dispatchers and the system user as full-list viewers", async () => {
+    const dispatcherRepo = {
+      exists: jest.fn(
+        async ({ where }: { where: { userName: string } }) =>
+          where.userName === "wb10517",
+      ),
+    };
+    const service = new RequirementPlatformService(
+      {} as any,
+      dispatcherRepo as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await expect(
+      RequestContext.run("wb10517", () => service.canViewAllRequirements()),
+    ).resolves.toBe(true);
+    await expect(
+      RequestContext.run("system", () => service.canViewAllRequirements()),
+    ).resolves.toBe(true);
+    await expect(
+      RequestContext.run("alice", () => service.canViewAllRequirements()),
+    ).resolves.toBe(false);
+  });
+
+  it("lets the system user view all requirements without joining the pool", async () => {
+    const query = {
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+    };
+    const service = new RequirementPlatformService(
+      { createQueryBuilder: jest.fn(() => query) } as any,
+      {
+        exists: jest.fn().mockResolvedValue(false),
+        find: jest.fn().mockResolvedValue([]),
+      } as any,
+      {
+        exists: jest.fn().mockResolvedValue(false),
+        find: jest.fn().mockResolvedValue([]),
+      } as any,
+      {} as any,
+      { find: jest.fn().mockResolvedValue([]) } as any,
+      { find: jest.fn().mockResolvedValue([]) } as any,
+      {} as any,
+      {} as any,
+      { isSyncing: jest.fn().mockReturnValue(false) } as any,
+      {} as any,
+    );
+
+    await expect(
+      RequestContext.run("system", () =>
+        service.list({ page: 1, size: 20, status: "all" }),
+      ),
+    ).resolves.toMatchObject({ rows: [], count: 0, isDispatcher: false });
+  });
+
+  it("still rejects users outside the dispatcher and member pools", async () => {
+    const service = new RequirementPlatformService(
+      { createQueryBuilder: jest.fn() } as any,
+      { exists: jest.fn().mockResolvedValue(false) } as any,
+      { exists: jest.fn().mockResolvedValue(false) } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await expect(
+      RequestContext.run("alice", () =>
+        service.list({ page: 1, size: 20, status: "all" }),
+      ),
+    ).rejects.toThrow("仅人员池成员和分发人可查看需求数据");
+  });
+
   it("does not list the system dispatcher in the requirement pool", async () => {
     const dispatcherRepo = {
       exists: jest.fn().mockResolvedValue(true),

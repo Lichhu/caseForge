@@ -4,6 +4,7 @@
 import type { ProjectPlatform } from "@case-forge/shared";
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   Inject,
@@ -23,6 +24,7 @@ import { auditFieldsForCreate } from "@common/audit/request-context";
 import {
   applyUserScope,
   findOwnedProject,
+  getScopedUserName,
   scopedWhere,
 } from "@common/audit/user-scope";
 import { toPublicProject } from "@common/http/public-response.util";
@@ -49,9 +51,16 @@ export type ProjectListItem = ReturnType<typeof toPublicProject> & {
   requirementOwner?: string | null;
   requirementCreator?: string | null;
   requirementCreatedAt?: Date | null;
+  requirementCompletedAt?: Date | null;
+  /** 需求被打回的时间（取回查源库状态时记录的时间） */
+  requirementReturnedAt?: Date | null;
   requirementId?: string | null;
   requirementStatus?: string | null;
   applicationName?: string | null;
+  /** 项目是否由当前登录用户创建 */
+  isOwned?: boolean;
+  /** 当前用户是否可以编辑该需求的备注（仅需求归属人） */
+  canEditRemark?: boolean;
 };
 
 /**
@@ -153,7 +162,12 @@ export class ProjectManageService {
       .skip((page - 1) * size)
       .take(size);
 
-    applyUserScope(query, "project");
+    const canViewAllApiTestProjects =
+      platform === "api-test" &&
+      (await this.requirementPlatform.canViewAllRequirements());
+    if (!canViewAllApiTestProjects) {
+      applyUserScope(query, "project");
+    }
 
     const keyword = input.trim();
     if (keyword) {
@@ -262,12 +276,23 @@ export class ProjectManageService {
       ]),
     );
 
+    const currentUserName = getScopedUserName();
+    const requirementForRow = (row: CaseProjectEntity) =>
+      requirementByProject.get(String(row.id)) ??
+      requirementByProject.get(`code:${row.requirementNo?.trim()}`);
+
     return {
       rows: rows.map((row) => ({
         ...toPublicProject(row),
         generationCount: generationCountMap.get(String(row.id)) ?? 0,
         caseCount: caseCountMap.get(String(row.id)) ?? 0,
         isClaimedFromPlatform: claimedProjectIdSet.has(String(row.id)),
+        isOwned: row.createdBy?.trim() === currentUserName,
+        canEditRemark:
+          platform === "api-test"
+            ? requirementForRow(row)?.claimedBy?.trim() === currentUserName &&
+              row.createdBy?.trim() === currentUserName
+            : true,
         requirementOwner:
           requirementByProject.get(String(row.id))?.claimedBy ??
           requirementByProject.get(`code:${row.requirementNo?.trim()}`)
@@ -283,6 +308,15 @@ export class ProjectManageService {
           requirementByProject.get(`code:${row.requirementNo?.trim()}`)
             ?.createdAt ??
           null,
+        requirementCompletedAt:
+          requirementByProject.get(String(row.id))?.completedAt ??
+          requirementByProject.get(`code:${row.requirementNo?.trim()}`)
+            ?.completedAt ??
+          null,
+        requirementReturnedAt:
+          requirementForRow(row)?.status === "returned"
+            ? (requirementForRow(row)?.sourceUpdatedAt ?? null)
+            : null,
         requirementId:
           requirementByProject.get(String(row.id))?.id ??
           requirementByProject.get(`code:${row.requirementNo?.trim()}`)?.id ??
@@ -346,7 +380,16 @@ export class ProjectManageService {
   ): Promise<ReturnType<typeof toPublicProject>> {
     const project = await findOwnedProject(this.projectRepo, projectId);
     if (project.platform === "api-test") {
-      await this.requirementPlatform.assertProjectOperational(projectId);
+      // 备注（description）允许在任意需求状态下维护，但仅需求归属人可改；
+      // 名称/需求编号仍受测试中状态约束
+      const updatesLockedFields =
+        dto.title !== undefined || dto.requirementNo !== undefined;
+      if (updatesLockedFields) {
+        await this.requirementPlatform.assertProjectOperational(projectId);
+      }
+      if (dto.description !== undefined) {
+        await this.assertApiTestRemarkOwner(project);
+      }
     }
 
     if (project.platform === "api-test") {
@@ -391,6 +434,21 @@ export class ProjectManageService {
     }
 
     return toPublicProject(await this.projectRepo.save(project));
+  }
+
+  /** 接口测试项目备注仅需求归属人（认领人）可编辑 */
+  private async assertApiTestRemarkOwner(project: CaseProjectEntity) {
+    const userName = getScopedUserName();
+    const requirementNo = project.requirementNo?.trim();
+    const requirement = await this.apiRequirementRepo.findOne({
+      where: [
+        { claimedProjectId: project.id },
+        ...(requirementNo ? [{ projectCode: requirementNo }] : []),
+      ],
+    });
+    if (!requirement || requirement.claimedBy?.trim() !== userName) {
+      throw new ForbiddenException("仅需求归属人可修改备注");
+    }
   }
 
   private async assertApiTestRequirementAvailable(

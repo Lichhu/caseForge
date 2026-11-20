@@ -81,9 +81,14 @@ export class ProjectManageController {
         requirementOwner: row.requirementOwner,
         requirementCreator: row.requirementCreator,
         requirementCreatedAt: row.requirementCreatedAt?.toISOString() ?? null,
+        requirementCompletedAt:
+          row.requirementCompletedAt?.toISOString() ?? null,
+        requirementReturnedAt: row.requirementReturnedAt?.toISOString() ?? null,
         requirementId: row.requirementId,
         requirementStatus: row.requirementStatus,
         applicationName: row.applicationName,
+        isOwned: row.isOwned ?? true,
+        canEditRemark: row.canEditRemark ?? false,
       })),
     };
   }

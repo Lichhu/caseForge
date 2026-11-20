@@ -4,53 +4,18 @@
     :class="{ 'exec-run-compare--dense': dense }"
   >
     <div v-if="showSnapshots !== false" class="exec-run-compare-grid">
-      <section class="exec-run-compare-pane">
-        <header class="exec-run-compare-head">
-          <div>
-            <strong>请求</strong>
-            <span>实际发出的请求快照</span>
-          </div>
-          <a-tag :bordered="false">Request</a-tag>
-        </header>
-        <div class="exec-run-compare-content">
-          <div v-if="requestParts.body" class="exec-run-snapshot-section">
-            <div class="exec-run-snapshot-label">请求报文</div>
-            <pre class="exec-run-snapshot exec-run-snapshot--body">{{
-              requestParts.body
-            }}</pre>
-          </div>
-          <div class="exec-run-snapshot-section">
-            <div class="exec-run-snapshot-label">请求信息</div>
-            <pre class="exec-run-snapshot exec-run-snapshot--meta">{{
-              requestParts.meta
-            }}</pre>
-          </div>
-        </div>
-      </section>
-
-      <section class="exec-run-compare-pane">
-        <header class="exec-run-compare-head">
-          <div>
-            <strong>响应</strong>
-            <span>服务端返回的响应快照</span>
-          </div>
-          <a-tag :bordered="false" color="blue">Response</a-tag>
-        </header>
-        <div class="exec-run-compare-content">
-          <div v-if="responseParts.body" class="exec-run-snapshot-section">
-            <div class="exec-run-snapshot-label">响应报文</div>
-            <pre class="exec-run-snapshot exec-run-snapshot--body">{{
-              responseParts.body
-            }}</pre>
-          </div>
-          <div class="exec-run-snapshot-section">
-            <div class="exec-run-snapshot-label">响应信息</div>
-            <pre class="exec-run-snapshot exec-run-snapshot--meta">{{
-              responseParts.meta
-            }}</pre>
-          </div>
-        </div>
-      </section>
+      <ApiRunSnapshotPane
+        kind="request"
+        title="请求"
+        hint="实际发出的请求快照"
+        :snapshot="requestSnapshot"
+      />
+      <ApiRunSnapshotPane
+        kind="response"
+        title="响应"
+        hint="服务端返回的响应快照"
+        :snapshot="responseSnapshot"
+      />
     </div>
 
     <section class="exec-run-assertions">
@@ -60,16 +25,16 @@
           <span v-if="!dense">期望值与实际值并排展示</span>
         </div>
         <div class="exec-run-assert-summary">
-          <span>共 {{ assertionRows.length }} 条</span>
+          <span class="exec-run-assert-summary-total">
+            共 {{ assertionRows.length }} 条
+          </span>
           <span class="is-pass">通过 {{ assertionPassedCount }}</span>
           <span class="is-fail">失败 {{ assertionFailedCount }}</span>
         </div>
       </header>
-      <a-empty
-        v-if="!assertionRows.length"
-        class="exec-run-assertions-empty"
-        description="本次执行没有断言记录"
-      />
+      <div v-if="!assertionRows.length" class="exec-run-assertions-empty">
+        本次执行没有断言记录
+      </div>
       <div v-else class="exec-run-assertion-list">
         <article
           v-for="(assertion, index) in assertionRows"
@@ -91,9 +56,15 @@
             <strong>{{ assertion.name || `断言 ${index + 1}` }}</strong>
           </header>
           <div class="exec-run-assertion-values">
-            <div>
+            <div class="exec-run-assertion-value">
               <span>期望值</span>
-              <pre>{{ formatRunSnapshotField(assertion.expected) }}</pre>
+              <code
+                v-if="isCompactAssertionValue(assertion.expected)"
+                class="exec-run-assertion-inline"
+              >
+                {{ formatRunSnapshotField(assertion.expected) }}
+              </code>
+              <pre v-else>{{ formatRunSnapshotField(assertion.expected) }}</pre>
               <div
                 v-if="assertion.expectedSource"
                 class="exec-run-assertion-source"
@@ -118,9 +89,15 @@
                 </code>
               </div>
             </div>
-            <div>
+            <div class="exec-run-assertion-value">
               <span>实际值</span>
-              <pre>{{ formatRunSnapshotField(assertion.actual) }}</pre>
+              <code
+                v-if="isCompactAssertionValue(assertion.actual)"
+                class="exec-run-assertion-inline"
+              >
+                {{ formatRunSnapshotField(assertion.actual) }}
+              </code>
+              <pre v-else>{{ formatRunSnapshotField(assertion.actual) }}</pre>
             </div>
           </div>
         </article>
@@ -130,12 +107,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
-import type { AssertionValueSource } from '@case-forge/shared';
-import {
-  formatRunSnapshotField,
-  splitRunSnapshotForDisplay,
-} from '@/utils/casePayloadFormat.util';
+import { computed } from "vue";
+import type { AssertionValueSource } from "@case-forge/shared";
+import { formatRunSnapshotField } from "@/utils/casePayloadFormat.util";
+import ApiRunSnapshotPane from "@/components/api-test/ApiRunSnapshotPane.vue";
 
 export interface RunSnapshotAssertion {
   name: string;
@@ -159,8 +134,6 @@ const props = withDefaults(
   },
 );
 
-const requestParts = computed(() => splitSnapshot(props.requestSnapshot));
-const responseParts = computed(() => splitSnapshot(props.responseSnapshot));
 const assertionRows = computed(() => props.assertions ?? []);
 const assertionPassedCount = computed(
   () => (props.assertions ?? []).filter((item) => item.passed).length,
@@ -169,11 +142,12 @@ const assertionFailedCount = computed(
   () => (props.assertions ?? []).filter((item) => !item.passed).length,
 );
 
-function splitSnapshot(value: unknown) {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return splitRunSnapshotForDisplay(value as Record<string, unknown>);
-  }
-  return { meta: formatRunSnapshotField(value), body: null as string | null };
+/** 短标量值直接内联展示，避免每个断言都撑出大段代码块 */
+function isCompactAssertionValue(value: unknown): boolean {
+  const text = formatRunSnapshotField(value);
+  if (!text || text.includes("\n")) return false;
+  if (text.startsWith("{") || text.startsWith("[")) return false;
+  return text.length <= 48;
 }
 </script>
 
@@ -187,10 +161,10 @@ function splitSnapshot(value: unknown) {
 .exec-run-compare-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: 12px;
 }
 
-.exec-run-compare-pane,
 .exec-run-assertions {
   min-width: 0;
   overflow: hidden;
@@ -199,7 +173,6 @@ function splitSnapshot(value: unknown) {
   background: #fff;
 }
 
-.exec-run-compare-head,
 .exec-run-assertions-head {
   display: flex;
   align-items: center;
@@ -210,7 +183,6 @@ function splitSnapshot(value: unknown) {
   background: #f8f9fb;
 }
 
-.exec-run-compare-head > div,
 .exec-run-assertions-head > div:first-child {
   display: flex;
   min-width: 0;
@@ -218,68 +190,14 @@ function splitSnapshot(value: unknown) {
   gap: 2px;
 }
 
-.exec-run-compare-head strong,
 .exec-run-assertions-head strong {
   color: #1d2939;
   font-size: 13px;
 }
 
-.exec-run-compare-head span,
 .exec-run-assertions-head span {
   color: #98a2b3;
   font-size: 11px;
-}
-
-.exec-run-compare-content {
-  display: flex;
-  max-height: 360px;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  overflow: auto;
-  background: #fff;
-}
-
-.exec-run-snapshot-section {
-  min-width: 0;
-}
-
-.exec-run-snapshot-label {
-  margin-bottom: 6px;
-  color: #667085;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.exec-run-snapshot {
-  margin: 0;
-  padding: 10px 12px;
-  border: 1px solid #eaecf0;
-  border-radius: 8px;
-  background: #f9fafb;
-  color: #344054;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.exec-run-snapshot--meta {
-  max-height: 180px;
-  overflow: auto;
-}
-
-.exec-run-snapshot--body {
-  display: block;
-  width: 100%;
-  max-width: 100%;
-  max-height: 280px;
-  overflow: auto;
-  background: #fff;
-  border-color: #e4e7ec;
-  white-space: pre;
-  word-break: normal;
 }
 
 .exec-run-assert-summary {
@@ -287,6 +205,10 @@ function splitSnapshot(value: unknown) {
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+}
+
+.exec-run-assert-summary .exec-run-assert-summary-total {
+  color: #667085;
 }
 
 .exec-run-assert-summary .is-pass {
@@ -298,16 +220,17 @@ function splitSnapshot(value: unknown) {
 }
 
 .exec-run-assertions-empty {
-  margin: 16px 0;
+  padding: 14px 12px;
+  color: #98a2b3;
+  font-size: 12px;
+  text-align: center;
 }
 
 .exec-run-assertion-list {
   display: flex;
-  max-height: 420px;
   flex-direction: column;
   gap: 8px;
   padding: 10px;
-  overflow: auto;
 }
 
 .exec-run-assertion-item {
@@ -344,34 +267,51 @@ function splitSnapshot(value: unknown) {
   gap: 10px;
 }
 
-.exec-run-assertion-values > div {
+.exec-run-assertion-value {
   min-width: 0;
 }
 
-.exec-run-assertion-values span {
+.exec-run-assertion-value > span {
   display: block;
   margin-bottom: 4px;
   color: #98a2b3;
   font-size: 11px;
 }
 
-.exec-run-assertion-values pre {
+.exec-run-assertion-value pre {
   max-height: 160px;
   margin: 0;
   padding: 8px 10px;
   overflow: auto;
   border: 1px solid #eaecf0;
   border-radius: 6px;
-  background: #f9fafb;
-  color: #344054;
+  background: #fbfcfe;
+  color: #1d2939;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
-  line-height: 1.55;
+  line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.exec-run-assertion-item.failed .exec-run-assertion-values > div:last-child pre {
+.exec-run-assertion-inline {
+  display: block;
+  padding: 5px 9px;
+  overflow: hidden;
+  border: 1px solid #eaecf0;
+  border-radius: 6px;
+  background: #fbfcfe;
+  color: #1d2939;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exec-run-assertion-item.failed
+  .exec-run-assertion-value:last-child
+  :is(pre, .exec-run-assertion-inline) {
   border-color: #fecdca;
   background: #fef3f2;
 }
@@ -495,10 +435,6 @@ function splitSnapshot(value: unknown) {
   .exec-run-compare-grid,
   .exec-run-assertion-values {
     grid-template-columns: 1fr;
-  }
-
-  .exec-run-compare-content {
-    max-height: 320px;
   }
 }
 </style>

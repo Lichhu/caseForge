@@ -61,9 +61,13 @@ export interface ProjectListItem extends CaseForgeProject {
   requirementOwner?: string | null;
   requirementCreator?: string | null;
   requirementCreatedAt?: string | null;
+  requirementCompletedAt?: string | null;
+  requirementReturnedAt?: string | null;
   requirementId?: string | null;
   requirementStatus?: string | null;
   applicationName?: string | null;
+  isOwned?: boolean;
+  canEditRemark?: boolean;
 }
 
 export interface ProjectListQuery {
@@ -94,9 +98,13 @@ function mapProjectListRow(raw: {
   requirementOwner?: string | null;
   requirementCreator?: string | null;
   requirementCreatedAt?: string | null;
+  requirementCompletedAt?: string | null;
+  requirementReturnedAt?: string | null;
   requirementId?: string | null;
   requirementStatus?: string | null;
   applicationName?: string | null;
+  isOwned?: boolean;
+  canEditRemark?: boolean;
 }): ProjectListItem {
   return {
     id: raw.id,
@@ -117,9 +125,13 @@ function mapProjectListRow(raw: {
     requirementOwner: raw.requirementOwner ?? null,
     requirementCreator: raw.requirementCreator ?? null,
     requirementCreatedAt: raw.requirementCreatedAt ?? null,
+    requirementCompletedAt: raw.requirementCompletedAt ?? null,
+    requirementReturnedAt: raw.requirementReturnedAt ?? null,
     requirementId: raw.requirementId ?? null,
     requirementStatus: raw.requirementStatus ?? null,
     applicationName: raw.applicationName ?? null,
+    isOwned: raw.isOwned ?? true,
+    canEditRemark: raw.canEditRemark ?? false,
   };
 }
 
@@ -298,6 +310,8 @@ export async function listProjects(
       caseCount?: number;
       isClaimedFromPlatform?: boolean;
       applicationName?: string | null;
+      isOwned?: boolean;
+      canEditRemark?: boolean;
     }>;
     count: number;
     caseCount: number;
